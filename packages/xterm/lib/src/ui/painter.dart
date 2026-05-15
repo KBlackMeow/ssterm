@@ -57,23 +57,37 @@ class TerminalPainter {
   Size _measureCharSize() {
     const test = 'mmmmmmmmmm';
 
-    final textStyle = _textStyle.toTextStyle();
-    final builder = ParagraphBuilder(textStyle.getParagraphStyle());
-    builder.pushStyle(
-      textStyle.getTextStyle(textScaler: _textScaler),
+    double widthForWeight(FontWeight weight) {
+      final style = _textStyle.copyWith(fontWeight: weight);
+      final builder = ParagraphBuilder(style.toParagraphStyle());
+      builder.pushStyle(
+        style.toTextStyle().getTextStyle(textScaler: _textScaler),
+      );
+      builder.addText(test);
+      final paragraph = builder.build();
+      paragraph.layout(ParagraphConstraints(width: double.infinity));
+      final width = paragraph.maxIntrinsicWidth / test.length;
+      paragraph.dispose();
+      return width;
+    }
+
+    // ANSI bold and the configured weight can be wider than regular glyphs.
+    final width = [
+      widthForWeight(_textStyle.fontWeight),
+      widthForWeight(FontWeight.bold),
+    ].reduce((a, b) => a > b ? a : b);
+
+    final heightBuilder = ParagraphBuilder(_textStyle.toParagraphStyle());
+    heightBuilder.pushStyle(
+      _textStyle.toTextStyle().getTextStyle(textScaler: _textScaler),
     );
-    builder.addText(test);
+    heightBuilder.addText(test);
+    final heightParagraph = heightBuilder.build();
+    heightParagraph.layout(ParagraphConstraints(width: double.infinity));
+    final height = heightParagraph.height;
+    heightParagraph.dispose();
 
-    final paragraph = builder.build();
-    paragraph.layout(ParagraphConstraints(width: double.infinity));
-
-    final result = Size(
-      paragraph.maxIntrinsicWidth / test.length,
-      paragraph.height,
-    );
-
-    paragraph.dispose();
-    return result;
+    return Size(width, height);
   }
 
   /// The size of each character in the terminal.
@@ -205,7 +219,7 @@ class TerminalPainter {
 
       paragraph = _paragraphCache.performAndCacheLayout(
         String.fromCharCode(charCode),
-        style,
+        style.copyWith(leadingDistribution: TextLeadingDistribution.proportional),
         _textScaler,
         cacheKey,
       );

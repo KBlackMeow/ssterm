@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 import 'package:quiver/collection.dart';
+import 'package:xterm/src/ui/terminal_text_style.dart';
 
 /// A cache of laid out [Paragraph]s. This is used to avoid laying out the same
 /// text multiple times, which is expensive.
@@ -26,7 +27,9 @@ class ParagraphCache {
     TextScaler textScaler,
     int key,
   ) {
-    final builder = ParagraphBuilder(style.getParagraphStyle());
+    final builder = ParagraphBuilder(
+      style.getParagraphStyle(textHeightBehavior: kTerminalTextHeightBehavior),
+    );
     builder.pushStyle(style.getTextStyle(textScaler: textScaler));
     builder.addText(text);
 

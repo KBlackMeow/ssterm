@@ -4,6 +4,7 @@ import 'package:xterm/xterm.dart';
 
 import '../models/app_config.dart';
 import '../models/terminal_settings.dart';
+import '../widgets/terminal_surface.dart';
 import 'sftp_view.dart';
 
 const _kDivider = Color(0xFF3A3A3A);
@@ -18,6 +19,7 @@ class SshSessionView extends StatefulWidget {
     required this.panelPosition,
     required this.onPanelPositionChanged,
     required this.terminalSettings,
+    this.terminalViewKey,
   });
 
   final Terminal terminal;
@@ -27,6 +29,7 @@ class SshSessionView extends StatefulWidget {
   final SftpPanelPosition panelPosition;
   final ValueChanged<SftpPanelPosition> onPanelPositionChanged;
   final TerminalSettings terminalSettings;
+  final GlobalKey<TerminalViewState>? terminalViewKey;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -71,18 +74,10 @@ class _SshSessionViewState extends State<SshSessionView> {
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.terminalSettings;
-    final terminal = TerminalView(
-      widget.terminal,
-      theme: t.resolveTheme(),
-      textStyle: t.toTerminalStyle(),
-      cursorType: t.cursorType,
-      cursorBlink: t.cursorBlink,
-      cursorBlinkPeriodMs: t.cursorBlinkPeriodMs,
-      textScaler: TextScaler.linear(t.textScale),
-      padding: const EdgeInsets.all(6),
-      autofocus: true,
-      hardwareKeyboardOnly: true,
+    final terminal = TerminalSurface(
+      terminal: widget.terminal,
+      settings: widget.terminalSettings,
+      viewKey: widget.terminalViewKey,
     );
 
     final sftpPanel = SftpView(

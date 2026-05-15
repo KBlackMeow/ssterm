@@ -4,19 +4,19 @@ import 'package:xterm/xterm.dart';
 /// Built-in terminal color schemes.
 abstract final class TerminalThemePresets {
   static const iterm2 = TerminalTheme(
-    cursor: Color(0xFFD4D4D4),
+    cursor: Color(0xFFE0E0E0),
     selection: Color(0xFF4E6F91),
-    foreground: Color(0xFFC7C7C7),
+    foreground: Color(0xFFD4D4D4),
     background: Color(0xFF1C1C1C),
     black: Color(0xFF000000),
-    white: Color(0xFFC7C7C7),
+    white: Color(0xFFD4D4D4),
     red: Color(0xFFC91B00),
     green: Color(0xFF00C200),
     yellow: Color(0xFFC7C400),
     blue: Color(0xFF2472C8),
     magenta: Color(0xFFC930C7),
     cyan: Color(0xFF00C5C7),
-    brightBlack: Color(0xFF686868),
+    brightBlack: Color(0xFF757575),
     brightWhite: Color(0xFFFFFFFF),
     brightRed: Color(0xFFFF6E67),
     brightGreen: Color(0xFF5FFA68),

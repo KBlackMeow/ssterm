@@ -17,6 +17,10 @@ class TerminalSettings {
     this.cursorBlink = true,
     this.cursorBlinkPeriodMs = 530,
     this.textScale = 1.0,
+    this.wallpaperId,
+    this.wallpaperOpacity = 1.0,
+    this.wallpaperBlur = 12.0,
+    this.backgroundOpacity = 0.88,
   }) : customTheme = customTheme ?? TerminalThemePresets.iterm2;
 
   String themePresetId;
@@ -32,6 +36,19 @@ class TerminalSettings {
   int cursorBlinkPeriodMs;
   double textScale;
 
+  /// Filename under `~/.ssterm/wallpapers/`, or null when disabled.
+  String? wallpaperId;
+  double wallpaperOpacity;
+  /// Gaussian blur radius (sigma) for the wallpaper, 0 = none.
+  double wallpaperBlur;
+  /// Terminal cell background opacity when a wallpaper is set (0 = transparent).
+  double backgroundOpacity;
+
+  bool get hasWallpaper => wallpaperId != null && wallpaperId!.isNotEmpty;
+
+  double get effectiveBackgroundOpacity =>
+      hasWallpaper ? backgroundOpacity.clamp(0.0, 1.0) : 1.0;
+
   static const fontOptions = [
     'Monaco',
     'Menlo',
@@ -44,8 +61,44 @@ class TerminalSettings {
   ];
 
   TerminalTheme resolveTheme() {
-    if (themePresetId == 'custom') return customTheme;
-    return TerminalThemePresets.all[themePresetId] ?? TerminalThemePresets.iterm2;
+    final base = themePresetId == 'custom'
+        ? customTheme
+        : TerminalThemePresets.all[themePresetId] ?? TerminalThemePresets.iterm2;
+    return _brightenText(base);
+  }
+
+  static const _kTextLift = 0.10;
+  static const _kAnsiLift = 0.05;
+
+  static TerminalTheme _brightenText(TerminalTheme t) {
+    Color lift(Color c, double amount) =>
+        Color.lerp(c, const Color(0xFFFFFFFF), amount)!;
+
+    return TerminalTheme(
+      cursor: lift(t.cursor, _kTextLift),
+      selection: t.selection,
+      foreground: lift(t.foreground, _kTextLift),
+      background: t.background,
+      black: t.black,
+      red: lift(t.red, _kAnsiLift),
+      green: lift(t.green, _kAnsiLift),
+      yellow: lift(t.yellow, _kAnsiLift),
+      blue: lift(t.blue, _kAnsiLift),
+      magenta: lift(t.magenta, _kAnsiLift),
+      cyan: lift(t.cyan, _kAnsiLift),
+      white: lift(t.white, _kTextLift),
+      brightBlack: lift(t.brightBlack, _kTextLift),
+      brightRed: lift(t.brightRed, _kAnsiLift),
+      brightGreen: lift(t.brightGreen, _kAnsiLift),
+      brightYellow: lift(t.brightYellow, _kAnsiLift),
+      brightBlue: lift(t.brightBlue, _kAnsiLift),
+      brightMagenta: lift(t.brightMagenta, _kAnsiLift),
+      brightCyan: lift(t.brightCyan, _kAnsiLift),
+      brightWhite: lift(t.brightWhite, _kTextLift * 0.5),
+      searchHitBackground: t.searchHitBackground,
+      searchHitBackgroundCurrent: t.searchHitBackgroundCurrent,
+      searchHitForeground: t.searchHitForeground,
+    );
   }
 
   TerminalStyle toTerminalStyle() => TerminalStyle(
@@ -66,6 +119,11 @@ class TerminalSettings {
     bool? cursorBlink,
     int? cursorBlinkPeriodMs,
     double? textScale,
+    String? wallpaperId,
+    bool clearWallpaper = false,
+    double? wallpaperOpacity,
+    double? wallpaperBlur,
+    double? backgroundOpacity,
   }) {
     return TerminalSettings(
       themePresetId: themePresetId ?? this.themePresetId,
@@ -78,6 +136,10 @@ class TerminalSettings {
       cursorBlink: cursorBlink ?? this.cursorBlink,
       cursorBlinkPeriodMs: cursorBlinkPeriodMs ?? this.cursorBlinkPeriodMs,
       textScale: textScale ?? this.textScale,
+      wallpaperId: clearWallpaper ? null : (wallpaperId ?? this.wallpaperId),
+      wallpaperOpacity: wallpaperOpacity ?? this.wallpaperOpacity,
+      wallpaperBlur: wallpaperBlur ?? this.wallpaperBlur,
+      backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
     );
   }
 
@@ -118,6 +180,10 @@ class TerminalSettings {
       cursorBlink: json['cursorBlink'] as bool? ?? true,
       cursorBlinkPeriodMs: json['cursorBlinkPeriodMs'] as int? ?? 530,
       textScale: (json['textScale'] as num?)?.toDouble() ?? 1.0,
+      wallpaperId: json['wallpaperId'] as String?,
+      wallpaperOpacity: (json['wallpaperOpacity'] as num?)?.toDouble() ?? 1.0,
+      wallpaperBlur: (json['wallpaperBlur'] as num?)?.toDouble() ?? 12.0,
+      backgroundOpacity: (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.88,
     );
   }
 
@@ -133,6 +199,10 @@ class TerminalSettings {
         'cursorBlink': cursorBlink,
         'cursorBlinkPeriodMs': cursorBlinkPeriodMs,
         'textScale': textScale,
+        if (wallpaperId != null) 'wallpaperId': wallpaperId,
+        'wallpaperOpacity': wallpaperOpacity,
+        'wallpaperBlur': wallpaperBlur,
+        'backgroundOpacity': backgroundOpacity,
       };
 
   static FontWeight _fontWeightFromString(String? s) => switch (s) {

@@ -55,6 +55,9 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
 
   RenderTerminal get renderTerminal => terminalView.renderTerminal;
 
+  Offset _terminalLocal(Offset global) =>
+      renderTerminal.globalToLocal(global);
+
   DragStartDetails? _lastDragStartDetails;
 
   LongPressStartDetails? _lastLongPressStartDetails;
@@ -157,18 +160,18 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
   }
 
   void onDoubleTapDown(TapDownDetails details) {
-    renderTerminal.selectWord(details.localPosition);
+    renderTerminal.selectWord(_terminalLocal(details.globalPosition));
   }
 
   void onLongPressStart(LongPressStartDetails details) {
     _lastLongPressStartDetails = details;
-    renderTerminal.selectWord(details.localPosition);
+    renderTerminal.selectWord(_terminalLocal(details.globalPosition));
   }
 
   void onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
     renderTerminal.selectWord(
-      _lastLongPressStartDetails!.localPosition,
-      details.localPosition,
+      _terminalLocal(_lastLongPressStartDetails!.globalPosition),
+      _terminalLocal(details.globalPosition),
     );
   }
 
@@ -176,16 +179,17 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
 
   void onDragStart(DragStartDetails details) {
     _lastDragStartDetails = details;
+    final local = _terminalLocal(details.globalPosition);
 
     details.kind == PointerDeviceKind.mouse
-        ? renderTerminal.selectCharacters(details.localPosition)
-        : renderTerminal.selectWord(details.localPosition);
+        ? renderTerminal.selectCharacters(local)
+        : renderTerminal.selectWord(local);
   }
 
   void onDragUpdate(DragUpdateDetails details) {
     renderTerminal.selectCharacters(
-      _lastDragStartDetails!.localPosition,
-      details.localPosition,
+      _terminalLocal(_lastDragStartDetails!.globalPosition),
+      _terminalLocal(details.globalPosition),
     );
   }
 }

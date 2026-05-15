@@ -289,18 +289,22 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// Height of the entire terminal is expected to be a multiple of this value.
   double get lineHeight => _painter.cellSize.height;
 
+  /// Top-left of [row] in this render object's paint coordinates.
+  Offset _cellTopLeft(int col, int row) {
+    return Offset(
+      col * _painter.cellSize.width,
+      row * _painter.cellSize.height + _lineOffset,
+    );
+  }
+
   /// Get the top-left corner of the cell at [cellOffset] in pixels.
   Offset getOffset(CellOffset cellOffset) {
-    final row = cellOffset.y;
-    final col = cellOffset.x;
-    final x = col * _painter.cellSize.width;
-    final y = row * _painter.cellSize.height;
-    return Offset(x + _padding.left, y + _padding.top - _scrollOffset);
+    return _cellTopLeft(cellOffset.x, cellOffset.y);
   }
 
   /// Get the [CellOffset] of the cell that [offset] is in.
   CellOffset getCellOffset(Offset offset) {
-    final x = offset.dx - _padding.left;
+    final x = offset.dx;
     final y = offset.dy - _padding.top + _scrollOffset;
     final row = y ~/ _painter.cellSize.height;
     final col = x ~/ _painter.cellSize.width;
@@ -496,10 +500,31 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final effectFirstLine = firstLine.clamp(0, lines.length - 1);
     final effectLastLine = lastLine.clamp(0, lines.length - 1);
 
+    // Selection and search highlights go under glyphs so text colors stay visible.
+    if (_controller.selection != null) {
+      _paintSelection(
+        context,
+        offset,
+        canvas,
+        _controller.selection!,
+        effectFirstLine,
+        effectLastLine,
+      );
+    }
+
+    _paintHighlights(
+      context,
+      offset,
+      canvas,
+      _controller.highlights,
+      effectFirstLine,
+      effectLastLine,
+    );
+
     for (var i = effectFirstLine; i <= effectLastLine; i++) {
       _painter.paintLine(
         canvas,
-        offset.translate(0, (i * charHeight + _lineOffset).truncateToDouble()),
+        offset + _cellTopLeft(0, i),
         lines[i],
       );
     }
@@ -519,22 +544,6 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         );
       }
     }
-
-    _paintHighlights(
-      canvas,
-      _controller.highlights,
-      effectFirstLine,
-      effectLastLine,
-    );
-
-    if (_controller.selection != null) {
-      _paintSelection(
-        canvas,
-        _controller.selection!,
-        effectFirstLine,
-        effectLastLine,
-      );
-    }
   }
 
   /// Paints the text that is currently being composed in IME to [canvas] at
@@ -551,7 +560,13 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       underline: true,
     );
 
-    final builder = ParagraphBuilder(style.getParagraphStyle());
+    final builder = ParagraphBuilder(
+      _painter.textStyle.toParagraphStyle(
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        underline: true,
+      ),
+    );
     builder.addPlaceholder(
       offset.dx,
       _painter.cellSize.height,
@@ -569,6 +584,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _paintSelection(
+    PaintingContext context,
+    Offset paintOffset,
     Canvas canvas,
     BufferRange selection,
     int firstLine,
@@ -587,11 +604,13 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         break;
       }
 
-      _paintSegment(canvas, segment, _painter.theme.selection);
+      _paintSegment(paintOffset, canvas, segment, _painter.theme.selection);
     }
   }
 
   void _paintHighlights(
+    PaintingContext context,
+    Offset paintOffset,
     Canvas canvas,
     List<TerminalHighlight> highlights,
     int firstLine,
@@ -615,21 +634,26 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
           break;
         }
 
-        _paintSegment(canvas, segment, highlight.color);
+        _paintSegment(paintOffset, canvas, segment, highlight.color);
       }
     }
   }
 
   @pragma('vm:prefer-inline')
-  void _paintSegment(Canvas canvas, BufferSegment segment, Color color) {
+  void _paintSegment(
+    Offset paintOffset,
+    Canvas canvas,
+    BufferSegment segment,
+    Color color,
+  ) {
     final start = segment.start ?? 0;
     final end = segment.end ?? _terminal.viewWidth;
 
-    final startOffset = Offset(
-      start * _painter.cellSize.width,
-      segment.line * _painter.cellSize.height + _lineOffset,
+    _painter.paintHighlight(
+      canvas,
+      paintOffset + _cellTopLeft(start, segment.line),
+      end - start,
+      color,
     );
-
-    _painter.paintHighlight(canvas, startOffset, end - start, color);
   }
 }

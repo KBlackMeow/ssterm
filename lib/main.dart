@@ -20,6 +20,7 @@ import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/ssh_connection.dart';
 import 'views/settings/settings_sheet.dart';
+import 'widgets/terminal_surface.dart';
 import 'views/ssh_session_view.dart';
 
 void main() {
@@ -103,6 +104,7 @@ class _Tab {
   SftpClient? sftp;
   ValueNotifier<String>? remotePath;
   _OutputPipe? pipe;
+  final terminalViewKey = GlobalKey<TerminalViewState>();
 
   _Tab._({
     required this.kind,
@@ -226,6 +228,7 @@ class _TerminalHomeState extends State<TerminalHome> {
       _tabs.add(tab);
       _active = _tabs.length - 1;
     });
+    _activateTab(_active);
   }
 
   // ── SSH / SFTP ────────────────────────────────────────────────────────────
@@ -352,6 +355,7 @@ class _TerminalHomeState extends State<TerminalHome> {
       _tabs.add(tab);
       _active = _tabs.length - 1;
     });
+    _activateTab(_active);
   }
 
   // ── Tab management ────────────────────────────────────────────────────────
@@ -362,6 +366,20 @@ class _TerminalHomeState extends State<TerminalHome> {
     setState(() {
       _tabs.removeAt(i);
       _active = _active.clamp(0, _tabs.length - 1);
+    });
+    _activateTab(_active);
+  }
+
+  void _selectTab(int i) {
+    if (i == _active) return;
+    setState(() => _active = i);
+    _activateTab(i);
+  }
+
+  void _activateTab(int i) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || i < 0 || i >= _tabs.length) return;
+      _tabs[i].terminalViewKey.currentState?.syncAfterShown();
     });
   }
 
@@ -376,19 +394,11 @@ class _TerminalHomeState extends State<TerminalHome> {
     );
   }
 
-  Widget _buildTerminalView(Terminal terminal) {
-    final t = _config.terminal;
-    return TerminalView(
-      terminal,
-      theme: t.resolveTheme(),
-      textStyle: t.toTerminalStyle(),
-      cursorType: t.cursorType,
-      cursorBlink: t.cursorBlink,
-      cursorBlinkPeriodMs: t.cursorBlinkPeriodMs,
-      textScaler: TextScaler.linear(t.textScale),
-      padding: const EdgeInsets.all(6),
-      autofocus: true,
-      hardwareKeyboardOnly: true,
+  Widget _buildTerminalView(Terminal terminal, GlobalKey<TerminalViewState> viewKey) {
+    return TerminalSurface(
+      terminal: terminal,
+      settings: _config.terminal,
+      viewKey: viewKey,
     );
   }
 
@@ -417,7 +427,7 @@ class _TerminalHomeState extends State<TerminalHome> {
               _TabBar(
                 tabs: _tabs,
                 active: _active,
-                onSelect: (i) => setState(() => _active = i),
+                onSelect: _selectTab,
                 onClose: _closeTab,
                 onNewLocal: _newLocalTab,
                 onNewSsh: () => _showConnectDialog(),
@@ -435,11 +445,9 @@ class _TerminalHomeState extends State<TerminalHome> {
     );
   }
 
-  Widget _buildBody() {
-    if (_tabs.isEmpty) return const SizedBox.shrink();
-    final tab = _tabs[_active];
+  Widget _buildTabBody(_Tab tab) {
     return switch (tab.kind) {
-      _TabKind.local => _buildTerminalView(tab.terminal!),
+      _TabKind.local => _buildTerminalView(tab.terminal!, tab.terminalViewKey),
       _TabKind.ssh => tab.sftp != null
           ? SshSessionView(
               terminal: tab.terminal!,
@@ -452,9 +460,21 @@ class _TerminalHomeState extends State<TerminalHome> {
                 _config.save();
               },
               terminalSettings: _config.terminal,
+              terminalViewKey: tab.terminalViewKey,
             )
-          : _buildTerminalView(tab.terminal!),
+          : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
     };
+  }
+
+  Widget _buildBody() {
+    if (_tabs.isEmpty) return const SizedBox.shrink();
+    return IndexedStack(
+      index: _active,
+      sizing: StackFit.expand,
+      children: [
+        for (final tab in _tabs) _buildTabBody(tab),
+      ],
+    );
   }
 }
 

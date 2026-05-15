@@ -235,7 +235,9 @@ class TerminalViewState extends State<TerminalView> {
           terminal: widget.terminal,
           controller: _controller,
           offset: offset,
-          padding: MediaQuery.of(context).padding,
+          // Padding is applied by the outer [Container]; the render object
+          // shares the same coordinate system as [paintLine] (origin at 0).
+          padding: EdgeInsets.zero,
           autoResize: widget.autoResize,
           textStyle: widget.textStyle,
           textScaler: widget.textScaler ?? MediaQuery.textScalerOf(context),
@@ -335,6 +337,22 @@ class TerminalViewState extends State<TerminalView> {
 
   void requestKeyboard() {
     _customTextEditKey.currentState?.requestKeyboard();
+  }
+
+  /// Call when this view becomes visible again (e.g. tab switch) to refresh
+  /// layout so the cursor aligns with the buffer.
+  void syncAfterShown() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        renderTerminal.markNeedsLayout();
+      } catch (_) {}
+      if (widget.hardwareKeyboardOnly) {
+        _focusNode.requestFocus();
+      } else {
+        requestKeyboard();
+      }
+    });
   }
 
   void closeKeyboard() {

@@ -20,7 +20,8 @@ class EscapeEmitter {
   }
 
   String cursorPosition(int x, int y) {
-    return '\x1b[$y;${x}R';
+    // CPR response uses 1-based row and column (ECMA-48).
+    return '\x1b[${y + 1};${x + 1}R';
   }
 
   String bracketedPaste(String text) {

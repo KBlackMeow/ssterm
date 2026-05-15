@@ -3,7 +3,10 @@ import 'package:xterm/xterm.dart';
 
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
+import '../../services/image_file_picker.dart';
+import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
+import '../../widgets/wallpaper_background.dart';
 
 const _kSheetBg = Color(0xFF2B2B2B);
 const _kDivider = Color(0xFF3A3A3A);
@@ -117,7 +120,11 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   _colorRow('Cursor', 'cursor', _s.resolveTheme().cursor),
                   _colorRow('Selection', 'selection', _s.resolveTheme().selection),
                   const SizedBox(height: 12),
+                  _sectionTitle('Wallpaper'),
+                  _wallpaperSection(),
+                  const SizedBox(height: 12),
                   _sectionTitle('Font'),
+                  _controlLabel('Family'),
                   _fontDropdown(),
                   _slider(
                     label: 'Size',
@@ -131,6 +138,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   ),
                   _slider(
                     label: 'Line height',
+                    hint: 'Vertical spacing between lines',
                     value: _s.lineHeight,
                     min: 1.0,
                     max: 1.5,
@@ -141,6 +149,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   _fontWeightChips(),
                   const SizedBox(height: 12),
                   _sectionTitle('Cursor'),
+                  _controlLabel('Shape'),
                   _cursorShapeChips(),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -261,6 +270,126 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
+  Future<void> _pickWallpaper() async {
+    if (!ImageFilePicker.isSupported) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Image picker is only available on macOS.'),
+        ),
+      );
+      return;
+    }
+
+    final path = await ImageFilePicker.pickPath();
+    if (path == null) return;
+
+    final id = await WallpaperStorage.importFrom(path);
+    if (id == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not import image.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+
+    final hadWallpaper = _s.hasWallpaper;
+    _apply(
+      _s.copyWith(
+        wallpaperId: id,
+        backgroundOpacity: hadWallpaper ? _s.backgroundOpacity : 0.88,
+        wallpaperBlur: hadWallpaper ? _s.wallpaperBlur : 12.0,
+      ),
+    );
+  }
+
+  Future<void> _removeWallpaper() async {
+    final id = _s.wallpaperId;
+    if (id != null) await WallpaperStorage.delete(id);
+    if (!mounted) return;
+    _apply(_s.copyWith(clearWallpaper: true));
+  }
+
+  Widget _wallpaperSection() {
+    final file = WallpaperStorage.resolveFile(_s.wallpaperId);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (file != null) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: 72,
+              width: double.infinity,
+              child: WallpaperBackground(
+                file: file,
+                opacity: _s.wallpaperOpacity,
+                blur: _s.wallpaperBlur,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          children: [
+            TextButton.icon(
+              onPressed: _pickWallpaper,
+              icon: const Icon(Icons.image_outlined, size: 16, color: _kAccent),
+              label: Text(
+                file == null ? 'Choose image…' : 'Change image…',
+                style: const TextStyle(color: _kAccent, fontSize: 13),
+              ),
+            ),
+            if (file != null) ...[
+              const Spacer(),
+              TextButton(
+                onPressed: _removeWallpaper,
+                child: const Text(
+                  'Remove',
+                  style: TextStyle(color: _kFgMuted, fontSize: 13),
+                ),
+              ),
+            ],
+          ],
+        ),
+        if (file != null) ...[
+          _slider(
+            label: 'Wallpaper',
+            hint: 'Image visibility',
+            value: _s.wallpaperOpacity,
+            min: 0.1,
+            max: 1.0,
+            divisions: 18,
+            display: '${(_s.wallpaperOpacity * 100).round()}%',
+            onChanged: (v) => _apply(_s.copyWith(wallpaperOpacity: v)),
+          ),
+          _slider(
+            label: 'Blur',
+            hint: 'Frosted-glass effect on the image',
+            value: _s.wallpaperBlur,
+            min: 0,
+            max: 24,
+            divisions: 24,
+            display: _s.wallpaperBlur.toStringAsFixed(0),
+            onChanged: (v) => _apply(_s.copyWith(wallpaperBlur: v)),
+          ),
+          _slider(
+            label: 'Background',
+            hint: 'Terminal fill over the image',
+            value: _s.backgroundOpacity,
+            min: 0.5,
+            max: 1.0,
+            divisions: 10,
+            display: '${(_s.backgroundOpacity * 100).round()}%',
+            onChanged: (v) => _apply(_s.copyWith(backgroundOpacity: v)),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _fontDropdown() {
     return DropdownButtonFormField<String>(
       initialValue: TerminalSettings.fontOptions.contains(_s.fontFamily)
@@ -284,24 +413,56 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
+  Widget _controlLabel(String label, {String? hint}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: _kFg, fontSize: 13)),
+          if (hint != null) ...[
+            const SizedBox(height: 2),
+            Text(hint, style: const TextStyle(color: _kFgMuted, fontSize: 11)),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _fontWeightChips() {
     const options = [
       (FontWeight.normal, 'Normal'),
       (FontWeight.w500, 'Medium'),
       (FontWeight.w600, 'Semibold'),
     ];
-    return Wrap(
-      spacing: 6,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final (w, label) in options)
-          ChoiceChip(
-            label: Text(label, style: TextStyle(fontSize: 12, color: _s.fontWeight == w ? Colors.white : _kFg)),
-            selected: _s.fontWeight == w,
-            selectedColor: _kAccent,
-            backgroundColor: const Color(0xFF1C1C1C),
-            side: const BorderSide(color: _kDivider),
-            onSelected: (_) => _apply(_s.copyWith(fontWeight: w)),
-          ),
+        _controlLabel(
+          'Weight',
+          hint: 'Thickness of regular text (bold output is unchanged)',
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          children: [
+            for (final (w, label) in options)
+              ChoiceChip(
+                label: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _s.fontWeight == w ? Colors.white : _kFg,
+                  ),
+                ),
+                selected: _s.fontWeight == w,
+                selectedColor: _kAccent,
+                backgroundColor: const Color(0xFF1C1C1C),
+                side: const BorderSide(color: _kDivider),
+                onSelected: (_) => _apply(_s.copyWith(fontWeight: w)),
+              ),
+          ],
+        ),
       ],
     );
   }
@@ -336,6 +497,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
 
   Widget _slider({
     required String label,
+    String? hint,
     required double value,
     required double min,
     required double max,
@@ -353,6 +515,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             Text(display, style: const TextStyle(color: _kFgMuted, fontSize: 12)),
           ],
         ),
+        if (hint != null) ...[
+          const SizedBox(height: 2),
+          Text(hint, style: const TextStyle(color: _kFgMuted, fontSize: 11)),
+        ],
         SliderTheme(
           data: SliderThemeData(
             activeTrackColor: _kAccent,

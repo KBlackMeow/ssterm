@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/widgets.dart';
 
 const _kDefaultFontSize = 13.0;
@@ -5,6 +7,12 @@ const _kDefaultFontSize = 13.0;
 const _kDefaultHeight = 1.2;
 
 const _kDefaultFontFamily = 'monospace';
+
+/// Top-align glyphs inside each terminal cell (avoids vertical centering).
+const kTerminalTextHeightBehavior = TextHeightBehavior(
+  applyHeightToFirstAscent: false,
+  applyHeightToLastDescent: false,
+);
 
 const _kDefaultFontFamilyFallback = [
   'Menlo',
@@ -64,6 +72,7 @@ class TerminalStyle {
     return TextStyle(
       fontSize: fontSize,
       height: height,
+      leadingDistribution: TextLeadingDistribution.proportional,
       fontFamily: fontFamily,
       fontFamilyFallback: fontFamilyFallback,
       color: color,
@@ -72,6 +81,22 @@ class TerminalStyle {
       fontStyle: italic ? FontStyle.italic : FontStyle.normal,
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
+  }
+
+  ParagraphStyle toParagraphStyle({
+    Color? color,
+    Color? backgroundColor,
+    bool bold = false,
+    bool italic = false,
+    bool underline = false,
+  }) {
+    return toTextStyle(
+      color: color,
+      backgroundColor: backgroundColor,
+      bold: bold,
+      italic: italic,
+      underline: underline,
+    ).getParagraphStyle(textHeightBehavior: kTerminalTextHeightBehavior);
   }
 
   TerminalStyle copyWith({
