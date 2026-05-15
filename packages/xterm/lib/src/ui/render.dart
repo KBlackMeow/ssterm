@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' show max;
 import 'dart:ui';
 
@@ -33,6 +34,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     required FocusNode focusNode,
     required TerminalCursorType cursorType,
     required bool alwaysShowCursor,
+    required bool cursorBlink,
+    required int cursorBlinkPeriodMs,
     EditableRectCallback? onEditableRect,
     String? composingText,
   })  : _terminal = terminal,
@@ -43,6 +46,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         _focusNode = focusNode,
         _cursorType = cursorType,
         _alwaysShowCursor = alwaysShowCursor,
+        _cursorBlink = cursorBlink,
+        _cursorBlinkPeriodMs = cursorBlinkPeriodMs,
         _onEditableRect = onEditableRect,
         _composingText = composingText,
         _painter = TerminalPainter(
@@ -134,6 +139,30 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     markNeedsPaint();
   }
 
+  bool _cursorBlink;
+  set cursorBlink(bool value) {
+    if (value == _cursorBlink) return;
+    _cursorBlink = value;
+    if (attached) {
+      _restartBlinkTimer();
+    } else {
+      _cursorBlinkPhase = true;
+    }
+    markNeedsPaint();
+  }
+
+  int _cursorBlinkPeriodMs;
+  set cursorBlinkPeriodMs(int value) {
+    if (value == _cursorBlinkPeriodMs) return;
+    _cursorBlinkPeriodMs = value;
+    if (attached && _cursorBlink) {
+      _restartBlinkTimer();
+    }
+  }
+
+  bool _cursorBlinkPhase = true;
+  Timer? _blinkTimer;
+
   EditableRectCallback? _onEditableRect;
   set onEditableRect(EditableRectCallback? value) {
     if (value == _onEditableRect) return;
@@ -168,7 +197,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _onTerminalChange() {
+    // Show cursor at the new position immediately when typing/output arrives.
+    _cursorBlinkPhase = true;
     markNeedsLayout();
+    markNeedsPaint();
     _scheduleNotifyEditableRect();
   }
 
@@ -179,6 +211,23 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   @override
   final isRepaintBoundary = true;
 
+  void _restartBlinkTimer() {
+    _blinkTimer?.cancel();
+    _blinkTimer = null;
+    if (!_cursorBlink) {
+      _cursorBlinkPhase = true;
+      return;
+    }
+    _cursorBlinkPhase = true;
+    _blinkTimer = Timer.periodic(
+      Duration(milliseconds: _cursorBlinkPeriodMs),
+      (_) {
+        _cursorBlinkPhase = !_cursorBlinkPhase;
+        markNeedsPaint();
+      },
+    );
+  }
+
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
@@ -186,10 +235,13 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     _terminal.addListener(_onTerminalChange);
     _controller.addListener(_onControllerUpdate);
     _focusNode.addListener(_onFocusChange);
+    _restartBlinkTimer();
   }
 
   @override
   void detach() {
+    _blinkTimer?.cancel();
+    _blinkTimer = null;
     super.detach();
     _offset.removeListener(_onScroll);
     _terminal.removeListener(_onTerminalChange);
@@ -386,6 +438,12 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     return _terminal.cursorVisibleMode || _alwaysShowCursor || _isComposingText;
   }
 
+  bool get _paintCursorNow {
+    if (!_shouldShowCursor) return false;
+    if (!_cursorBlink || !_focusNode.hasFocus) return true;
+    return _cursorBlinkPhase;
+  }
+
   double get _viewportHeight {
     return size.height - _padding.vertical;
   }
@@ -405,9 +463,11 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   /// The offset of the cursor from the top left corner of this render object.
   Offset get cursorOffset {
-    return Offset(
-      _terminal.buffer.cursorX * _painter.cellSize.width,
-      _terminal.buffer.absoluteCursorY * _painter.cellSize.height + _lineOffset,
+    return getOffset(
+      CellOffset(
+        _terminal.buffer.cursorX,
+        _terminal.buffer.absoluteCursorY,
+      ),
     );
   }
 
@@ -450,7 +510,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
         _paintComposingText(canvas, offset + cursorOffset);
       }
 
-      if (_shouldShowCursor) {
+      if (_paintCursorNow) {
         _painter.paintCursor(
           canvas,
           offset + cursorOffset,

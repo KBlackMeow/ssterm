@@ -110,14 +110,14 @@ class TerminalPainter {
         return;
       case TerminalCursorType.underline:
         return canvas.drawLine(
-          Offset(offset.dx, _cellSize.height - 1),
-          Offset(offset.dx + _cellSize.width, _cellSize.height - 1),
+          Offset(offset.dx, offset.dy + _cellSize.height - 1),
+          Offset(offset.dx + _cellSize.width, offset.dy + _cellSize.height - 1),
           paint,
         );
       case TerminalCursorType.verticalBar:
         return canvas.drawLine(
-          Offset(offset.dx, 0),
-          Offset(offset.dx, _cellSize.height),
+          Offset(offset.dx, offset.dy),
+          Offset(offset.dx, offset.dy + _cellSize.height),
           paint,
         );
     }

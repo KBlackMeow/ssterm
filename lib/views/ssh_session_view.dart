@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
 import '../models/app_config.dart';
+import '../models/terminal_settings.dart';
 import 'sftp_view.dart';
 
 const _kDivider = Color(0xFF3A3A3A);
@@ -16,8 +17,7 @@ class SshSessionView extends StatefulWidget {
     required this.remotePath,
     required this.panelPosition,
     required this.onPanelPositionChanged,
-    required this.theme,
-    required this.textStyle,
+    required this.terminalSettings,
   });
 
   final Terminal terminal;
@@ -26,8 +26,7 @@ class SshSessionView extends StatefulWidget {
   final ValueNotifier<String> remotePath;
   final SftpPanelPosition panelPosition;
   final ValueChanged<SftpPanelPosition> onPanelPositionChanged;
-  final TerminalTheme theme;
-  final TerminalStyle textStyle;
+  final TerminalSettings terminalSettings;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -72,10 +71,15 @@ class _SshSessionViewState extends State<SshSessionView> {
 
   @override
   Widget build(BuildContext context) {
+    final t = widget.terminalSettings;
     final terminal = TerminalView(
       widget.terminal,
-      theme: widget.theme,
-      textStyle: widget.textStyle,
+      theme: t.resolveTheme(),
+      textStyle: t.toTerminalStyle(),
+      cursorType: t.cursorType,
+      cursorBlink: t.cursorBlink,
+      cursorBlinkPeriodMs: t.cursorBlinkPeriodMs,
+      textScaler: TextScaler.linear(t.textScale),
       padding: const EdgeInsets.all(6),
       autofocus: true,
       hardwareKeyboardOnly: true,

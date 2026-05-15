@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 
@@ -18,6 +19,7 @@ import 'services/host_key_verifier.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/ssh_connection.dart';
+import 'views/settings/settings_sheet.dart';
 import 'views/ssh_session_view.dart';
 
 void main() {
@@ -38,33 +40,6 @@ class SsTermApp extends StatelessWidget {
     );
   }
 }
-
-// ── iTerm2 color palette ────────────────────────────────────────────────────
-const _kTheme = TerminalTheme(
-  cursor: Color(0xFFD4D4D4),
-  selection: Color(0xFF4E6F91),
-  foreground: Color(0xFFC7C7C7),
-  background: Color(0xFF1C1C1C),
-  black: Color(0xFF000000),
-  white: Color(0xFFC7C7C7),
-  red: Color(0xFFC91B00),
-  green: Color(0xFF00C200),
-  yellow: Color(0xFFC7C400),
-  blue: Color(0xFF2472C8),
-  magenta: Color(0xFFC930C7),
-  cyan: Color(0xFF00C5C7),
-  brightBlack: Color(0xFF686868),
-  brightWhite: Color(0xFFFFFFFF),
-  brightRed: Color(0xFFFF6E67),
-  brightGreen: Color(0xFF5FFA68),
-  brightYellow: Color(0xFFFFFC67),
-  brightBlue: Color(0xFF6871FF),
-  brightMagenta: Color(0xFFFF77FF),
-  brightCyan: Color(0xFF60FDFF),
-  searchHitBackground: Color(0xFFFF9F00),
-  searchHitBackgroundCurrent: Color(0xFFFF6600),
-  searchHitForeground: Color(0xFFFFFFFF),
-);
 
 const _kBg = Color(0xFF1C1C1C);
 const _kTabBarBg = Color(0xFF2B2B2B);
@@ -390,28 +365,72 @@ class _TerminalHomeState extends State<TerminalHome> {
     });
   }
 
+  void _openSettings() {
+    showTerminalSettingsSheet(
+      context,
+      settings: _config.terminal,
+      onChanged: (next) {
+        setState(() => _config.terminal = next);
+        _config.save();
+      },
+    );
+  }
+
+  Widget _buildTerminalView(Terminal terminal) {
+    final t = _config.terminal;
+    return TerminalView(
+      terminal,
+      theme: t.resolveTheme(),
+      textStyle: t.toTerminalStyle(),
+      cursorType: t.cursorType,
+      cursorBlink: t.cursorBlink,
+      cursorBlinkPeriodMs: t.cursorBlinkPeriodMs,
+      textScaler: TextScaler.linear(t.textScale),
+      padding: const EdgeInsets.all(6),
+      autofocus: true,
+      hardwareKeyboardOnly: true,
+    );
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _kBg,
-      body: Column(
-        children: [
-          _TabBar(
-            tabs: _tabs,
-            active: _active,
-            onSelect: (i) => setState(() => _active = i),
-            onClose: _closeTab,
-            onNewLocal: _newLocalTab,
-            onNewSsh: () => _showConnectDialog(),
-            savedHosts: _savedHosts,
-            configHosts: _configHosts,
-            onConnectHost: _connectSavedHost,
+    return Shortcuts(
+      shortcuts: {
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.comma):
+            const _OpenSettingsIntent(),
+      },
+      child: Actions(
+        actions: {
+          _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
+            onInvoke: (_) {
+              _openSettings();
+              return null;
+            },
           ),
-          const Divider(height: 1, thickness: 1, color: _kDivider),
-          Expanded(child: _buildBody()),
-        ],
+        },
+        child: Scaffold(
+          backgroundColor: _kBg,
+          body: Column(
+            children: [
+              _TabBar(
+                tabs: _tabs,
+                active: _active,
+                onSelect: (i) => setState(() => _active = i),
+                onClose: _closeTab,
+                onNewLocal: _newLocalTab,
+                onNewSsh: () => _showConnectDialog(),
+                onSettings: _openSettings,
+                savedHosts: _savedHosts,
+                configHosts: _configHosts,
+                onConnectHost: _connectSavedHost,
+              ),
+              const Divider(height: 1, thickness: 1, color: _kDivider),
+              Expanded(child: _buildBody()),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -420,14 +439,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     if (_tabs.isEmpty) return const SizedBox.shrink();
     final tab = _tabs[_active];
     return switch (tab.kind) {
-      _TabKind.local => TerminalView(
-          tab.terminal!,
-          theme: _kTheme,
-          textStyle: const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
-          padding: const EdgeInsets.all(6),
-          autofocus: true,
-          hardwareKeyboardOnly: true,
-        ),
+      _TabKind.local => _buildTerminalView(tab.terminal!),
       _TabKind.ssh => tab.sftp != null
           ? SshSessionView(
               terminal: tab.terminal!,
@@ -439,19 +451,9 @@ class _TerminalHomeState extends State<TerminalHome> {
                 setState(() => _config.sftpPanelPosition = pos);
                 _config.save();
               },
-              theme: _kTheme,
-              textStyle:
-                  const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
+              terminalSettings: _config.terminal,
             )
-          : TerminalView(
-              tab.terminal!,
-              theme: _kTheme,
-              textStyle:
-                  const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
-              padding: const EdgeInsets.all(6),
-              autofocus: true,
-              hardwareKeyboardOnly: true,
-            ),
+          : _buildTerminalView(tab.terminal!),
     };
   }
 }
@@ -465,6 +467,7 @@ class _TabBar extends StatelessWidget {
     required this.onClose,
     required this.onNewLocal,
     required this.onNewSsh,
+    required this.onSettings,
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
@@ -476,6 +479,7 @@ class _TabBar extends StatelessWidget {
   final ValueChanged<int> onClose;
   final VoidCallback onNewLocal;
   final VoidCallback onNewSsh;
+  final VoidCallback onSettings;
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
@@ -538,7 +542,14 @@ class _TabBar extends StatelessWidget {
             configHosts: configHosts,
             onConnectHost: onConnectHost,
           ),
-          const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'Settings (⌘,)',
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.settings_outlined, size: 18, color: _kFgInactive),
+            onPressed: onSettings,
+          ),
+          const SizedBox(width: 2),
         ],
       ),
     );
@@ -821,4 +832,8 @@ class _PlusMenu extends StatelessWidget {
       ),
     );
   }
+}
+
+class _OpenSettingsIntent extends Intent {
+  const _OpenSettingsIntent();
 }

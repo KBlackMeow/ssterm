@@ -1,12 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'terminal_settings.dart';
+
 enum SftpPanelPosition { right, bottom }
 
 class AppConfig {
-  AppConfig({this.sftpPanelPosition = SftpPanelPosition.right});
+  AppConfig({
+    this.sftpPanelPosition = SftpPanelPosition.right,
+    TerminalSettings? terminal,
+  }) : terminal = terminal ?? TerminalSettings();
 
   SftpPanelPosition sftpPanelPosition;
+  TerminalSettings terminal;
 
   static Future<File> _file() async {
     final home = Platform.environment['HOME'] ?? '';
@@ -25,6 +31,9 @@ class AppConfig {
         sftpPanelPosition: pos == 'bottom'
             ? SftpPanelPosition.bottom
             : SftpPanelPosition.right,
+        terminal: TerminalSettings.fromJson(
+          json['terminal'] as Map<String, dynamic>?,
+        ),
       );
     } catch (_) {
       return AppConfig();
@@ -37,6 +46,7 @@ class AppConfig {
       const JsonEncoder.withIndent('  ').convert({
         'sftpPanelPosition':
             sftpPanelPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
+        'terminal': terminal.toJson(),
       }),
     );
   }

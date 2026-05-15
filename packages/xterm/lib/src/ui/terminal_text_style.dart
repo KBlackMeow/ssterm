@@ -29,6 +29,7 @@ class TerminalStyle {
     this.height = _kDefaultHeight,
     this.fontFamily = _kDefaultFontFamily,
     this.fontFamilyFallback = _kDefaultFontFamilyFallback,
+    this.fontWeight = FontWeight.normal,
   });
 
   factory TerminalStyle.fromTextStyle(TextStyle textStyle) {
@@ -51,6 +52,8 @@ class TerminalStyle {
 
   final List<String> fontFamilyFallback;
 
+  final FontWeight fontWeight;
+
   TextStyle toTextStyle({
     Color? color,
     Color? backgroundColor,
@@ -65,7 +68,7 @@ class TerminalStyle {
       fontFamilyFallback: fontFamilyFallback,
       color: color,
       backgroundColor: backgroundColor,
-      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      fontWeight: bold ? FontWeight.bold : fontWeight,
       fontStyle: italic ? FontStyle.italic : FontStyle.normal,
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
@@ -76,12 +79,41 @@ class TerminalStyle {
     double? height,
     String? fontFamily,
     List<String>? fontFamilyFallback,
+    FontWeight? fontWeight,
   }) {
     return TerminalStyle(
       fontSize: fontSize ?? this.fontSize,
       height: height ?? this.height,
       fontFamily: fontFamily ?? this.fontFamily,
       fontFamilyFallback: fontFamilyFallback ?? this.fontFamilyFallback,
+      fontWeight: fontWeight ?? this.fontWeight,
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    return other is TerminalStyle &&
+        other.fontSize == fontSize &&
+        other.height == height &&
+        other.fontFamily == fontFamily &&
+        other.fontWeight == fontWeight &&
+        _listEquals(other.fontFamilyFallback, fontFamilyFallback);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        fontSize,
+        height,
+        fontFamily,
+        fontWeight,
+        Object.hashAll(fontFamilyFallback),
+      );
+}
+
+bool _listEquals<T>(List<T> a, List<T> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }

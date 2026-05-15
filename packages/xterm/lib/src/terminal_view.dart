@@ -43,6 +43,8 @@ class TerminalView extends StatefulWidget {
     this.keyboardAppearance = Brightness.dark,
     this.cursorType = TerminalCursorType.block,
     this.alwaysShowCursor = false,
+    this.cursorBlink = true,
+    this.cursorBlinkPeriodMs = 530,
     this.deleteDetection = false,
     this.shortcuts,
     this.onKeyEvent,
@@ -114,6 +116,12 @@ class TerminalView extends StatefulWidget {
   /// Whether to always show the cursor. This is useful for debugging.
   /// [false] by default.
   final bool alwaysShowCursor;
+
+  /// Whether the cursor blinks when the terminal has focus. [true] by default.
+  final bool cursorBlink;
+
+  /// Cursor blink period in milliseconds. [530] by default.
+  final int cursorBlinkPeriodMs;
 
   /// Workaround to detect delete key for platforms and IMEs that does not
   /// emit hardware delete event. Prefered on mobile platforms. [false] by
@@ -235,6 +243,8 @@ class TerminalViewState extends State<TerminalView> {
           focusNode: _focusNode,
           cursorType: widget.cursorType,
           alwaysShowCursor: widget.alwaysShowCursor,
+          cursorBlink: widget.cursorBlink,
+          cursorBlinkPeriodMs: widget.cursorBlinkPeriodMs,
           onEditableRect: _onEditableRect,
           composingText: _composingText,
         );
@@ -464,6 +474,8 @@ class _TerminalView extends LeafRenderObjectWidget {
     required this.focusNode,
     required this.cursorType,
     required this.alwaysShowCursor,
+    required this.cursorBlink,
+    required this.cursorBlinkPeriodMs,
     this.onEditableRect,
     this.composingText,
   });
@@ -490,6 +502,10 @@ class _TerminalView extends LeafRenderObjectWidget {
 
   final bool alwaysShowCursor;
 
+  final bool cursorBlink;
+
+  final int cursorBlinkPeriodMs;
+
   final EditableRectCallback? onEditableRect;
 
   final String? composingText;
@@ -508,6 +524,8 @@ class _TerminalView extends LeafRenderObjectWidget {
       focusNode: focusNode,
       cursorType: cursorType,
       alwaysShowCursor: alwaysShowCursor,
+      cursorBlink: cursorBlink,
+      cursorBlinkPeriodMs: cursorBlinkPeriodMs,
       onEditableRect: onEditableRect,
       composingText: composingText,
     );
@@ -527,6 +545,8 @@ class _TerminalView extends LeafRenderObjectWidget {
       ..focusNode = focusNode
       ..cursorType = cursorType
       ..alwaysShowCursor = alwaysShowCursor
+      ..cursorBlink = cursorBlink
+      ..cursorBlinkPeriodMs = cursorBlinkPeriodMs
       ..onEditableRect = onEditableRect
       ..composingText = composingText;
   }
