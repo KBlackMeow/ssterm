@@ -56,7 +56,9 @@ class RemoteCwdParser {
   }
 
   static String? _pathFromOsc(String osc) {
-    final m = RegExp(r'file://[^/\x07\x1b\\]*(/[^\x07\x1b\\]*)').firstMatch(osc);
+    final m = RegExp(
+      r'file://[^/\x07\x1b\\]*(/[^\x07\x1b\\]*)',
+    ).firstMatch(osc);
     if (m == null) return null;
     final raw = m.group(1)!;
     if (raw.isEmpty) return '/';

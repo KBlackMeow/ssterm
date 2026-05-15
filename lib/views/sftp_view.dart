@@ -90,13 +90,20 @@ class _SftpViewState extends State<SftpView> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _loading = false; _error = e.toString(); });
+      if (mounted)
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
     }
   }
 
   Future<void> _download(SftpName entry) async {
     final remotePath = _join(_path, entry.filename);
-    setState(() { _busy = true; _status = 'Downloading ${entry.filename}…'; });
+    setState(() {
+      _busy = true;
+      _status = 'Downloading ${entry.filename}…';
+    });
     try {
       final file = await widget.sftp.open(remotePath);
       final bytes = await file.readBytes();
@@ -106,9 +113,17 @@ class _SftpViewState extends State<SftpView> {
       final dest = '$home/Downloads/${entry.filename}';
       await File(dest).writeAsBytes(bytes);
 
-      if (mounted) setState(() { _busy = false; _status = 'Saved to ~/Downloads/${entry.filename}'; });
+      if (mounted)
+        setState(() {
+          _busy = false;
+          _status = 'Saved to ~/Downloads/${entry.filename}';
+        });
     } catch (e) {
-      if (mounted) setState(() { _busy = false; _status = 'Error: $e'; });
+      if (mounted)
+        setState(() {
+          _busy = false;
+          _status = 'Error: $e';
+        });
     }
   }
 
@@ -141,7 +156,8 @@ class _SftpViewState extends State<SftpView> {
     final ctrl = TextEditingController(text: entry.name.filename);
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
+      builder: (ctx) =>
+          _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
     );
     if (name == null || name.isEmpty || name == entry.name.filename) return;
 
@@ -160,7 +176,8 @@ class _SftpViewState extends State<SftpView> {
     final ctrl = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
+      builder: (ctx) =>
+          _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
     );
     if (name == null || name.isEmpty) return;
 
@@ -285,32 +302,41 @@ class _SftpViewState extends State<SftpView> {
           const SizedBox(width: 18),
           const SizedBox(width: 8),
           const Expanded(
-            child: Text('Name',
-                style: TextStyle(
-                    color: Color(0xFF686868),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              'Name',
+              style: TextStyle(
+                color: Color(0xFF686868),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           const SizedBox(
             width: _kSizeColWidth,
-            child: Text('Size',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                    color: Color(0xFF686868),
-                    fontSize: _kMetaFontSize,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              'Size',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: Color(0xFF686868),
+                fontSize: _kMetaFontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           const SizedBox(width: 4),
           const SizedBox(
             width: _kDateColWidth,
-            child: Text('Modified',
-                textAlign: TextAlign.right,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: Color(0xFF686868),
-                    fontSize: _kMetaFontSize,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              'Modified',
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Color(0xFF686868),
+                fontSize: _kMetaFontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -320,13 +346,18 @@ class _SftpViewState extends State<SftpView> {
   Widget _buildBody() {
     if (_loading) {
       return const Center(
-          child: CircularProgressIndicator(
-              color: Color(0xFF2472C8), strokeWidth: 2));
+        child: CircularProgressIndicator(
+          color: Color(0xFF2472C8),
+          strokeWidth: 2,
+        ),
+      );
     }
     if (_error != null) {
       return Center(
-        child: Text(_error!,
-            style: const TextStyle(color: Color(0xFFFF6E67), fontSize: 12)),
+        child: Text(
+          _error!,
+          style: const TextStyle(color: Color(0xFFFF6E67), fontSize: 12),
+        ),
       );
     }
     return ListView.builder(
@@ -341,7 +372,11 @@ class _SftpViewState extends State<SftpView> {
             onTap: () => setState(() => _selected = isSel ? null : e),
             onDoubleTap: () {
               if (isDir) {
-                _listDir(e.filename == '..' ? _parent(_path) : _join(_path, e.filename));
+                _listDir(
+                  e.filename == '..'
+                      ? _parent(_path)
+                      : _join(_path, e.filename),
+                );
               }
             },
             child: Container(
@@ -428,18 +463,24 @@ class _SftpViewState extends State<SftpView> {
         if (!isDir)
           PopupMenuItem(
             onTap: () => _download(e),
-            child: const Text('Download',
-                style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13)),
+            child: const Text(
+              'Download',
+              style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
+            ),
           ),
         PopupMenuItem(
           onTap: () => _rename(SshFtpEntry(e)),
-          child: const Text('Rename',
-              style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13)),
+          child: const Text(
+            'Rename',
+            style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
+          ),
         ),
         PopupMenuItem(
           onTap: () => _delete(e),
-          child: const Text('Delete',
-              style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13)),
+          child: const Text(
+            'Delete',
+            style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13),
+          ),
         ),
       ],
     );
@@ -457,22 +498,22 @@ class _SftpViewState extends State<SftpView> {
               width: 12,
               height: 12,
               child: CircularProgressIndicator(
-                  strokeWidth: 1.5, color: Color(0xFF2472C8)),
+                strokeWidth: 1.5,
+                color: Color(0xFF2472C8),
+              ),
             ),
             const SizedBox(width: 6),
           ],
           Expanded(
             child: Text(
               _status ?? '',
-              style:
-                  const TextStyle(color: Color(0xFF8E8E8E), fontSize: 11),
+              style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 11),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
             '${_entries.length} items',
-            style:
-                const TextStyle(color: Color(0xFF686868), fontSize: 11),
+            style: const TextStyle(color: Color(0xFF686868), fontSize: 11),
           ),
         ],
       ),
@@ -480,15 +521,41 @@ class _SftpViewState extends State<SftpView> {
   }
 
   IconData _fileIcon(String name) {
-    final ext = name.contains('.')
-        ? name.split('.').last.toLowerCase()
-        : '';
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return switch (ext) {
-      'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' || 'c' || 'cpp' || 'java' || 'swift' || 'kt' => Icons.code,
-      'json' || 'yaml' || 'yml' || 'toml' || 'xml' || 'ini' || 'conf' => Icons.data_object,
+      'dart' ||
+      'py' ||
+      'js' ||
+      'ts' ||
+      'go' ||
+      'rs' ||
+      'c' ||
+      'cpp' ||
+      'java' ||
+      'swift' ||
+      'kt' => Icons.code,
+      'json' ||
+      'yaml' ||
+      'yml' ||
+      'toml' ||
+      'xml' ||
+      'ini' ||
+      'conf' => Icons.data_object,
       'md' || 'txt' || 'log' || 'rst' => Icons.description_outlined,
-      'png' || 'jpg' || 'jpeg' || 'gif' || 'svg' || 'webp' || 'ico' => Icons.image_outlined,
-      'zip' || 'tar' || 'gz' || 'bz2' || 'xz' || '7z' || 'rar' => Icons.archive_outlined,
+      'png' ||
+      'jpg' ||
+      'jpeg' ||
+      'gif' ||
+      'svg' ||
+      'webp' ||
+      'ico' => Icons.image_outlined,
+      'zip' ||
+      'tar' ||
+      'gz' ||
+      'bz2' ||
+      'xz' ||
+      '7z' ||
+      'rar' => Icons.archive_outlined,
       'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal,
       _ => Icons.insert_drive_file_outlined,
     };
@@ -549,10 +616,10 @@ class _ToolBtnState extends State<_ToolBtn> {
     final color = disabled
         ? const Color(0xFF3A3A3A)
         : widget.danger
-            ? const Color(0xFFFF6E67)
-            : _hover
-                ? const Color(0xFFC7C7C7)
-                : const Color(0xFF8E8E8E);
+        ? const Color(0xFFFF6E67)
+        : _hover
+        ? const Color(0xFFC7C7C7)
+        : const Color(0xFF8E8E8E);
 
     return Tooltip(
       message: widget.tooltip,
@@ -591,23 +658,30 @@ class _ConfirmDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: const Color(0xFF2B2B2B),
-      title: Text(title,
-          style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14)),
-      content: Text(body,
-          style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 13)),
+      title: Text(
+        title,
+        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
+      ),
+      content: Text(
+        body,
+        style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel',
-              style: TextStyle(color: Color(0xFF8E8E8E))),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Color(0xFF8E8E8E)),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, true),
-          child: Text(confirm,
-              style: TextStyle(
-                  color: danger
-                      ? const Color(0xFFFF6E67)
-                      : const Color(0xFF2472C8))),
+          child: Text(
+            confirm,
+            style: TextStyle(
+              color: danger ? const Color(0xFFFF6E67) : const Color(0xFF2472C8),
+            ),
+          ),
         ),
       ],
     );
@@ -629,8 +703,10 @@ class _InputDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: const Color(0xFF2B2B2B),
-      title: Text(title,
-          style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14)),
+      title: Text(
+        title,
+        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
+      ),
       content: TextField(
         controller: ctrl,
         autofocus: true,
@@ -652,13 +728,17 @@ class _InputDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel',
-              style: TextStyle(color: Color(0xFF8E8E8E))),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Color(0xFF8E8E8E)),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, ctrl.text),
-          child: Text(confirm,
-              style: const TextStyle(color: Color(0xFF2472C8))),
+          child: Text(
+            confirm,
+            style: const TextStyle(color: Color(0xFF2472C8)),
+          ),
         ),
       ],
     );

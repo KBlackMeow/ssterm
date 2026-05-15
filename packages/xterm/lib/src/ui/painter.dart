@@ -3,6 +3,7 @@ import 'package:flutter/painting.dart';
 
 import 'package:xterm/src/ui/palette_builder.dart';
 import 'package:xterm/src/ui/paragraph_cache.dart';
+import 'package:xterm/src/utils/hash_values.dart';
 import 'package:xterm/xterm.dart';
 
 /// Encapsulates the logic for painting various terminal elements.
@@ -165,6 +166,7 @@ class TerminalPainter {
   void paintCell(Canvas canvas, Offset offset, CellData cellData) {
     paintCellBackground(canvas, offset, cellData);
     paintCellForeground(canvas, offset, cellData);
+    paintCellUnderline(canvas, offset, cellData);
   }
 
   /// Paints the character in the cell represented by [cellData] to [canvas] at
@@ -174,7 +176,14 @@ class TerminalPainter {
     final charCode = cellData.content & CellContent.codepointMask;
     if (charCode == 0) return;
 
-    final cacheKey = cellData.getHash() ^ _textScaler.hashCode;
+    // Glyph cache ignores underline; underline is drawn in [paintCellUnderline].
+    final cacheKey = hashValues(
+          cellData.foreground,
+          cellData.background,
+          cellData.flags & ~CellFlags.underline,
+          cellData.content,
+        ) ^
+        _textScaler.hashCode;
     var paragraph = _paragraphCache.getLayoutFromCache(cacheKey);
 
     if (paragraph == null) {
@@ -192,22 +201,10 @@ class TerminalPainter {
         color: color,
         bold: cellFlags & CellFlags.bold != 0,
         italic: cellFlags & CellFlags.italic != 0,
-        underline: cellFlags & CellFlags.underline != 0,
       );
 
-      // Flutter does not draw an underline below a space which is not between
-      // other regular characters. As only single characters are drawn, this
-      // will never produce an underline below a space in the terminal. As a
-      // workaround the regular space CodePoint 0x20 is replaced with
-      // the CodePoint 0xA0. This is a non breaking space and a underline can be
-      // drawn below it.
-      var char = String.fromCharCode(charCode);
-      if (cellFlags & CellFlags.underline != 0 && charCode == 0x20) {
-        char = String.fromCharCode(0xA0);
-      }
-
       paragraph = _paragraphCache.performAndCacheLayout(
-        char,
+        String.fromCharCode(charCode),
         style,
         _textScaler,
         cacheKey,
@@ -215,6 +212,36 @@ class TerminalPainter {
     }
 
     canvas.drawParagraph(paragraph, offset);
+  }
+
+  /// Draws an underline at the bottom of the cell, below the glyph.
+  @pragma('vm:prefer-inline')
+  void paintCellUnderline(Canvas canvas, Offset offset, CellData cellData) {
+    if (cellData.flags & CellFlags.underline == 0) return;
+
+    final charCode = cellData.content & CellContent.codepointMask;
+    if (charCode == 0) return;
+
+    final cellFlags = cellData.flags;
+    var color = cellFlags & CellFlags.inverse == 0
+        ? resolveForegroundColor(cellData.foreground)
+        : resolveBackgroundColor(cellData.background);
+
+    if (cellFlags & CellFlags.faint != 0) {
+      color = color.withOpacity(0.5);
+    }
+
+    final doubleWidth = cellData.content >> CellContent.widthShift == 2;
+    final width = _cellSize.width * (doubleWidth ? 2 : 1);
+    final y = offset.dy + _cellSize.height - 1;
+
+    canvas.drawLine(
+      Offset(offset.dx, y),
+      Offset(offset.dx + width, y),
+      Paint()
+        ..color = color
+        ..strokeWidth = 1,
+    );
   }
 
   /// Paints the background of a cell represented by [cellData] to [canvas] at
