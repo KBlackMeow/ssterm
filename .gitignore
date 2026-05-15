@@ -1,0 +1,18 @@
+# Dart / Flutter
+.dart_tool/
+build/
+.flutter-plugins-dependencies
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
+
+# Generated platform files
+**/Flutter/ephemeral/
+**/Pods/
+android/local.properties
+android/**/GeneratedPluginRegistrant.java
+
+# Local tooling
+.claude/
