@@ -134,7 +134,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   }
 
   KeyEventResult _onKeyEvent(FocusNode focusNode, KeyEvent event) {
-    if (_currentEditingState.composing.isCollapsed) {
+    if (!_isImeComposing) {
       return widget.onKeyEvent(focusNode, event);
     }
 
@@ -172,8 +172,6 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
       _connection!.show();
 
-      // setEditableRect(Rect.zero, Rect.zero);
-
       _connection!.setEditingState(_initEditingState);
     }
   }
@@ -197,6 +195,16 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
   late var _currentEditingState = _initEditingState.copyWith();
 
+  /// Non-null while an IME composition is in progress (CJK, etc.).
+  String? _imeComposingText;
+
+  TextEditingValue? _lastEditingState;
+
+  bool get _isImeComposing =>
+      _imeComposingText != null ||
+      _currentEditingState.composing.start !=
+          _currentEditingState.composing.end;
+
   @override
   TextEditingValue? get currentTextEditingValue {
     return _currentEditingState;
@@ -211,30 +219,64 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   void updateEditingValue(TextEditingValue value) {
     _currentEditingState = value;
 
-    // Get input after composing is done
-    if (!_currentEditingState.composing.isCollapsed) {
-      final text = _currentEditingState.text;
-      final composingText = _currentEditingState.composing.textInside(text);
-      widget.onComposing(composingText);
+    // IME is still composing — show preview only, do not send to the shell.
+    if (value.composing.start != value.composing.end) {
+      // Extract only the composing portion using the composing range so that
+      // any previously committed prefix in the field is not included.
+      final start = value.composing.start.clamp(0, value.text.length);
+      final end = value.composing.end.clamp(0, value.text.length);
+      _imeComposingText = value.text.substring(start, end);
+      widget.onComposing(_imeComposingText);
+      _lastEditingState = value;
       return;
     }
 
-    widget.onComposing(null);
+    final imePreview = _imeComposingText;
+    final hadImeComposing = imePreview != null;
 
-    if (_currentEditingState.text.length < _initEditingState.text.length) {
-      widget.onDelete();
-    } else {
-      final textDelta = _currentEditingState.text.substring(
-        _initEditingState.text.length,
-      );
+    if (hadImeComposing) {
+      _imeComposingText = null;
+      widget.onComposing(null);
 
-      widget.onInsert(textDelta);
+      // The committed text is the full value.text — the platform resets its
+      // field to the init state after each IME commit, so value.text contains
+      // only the newly committed characters (not accumulated prior commits).
+      final committed = value.text;
+      if (committed.length < _initEditingState.text.length) {
+        widget.onDelete();
+      } else if (committed.isNotEmpty) {
+        widget.onInsert(committed);
+      }
+
+      _lastEditingState = _initEditingState.copyWith();
+      if (committed.isNotEmpty) {
+        _currentEditingState = _initEditingState.copyWith();
+        _connection?.setEditingState(_initEditingState);
+      }
+      return;
     }
 
-    // Reset editing state if composing is done
-    if (_currentEditingState.composing.isCollapsed &&
-        _currentEditingState.text != _initEditingState.text) {
-      _connection!.setEditingState(_initEditingState);
+    var inputText = value.text;
+
+    // Avoid duplicate chars when the platform sends cumulative text (e.g. "l"
+    // then "ls"); still allows multi-char CJK commits in one chunk.
+    if (_lastEditingState?.text.isNotEmpty == true &&
+        inputText.length > _lastEditingState!.text.length) {
+      inputText = inputText.substring(_lastEditingState!.text.length);
+    }
+
+    if (value.text.length < _initEditingState.text.length) {
+      widget.onDelete();
+    } else if (inputText.isNotEmpty) {
+      widget.onInsert(inputText);
+    }
+
+    _lastEditingState = value;
+
+    if (value != _initEditingState && inputText.isNotEmpty) {
+      _currentEditingState = _initEditingState.copyWith();
+      _connection?.setEditingState(_initEditingState);
+      _lastEditingState = _initEditingState.copyWith();
     }
   }
 

@@ -188,7 +188,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final lineHeight = _painter.cellSize.height;
     _stickToBottom =
         (_maxScrollExtent - _offset.pixels).abs() < lineHeight / 2;
-    markNeedsLayout();
+    markNeedsPaint();
     _scheduleNotifyEditableRect();
   }
 
@@ -277,13 +277,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   double get _terminalHeight =>
       _terminal.buffer.lines.length * _painter.cellSize.height;
 
-  /// The distance from the top of the terminal to the top of the viewport.
-  // double get _scrollOffset => _offset.pixels;
-  double get _scrollOffset {
-    final lineHeight = _painter.cellSize.height;
-    // Snap scroll offset to whole lines so clear/scrollback align with the viewport.
-    return (_offset.pixels ~/ lineHeight) * lineHeight;
-  }
+  /// Current scroll position in pixels (smooth sub-line scrolling).
+  double get _scrollPixels => _offset.pixels;
 
   /// The height of a terminal line in pixels. This includes the line spacing.
   /// Height of the entire terminal is expected to be a multiple of this value.
@@ -305,7 +300,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// Get the [CellOffset] of the cell that [offset] is in.
   CellOffset getCellOffset(Offset offset) {
     final x = offset.dx;
-    final y = offset.dy - _padding.top + _scrollOffset;
+    final y = offset.dy - _padding.top + _scrollPixels;
     final row = y ~/ _painter.cellSize.height;
     final col = x ~/ _painter.cellSize.width;
     return CellOffset(
@@ -462,7 +457,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   double get _lineOffset {
-    return -_scrollOffset + _padding.top;
+    return -_scrollPixels + _padding.top;
   }
 
   /// The offset of the cursor from the top left corner of this render object.
@@ -491,8 +486,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final lines = _terminal.buffer.lines;
     final charHeight = _painter.cellSize.height;
 
-    final firstLineOffset = _scrollOffset - _padding.top;
-    final lastLineOffset = _scrollOffset + size.height - _padding.bottom;
+    final firstLineOffset = _scrollPixels - _padding.top;
+    final lastLineOffset = _scrollPixels + size.height - _padding.bottom;
 
     final firstLine = (firstLineOffset / charHeight).ceil();
     final lastLine = (lastLineOffset / charHeight).floor() - 1;

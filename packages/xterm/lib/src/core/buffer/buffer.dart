@@ -133,7 +133,15 @@ class Buffer {
     }
 
     if (cellWidth == 2) {
-      writeChar(0);
+      // Write a blank placeholder for the right column of the wide char.
+      // writeChar(0) would early-return because wcwidth(0)==0, so write directly.
+      if (_cursorX < viewWidth) {
+        if (_cursorX >= line.length) {
+          line.resize(terminal.viewWidth);
+        }
+        line.setCell(_cursorX, 0, 0, terminal.cursor);
+        _cursorX++;
+      }
     }
   }
 
@@ -366,6 +374,7 @@ class Buffer {
   void deleteChars(int count) {
     final start = _cursorX.clamp(0, viewWidth);
     count = min(count, viewWidth - start);
+    if (count <= 0 || start >= currentLine.length) return;
     currentLine.removeCells(start, count, terminal.cursor);
   }
 

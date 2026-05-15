@@ -14,7 +14,8 @@ class TerminalSurface extends StatelessWidget {
     this.viewKey,
     this.padding = const EdgeInsets.all(6),
     this.autofocus = true,
-    this.hardwareKeyboardOnly = true,
+    // IME (e.g. Chinese) needs [CustomTextEdit] / TextInput, not hardware keys only.
+    this.hardwareKeyboardOnly = false,
   });
 
   final Terminal terminal;
@@ -39,6 +40,7 @@ class TerminalSurface extends StatelessWidget {
       padding: padding,
       autofocus: autofocus,
       hardwareKeyboardOnly: hardwareKeyboardOnly,
+      keyboardType: TextInputType.text,
       backgroundOpacity: t.effectiveBackgroundOpacity,
     );
 
