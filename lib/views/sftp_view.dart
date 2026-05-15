@@ -2,11 +2,30 @@ import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 
+import '../models/app_config.dart';
+
+const _kSizeColWidth = 44.0;
+const _kDateColWidth = 72.0;
+const _kMetaFontSize = 9.0;
+
 class SftpView extends StatefulWidget {
-  const SftpView({super.key, required this.sftp, required this.host});
+  const SftpView({
+    super.key,
+    required this.sftp,
+    required this.host,
+    this.remotePath,
+    this.panelPosition,
+    this.onPanelPositionChanged,
+  });
 
   final SftpClient sftp;
   final String host;
+
+  /// When set, the panel follows this path (e.g. synced from the SSH shell cwd).
+  final ValueNotifier<String>? remotePath;
+
+  final SftpPanelPosition? panelPosition;
+  final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
 
   @override
   State<SftpView> createState() => _SftpViewState();
@@ -24,7 +43,29 @@ class _SftpViewState extends State<SftpView> {
   @override
   void initState() {
     super.initState();
-    _listDir('/');
+    final sync = widget.remotePath;
+    if (sync != null) {
+      sync.addListener(_onRemotePathChanged);
+      if (sync.value.isNotEmpty) {
+        _listDir(sync.value);
+      } else {
+        _loading = true;
+      }
+    } else {
+      _listDir('/');
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.remotePath?.removeListener(_onRemotePathChanged);
+    super.dispose();
+  }
+
+  void _onRemotePathChanged() {
+    final p = widget.remotePath?.value;
+    if (p == null || p.isEmpty || p == _path) return;
+    _listDir(p);
   }
 
   Future<void> _listDir(String path) async {
@@ -197,6 +238,22 @@ class _SftpViewState extends State<SftpView> {
             child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
           ),
           const SizedBox(width: 4),
+          if (widget.onPanelPositionChanged != null &&
+              widget.panelPosition != null)
+            _ToolBtn(
+              icon: widget.panelPosition == SftpPanelPosition.right
+                  ? Icons.view_agenda_outlined
+                  : Icons.view_sidebar_outlined,
+              tooltip: widget.panelPosition == SftpPanelPosition.right
+                  ? '移到下侧'
+                  : '移到右侧',
+              onTap: () {
+                final next = widget.panelPosition == SftpPanelPosition.right
+                    ? SftpPanelPosition.bottom
+                    : SftpPanelPosition.right;
+                widget.onPanelPositionChanged!(next);
+              },
+            ),
           _ToolBtn(
             icon: Icons.download,
             tooltip: 'Download',
@@ -223,33 +280,36 @@ class _SftpViewState extends State<SftpView> {
       height: 24,
       color: const Color(0xFF222222),
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(width: 18),
-          SizedBox(width: 8),
-          Expanded(
+          const SizedBox(width: 18),
+          const SizedBox(width: 8),
+          const Expanded(
             child: Text('Name',
                 style: TextStyle(
                     color: Color(0xFF686868),
                     fontSize: 11,
                     fontWeight: FontWeight.w600)),
           ),
-          SizedBox(
-            width: 72,
+          const SizedBox(width: 6),
+          const SizedBox(
+            width: _kSizeColWidth,
             child: Text('Size',
                 textAlign: TextAlign.right,
                 style: TextStyle(
                     color: Color(0xFF686868),
-                    fontSize: 11,
+                    fontSize: _kMetaFontSize,
                     fontWeight: FontWeight.w600)),
           ),
-          SizedBox(width: 12),
-          SizedBox(
-            width: 148,
+          const SizedBox(width: 4),
+          const SizedBox(
+            width: _kDateColWidth,
             child: Text('Modified',
+                textAlign: TextAlign.right,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     color: Color(0xFF686868),
-                    fontSize: 11,
+                    fontSize: _kMetaFontSize,
                     fontWeight: FontWeight.w600)),
           ),
         ],
@@ -299,34 +359,51 @@ class _SftpViewState extends State<SftpView> {
                   ),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text(
-                      e.filename,
-                      style: TextStyle(
-                        color: isDir
-                            ? const Color(0xFFC7C7C7)
-                            : const Color(0xFFAAAAAA),
-                        fontSize: 12,
-                        fontFamily: 'Monaco',
+                    child: Tooltip(
+                      message: e.filename,
+                      waitDuration: const Duration(milliseconds: 400),
+                      child: Text(
+                        e.filename,
+                        style: TextStyle(
+                          color: isDir
+                              ? const Color(0xFFC7C7C7)
+                              : const Color(0xFFAAAAAA),
+                          fontSize: 12,
+                          fontFamily: 'Monaco',
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  const SizedBox(width: 6),
                   SizedBox(
-                    width: 72,
+                    width: _kSizeColWidth,
                     child: Text(
                       isDir ? '' : _fmtSize(e.attr.size ?? 0),
                       textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Color(0xFF686868), fontSize: 11),
+                        color: Color(0xFF686868),
+                        fontSize: _kMetaFontSize,
+                        fontFamily: 'Monaco',
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 4),
                   SizedBox(
-                    width: 148,
+                    width: _kDateColWidth,
                     child: Text(
                       _fmtDate(e.attr.modifyTime),
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Color(0xFF686868), fontSize: 11),
+                        color: Color(0xFF686868),
+                        fontSize: _kMetaFontSize,
+                        fontFamily: 'Monaco',
+                      ),
                     ),
                   ),
                 ],
@@ -434,8 +511,9 @@ class _SftpViewState extends State<SftpView> {
         dt.year == now.year && dt.month == now.month && dt.day == now.day;
     final hm =
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    if (today) return 'Today $hm';
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} $hm';
+    if (today) return hm;
+    return '${dt.month.toString().padLeft(2, '0')}-'
+        '${dt.day.toString().padLeft(2, '0')} $hm';
   }
 }
 

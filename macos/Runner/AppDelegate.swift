@@ -10,4 +10,12 @@ class AppDelegate: FlutterAppDelegate {
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }
+
+  override func applicationDidFinishLaunching(_ notification: Notification) {
+    for window in NSApplication.shared.windows {
+      window.makeKeyAndOrderFront(nil)
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    super.applicationDidFinishLaunching(notification)
+  }
 }

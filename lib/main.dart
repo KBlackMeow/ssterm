@@ -10,7 +10,15 @@ import 'package:xterm/xterm.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 
 import 'dialogs/connect_dialog.dart';
-import 'views/sftp_view.dart';
+import 'models/app_config.dart';
+import 'models/saved_hosts_store.dart';
+import 'models/ssh_config.dart';
+import 'models/ssh_host.dart';
+import 'services/host_key_verifier.dart';
+import 'services/remote_cwd_parser.dart';
+import 'services/remote_home.dart';
+import 'services/ssh_connection.dart';
+import 'views/ssh_session_view.dart';
 
 void main() {
   runApp(const SsTermApp());
@@ -67,9 +75,10 @@ const _kFgInactive = Color(0xFF8E8E8E);
 // ── I/O → Terminal bridge ────────────────────────────────────────────────────
 // Flushes once per frame so notifyListeners() and VT parsing fire in one pass.
 class _OutputPipe {
-  _OutputPipe(this._terminal);
+  _OutputPipe(this._terminal, {this.transform});
 
   final Terminal _terminal;
+  final List<int> Function(List<int>)? transform;
   final _buf = BytesBuilder(copy: false);
   bool _pending = false;
   final _subs = <StreamSubscription<List<int>>>[];
@@ -88,7 +97,11 @@ class _OutputPipe {
 
   void _flush(Duration _) {
     _pending = false;
-    final bytes = _buf.takeBytes();
+    var bytes = _buf.takeBytes();
+    if (bytes.isEmpty) return;
+    if (transform != null) {
+      bytes = Uint8List.fromList(transform!(bytes));
+    }
     if (bytes.isNotEmpty) {
       _terminal.write(utf8.decode(bytes, allowMalformed: true));
     }
@@ -102,7 +115,7 @@ class _OutputPipe {
 }
 
 // ── Tab model ───────────────────────────────────────────────────────────────
-enum _TabKind { local, ssh, sftp }
+enum _TabKind { local, ssh }
 
 class _Tab {
   _TabKind kind;
@@ -113,7 +126,7 @@ class _Tab {
   SSHClient? sshClient;
   SSHSession? sshSession;
   SftpClient? sftp;
-  String? sftpHost;
+  ValueNotifier<String>? remotePath;
   _OutputPipe? pipe;
 
   _Tab._({
@@ -124,7 +137,7 @@ class _Tab {
     this.sshClient,
     this.sshSession,
     this.sftp,
-    this.sftpHost,
+    this.remotePath,
   });
 
   factory _Tab.local(Terminal t, Pty p, String shell) => _Tab._(
@@ -134,25 +147,27 @@ class _Tab {
         pty: p,
       );
 
-  factory _Tab.ssh(Terminal t, SSHClient c, SSHSession s, String title) =>
+  factory _Tab.ssh(
+    Terminal t,
+    SSHClient c,
+    SSHSession s,
+    String title, {
+    SftpClient? sftp,
+    ValueNotifier<String>? remotePath,
+  }) =>
       _Tab._(
         kind: _TabKind.ssh,
         title: title,
         terminal: t,
         sshClient: c,
         sshSession: s,
-      );
-
-  factory _Tab.sftp(SftpClient sftp, SSHClient c, String host) => _Tab._(
-        kind: _TabKind.sftp,
-        title: host,
         sftp: sftp,
-        sshClient: c,
-        sftpHost: host,
+        remotePath: remotePath,
       );
 
   void dispose() {
     pipe?.dispose();
+    remotePath?.dispose();
     pty?.kill();
     sshSession?.close();
     sshClient?.close();
@@ -161,7 +176,6 @@ class _Tab {
   IconData get icon => switch (kind) {
         _TabKind.local => Icons.terminal,
         _TabKind.ssh => Icons.lock_outline,
-        _TabKind.sftp => Icons.folder_outlined,
       };
 }
 
@@ -176,11 +190,30 @@ class TerminalHome extends StatefulWidget {
 class _TerminalHomeState extends State<TerminalHome> {
   final List<_Tab> _tabs = [];
   int _active = 0;
+  List<SshHost> _savedHosts = [];
+  List<SshHost> _configHosts = [];
+  AppConfig _config = AppConfig();
 
   @override
   void initState() {
     super.initState();
     _newLocalTab();
+    _loadSshHosts();
+    AppConfig.load().then((c) {
+      if (mounted) setState(() => _config = c);
+    });
+  }
+
+  Future<void> _loadSshHosts() async {
+    final saved = await SavedHostsStore.load();
+    final config = await parseSshConfig();
+    if (!mounted) return;
+    setState(() {
+      _savedHosts = saved
+        ..sort((a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+      _configHosts = config
+        ..sort((a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+    });
   }
 
   @override
@@ -222,44 +255,126 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   // ── SSH / SFTP ────────────────────────────────────────────────────────────
 
-  Future<void> _showConnectDialog() async {
-    final result = await showConnectDialog(context);
+  Future<void> _showConnectDialog({SshHost? initialHost}) async {
+    final result = await showConnectDialog(context, initialHost: initialHost);
     if (result == null || !mounted) return;
+    await _rememberHostProfile(result.profile);
+    await _openSshTerminal(result);
+  }
 
-    if (result.mode == ConnectMode.terminal) {
-      _openSshTerminal(result);
-    } else {
-      _openSftpBrowser(result);
+  /// Persists and refreshes the + menu after a successful manual connect.
+  Future<void> _rememberHostProfile(SshHost profile) async {
+    try {
+      await SavedHostsStore.upsert(profile);
+    } catch (_) {
+      // Fall through — still update the in-memory menu below.
+    }
+    await _loadSshHosts();
+  }
+
+  Future<void> _connectSavedHost(SshHost host) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: Center(
+          child: Card(
+            color: Color(0xFF2B2B2B),
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(
+                    color: Color(0xFF2472C8),
+                    strokeWidth: 2,
+                  ),
+                  SizedBox(height: 16),
+                  Text('Connecting…',
+                      style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final result = await connectSshHost(
+        host,
+        verifyHostKey: createHostKeyVerifier(
+          context,
+          hostname: host.hostname,
+          port: host.port,
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      await _loadSshHosts();
+      await _openSshTerminal(result);
+    } catch (_) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      await _showConnectDialog(initialHost: host);
     }
   }
 
-  void _openSshTerminal(ConnectResult r) {
+  Future<void> _openSshTerminal(ConnectResult r) async {
     final terminal = Terminal(maxLines: 5000);
     final session = r.session!;
+    final remotePath = ValueNotifier<String>('');
+    final cwdParser = RemoteCwdParser();
 
-    // Bind both stdout and stderr so backpressure never stalls the SSH stream.
-    final pipe = _OutputPipe(terminal)
-      ..bind(session.stdout)
-      ..bind(session.stderr);
+    final pipe = _OutputPipe(terminal, transform: (bytes) {
+      final parsed = cwdParser.process(bytes);
+      if (parsed.cwd != null && parsed.cwd != remotePath.value) {
+        remotePath.value = parsed.cwd!;
+      }
+      return parsed.cleaned;
+    });
 
     terminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
     terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+
+    // Bind streams after the first layout so viewWidth matches the widget.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      pipe.bind(session.stdout);
+      pipe.bind(session.stderr);
+    });
 
     session.done.then((_) {
       if (mounted) terminal.write('\r\n[SSH session closed]\r\n');
     });
 
+    SftpClient? sftp;
+    try {
+      sftp = await r.client.sftp();
+      remotePath.value = await fetchRemoteHome(r.client);
+    } catch (_) {
+      remotePath.value = '/';
+    }
+
+    if (!mounted) {
+      pipe.dispose();
+      remotePath.dispose();
+      return;
+    }
+
+    scheduleRemoteCwdSetup(session);
+
     setState(() {
-      final tab = _Tab.ssh(terminal, r.client, session, '${r.username}@${r.host}');
+      final tab = _Tab.ssh(
+        terminal,
+        r.client,
+        session,
+        r.alias,
+        sftp: sftp,
+        remotePath: remotePath,
+      );
       tab.pipe = pipe;
       _tabs.add(tab);
-      _active = _tabs.length - 1;
-    });
-  }
-
-  void _openSftpBrowser(ConnectResult r) {
-    setState(() {
-      _tabs.add(_Tab.sftp(r.sftp!, r.client, r.host));
       _active = _tabs.length - 1;
     });
   }
@@ -289,7 +404,10 @@ class _TerminalHomeState extends State<TerminalHome> {
             onSelect: (i) => setState(() => _active = i),
             onClose: _closeTab,
             onNewLocal: _newLocalTab,
-            onNewSsh: _showConnectDialog,
+            onNewSsh: () => _showConnectDialog(),
+            savedHosts: _savedHosts,
+            configHosts: _configHosts,
+            onConnectHost: _connectSavedHost,
           ),
           const Divider(height: 1, thickness: 1, color: _kDivider),
           Expanded(child: _buildBody()),
@@ -302,7 +420,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     if (_tabs.isEmpty) return const SizedBox.shrink();
     final tab = _tabs[_active];
     return switch (tab.kind) {
-      _TabKind.local || _TabKind.ssh => TerminalView(
+      _TabKind.local => TerminalView(
           tab.terminal!,
           theme: _kTheme,
           textStyle: const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
@@ -310,11 +428,30 @@ class _TerminalHomeState extends State<TerminalHome> {
           autofocus: true,
           hardwareKeyboardOnly: true,
         ),
-      _TabKind.sftp => SftpView(
-          key: ValueKey(tab.sftpHost),
-          sftp: tab.sftp!,
-          host: tab.sftpHost!,
-        ),
+      _TabKind.ssh => tab.sftp != null
+          ? SshSessionView(
+              terminal: tab.terminal!,
+              sftp: tab.sftp!,
+              host: tab.title,
+              remotePath: tab.remotePath!,
+              panelPosition: _config.sftpPanelPosition,
+              onPanelPositionChanged: (pos) {
+                setState(() => _config.sftpPanelPosition = pos);
+                _config.save();
+              },
+              theme: _kTheme,
+              textStyle:
+                  const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
+            )
+          : TerminalView(
+              tab.terminal!,
+              theme: _kTheme,
+              textStyle:
+                  const TerminalStyle(fontSize: 13.5, fontFamily: 'Monaco'),
+              padding: const EdgeInsets.all(6),
+              autofocus: true,
+              hardwareKeyboardOnly: true,
+            ),
     };
   }
 }
@@ -328,6 +465,9 @@ class _TabBar extends StatelessWidget {
     required this.onClose,
     required this.onNewLocal,
     required this.onNewSsh,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onConnectHost,
   });
 
   final List<_Tab> tabs;
@@ -336,6 +476,11 @@ class _TabBar extends StatelessWidget {
   final ValueChanged<int> onClose;
   final VoidCallback onNewLocal;
   final VoidCallback onNewSsh;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<SshHost> onConnectHost;
+
+  static const _minTabWidth = 100.0;
 
   @override
   Widget build(BuildContext context) {
@@ -345,23 +490,54 @@ class _TabBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final canExpand = tabs.isNotEmpty &&
+                    tabs.length * _minTabWidth <= constraints.maxWidth;
+
+                final chips = [
                   for (var i = 0; i < tabs.length; i++)
-                    _TabChip(
-                      tab: tabs[i],
-                      isActive: i == active,
-                      showClose: tabs.length > 1,
-                      onTap: () => onSelect(i),
-                      onClose: () => onClose(i),
-                    ),
-                ],
-              ),
+                    canExpand
+                        ? Expanded(
+                            child: _TabChip(
+                              tab: tabs[i],
+                              isActive: i == active,
+                              showClose: tabs.length > 1,
+                              expand: true,
+                              onTap: () => onSelect(i),
+                              onClose: () => onClose(i),
+                            ),
+                          )
+                        : SizedBox(
+                            width: _minTabWidth,
+                            child: _TabChip(
+                              tab: tabs[i],
+                              isActive: i == active,
+                              showClose: tabs.length > 1,
+                              expand: false,
+                              onTap: () => onSelect(i),
+                              onClose: () => onClose(i),
+                            ),
+                          ),
+                ];
+
+                if (canExpand) {
+                  return Row(children: chips);
+                }
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: chips),
+                );
+              },
             ),
           ),
-          _PlusMenu(onLocal: onNewLocal, onSsh: onNewSsh),
+          _PlusMenu(
+            onLocal: onNewLocal,
+            onNewSsh: onNewSsh,
+            savedHosts: savedHosts,
+            configHosts: configHosts,
+            onConnectHost: onConnectHost,
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -374,6 +550,7 @@ class _TabChip extends StatelessWidget {
     required this.tab,
     required this.isActive,
     required this.showClose,
+    required this.expand,
     required this.onTap,
     required this.onClose,
   });
@@ -381,6 +558,7 @@ class _TabChip extends StatelessWidget {
   final _Tab tab;
   final bool isActive;
   final bool showClose;
+  final bool expand;
   final VoidCallback onTap;
   final VoidCallback onClose;
 
@@ -390,6 +568,7 @@ class _TabChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
+        height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive ? _kBg : Colors.transparent,
@@ -402,21 +581,39 @@ class _TabChip extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(tab.icon,
                 size: 11,
                 color: isActive ? _kFgActive : _kFgInactive),
             const SizedBox(width: 5),
-            Text(
-              tab.title,
-              style: TextStyle(
-                color: isActive ? _kFgActive : _kFgInactive,
-                fontSize: 12,
-                fontWeight:
-                    isActive ? FontWeight.w500 : FontWeight.normal,
+            if (expand)
+              Expanded(
+                child: Text(
+                  tab.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isActive ? _kFgActive : _kFgInactive,
+                    fontSize: 12,
+                    fontWeight:
+                        isActive ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                ),
+              )
+            else
+              Flexible(
+                child: Text(
+                  tab.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isActive ? _kFgActive : _kFgInactive,
+                    fontSize: 12,
+                    fontWeight:
+                        isActive ? FontWeight.w500 : FontWeight.normal,
+                  ),
+                ),
               ),
-            ),
             if (showClose) ...[
               const SizedBox(width: 6),
               _CloseBtn(onTap: onClose, isActive: isActive),
@@ -470,51 +667,157 @@ class _CloseBtnState extends State<_CloseBtn> {
 }
 
 class _PlusMenu extends StatelessWidget {
-  const _PlusMenu({required this.onLocal, required this.onSsh});
-  final VoidCallback onLocal;
-  final VoidCallback onSsh;
+  const _PlusMenu({
+    required this.onLocal,
+    required this.onNewSsh,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onConnectHost,
+  });
 
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: 'New tab',
+  final VoidCallback onLocal;
+  final VoidCallback onNewSsh;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<SshHost> onConnectHost;
+
+  static const _headerStyle = TextStyle(
+    color: Color(0xFF6E6E6E),
+    fontSize: 10,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.3,
+  );
+
+  PopupMenuItem<String> _sectionHeader(String label) {
+    return PopupMenuItem<String>(
+      enabled: false,
+      height: 28,
+      child: Text(label, style: _headerStyle),
+    );
+  }
+
+  PopupMenuItem<String> _hostItem(SshHost h, String prefix) {
+    return PopupMenuItem<String>(
+      value: '$prefix:${h.profileKey}',
+      height: 36,
+      child: Row(children: [
+        Icon(
+          prefix == 'saved' ? Icons.bookmark_outline : Icons.description_outlined,
+          size: 13,
+          color: _kFgInactive,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(h.alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kFgActive, fontSize: 13)),
+              Text(h.displayInfo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kFgInactive, fontSize: 11)),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _showMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
       color: const Color(0xFF2B2B2B),
-      offset: const Offset(0, 32),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(6),
         side: const BorderSide(color: _kDivider),
       ),
-      itemBuilder: (_) => [
-        PopupMenuItem(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+        minWidth: 220,
+      ),
+      items: [
+        const PopupMenuItem(
           value: 'local',
           height: 36,
           child: Row(children: [
-            const Icon(Icons.terminal, size: 13, color: _kFgInactive),
-            const SizedBox(width: 8),
-            const Text('New Local Terminal',
+            Icon(Icons.terminal, size: 13, color: _kFgInactive),
+            SizedBox(width: 8),
+            Text('系统终端',
                 style: TextStyle(color: _kFgActive, fontSize: 13)),
           ]),
         ),
-        PopupMenuItem(
-          value: 'ssh',
+        if (savedHosts.isNotEmpty) ...[
+          const PopupMenuDivider(height: 1),
+          _sectionHeader('已保存'),
+          for (final h in savedHosts) _hostItem(h, 'saved'),
+        ],
+        if (configHosts.isNotEmpty) ...[
+          const PopupMenuDivider(height: 1),
+          _sectionHeader('~/.ssh/config'),
+          for (final h in configHosts) _hostItem(h, 'config'),
+        ],
+        const PopupMenuDivider(height: 1),
+        const PopupMenuItem(
+          value: 'new',
           height: 36,
           child: Row(children: [
-            const Icon(Icons.lock_outline, size: 13, color: _kFgInactive),
-            const SizedBox(width: 8),
-            const Text('New SSH Connection…',
+            Icon(Icons.add, size: 13, color: _kFgInactive),
+            SizedBox(width: 8),
+            Text('新建 SSH…',
                 style: TextStyle(color: _kFgActive, fontSize: 13)),
           ]),
         ),
       ],
-      onSelected: (v) {
-        if (v == 'local') onLocal();
-        if (v == 'ssh') onSsh();
-      },
-      child: Container(
-        width: 28,
-        height: 28,
-        alignment: Alignment.center,
-        child: const Icon(Icons.add, size: 15, color: _kFgInactive),
+    ).then((v) {
+      if (v == null) return;
+      if (v == 'local') {
+        onLocal();
+        return;
+      }
+      if (v == 'new') {
+        onNewSsh();
+        return;
+      }
+      if (v.startsWith('saved:') || v.startsWith('config:')) {
+        final sep = v.indexOf(':');
+        final prefix = v.substring(0, sep);
+        final key = v.substring(sep + 1);
+        final list = prefix == 'saved' ? savedHosts : configHosts;
+        for (final h in list) {
+          if (h.profileKey == key) {
+            onConnectHost(h);
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showMenu(context),
+      child: Tooltip(
+        message: '新建标签',
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: const Icon(Icons.add, size: 15, color: _kFgInactive),
+        ),
       ),
     );
   }

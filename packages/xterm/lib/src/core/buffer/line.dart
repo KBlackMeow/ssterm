@@ -101,6 +101,9 @@ class BufferLine with IndexedItem {
   }
 
   void setCell(int index, int char, int witdh, CursorStyle style) {
+    if (index >= _length) {
+      resize(index + 1);
+    }
     final offset = index * _cellSize;
     _data[offset + _cellForeground] = style.foreground;
     _data[offset + _cellBackground] = style.background;

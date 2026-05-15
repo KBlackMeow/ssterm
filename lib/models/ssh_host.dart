@@ -6,6 +6,7 @@ class SshHost {
   final int port;
   final String? user;
   final String? identityFile;
+  final String? password;
 
   const SshHost({
     required this.alias,
@@ -13,63 +14,42 @@ class SshHost {
     this.port = 22,
     this.user,
     this.identityFile,
+    this.password,
   });
 
-  String get displayInfo =>
-      '${user != null ? '$user@' : ''}$hostname${port != 22 ? ':$port' : ''}';
+  String get displayInfo {
+    final u = user ?? defaultUsername;
+    return '$u@$hostname${port != 22 ? ':$port' : ''}';
+  }
+
+  static String get defaultUsername =>
+      Platform.environment['USER'] ?? 'root';
+
+  /// Stable id for the same server profile (ignores auth method).
+  String get profileKey =>
+      '$hostname:$port:${user ?? defaultUsername}';
+
+  String get connectionKey {
+    final auth = usesPassword ? 'password' : 'key';
+    return '$profileKey:${identityFile ?? ''}:$auth';
+  }
+
+  bool get usesPassword => password != null && password!.isNotEmpty;
+
+  bool get usesIdentityFile =>
+      identityFile != null && identityFile!.isNotEmpty;
 }
 
-Future<List<SshHost>> parseSshConfig() async {
+bool looksLikeKeyPath(String value) {
+  final t = value.trim();
+  if (t.isEmpty) return false;
+  if (t.startsWith('~/') || t.startsWith('/')) return true;
+  if (t.contains('/')) return true;
+  return RegExp(r'\.(pem|key)$', caseSensitive: false).hasMatch(t);
+}
+
+String expandHomePath(String path) {
   final home = Platform.environment['HOME'] ?? '';
-  final file = File('$home/.ssh/config');
-  if (!await file.exists()) return [];
-
-  final hosts = <SshHost>[];
-  String? alias;
-  String? hostname;
-  int port = 22;
-  String? user;
-  String? identityFile;
-
-  void flush() {
-    final a = alias;
-    if (a == null || a.contains('*')) return;
-    hosts.add(SshHost(
-      alias: a,
-      hostname: hostname ?? a,
-      port: port,
-      user: user,
-      identityFile: identityFile,
-    ));
-  }
-
-  for (final raw in await file.readAsLines()) {
-    final line = raw.trim();
-    if (line.isEmpty || line.startsWith('#')) continue;
-
-    final match = RegExp(r'^(\S+)[\s=]+(.+)$').firstMatch(line);
-    if (match == null) continue;
-    final key = match.group(1)!.toLowerCase();
-    final val = match.group(2)!.trim();
-
-    switch (key) {
-      case 'host':
-        flush();
-        alias = val;
-        hostname = null;
-        port = 22;
-        user = null;
-        identityFile = null;
-      case 'hostname':
-        hostname = val;
-      case 'port':
-        port = int.tryParse(val) ?? 22;
-      case 'user':
-        user = val;
-      case 'identityfile':
-        identityFile = val.replaceAll('~', home);
-    }
-  }
-  flush();
-  return hosts;
+  if (path.startsWith('~/')) return '$home${path.substring(1)}';
+  return path.replaceAll('~', home);
 }

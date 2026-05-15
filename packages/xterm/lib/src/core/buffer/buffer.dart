@@ -119,6 +119,11 @@ class Buffer {
     }
 
     final line = currentLine;
+    // Line width can lag behind viewWidth when output is flushed before layout
+    // resize completes; grow the line instead of indexing past its end.
+    if (_cursorX >= line.length) {
+      line.resize(terminal.viewWidth);
+    }
     line.setCell(_cursorX, codePoint, cellWidth, terminal.cursor);
 
     if (_cursorX < viewWidth) {
