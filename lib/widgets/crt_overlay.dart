@@ -77,7 +77,7 @@ class _CrtOverlayState extends State<CrtOverlay> {
     final needsAnim =
         s.enabled && (s.flickerIntensity > 0 || s.noiseIntensity > 0);
     if (needsAnim && _timer == null) {
-      _timer = Timer.periodic(const Duration(milliseconds: 90), _onTick);
+      _timer = Timer.periodic(const Duration(milliseconds: 140), _onTick);
     } else if (!needsAnim && _timer != null) {
       _timer?.cancel();
       _timer = null;
@@ -136,8 +136,8 @@ class _CrtOverlayState extends State<CrtOverlay> {
     }
 
     final ni = s.noiseIntensity;
-    if (ni > 0) {
-      _noisePhase = (_noisePhase + (0.85 + ni * 0.75)) % 256.0;
+    if (ni > 0 && (_tick & 1) == 0) {
+      _noisePhase = (_noisePhase + (0.75 + ni * 0.55)) % 256.0;
       _notifier.noisePhase = _noisePhase;
       dirty = true;
     }
@@ -155,7 +155,7 @@ class _CrtOverlayState extends State<CrtOverlay> {
   }
 
   Future<ui.Image> _createNoiseImage(double intensity, int seed) async {
-    const size = 256;
+    const size = 128;
     final pixels = Uint8List(size * size * 4);
     final threshold = (intensity.clamp(0.0, 1.0) * 255).round();
 
@@ -379,7 +379,7 @@ class _CrtEffectsPainter extends CustomPainter {
       Offset.zero & size,
       Paint()
         ..shader = shader
-        ..color = Colors.white.withValues(alpha: noiseIntensity * 0.12),
+        ..color = Colors.white.withValues(alpha: noiseIntensity * 0.08),
     );
   }
 

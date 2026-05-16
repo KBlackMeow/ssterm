@@ -72,7 +72,7 @@ class TerminalPreview extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Text.rich(
                         TextSpan(
                           children: [
@@ -81,14 +81,16 @@ class TerminalPreview extends StatelessWidget {
                               style: c(theme.foreground, bold: true),
                             ),
                             TextSpan(
-                              text: 'italic',
+                              text: 'italic ',
                               style: c(theme.cyan, italic: true),
+                            ),
+                            TextSpan(
+                              text: '\$ echo hello',
+                              style: c(theme.brightBlack),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text('\$ echo hello', style: c(theme.brightBlack)),
                     ],
                   ),
                 ),

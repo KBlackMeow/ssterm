@@ -11,7 +11,7 @@ const _kDefaultFontFamily = 'monospace';
 /// Top-align glyphs inside each terminal cell (avoids vertical centering).
 const kTerminalTextHeightBehavior = TextHeightBehavior(
   applyHeightToFirstAscent: false,
-  applyHeightToLastDescent: false,
+  applyHeightToLastDescent: true,
 );
 
 const _kDefaultFontFamilyFallback = [
