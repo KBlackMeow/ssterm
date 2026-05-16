@@ -8,9 +8,10 @@ const _kDefaultHeight = 1.2;
 
 const _kDefaultFontFamily = 'monospace';
 
-/// Top-align glyphs inside each terminal cell (avoids vertical centering).
+/// Distribute line-height leading evenly above and below each cell so the
+/// selection highlight does not appear shifted relative to the glyphs.
 const kTerminalTextHeightBehavior = TextHeightBehavior(
-  applyHeightToFirstAscent: false,
+  applyHeightToFirstAscent: true,
   applyHeightToLastDescent: true,
 );
 
