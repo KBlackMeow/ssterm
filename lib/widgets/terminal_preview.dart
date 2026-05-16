@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/terminal_settings.dart';
 import '../services/wallpaper_storage.dart';
+import 'crt_overlay.dart';
 import 'wallpaper_background.dart';
 
 /// Static sample lines styled with current [TerminalSettings] (no live Terminal).
@@ -28,10 +29,10 @@ class TerminalPreview extends StatelessWidget {
     final wallpaper = WallpaperStorage.resolveFile(settings.wallpaperId);
     final bgOpacity = settings.effectiveBackgroundOpacity;
 
-    return ClipRRect(
+    Widget preview = ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: SizedBox(
-        height: 88,
+        height: 96,
         width: double.infinity,
         child: Stack(
           fit: StackFit.expand,
@@ -97,5 +98,11 @@ class TerminalPreview extends StatelessWidget {
         ),
       ),
     );
+
+    if (settings.crt.enabled) {
+      preview = CrtOverlay(settings: settings.crt, child: preview);
+    }
+
+    return preview;
   }
 }

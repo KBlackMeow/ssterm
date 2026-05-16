@@ -81,12 +81,68 @@ abstract final class TerminalThemePresets {
     searchHitForeground: Color(0xFF282C34),
   );
 
+  // Fallout 4 Pip-Boy phosphor green.
+  static const pipBoy = TerminalTheme(
+    cursor: Color(0xFF5BED38),
+    selection: Color(0xFF2C5630),
+    foreground: Color(0xFF5BED38),
+    background: Color(0xFF060E06),
+    black: Color(0xFF060E06),
+    red: Color(0xFFFF3C28),
+    green: Color(0xFF5BED38),
+    yellow: Color(0xFFD1FF4B),
+    blue: Color(0xFF48CAE4),
+    magenta: Color(0xFFC77DFF),
+    cyan: Color(0xFF80FFDB),
+    white: Color(0xFFCAFFAF),
+    brightBlack: Color(0xFF2C5630),
+    brightRed: Color(0xFFFF6B5E),
+    brightGreen: Color(0xFFA7E880),
+    brightYellow: Color(0xFFEBFF87),
+    brightBlue: Color(0xFF90E0EF),
+    brightMagenta: Color(0xFFE0AEFF),
+    brightCyan: Color(0xFFA8FFED),
+    brightWhite: Color(0xFFE8FFE0),
+    searchHitBackground: Color(0xFF2C5630),
+    searchHitBackgroundCurrent: Color(0xFF5BED38),
+    searchHitForeground: Color(0xFF060E06),
+  );
+
+  // Classic amber phosphor terminal.
+  static const amber = TerminalTheme(
+    cursor: Color(0xFFFFB000),
+    selection: Color(0xFF5C3C00),
+    foreground: Color(0xFFFFB000),
+    background: Color(0xFF100800),
+    black: Color(0xFF100800),
+    red: Color(0xFFFF5050),
+    green: Color(0xFF90FF40),
+    yellow: Color(0xFFFFCC40),
+    blue: Color(0xFF70A0FF),
+    magenta: Color(0xFFFF80FF),
+    cyan: Color(0xFF70FFFF),
+    white: Color(0xFFFFF0C0),
+    brightBlack: Color(0xFF5C3C00),
+    brightRed: Color(0xFFFF8080),
+    brightGreen: Color(0xFFBBFF70),
+    brightYellow: Color(0xFFFFE080),
+    brightBlue: Color(0xFFA0C0FF),
+    brightMagenta: Color(0xFFFFB0FF),
+    brightCyan: Color(0xFFB0FFFF),
+    brightWhite: Color(0xFFFFFFD0),
+    searchHitBackground: Color(0xFF5C3C00),
+    searchHitBackgroundCurrent: Color(0xFFFFB000),
+    searchHitForeground: Color(0xFF100800),
+  );
+
   static const Map<String, TerminalTheme> all = {
     'iterm2': iterm2,
     'default': TerminalThemes.defaultTheme,
     'whiteOnBlack': TerminalThemes.whiteOnBlack,
     'dracula': dracula,
     'oneDark': oneDark,
+    'pipBoy': pipBoy,
+    'amber': amber,
   };
 
   static const labels = {
@@ -95,6 +151,8 @@ abstract final class TerminalThemePresets {
     'whiteOnBlack': 'White on Black',
     'dracula': 'Dracula',
     'oneDark': 'One Dark',
+    'pipBoy': 'Pip-Boy',
+    'amber': 'Amber',
     'custom': 'Custom',
   };
 

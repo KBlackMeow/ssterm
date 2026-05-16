@@ -3,6 +3,7 @@ import 'package:xterm/xterm.dart';
 
 import '../models/terminal_settings.dart';
 import '../services/wallpaper_storage.dart';
+import 'crt_overlay.dart';
 import 'wallpaper_background.dart';
 
 /// Terminal view with optional full-bleed wallpaper behind semi-transparent cells.
@@ -45,18 +46,25 @@ class TerminalSurface extends StatelessWidget {
     );
 
     final wallpaper = WallpaperStorage.resolveFile(t.wallpaperId);
-    if (wallpaper == null) return terminalView;
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        WallpaperBackground(
-          file: wallpaper,
-          opacity: t.wallpaperOpacity,
-          blur: t.wallpaperBlur,
-        ),
-        terminalView,
-      ],
-    );
+    Widget surface = wallpaper == null
+        ? terminalView
+        : Stack(
+            fit: StackFit.expand,
+            children: [
+              WallpaperBackground(
+                file: wallpaper,
+                opacity: t.wallpaperOpacity,
+                blur: t.wallpaperBlur,
+              ),
+              terminalView,
+            ],
+          );
+
+    if (t.crt.enabled) {
+      surface = CrtOverlay(settings: t.crt, child: surface);
+    }
+
+    return surface;
   }
 }

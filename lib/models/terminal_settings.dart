@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:xterm/xterm.dart';
 
+import 'crt_settings.dart';
 import 'terminal_theme_codec.dart';
 import 'terminal_theme_presets.dart';
 
@@ -21,7 +22,9 @@ class TerminalSettings {
     this.wallpaperOpacity = 1.0,
     this.wallpaperBlur = 12.0,
     this.backgroundOpacity = 0.88,
-  }) : customTheme = customTheme ?? TerminalThemePresets.iterm2;
+    CrtSettings? crt,
+  })  : customTheme = customTheme ?? TerminalThemePresets.iterm2,
+        crt = crt ?? const CrtSettings();
 
   String themePresetId;
   TerminalTheme customTheme;
@@ -43,6 +46,8 @@ class TerminalSettings {
   double wallpaperBlur;
   /// Terminal cell background opacity when a wallpaper is set (0 = transparent).
   double backgroundOpacity;
+
+  CrtSettings crt;
 
   bool get hasWallpaper => wallpaperId != null && wallpaperId!.isNotEmpty;
 
@@ -124,6 +129,7 @@ class TerminalSettings {
     double? wallpaperOpacity,
     double? wallpaperBlur,
     double? backgroundOpacity,
+    CrtSettings? crt,
   }) {
     return TerminalSettings(
       themePresetId: themePresetId ?? this.themePresetId,
@@ -140,6 +146,7 @@ class TerminalSettings {
       wallpaperOpacity: wallpaperOpacity ?? this.wallpaperOpacity,
       wallpaperBlur: wallpaperBlur ?? this.wallpaperBlur,
       backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
+      crt: crt ?? this.crt,
     );
   }
 
@@ -184,6 +191,7 @@ class TerminalSettings {
       wallpaperOpacity: (json['wallpaperOpacity'] as num?)?.toDouble() ?? 1.0,
       wallpaperBlur: (json['wallpaperBlur'] as num?)?.toDouble() ?? 12.0,
       backgroundOpacity: (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.88,
+      crt: CrtSettings.fromJson(json['crt'] as Map<String, dynamic>?),
     );
   }
 
@@ -203,6 +211,7 @@ class TerminalSettings {
         'wallpaperOpacity': wallpaperOpacity,
         'wallpaperBlur': wallpaperBlur,
         'backgroundOpacity': backgroundOpacity,
+        'crt': crt.toJson(),
       };
 
   static FontWeight _fontWeightFromString(String? s) => switch (s) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
+import '../../models/crt_settings.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
 import '../../services/image_file_picker.dart';
@@ -170,6 +171,9 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         _s.copyWith(cursorBlinkPeriodMs: _periodFromIndex(v.round())),
                       ),
                     ),
+                  const SizedBox(height: 12),
+                  _sectionTitle('CRT Effect'),
+                  _crtSection(),
                 ],
               ),
             ),
@@ -491,6 +495,113 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             side: const BorderSide(color: _kDivider),
             onSelected: (_) => _apply(_s.copyWith(cursorType: type)),
           ),
+      ],
+    );
+  }
+
+  void _applyCrt(CrtSettings crt) => _apply(_s.copyWith(crt: crt));
+
+  Widget _crtSection() {
+    final crt = _s.crt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Enable CRT mode',
+              style: TextStyle(color: _kFg, fontSize: 13)),
+          subtitle: const Text('Scanlines · glow · vignette · flicker',
+              style: TextStyle(color: _kFgMuted, fontSize: 11)),
+          value: crt.enabled,
+          activeTrackColor: _kAccent,
+          onChanged: (v) => _applyCrt(crt.copyWith(enabled: v)),
+        ),
+        if (crt.enabled) ...[
+          _controlLabel('Phosphor',
+              hint: 'Recommended: pair with Pip-Boy or Amber color scheme'),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final p in CrtPhosphor.values)
+                ChoiceChip(
+                  label: Text(
+                    p.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: crt.phosphor == p ? Colors.white : _kFg,
+                    ),
+                  ),
+                  selected: crt.phosphor == p,
+                  selectedColor: _kAccent,
+                  backgroundColor: const Color(0xFF1C1C1C),
+                  side: const BorderSide(color: _kDivider),
+                  onSelected: (_) => _applyCrt(crt.copyWith(phosphor: p)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          _slider(
+            label: 'Scanlines',
+            hint: 'Horizontal dark lines',
+            value: crt.scanlineOpacity,
+            min: 0,
+            max: 0.6,
+            divisions: 12,
+            display: '${(crt.scanlineOpacity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(scanlineOpacity: v)),
+          ),
+          _slider(
+            label: 'Glow',
+            hint: 'Phosphor electron-beam spread',
+            value: crt.glowIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.glowIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(glowIntensity: v)),
+          ),
+          _slider(
+            label: 'Vignette',
+            hint: 'Edge darkening',
+            value: crt.vignette,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.vignette * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(vignette: v)),
+          ),
+          _slider(
+            label: 'Curvature',
+            hint: 'Rounded screen corners',
+            value: crt.curvature,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.curvature * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(curvature: v)),
+          ),
+          _slider(
+            label: 'Flicker',
+            hint: 'Brightness oscillation',
+            value: crt.flickerIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.flickerIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(flickerIntensity: v)),
+          ),
+          _slider(
+            label: 'Noise',
+            hint: 'Static grain',
+            value: crt.noiseIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.noiseIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(noiseIntensity: v)),
+          ),
+        ],
       ],
     );
   }
