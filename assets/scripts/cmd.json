@@ -52,18 +52,23 @@
 
   {
     "name": "木马筛查 - 近期修改文件",
-    "description": "查找最近 7 天被修改的脚本、Web 文件与可执行文件（排除 /proc）",
-    "command": "find / -type f \\( -name '*.sh' -o -name '*.py' -o -name '*.pl' -o -name '*.elf' -o -name '*.jsp' -o -name '*.jspx' -o -name '*.php' -o -name '*.aspx' -o -name '*.war' \\) -mtime -7 2>/dev/null | grep -v /proc"
+    "description": "查找最近 7 天被修改的脚本与 Web 文件，显示修改时间、权限与属主（排除 /proc /sys）",
+    "command": "find / \\( -path /proc -o -path /sys \\) -prune -o -type f \\( -name '*.sh' -o -name '*.py' -o -name '*.pl' -o -name '*.elf' -o -name '*.jsp' -o -name '*.jspx' -o -name '*.php' -o -name '*.aspx' -o -name '*.war' \\) -mtime -7 -printf '%TY-%Tm-%Td %TH:%TM  %M  %-12u  %p\\n' 2>/dev/null | sort"
   },
   {
     "name": "木马筛查 - SUID/SGID 文件",
-    "description": "列出所有具有 SUID 或 SGID 权限位的文件",
-    "command": "find / -type f \\( -perm -4000 -o -perm -2000 \\) -exec ls -la {} \\; 2>/dev/null"
+    "description": "列出所有具有 SUID 或 SGID 权限位的文件，显示修改时间、权限与属主",
+    "command": "find / \\( -path /proc -o -path /sys \\) -prune -o -type f \\( -perm -4000 -o -perm -2000 \\) -printf '%TY-%Tm-%Td %TH:%TM  %M  %-12u  %p\\n' 2>/dev/null | sort"
   },
   {
     "name": "木马筛查 - 隐藏文件扫描",
-    "description": "扫描临时目录与 home 目录下的隐藏文件",
-    "command": "find /tmp /var/tmp /dev/shm /root /home -name '.*' -type f 2>/dev/null"
+    "description": "扫描临时目录与 home 目录下的隐藏文件，显示修改时间、权限与属主",
+    "command": "find /tmp /var/tmp /dev/shm /root /home -name '.*' -type f -printf '%TY-%Tm-%Td %TH:%TM  %M  %-12u  %p\\n' 2>/dev/null | sort"
+  },
+  {
+    "name": "木马筛查 - 进程持有文件",
+    "description": "用 lsof 列出正在访问脚本/Web 文件的进程，显示 PID、进程名与文件路径",
+    "command": "lsof 2>/dev/null | grep -E '\\.(sh|py|pl|php|jsp|jspx|aspx|war|elf)[[:space:]]*$' | awk '{printf \"PID=%-7s COMM=%-20s FILE=%s\\n\", $2, $1, $NF}' | sort -u"
   },
   {
     "name": "木马筛查 - PHP Webshell 关键字",
@@ -83,13 +88,13 @@
 
   {
     "name": "内存马排查 - 无文件进程",
-    "description": "查找 /proc/PID/exe 已被删除的无文件运行进程",
-    "command": "ls -la /proc/*/exe 2>/dev/null | grep deleted"
+    "description": "查找 /proc/PID/exe 已被删除的无文件运行进程，显示 PID、进程名与启动时间",
+    "command": "for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do exe=$(readlink /proc/$pid/exe 2>/dev/null); echo $exe | grep -q '(deleted)' || continue; comm=$(cat /proc/$pid/comm 2>/dev/null); start=$(stat -c '%y' /proc/$pid 2>/dev/null | cut -d'.' -f1); printf 'PID=%-7s COMM=%-20s START=%s\\nEXE=%s\\n\\n' \"$pid\" \"$comm\" \"$start\" \"$exe\"; done"
   },
   {
     "name": "内存马排查 - 匿名可执行内存",
-    "description": "检测进程内存中存在匿名可执行映射（代码注入特征）",
-    "command": "for pid in $(ls /proc | grep -E '^[0-9]+$'); do grep -q 'rwxp 00000000 00:00' /proc/$pid/maps 2>/dev/null && echo PID: $pid; done"
+    "description": "检测进程内存中存在匿名可执行映射（代码注入特征），显示 PID、进程名与启动时间",
+    "command": "for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do grep -q 'rwxp 00000000 00:00' /proc/$pid/maps 2>/dev/null || continue; comm=$(cat /proc/$pid/comm 2>/dev/null); start=$(stat -c '%y' /proc/$pid 2>/dev/null | cut -d'.' -f1); printf 'PID=%-7s COMM=%-20s START=%s\\n' \"$pid\" \"$comm\" \"$start\"; done"
   },
   {
     "name": "内存马排查 - 可疑网络外连",
@@ -98,8 +103,8 @@
   },
   {
     "name": "内存马排查 - 解释器进程",
-    "description": "列出 Java、Python、Node 等常见内存马载体进程",
-    "command": "ps aux | grep -E '(java|python|ruby|node|php)' | grep -v grep"
+    "description": "列出 Java、Python、Node 等常见内存马载体进程，显示 PID、进程名与精确启动时间",
+    "command": "ps -eo pid,comm,lstart,args --sort=lstart 2>/dev/null | grep -E '(java|python|ruby|node|php|perl)' | grep -v grep"
   },
 
   {

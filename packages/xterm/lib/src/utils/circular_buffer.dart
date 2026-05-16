@@ -226,6 +226,7 @@ class IndexAwareCircularBuffer<T extends IndexedItem> {
     if (count > _length) count = _length;
     _startIndex += count;
     _startIndex %= _array.length;
+    _absoluteStartIndex += count;
     _length -= count;
   }
 
