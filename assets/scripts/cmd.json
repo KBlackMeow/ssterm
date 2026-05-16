@@ -1,0 +1,125 @@
+[
+  {
+    "name": "系统信息",
+    "description": "查看内核与系统基本信息",
+    "command": "uname -a"
+  },
+  {
+    "name": "磁盘使用",
+    "description": "列出各分区磁盘使用情况",
+    "command": "df -h"
+  },
+  {
+    "name": "内存使用",
+    "description": "查看物理内存与 Swap 使用情况",
+    "command": "free -h"
+  },
+  {
+    "name": "进程列表",
+    "description": "查看当前所有运行进程",
+    "command": "ps aux"
+  },
+  {
+    "name": "网络监听端口",
+    "description": "查看所有监听中的 TCP/UDP 端口",
+    "command": "ss -tlnp"
+  },
+  {
+    "name": "实时进程监控",
+    "description": "动态显示 CPU/内存占用 Top 进程",
+    "command": "top"
+  },
+  {
+    "name": "当前目录文件",
+    "description": "列出当前目录详细文件信息",
+    "command": "ls -lah"
+  },
+  {
+    "name": "查看日志（实时）",
+    "description": "实时跟踪系统日志输出",
+    "command": "tail -f /var/log/syslog"
+  },
+  {
+    "name": "当前登录用户",
+    "description": "查看当前系统登录用户及终端",
+    "command": "who"
+  },
+  {
+    "name": "环境变量",
+    "description": "列出所有环境变量",
+    "command": "env"
+  },
+
+  {
+    "name": "木马筛查 - 近期修改文件",
+    "description": "查找最近 7 天被修改的脚本、Web 文件与可执行文件（排除 /proc）",
+    "command": "find / -type f \\( -name '*.sh' -o -name '*.py' -o -name '*.pl' -o -name '*.elf' -o -name '*.jsp' -o -name '*.jspx' -o -name '*.php' -o -name '*.aspx' -o -name '*.war' \\) -mtime -7 2>/dev/null | grep -v /proc"
+  },
+  {
+    "name": "木马筛查 - SUID/SGID 文件",
+    "description": "列出所有具有 SUID 或 SGID 权限位的文件",
+    "command": "find / -type f \\( -perm -4000 -o -perm -2000 \\) -exec ls -la {} \\; 2>/dev/null"
+  },
+  {
+    "name": "木马筛查 - 隐藏文件扫描",
+    "description": "扫描临时目录与 home 目录下的隐藏文件",
+    "command": "find /tmp /var/tmp /dev/shm /root /home -name '.*' -type f 2>/dev/null"
+  },
+  {
+    "name": "木马筛查 - PHP Webshell 关键字",
+    "description": "在 Web 目录中扫描 PHP Webshell 常见特征字符串",
+    "command": "grep -rEl --include='*.php' --include='*.aspx' 'eval|base64_decode|shell_exec|passthru|proc_open|popen' /var/www /srv /opt 2>/dev/null"
+  },
+  {
+    "name": "木马筛查 - JSP Webshell 关键字",
+    "description": "扫描 JSP 文件中 ProcessBuilder/Runtime.exec/getParameter 等执行特征",
+    "command": "grep -rEl --include='*.jsp' --include='*.jspx' 'ProcessBuilder|Runtime\\.getRuntime|getParameter|cmd\\.exe|/bin/bash|/bin/sh' /var/www /srv /opt /usr/local/tomcat 2>/dev/null"
+  },
+  {
+    "name": "木马筛查 - 综合代码特征（全框架）",
+    "description": "用 grep 递归扫描当前目录，覆盖 PHP/Python/Node/Java 等全框架 Webshell、反弹 Shell、挖矿程序与混淆代码特征（无需额外工具）",
+    "command": "grep -rEIn --exclude-dir='.git' --exclude-dir='node_modules' --exclude-dir='vendor' --exclude-dir='__pycache__' --exclude-dir='build' --exclude-dir='dist' --exclude-dir='target' --exclude-dir='.dart_tool' 'eval[[:space:]]*\\([[:space:]]*(base64_decode|gzinflate|str_rot13|gzuncompress|hex2bin|rawurldecode)[[:space:]]*\\(|\\$_(GET|POST|REQUEST|COOKIE|FILES)[[:space:]]*\\[[^\\]]*\\][[:space:]]*\\(\\)|(shell_exec|system|passthru|exec|popen|proc_open|pcntl_exec)[[:space:]]*\\([[:space:]]*\\$_(GET|POST|REQUEST|COOKIE)|preg_replace[[:space:]]*\\([^,]+/e|assert[[:space:]]*\\([[:space:]]*\\$_(GET|POST|REQUEST|COOKIE)|exec[[:space:]]*\\([[:space:]]*(base64|binascii|codecs)\\.|subprocess\\.(call|Popen|run)[[:space:]]*\\(.*shell[[:space:]]*=[[:space:]]*True|child_process\\.(exec|execSync|spawn)[[:space:]]*\\(.*req\\.|Runtime\\.getRuntime\\(\\)\\.exec\\(.*getParameter|ProcessBuilder[[:space:]]*\\(.*getParameter|bash[[:space:]]+-i[[:space:]]+>&[[:space:]]*/dev/tcp|(nc|ncat|netcat)[[:space:]]+.*-e[[:space:]]+/bin/(sh|bash)|python[23]?[[:space:]]+-c[[:space:]]+.*import[[:space:]]+socket|/bin/(sh|bash)[[:space:]]+-i.*>/dev/(tcp|udp)|(curl|wget)[[:space:]]+.*\\|[[:space:]]*(ba)?sh|stratum\\+tcp://|(xmrig|ethminer|cgminer|cpuminer|minerd)|eval[[:space:]]*\\([[:space:]]*eval[[:space:]]*\\(|(chr\\([0-9]+\\)\\.){6,}|(\\\\x[0-9a-fA-F]{2}){20,}' . 2>/dev/null"
+  },
+
+  {
+    "name": "内存马排查 - 无文件进程",
+    "description": "查找 /proc/PID/exe 已被删除的无文件运行进程",
+    "command": "ls -la /proc/*/exe 2>/dev/null | grep deleted"
+  },
+  {
+    "name": "内存马排查 - 匿名可执行内存",
+    "description": "检测进程内存中存在匿名可执行映射（代码注入特征）",
+    "command": "for pid in $(ls /proc | grep -E '^[0-9]+$'); do grep -q 'rwxp 00000000 00:00' /proc/$pid/maps 2>/dev/null && echo PID: $pid; done"
+  },
+  {
+    "name": "内存马排查 - 可疑网络外连",
+    "description": "列出所有 ESTABLISHED 状态的外部连接及关联进程",
+    "command": "ss -antp | grep ESTABLISHED"
+  },
+  {
+    "name": "内存马排查 - 解释器进程",
+    "description": "列出 Java、Python、Node 等常见内存马载体进程",
+    "command": "ps aux | grep -E '(java|python|ruby|node|php)' | grep -v grep"
+  },
+
+  {
+    "name": "后门排查 - 计划任务枚举",
+    "description": "枚举系统及当前用户的 crontab 与定时任务",
+    "command": "crontab -l 2>/dev/null; cat /etc/crontab 2>/dev/null; ls -la /etc/cron.*/"
+  },
+  {
+    "name": "后门排查 - SSH 授权密钥",
+    "description": "检查各用户 ~/.ssh/authorized_keys 文件内容",
+    "command": "find /root /home -name 'authorized_keys' 2>/dev/null -exec echo '=== {} ===' \\; -exec cat {} \\;"
+  },
+  {
+    "name": "后门排查 - 超级用户账号",
+    "description": "查找 UID=0 的账号及空密码账号",
+    "command": "grep -E '^[^:]+:[^:]*:0:' /etc/passwd; grep -E '^[^:]+::' /etc/shadow 2>/dev/null"
+  },
+  {
+    "name": "后门排查 - 系统启动项",
+    "description": "列出正在运行的服务与 rc.local 启动配置",
+    "command": "systemctl list-units --type=service --state=running 2>/dev/null; cat /etc/rc.local 2>/dev/null; ls -la /etc/init.d/"
+  }
+]

@@ -19,7 +19,8 @@ import 'services/host_key_verifier.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/ssh_connection.dart';
-import 'views/settings/settings_sheet.dart';
+import 'views/settings/settings_sheet.dart' show SettingsPage;
+import 'widgets/cmd_picker_button.dart';
 import 'widgets/terminal_surface.dart';
 import 'views/ssh_session_view.dart';
 
@@ -91,7 +92,7 @@ class _OutputPipe {
 }
 
 // ── Tab model ───────────────────────────────────────────────────────────────
-enum _TabKind { local, ssh }
+enum _TabKind { local, ssh, settings }
 
 class _Tab {
   _TabKind kind;
@@ -117,12 +118,8 @@ class _Tab {
     this.remotePath,
   });
 
-  factory _Tab.local(Terminal t, Pty p, String shell) => _Tab._(
-        kind: _TabKind.local,
-        title: shell,
-        terminal: t,
-        pty: p,
-      );
+  factory _Tab.local(Terminal t, Pty p, String shell) =>
+      _Tab._(kind: _TabKind.local, title: shell, terminal: t, pty: p);
 
   factory _Tab.ssh(
     Terminal t,
@@ -131,16 +128,15 @@ class _Tab {
     String title, {
     SftpClient? sftp,
     ValueNotifier<String>? remotePath,
-  }) =>
-      _Tab._(
-        kind: _TabKind.ssh,
-        title: title,
-        terminal: t,
-        sshClient: c,
-        sshSession: s,
-        sftp: sftp,
-        remotePath: remotePath,
-      );
+  }) => _Tab._(
+    kind: _TabKind.ssh,
+    title: title,
+    terminal: t,
+    sshClient: c,
+    sshSession: s,
+    sftp: sftp,
+    remotePath: remotePath,
+  );
 
   void dispose() {
     pipe?.dispose();
@@ -150,10 +146,13 @@ class _Tab {
     sshClient?.close();
   }
 
+  factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
+
   IconData get icon => switch (kind) {
-        _TabKind.local => Icons.terminal,
-        _TabKind.ssh => Icons.lock_outline,
-      };
+    _TabKind.local => Icons.terminal,
+    _TabKind.ssh => Icons.lock_outline,
+    _TabKind.settings => Icons.settings_outlined,
+  };
 }
 
 // ── Home ────────────────────────────────────────────────────────────────────
@@ -187,9 +186,13 @@ class _TerminalHomeState extends State<TerminalHome> {
     if (!mounted) return;
     setState(() {
       _savedHosts = saved
-        ..sort((a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
       _configHosts = config
-        ..sort((a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
     });
   }
 
@@ -269,8 +272,10 @@ class _TerminalHomeState extends State<TerminalHome> {
                     strokeWidth: 2,
                   ),
                   SizedBox(height: 16),
-                  Text('Connecting…',
-                      style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 13)),
+                  Text(
+                    'Connecting…',
+                    style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
+                  ),
                 ],
               ),
             ),
@@ -305,13 +310,16 @@ class _TerminalHomeState extends State<TerminalHome> {
     final remotePath = ValueNotifier<String>('');
     final cwdParser = RemoteCwdParser();
 
-    final pipe = _OutputPipe(terminal, transform: (bytes) {
-      final parsed = cwdParser.process(bytes);
-      if (parsed.cwd != null && parsed.cwd != remotePath.value) {
-        remotePath.value = parsed.cwd!;
-      }
-      return parsed.cleaned;
-    });
+    final pipe = _OutputPipe(
+      terminal,
+      transform: (bytes) {
+        final parsed = cwdParser.process(bytes);
+        if (parsed.cwd != null && parsed.cwd != remotePath.value) {
+          remotePath.value = parsed.cwd!;
+        }
+        return parsed.cleaned;
+      },
+    );
 
     terminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
     terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
@@ -383,18 +391,36 @@ class _TerminalHomeState extends State<TerminalHome> {
     });
   }
 
-  void _openSettings() {
-    showTerminalSettingsSheet(
-      context,
-      settings: _config.terminal,
-      onChanged: (next) {
-        setState(() => _config.terminal = next);
-        _config.save();
-      },
-    );
+  void _syncAllTerminals() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final tab in _tabs) {
+        tab.terminalViewKey.currentState?.syncAfterShown();
+      }
+    });
   }
 
-  Widget _buildTerminalView(Terminal terminal, GlobalKey<TerminalViewState> viewKey) {
+  void _insertCommand(String cmd) {
+    final tab = _tabs[_active];
+    tab.terminal?.onOutput?.call(cmd);
+  }
+
+  void _openSettings() {
+    final idx = _tabs.indexWhere((t) => t.kind == _TabKind.settings);
+    if (idx != -1) {
+      _selectTab(idx);
+      return;
+    }
+    setState(() {
+      _tabs.add(_Tab.settings());
+      _active = _tabs.length - 1;
+    });
+  }
+
+  Widget _buildTerminalView(
+    Terminal terminal,
+    GlobalKey<TerminalViewState> viewKey,
+  ) {
     return TerminalSurface(
       terminal: terminal,
       settings: _config.terminal,
@@ -435,6 +461,9 @@ class _TerminalHomeState extends State<TerminalHome> {
                 savedHosts: _savedHosts,
                 configHosts: _configHosts,
                 onConnectHost: _connectSavedHost,
+                onInsertCommand: _tabs.isNotEmpty && _tabs[_active].terminal != null
+                    ? _insertCommand
+                    : null,
               ),
               const Divider(height: 1, thickness: 1, color: _kDivider),
               Expanded(child: _buildBody()),
@@ -448,21 +477,30 @@ class _TerminalHomeState extends State<TerminalHome> {
   Widget _buildTabBody(_Tab tab) {
     return switch (tab.kind) {
       _TabKind.local => _buildTerminalView(tab.terminal!, tab.terminalViewKey),
-      _TabKind.ssh => tab.sftp != null
-          ? SshSessionView(
-              terminal: tab.terminal!,
-              sftp: tab.sftp!,
-              host: tab.title,
-              remotePath: tab.remotePath!,
-              panelPosition: _config.sftpPanelPosition,
-              onPanelPositionChanged: (pos) {
-                setState(() => _config.sftpPanelPosition = pos);
-                _config.save();
-              },
-              terminalSettings: _config.terminal,
-              terminalViewKey: tab.terminalViewKey,
-            )
-          : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+      _TabKind.ssh =>
+        tab.sftp != null
+            ? SshSessionView(
+                terminal: tab.terminal!,
+                sftp: tab.sftp!,
+                host: tab.title,
+                remotePath: tab.remotePath!,
+                panelPosition: _config.sftpPanelPosition,
+                onPanelPositionChanged: (pos) {
+                  setState(() => _config.sftpPanelPosition = pos);
+                  _config.save();
+                },
+                terminalSettings: _config.terminal,
+                terminalViewKey: tab.terminalViewKey,
+              )
+            : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+      _TabKind.settings => SettingsPage(
+          settings: _config.terminal,
+          onChanged: (next) {
+            setState(() => _config.terminal = next);
+            _config.save();
+            _syncAllTerminals();
+          },
+        ),
     };
   }
 
@@ -471,9 +509,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     return IndexedStack(
       index: _active,
       sizing: StackFit.expand,
-      children: [
-        for (final tab in _tabs) _buildTabBody(tab),
-      ],
+      children: [for (final tab in _tabs) _buildTabBody(tab)],
     );
   }
 }
@@ -491,6 +527,7 @@ class _TabBar extends StatelessWidget {
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
+    this.onInsertCommand,
   });
 
   final List<_Tab> tabs;
@@ -503,20 +540,22 @@ class _TabBar extends StatelessWidget {
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
+  final ValueChanged<String>? onInsertCommand;
 
   static const _minTabWidth = 100.0;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 36,
+      height: 24,
       color: _kTabBarBg,
       child: Row(
         children: [
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final canExpand = tabs.isNotEmpty &&
+                final canExpand =
+                    tabs.isNotEmpty &&
                     tabs.length * _minTabWidth <= constraints.maxWidth;
 
                 final chips = [
@@ -562,12 +601,22 @@ class _TabBar extends StatelessWidget {
             configHosts: configHosts,
             onConnectHost: onConnectHost,
           ),
-          IconButton(
-            tooltip: 'Settings (⌘,)',
-            padding: const EdgeInsets.all(8),
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: const Icon(Icons.settings_outlined, size: 18, color: _kFgInactive),
-            onPressed: onSettings,
+          CmdPickerButton(onInsert: onInsertCommand),
+          GestureDetector(
+            onTap: onSettings,
+            child: Tooltip(
+              message: 'Settings (⌘,)',
+              child: Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.settings_outlined,
+                  size: 15,
+                  color: _kFgInactive,
+                ),
+              ),
+            ),
           ),
           const SizedBox(width: 2),
         ],
@@ -599,7 +648,7 @@ class _TabChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),
-        height: 36,
+        height: 30,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: isActive ? _kBg : Colors.transparent,
@@ -613,9 +662,11 @@ class _TabChip extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(tab.icon,
-                size: 11,
-                color: isActive ? _kFgActive : _kFgInactive),
+            Icon(
+              tab.icon,
+              size: 11,
+              color: isActive ? _kFgActive : _kFgInactive,
+            ),
             const SizedBox(width: 5),
             if (expand)
               Expanded(
@@ -626,8 +677,7 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight:
-                        isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               )
@@ -640,8 +690,7 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight:
-                        isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               ),
@@ -688,8 +737,8 @@ class _CloseBtnState extends State<_CloseBtn> {
             color: _hover
                 ? _kFgActive
                 : widget.isActive
-                    ? _kFgInactive
-                    : Colors.transparent,
+                ? _kFgInactive
+                : Colors.transparent,
           ),
         ),
       ),
@@ -731,30 +780,38 @@ class _PlusMenu extends StatelessWidget {
     return PopupMenuItem<String>(
       value: '$prefix:${h.profileKey}',
       height: 36,
-      child: Row(children: [
-        Icon(
-          prefix == 'saved' ? Icons.bookmark_outline : Icons.description_outlined,
-          size: 13,
-          color: _kFgInactive,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(h.alias,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _kFgActive, fontSize: 13)),
-              Text(h.displayInfo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _kFgInactive, fontSize: 11)),
-            ],
+      child: Row(
+        children: [
+          Icon(
+            prefix == 'saved'
+                ? Icons.bookmark_outline
+                : Icons.description_outlined,
+            size: 13,
+            color: _kFgInactive,
           ),
-        ),
-      ]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  h.alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kFgActive, fontSize: 13),
+                ),
+                Text(
+                  h.displayInfo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kFgInactive, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -783,12 +840,13 @@ class _PlusMenu extends StatelessWidget {
         const PopupMenuItem(
           value: 'local',
           height: 36,
-          child: Row(children: [
-            Icon(Icons.terminal, size: 13, color: _kFgInactive),
-            SizedBox(width: 8),
-            Text('系统终端',
-                style: TextStyle(color: _kFgActive, fontSize: 13)),
-          ]),
+          child: Row(
+            children: [
+              Icon(Icons.terminal, size: 13, color: _kFgInactive),
+              SizedBox(width: 8),
+              Text('系统终端', style: TextStyle(color: _kFgActive, fontSize: 13)),
+            ],
+          ),
         ),
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
@@ -804,12 +862,16 @@ class _PlusMenu extends StatelessWidget {
         const PopupMenuItem(
           value: 'new',
           height: 36,
-          child: Row(children: [
-            Icon(Icons.add, size: 13, color: _kFgInactive),
-            SizedBox(width: 8),
-            Text('新建 SSH…',
-                style: TextStyle(color: _kFgActive, fontSize: 13)),
-          ]),
+          child: Row(
+            children: [
+              Icon(Icons.add, size: 13, color: _kFgInactive),
+              SizedBox(width: 8),
+              Text(
+                '新建 SSH…',
+                style: TextStyle(color: _kFgActive, fontSize: 13),
+              ),
+            ],
+          ),
         ),
       ],
     ).then((v) {

@@ -15,27 +15,9 @@ const _kFg = Color(0xFFD4D4D4);
 const _kFgMuted = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
 
-Future<void> showTerminalSettingsSheet(
-  BuildContext context, {
-  required TerminalSettings settings,
-  required ValueChanged<TerminalSettings> onChanged,
-}) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: _kSheetBg,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
-    ),
-    builder: (ctx) => _SettingsSheet(
-      settings: settings,
-      onChanged: onChanged,
-    ),
-  );
-}
-
-class _SettingsSheet extends StatefulWidget {
-  const _SettingsSheet({
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({
+    super.key,
     required this.settings,
     required this.onChanged,
   });
@@ -44,16 +26,25 @@ class _SettingsSheet extends StatefulWidget {
   final ValueChanged<TerminalSettings> onChanged;
 
   @override
-  State<_SettingsSheet> createState() => _SettingsSheetState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsSheetState extends State<_SettingsSheet> {
+class _SettingsPageState extends State<SettingsPage>
+    with SingleTickerProviderStateMixin {
   late TerminalSettings _s;
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   void _apply(TerminalSettings next) {
@@ -61,127 +52,279 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     widget.onChanged(next);
   }
 
+  void _applyCrt(CrtSettings crt) => _apply(_s.copyWith(crt: crt));
+
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.82,
-      minChildSize: 0.45,
-      maxChildSize: 0.95,
-      builder: (_, scroll) => Padding(
-        padding: EdgeInsets.only(bottom: bottom),
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: _kDivider,
-                borderRadius: BorderRadius.circular(2),
+    return Container(
+      color: _kSheetBg,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Settings',
+                style: TextStyle(
+                  color: _kFg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
-              child: Row(
-                children: [
-                  const Text(
-                    'Terminal Settings',
-                    style: TextStyle(
-                      color: _kFg,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: _kFgMuted, size: 20),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: TerminalPreview(settings: _s),
+          ),
+          const SizedBox(height: 8),
+          TabBar(
+            controller: _tabController,
+            labelColor: _kFg,
+            unselectedLabelColor: _kFgMuted,
+            indicatorColor: _kAccent,
+            indicatorSize: TabBarIndicatorSize.label,
+            dividerColor: _kDivider,
+            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            unselectedLabelStyle: const TextStyle(fontSize: 12),
+            tabs: const [
+              Tab(text: 'Appearance'),
+              Tab(text: 'Font'),
+              Tab(text: 'Cursor'),
+              Tab(text: 'Effects'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildAppearanceTab(),
+                _buildFontTab(),
+                _buildCursorTab(),
+                _buildEffectsTab(),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TerminalPreview(settings: _s),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView(
-                controller: scroll,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                children: [
-                  _sectionTitle('Color scheme'),
-                  _presetChips(),
-                  const SizedBox(height: 12),
-                  _sectionTitle('Colors'),
-                  _colorRow('Foreground', 'foreground', _s.resolveTheme().foreground),
-                  _colorRow('Background', 'background', _s.resolveTheme().background),
-                  _colorRow('Cursor', 'cursor', _s.resolveTheme().cursor),
-                  _colorRow('Selection', 'selection', _s.resolveTheme().selection),
-                  const SizedBox(height: 12),
-                  _sectionTitle('Wallpaper'),
-                  _wallpaperSection(),
-                  const SizedBox(height: 12),
-                  _sectionTitle('Font'),
-                  _controlLabel('Family'),
-                  _fontDropdown(),
-                  _slider(
-                    label: 'Size',
-                    value: _s.fontSize,
-                    min: 10,
-                    max: 22,
-                    divisions: 24,
-                    display: _s.fontSize.toStringAsFixed(1),
-                    onChanged: (v) =>
-                        _apply(_s.copyWith(fontSize: double.parse(v.toStringAsFixed(1)))),
-                  ),
-                  _slider(
-                    label: 'Line height',
-                    hint: 'Vertical spacing between lines',
-                    value: _s.lineHeight,
-                    min: 1.0,
-                    max: 1.5,
-                    divisions: 10,
-                    display: _s.lineHeight.toStringAsFixed(2),
-                    onChanged: (v) => _apply(_s.copyWith(lineHeight: v)),
-                  ),
-                  _fontWeightChips(),
-                  const SizedBox(height: 12),
-                  _sectionTitle('Cursor'),
-                  _controlLabel('Shape'),
-                  _cursorShapeChips(),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Blink', style: TextStyle(color: _kFg, fontSize: 13)),
-                    value: _s.cursorBlink,
-                    activeTrackColor: _kAccent,
-                    onChanged: (v) => _apply(_s.copyWith(cursorBlink: v)),
-                  ),
-                  if (_s.cursorBlink)
-                    _slider(
-                      label: 'Blink speed',
-                      value: _blinkSpeedIndex.toDouble(),
-                      min: 0,
-                      max: 2,
-                      divisions: 2,
-                      display: _blinkSpeedLabel,
-                      onChanged: (v) => _apply(
-                        _s.copyWith(cursorBlinkPeriodMs: _periodFromIndex(v.round())),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  _sectionTitle('CRT Effect'),
-                  _crtSection(),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  // ── Appearance tab: theme preset, custom colors, wallpaper ─────────────────
+
+  Widget _buildAppearanceTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('Theme'),
+        _presetChips(),
+        const SizedBox(height: 12),
+        _sectionTitle('Colors'),
+        _colorRow('Foreground', 'foreground', _s.resolveTheme().foreground),
+        _colorRow('Background', 'background', _s.resolveTheme().background),
+        _colorRow('Cursor', 'cursor', _s.resolveTheme().cursor),
+        _colorRow('Selection', 'selection', _s.resolveTheme().selection),
+        const SizedBox(height: 12),
+        _sectionTitle('Wallpaper'),
+        _wallpaperSection(),
+      ],
+    );
+  }
+
+  // ── Font tab: family, size, line-height, weight ─────────────────────────────
+
+  Widget _buildFontTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('Family'),
+        _fontDropdown(),
+        const SizedBox(height: 12),
+        _sectionTitle('Size & Spacing'),
+        _slider(
+          label: 'Size',
+          value: _s.fontSize,
+          min: 10,
+          max: 22,
+          divisions: 24,
+          display: _s.fontSize.toStringAsFixed(1),
+          onChanged: (v) => setState(() {
+            _s = _s.copyWith(fontSize: double.parse(v.toStringAsFixed(1)));
+          }),
+          onChangeEnd: (_) => _apply(_s),
+        ),
+        _slider(
+          label: 'Line height',
+          hint: 'Vertical spacing between lines',
+          value: _s.lineHeight,
+          min: 1.0,
+          max: 1.5,
+          divisions: 10,
+          display: _s.lineHeight.toStringAsFixed(2),
+          onChanged: (v) => setState(() => _s = _s.copyWith(lineHeight: v)),
+          onChangeEnd: (_) => _apply(_s),
+        ),
+        const SizedBox(height: 12),
+        _sectionTitle('Weight'),
+        _fontWeightChips(),
+      ],
+    );
+  }
+
+  // ── Cursor tab: shape, blink ────────────────────────────────────────────────
+
+  Widget _buildCursorTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('Shape'),
+        const SizedBox(height: 6),
+        _cursorShapeChips(),
+        const SizedBox(height: 16),
+        _sectionTitle('Blink'),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Enable blinking', style: TextStyle(color: _kFg, fontSize: 13)),
+          value: _s.cursorBlink,
+          activeTrackColor: _kAccent,
+          onChanged: (v) => _apply(_s.copyWith(cursorBlink: v)),
+        ),
+        if (_s.cursorBlink)
+          _slider(
+            label: 'Speed',
+            value: _blinkSpeedIndex.toDouble(),
+            min: 0,
+            max: 2,
+            divisions: 2,
+            display: _blinkSpeedLabel,
+            onChanged: (v) => _apply(
+              _s.copyWith(cursorBlinkPeriodMs: _periodFromIndex(v.round())),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ── Effects tab: CRT with sub-groups ───────────────────────────────────────
+
+  Widget _buildEffectsTab() {
+    final crt = _s.crt;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('CRT Monitor'),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Enable CRT mode', style: TextStyle(color: _kFg, fontSize: 13)),
+          subtitle: const Text(
+            'Scanlines · glow · vignette · flicker',
+            style: TextStyle(color: _kFgMuted, fontSize: 11),
+          ),
+          value: crt.enabled,
+          activeTrackColor: _kAccent,
+          onChanged: (v) => _applyCrt(crt.copyWith(enabled: v)),
+        ),
+        if (crt.enabled) ...[
+          const SizedBox(height: 8),
+          _sectionTitle('Phosphor'),
+          const SizedBox(height: 4),
+          Text(
+            'Pair with Pip-Boy or Amber color scheme for best results',
+            style: const TextStyle(color: _kFgMuted, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final p in CrtPhosphor.values)
+                ChoiceChip(
+                  label: Text(
+                    p.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: crt.phosphor == p ? Colors.white : _kFg,
+                    ),
+                  ),
+                  selected: crt.phosphor == p,
+                  selectedColor: _kAccent,
+                  backgroundColor: const Color(0xFF1C1C1C),
+                  side: const BorderSide(color: _kDivider),
+                  onSelected: (_) => _applyCrt(crt.copyWith(phosphor: p)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _sectionTitle('Intensity'),
+          _slider(
+            label: 'Scanlines',
+            hint: 'Horizontal dark lines',
+            value: crt.scanlineOpacity,
+            min: 0,
+            max: 0.6,
+            divisions: 12,
+            display: '${(crt.scanlineOpacity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(scanlineOpacity: v)),
+          ),
+          _slider(
+            label: 'Glow',
+            hint: 'Phosphor electron-beam spread',
+            value: crt.glowIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.glowIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(glowIntensity: v)),
+          ),
+          _slider(
+            label: 'Flicker',
+            hint: 'Brightness oscillation',
+            value: crt.flickerIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.flickerIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(flickerIntensity: v)),
+          ),
+          _slider(
+            label: 'Noise',
+            hint: 'Static grain',
+            value: crt.noiseIntensity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.noiseIntensity * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(noiseIntensity: v)),
+          ),
+          const SizedBox(height: 12),
+          _sectionTitle('Geometry'),
+          _slider(
+            label: 'Vignette',
+            hint: 'Edge darkening',
+            value: crt.vignette,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.vignette * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(vignette: v)),
+          ),
+          _slider(
+            label: 'Curvature',
+            hint: 'Rounded screen corners',
+            value: crt.curvature,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            display: '${(crt.curvature * 100).round()}%',
+            onChanged: (v) => _applyCrt(crt.copyWith(curvature: v)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Blink helpers ───────────────────────────────────────────────────────────
 
   int get _blinkSpeedIndex => switch (_s.cursorBlinkPeriodMs) {
         <= 400 => 0,
@@ -201,24 +344,23 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         _ => 530,
       };
 
+  // ── Shared section widget helpers ───────────────────────────────────────────
+
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8, top: 4),
         child: Text(
-          text,
+          text.toUpperCase(),
           style: const TextStyle(
             color: _kFgMuted,
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
+            letterSpacing: 0.8,
           ),
         ),
       );
 
   Widget _presetChips() {
-    final ids = [
-      ...TerminalThemePresets.all.keys,
-      'custom',
-    ];
+    final ids = [...TerminalThemePresets.all.keys, 'custom'];
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -278,9 +420,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     if (!ImageFilePicker.isSupported) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Image picker is only available on macOS.'),
-        ),
+        const SnackBar(content: Text('Image picker is only available on macOS.')),
       );
       return;
     }
@@ -291,9 +431,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final id = await WallpaperStorage.importFrom(path);
     if (id == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not import image.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Could not import image.')));
       return;
     }
     if (!mounted) return;
@@ -360,7 +499,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
         ),
         if (file != null) ...[
           _slider(
-            label: 'Wallpaper',
+            label: 'Opacity',
             hint: 'Image visibility',
             value: _s.wallpaperOpacity,
             min: 0.1,
@@ -380,8 +519,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             onChanged: (v) => _apply(_s.copyWith(wallpaperBlur: v)),
           ),
           _slider(
-            label: 'Background',
-            hint: 'Terminal fill over the image',
+            label: 'Background fill',
+            hint: 'Terminal color fill over the image',
             value: _s.backgroundOpacity,
             min: 0.5,
             max: 1.0,
@@ -404,8 +543,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       decoration: const InputDecoration(
         isDense: true,
         contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+        enabledBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
+        focusedBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
       ),
       items: [
         for (final f in TerminalSettings.fontOptions)
@@ -443,10 +584,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _controlLabel(
-          'Weight',
-          hint: 'Thickness of regular text (bold output is unchanged)',
+          'Thickness of regular text',
+          hint: 'Bold output is not affected',
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 6,
           children: [
@@ -499,113 +640,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     );
   }
 
-  void _applyCrt(CrtSettings crt) => _apply(_s.copyWith(crt: crt));
-
-  Widget _crtSection() {
-    final crt = _s.crt;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Enable CRT mode',
-              style: TextStyle(color: _kFg, fontSize: 13)),
-          subtitle: const Text('Scanlines · glow · vignette · flicker',
-              style: TextStyle(color: _kFgMuted, fontSize: 11)),
-          value: crt.enabled,
-          activeTrackColor: _kAccent,
-          onChanged: (v) => _applyCrt(crt.copyWith(enabled: v)),
-        ),
-        if (crt.enabled) ...[
-          _controlLabel('Phosphor',
-              hint: 'Recommended: pair with Pip-Boy or Amber color scheme'),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final p in CrtPhosphor.values)
-                ChoiceChip(
-                  label: Text(
-                    p.label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: crt.phosphor == p ? Colors.white : _kFg,
-                    ),
-                  ),
-                  selected: crt.phosphor == p,
-                  selectedColor: _kAccent,
-                  backgroundColor: const Color(0xFF1C1C1C),
-                  side: const BorderSide(color: _kDivider),
-                  onSelected: (_) => _applyCrt(crt.copyWith(phosphor: p)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          _slider(
-            label: 'Scanlines',
-            hint: 'Horizontal dark lines',
-            value: crt.scanlineOpacity,
-            min: 0,
-            max: 0.6,
-            divisions: 12,
-            display: '${(crt.scanlineOpacity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(scanlineOpacity: v)),
-          ),
-          _slider(
-            label: 'Glow',
-            hint: 'Phosphor electron-beam spread',
-            value: crt.glowIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.glowIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(glowIntensity: v)),
-          ),
-          _slider(
-            label: 'Vignette',
-            hint: 'Edge darkening',
-            value: crt.vignette,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.vignette * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(vignette: v)),
-          ),
-          _slider(
-            label: 'Curvature',
-            hint: 'Rounded screen corners',
-            value: crt.curvature,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.curvature * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(curvature: v)),
-          ),
-          _slider(
-            label: 'Flicker',
-            hint: 'Brightness oscillation',
-            value: crt.flickerIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.flickerIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(flickerIntensity: v)),
-          ),
-          _slider(
-            label: 'Noise',
-            hint: 'Static grain',
-            value: crt.noiseIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.noiseIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(noiseIntensity: v)),
-          ),
-        ],
-      ],
-    );
-  }
-
   Widget _slider({
     required String label,
     String? hint,
@@ -615,6 +649,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     required int divisions,
     required String display,
     required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -642,12 +677,15 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             max: max,
             divisions: divisions,
             onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
           ),
         ),
       ],
     );
   }
 }
+
+// ── Color picker dialog ──────────────────────────────────────────────────────
 
 class _ColorPickerDialog extends StatefulWidget {
   const _ColorPickerDialog({required this.initial});
