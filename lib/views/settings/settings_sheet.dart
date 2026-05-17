@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
+import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
 import '../../models/crt_settings.dart';
+import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
 import '../../services/image_file_picker.dart';
@@ -20,10 +22,16 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.settings,
     required this.onChanged,
+    this.savedHosts = const [],
+    this.onSaveHost,
+    this.onDeleteHost,
   });
 
   final TerminalSettings settings;
   final ValueChanged<TerminalSettings> onChanged;
+  final List<SshHost> savedHosts;
+  final void Function(SshHost? original, SshHost updated)? onSaveHost;
+  final ValueChanged<SshHost>? onDeleteHost;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -38,7 +46,7 @@ class _SettingsPageState extends State<SettingsPage>
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -93,6 +101,7 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'Font'),
               Tab(text: 'Cursor'),
               Tab(text: 'Effects'),
+              Tab(text: 'SSH'),
             ],
           ),
           Expanded(
@@ -103,6 +112,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildFontTab(),
                 _buildCursorTab(),
                 _buildEffectsTab(),
+                _buildSshTab(),
               ],
             ),
           ),
@@ -343,6 +353,120 @@ class _SettingsPageState extends State<SettingsPage>
         2 => 800,
         _ => 530,
       };
+
+  // ── SSH tab ─────────────────────────────────────────────────────────────────
+
+  Widget _buildSshTab() {
+    final hosts = widget.savedHosts;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        Row(
+          children: [
+            Expanded(child: _sectionTitle('Saved Connections')),
+            TextButton.icon(
+              onPressed: _addHost,
+              icon: const Icon(Icons.add, size: 14, color: _kAccent),
+              label: const Text('Add', style: TextStyle(color: _kAccent, fontSize: 12)),
+            ),
+          ],
+        ),
+        if (hosts.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                'No saved SSH configurations',
+                style: TextStyle(color: _kFgMuted, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          for (final host in hosts) _buildHostTile(host),
+      ],
+    );
+  }
+
+  Widget _buildHostTile(SshHost host) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _kDivider),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        leading: const Icon(Icons.lock_outline, color: _kFgMuted, size: 18),
+        title: Text(
+          host.alias,
+          style: const TextStyle(color: _kFg, fontSize: 13),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          host.displayInfo,
+          style: const TextStyle(color: _kFgMuted, fontSize: 11),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
+              onPressed: () => _editHost(host),
+              tooltip: 'Edit',
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 15, color: _kFgMuted),
+              onPressed: () => _confirmDeleteHost(host),
+              tooltip: 'Delete',
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editHost(SshHost host) async {
+    final updated = await showEditHostDialog(context, host: host);
+    if (updated != null) widget.onSaveHost?.call(host, updated);
+  }
+
+  Future<void> _addHost() async {
+    final newHost = await showEditHostDialog(context);
+    if (newHost != null) widget.onSaveHost?.call(null, newHost);
+  }
+
+  Future<void> _confirmDeleteHost(SshHost host) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _kSheetBg,
+        title: const Text('Delete Configuration', style: TextStyle(color: _kFg, fontSize: 15)),
+        content: Text(
+          'Delete "${host.alias}"?',
+          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) widget.onDeleteHost?.call(host);
+  }
 
   // ── Shared section widget helpers ───────────────────────────────────────────
 

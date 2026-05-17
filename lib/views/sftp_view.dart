@@ -264,8 +264,8 @@ class _SftpViewState extends State<SftpView> {
                   ? Icons.view_agenda_outlined
                   : Icons.view_sidebar_outlined,
               tooltip: widget.panelPosition == SftpPanelPosition.right
-                  ? '移到下侧'
-                  : '移到右侧',
+                  ? 'Move to bottom'
+                  : 'Move to right',
               onTap: () {
                 final next = widget.panelPosition == SftpPanelPosition.right
                     ? SftpPanelPosition.bottom
@@ -297,7 +297,7 @@ class _SftpViewState extends State<SftpView> {
             ),
             _ToolBtn(
               icon: Icons.close,
-              tooltip: '隐藏 SFTP',
+              tooltip: 'Hide SFTP',
               onTap: widget.onClose,
             ),
           ],

@@ -16,7 +16,7 @@ Future<ConnectResult> connectSshHost(
 }) async {
   final user = host.user?.trim() ?? '';
   if (user.isEmpty) {
-    throw const FormatException('用户名不能为空');
+    throw const FormatException('Username cannot be empty');
   }
 
   SSHClient? jumpClient;
@@ -34,7 +34,7 @@ Future<ConnectResult> connectSshHost(
     } else if (jump.identityFile != null && jump.identityFile!.isNotEmpty) {
       final path = expandHomePath(jump.identityFile!);
       final f = File(path);
-      if (!await f.exists()) throw FormatException('跳板机密钥文件不存在:\n$path');
+      if (!await f.exists()) throw FormatException('Jump host key file not found:\n$path');
       jumpIdentities = SSHKeyPair.fromPem(await f.readAsString());
     } else {
       jumpIdentities = await _defaultIdentities();
@@ -59,7 +59,7 @@ Future<ConnectResult> connectSshHost(
     await jumpClient.authenticated
         .timeout(const Duration(seconds: 15), onTimeout: () {
       jumpClient!.close();
-      throw TimeoutException('跳板机认证超时');
+      throw TimeoutException('Jump host authentication timed out');
     });
   }
 
@@ -73,12 +73,12 @@ Future<ConnectResult> connectSshHost(
     final f = File(path);
     if (!await f.exists()) {
       jumpClient?.close();
-      throw FormatException('密钥文件不存在:\n$path');
+      throw FormatException('Key file not found:\n$path');
     }
     identities = SSHKeyPair.fromPem(await f.readAsString());
     if (identities.isEmpty) {
       jumpClient?.close();
-      throw FormatException('无法解析密钥:\n$path');
+      throw FormatException('Cannot parse key:\n$path');
     }
   } else {
     identities = await _defaultIdentities();
@@ -90,7 +90,7 @@ Future<ConnectResult> connectSshHost(
           .forwardLocal(host.hostname, host.port)
           .timeout(const Duration(seconds: 10), onTimeout: () {
           jumpClient!.close();
-          throw TimeoutException('跳板机隧道建立超时');
+          throw TimeoutException('Jump host tunnel timed out');
         })
       : await NoDelaySocket.connect(
           host.hostname,
@@ -161,8 +161,8 @@ Future<ConnectResult> connectSshParams({
   final host = hostname.trim();
   final user = username.trim();
 
-  if (host.isEmpty) throw const FormatException('请输入 IP 或主机名');
-  if (user.isEmpty) throw const FormatException('用户名不能为空');
+  if (host.isEmpty) throw const FormatException('Enter IP or hostname');
+  if (user.isEmpty) throw const FormatException('Username cannot be empty');
 
   final pwd = password?.trim();
   final keyPath = identityFile?.trim();

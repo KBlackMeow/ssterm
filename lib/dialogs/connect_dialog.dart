@@ -21,6 +21,17 @@ Future<ConnectResult?> showConnectDialog(
   );
 }
 
+Future<SshHost?> showEditHostDialog(
+  BuildContext context, {
+  SshHost? host,
+}) {
+  return showDialog<SshHost>(
+    context: context,
+    barrierColor: Colors.black54,
+    builder: (ctx) => _ConnectDialog(initialHost: host, editOnly: true),
+  );
+}
+
 // ─── Colors ─────────────────────────────────────────────────────────────────
 const _kBg = Color(0xFF2B2B2B);
 const _kField = Color(0xFF1C1C1C);
@@ -34,8 +45,9 @@ const _kTitle = Color(0xFFD4D4D4);
 
 // ─── Main dialog ─────────────────────────────────────────────────────────────
 class _ConnectDialog extends StatefulWidget {
-  const _ConnectDialog({this.initialHost});
+  const _ConnectDialog({this.initialHost, this.editOnly = false});
   final SshHost? initialHost;
+  final bool editOnly;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -154,21 +166,65 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     );
   }
 
+  void _save() {
+    final host = _hostCtrl.text.trim();
+    final user = _userCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 22;
+
+    if (host.isEmpty) {
+      setState(() => _error = 'Enter IP or hostname');
+      return;
+    }
+    if (user.isEmpty) {
+      setState(() => _error = 'Username is required');
+      return;
+    }
+    if (port < 1 || port > 65535) {
+      setState(() => _error = 'Invalid port (1–65535)');
+      return;
+    }
+
+    final alias = _nameCtrl.text.trim();
+    Navigator.of(context).pop(
+      SshHost(
+        alias: alias.isEmpty
+            ? '$user@$host${port != 22 ? ":$port" : ""}'
+            : alias,
+        hostname: host,
+        port: port,
+        user: user.isEmpty ? null : user,
+        password: _authMode == _AuthMode.password
+            ? (_passwordCtrl.text.isNotEmpty
+                ? _passwordCtrl.text
+                : widget.initialHost?.password)
+            : null,
+        identityFile: _authMode == _AuthMode.key
+            ? (_keyCtrl.text.trim().isEmpty ? null : _keyCtrl.text.trim())
+            : null,
+        forwardRules: List.of(_forwardRules),
+        jumpHost: _buildJumpHost(),
+        keepaliveInterval: _keepaliveInterval,
+        autoReconnect: _autoReconnect,
+        sessionLog: _sessionLog,
+      ),
+    );
+  }
+
   Future<void> _create() async {
     final host = _hostCtrl.text.trim();
     final user = _userCtrl.text.trim();
     final port = int.tryParse(_portCtrl.text.trim()) ?? 22;
 
     if (host.isEmpty) {
-      setState(() => _error = '请输入 IP 或主机名');
+      setState(() => _error = 'Enter IP or hostname');
       return;
     }
     if (user.isEmpty) {
-      setState(() => _error = '用户名为必填项');
+      setState(() => _error = 'Username is required');
       return;
     }
     if (port < 1 || port > 65535) {
-      setState(() => _error = '端口无效（1–65535）');
+      setState(() => _error = 'Invalid port (1–65535)');
       return;
     }
 
@@ -238,13 +294,13 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     if (s.contains('userauth') ||
         s.contains('authentication') ||
         s.contains('permission')) {
-      return '认证失败，请检查密码或密钥';
+      return 'Authentication failed, check password or key';
     }
-    if (s.contains('refused')) return '连接被拒绝，请检查 IP 和端口';
-    if (s.contains('timeout') || s.contains('timedout')) return '连接超时';
-    if (s.contains('hostkey') || s.contains('host key')) return '主机密钥验证失败';
+    if (s.contains('refused')) return 'Connection refused, check IP and port';
+    if (s.contains('timeout') || s.contains('timedout')) return 'Connection timed out';
+    if (s.contains('hostkey') || s.contains('host key')) return 'Host key verification failed';
     if (s.contains('nodename') || s.contains('socketexception')) {
-      return '无法解析主机';
+      return 'Cannot resolve host';
     }
     return e.toString().replaceAll('Exception: ', '').replaceAll('Error: ', '');
   }
@@ -275,7 +331,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                           ),
                           SizedBox(height: 16),
                           Text(
-                            '连接中…',
+                            'Connecting…',
                             style: TextStyle(color: _kLabel, fontSize: 13),
                           ),
                         ],
@@ -300,9 +356,11 @@ class _ConnectDialogState extends State<_ConnectDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              '新建 SSH',
-              style: TextStyle(
+            Text(
+              widget.editOnly
+                  ? (widget.initialHost != null ? 'Edit SSH Config' : 'Add SSH Config')
+                  : 'New SSH',
+              style: const TextStyle(
                 color: _kTitle,
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -311,16 +369,16 @@ class _ConnectDialogState extends State<_ConnectDialog> {
             const SizedBox(height: 20),
 
             // ── Basic ──────────────────────────────────────────────────────
-            _Field(label: '主机名称', ctrl: _nameCtrl, hint: '留空则使用 IP:端口'),
+            _Field(label: 'Name', ctrl: _nameCtrl, hint: 'Leave empty to use IP:port'),
             const SizedBox(height: 10),
             Row(
               children: [
-                Expanded(child: _Field(label: 'IP / 主机名', ctrl: _hostCtrl)),
+                Expanded(child: _Field(label: 'IP / Hostname', ctrl: _hostCtrl)),
                 const SizedBox(width: 8),
                 SizedBox(
                   width: 72,
                   child: _Field(
-                    label: '端口',
+                    label: 'Port',
                     ctrl: _portCtrl,
                     inputType: TextInputType.number,
                   ),
@@ -328,29 +386,29 @@ class _ConnectDialogState extends State<_ConnectDialog> {
               ],
             ),
             const SizedBox(height: 10),
-            _Field(label: '用户名 *', ctrl: _userCtrl, hint: '必填'),
+            _Field(label: 'Username *', ctrl: _userCtrl, hint: 'Required'),
             const SizedBox(height: 10),
             _buildAuthToggle(_authMode, (m) => setState(() => _authMode = m)),
             const SizedBox(height: 10),
             if (_authMode == _AuthMode.password)
               _Field(
-                label: '密码',
+                label: 'Password',
                 ctrl: _passwordCtrl,
-                hint: '留空则尝试 ~/.ssh 默认密钥',
+                hint: 'Leave empty to use ~/.ssh default key',
                 obscure: true,
               )
             else
               _Field(
-                label: '私钥路径',
+                label: 'Identity file',
                 ctrl: _keyCtrl,
-                hint: '例如 ~/.ssh/id_ed25519',
+                hint: 'e.g. ~/.ssh/id_ed25519',
               ),
 
             const SizedBox(height: 16),
 
             // ── Jump Host ─────────────────────────────────────────────────
             _Section(
-              title: '跳板机 (ProxyJump)',
+              title: 'Jump Host (ProxyJump)',
               enabled: _jumpEnabled,
               onToggle: (v) => setState(() => _jumpEnabled = v),
               child: _buildJumpFields(),
@@ -386,13 +444,13 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _connecting ? null : _create,
+              onPressed: _connecting ? null : (widget.editOnly ? _save : _create),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _kAccent,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              child: const Text('创建'),
+              child: Text(widget.editOnly ? 'Save' : 'Connect'),
             ),
           ],
         ),
@@ -407,13 +465,13 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         Row(
           children: [
             Expanded(
-              child: _Field(label: 'IP / 主机名', ctrl: _jumpHostCtrl),
+              child: _Field(label: 'IP / Hostname', ctrl: _jumpHostCtrl),
             ),
             const SizedBox(width: 8),
             SizedBox(
               width: 72,
               child: _Field(
-                label: '端口',
+                label: 'Port',
                 ctrl: _jumpPortCtrl,
                 inputType: TextInputType.number,
               ),
@@ -421,7 +479,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
           ],
         ),
         const SizedBox(height: 8),
-        _Field(label: '用户名', ctrl: _jumpUserCtrl),
+        _Field(label: 'Username', ctrl: _jumpUserCtrl),
         const SizedBox(height: 8),
         _buildAuthToggle(
           _jumpAuthMode,
@@ -429,9 +487,9 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         ),
         const SizedBox(height: 8),
         if (_jumpAuthMode == _AuthMode.password)
-          _Field(label: '密码', ctrl: _jumpPasswordCtrl, obscure: true)
+          _Field(label: 'Password', ctrl: _jumpPasswordCtrl, obscure: true)
         else
-          _Field(label: '私钥路径', ctrl: _jumpKeyCtrl),
+          _Field(label: 'Identity file', ctrl: _jumpKeyCtrl),
       ],
     );
   }
@@ -441,11 +499,11 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       segments: const [
         ButtonSegment(
           value: _AuthMode.password,
-          label: Text('密码', style: TextStyle(fontSize: 12)),
+          label: Text('Password', style: TextStyle(fontSize: 12)),
         ),
         ButtonSegment(
           value: _AuthMode.key,
-          label: Text('密钥', style: TextStyle(fontSize: 12)),
+          label: Text('Key file', style: TextStyle(fontSize: 12)),
         ),
       ],
       selected: {current},
@@ -592,8 +650,8 @@ class _ForwardSectionState extends State<_ForwardSection> {
                   Expanded(
                     child: Text(
                       count == 0
-                          ? '端口转发'
-                          : '端口转发 ($count 条规则)',
+                          ? 'Port forwarding'
+                          : 'Port forwarding ($count rules)',
                       style: const TextStyle(color: _kFg, fontSize: 12),
                     ),
                   ),
@@ -624,7 +682,7 @@ class _ForwardSectionState extends State<_ForwardSection> {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              '暂无规则',
+              'No rules',
               style: TextStyle(color: _kLabel, fontSize: 12),
               textAlign: TextAlign.center,
             ),
@@ -648,7 +706,7 @@ class _ForwardSectionState extends State<_ForwardSection> {
         OutlinedButton.icon(
           onPressed: _addRule,
           icon: const Icon(Icons.add, size: 13),
-          label: const Text('添加规则', style: TextStyle(fontSize: 12)),
+          label: const Text('Add rule', style: TextStyle(fontSize: 12)),
           style: OutlinedButton.styleFrom(
             foregroundColor: _kLabel,
             side: const BorderSide(color: _kBorder),
@@ -712,7 +770,7 @@ class _RuleRow extends StatelessWidget {
             color: _kLabel,
             visualDensity: VisualDensity.compact,
             onPressed: onDelete,
-            tooltip: '删除',
+            tooltip: 'Delete',
           ),
         ],
       ),
@@ -745,24 +803,24 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
   void _confirm() {
     final lp = int.tryParse(_localPortCtrl.text.trim()) ?? 0;
     if (lp < 1 || lp > 65535) {
-      setState(() => _error = '本地端口无效');
+      setState(() => _error = 'Invalid local port');
       return;
     }
     if (_type == ForwardType.local) {
       if (_remoteHostCtrl.text.trim().isEmpty) {
-        setState(() => _error = '请输入远端主机');
+        setState(() => _error = 'Enter remote host');
         return;
       }
       final rp = int.tryParse(_remotePortCtrl.text.trim()) ?? 0;
       if (rp < 1 || rp > 65535) {
-        setState(() => _error = '远端端口无效');
+        setState(() => _error = 'Invalid remote port');
         return;
       }
     }
     if (_type == ForwardType.remote) {
       final rp = int.tryParse(_remotePortCtrl.text.trim()) ?? 0;
       if (rp < 1 || rp > 65535) {
-        setState(() => _error = '服务器端口无效');
+        setState(() => _error = 'Invalid server port');
         return;
       }
     }
@@ -791,7 +849,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                '添加转发规则',
+                'Add Forward Rule',
                 style: TextStyle(color: _kTitle, fontSize: 14, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 16),
@@ -801,21 +859,21 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
                 value: _type,
                 dropdownColor: _kBg,
                 style: const TextStyle(color: _kFg, fontSize: 13),
-                decoration: _inputDecoration('类型'),
+                decoration: _inputDecoration('Type'),
                 items: const [
                   DropdownMenuItem(
                     value: ForwardType.local,
-                    child: Text('L — 本地转发',
+                    child: Text('L — Local forward',
                         overflow: TextOverflow.ellipsis),
                   ),
                   DropdownMenuItem(
                     value: ForwardType.remote,
-                    child: Text('R — 远端转发',
+                    child: Text('R — Remote forward',
                         overflow: TextOverflow.ellipsis),
                   ),
                   DropdownMenuItem(
                     value: ForwardType.dynamic_,
-                    child: Text('D — 动态 SOCKS5',
+                    child: Text('D — Dynamic SOCKS5',
                         overflow: TextOverflow.ellipsis),
                   ),
                 ],
@@ -826,11 +884,11 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
                 child: Text(
                   switch (_type) {
                     ForwardType.local =>
-                      'localhost:本地端口  →  服务器  →  远端主机:端口',
+                      'localhost:local-port  →  server  →  remote-host:port',
                     ForwardType.remote =>
-                      '服务器监听端口  →  SSH隧道  →  localhost:本地端口',
+                      'server:port  →  SSH tunnel  →  localhost:local-port',
                     ForwardType.dynamic_ =>
-                      'SOCKS5 代理，所有流量经服务器出口',
+                      'SOCKS5 proxy, all traffic routed via server',
                   },
                   style: const TextStyle(
                       color: Color(0xFF6E6E6E), fontSize: 11),
@@ -839,21 +897,21 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
               const SizedBox(height: 6),
               _Field(
                 label: _type == ForwardType.dynamic_
-                    ? '本地 SOCKS5 端口'
-                    : '本地端口',
+                    ? 'Local SOCKS5 port'
+                    : 'Local port',
                 ctrl: _localPortCtrl,
                 inputType: TextInputType.number,
               ),
               if (_type == ForwardType.local) ...[
                 const SizedBox(height: 10),
                 _Field(
-                  label: '远端主机',
+                  label: 'Remote host',
                   ctrl: _remoteHostCtrl,
-                  hint: '例如 localhost 或 db.internal',
+                  hint: 'e.g. localhost or db.internal',
                 ),
                 const SizedBox(height: 10),
                 _Field(
-                  label: '远端端口',
+                  label: 'Remote port',
                   ctrl: _remotePortCtrl,
                   inputType: TextInputType.number,
                 ),
@@ -861,7 +919,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
               if (_type == ForwardType.remote) ...[
                 const SizedBox(height: 10),
                 _Field(
-                  label: '服务器监听端口',
+                  label: 'Server listen port',
                   ctrl: _remotePortCtrl,
                   inputType: TextInputType.number,
                 ),
@@ -876,7 +934,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('取消', style: TextStyle(color: _kLabel)),
+                    child: const Text('Cancel', style: TextStyle(color: _kLabel)),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
@@ -885,7 +943,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
                       backgroundColor: _kAccent,
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text('确定'),
+                    child: const Text('Confirm'),
                   ),
                 ],
               ),
@@ -943,7 +1001,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      '高级',
+                      'Advanced',
                       style: TextStyle(color: _kFg, fontSize: 12),
                     ),
                   ),
@@ -967,7 +1025,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                     children: [
                       const Expanded(
                         child: Text(
-                          'Keepalive 间隔',
+                          'Keepalive interval',
                           style: TextStyle(color: _kLabel, fontSize: 12),
                         ),
                       ),
@@ -977,10 +1035,10 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                         style: const TextStyle(color: _kFg, fontSize: 12),
                         underline: const SizedBox.shrink(),
                         items: const [
-                          DropdownMenuItem(value: 0, child: Text('禁用')),
-                          DropdownMenuItem(value: 15, child: Text('15 秒')),
-                          DropdownMenuItem(value: 30, child: Text('30 秒')),
-                          DropdownMenuItem(value: 60, child: Text('60 秒')),
+                          DropdownMenuItem(value: 0, child: Text('Disabled')),
+                          DropdownMenuItem(value: 15, child: Text('15 s')),
+                          DropdownMenuItem(value: 30, child: Text('30 s')),
+                          DropdownMenuItem(value: 60, child: Text('60 s')),
                         ],
                         onChanged: (v) => widget.onKeepaliveChanged(v ?? 0),
                       ),
@@ -991,7 +1049,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                     children: [
                       const Expanded(
                         child: Text(
-                          '断线自动重连',
+                          'Auto-reconnect',
                           style: TextStyle(color: _kLabel, fontSize: 12),
                         ),
                       ),
@@ -1009,7 +1067,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                     children: [
                       const Expanded(
                         child: Text(
-                          '会话日志',
+                          'Session log',
                           style: TextStyle(color: _kLabel, fontSize: 12),
                         ),
                       ),
@@ -1026,7 +1084,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        '日志保存至 ~/.ssterm/logs/',
+                        'Saved to ~/.ssterm/logs/',
                         style: const TextStyle(
                           color: _kLabel,
                           fontSize: 11,

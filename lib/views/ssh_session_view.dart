@@ -22,6 +22,7 @@ class SshSessionView extends StatefulWidget {
     required this.sftpVisible,
     required this.onToggleSftp,
     this.terminalViewKey,
+    this.contextMenu,
   });
 
   final Terminal terminal;
@@ -34,6 +35,7 @@ class SshSessionView extends StatefulWidget {
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
   final GlobalKey<TerminalViewState>? terminalViewKey;
+  final TerminalContextMenuConfig? contextMenu;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -80,6 +82,7 @@ class _SshSessionViewState extends State<SshSessionView> {
       terminal: widget.terminal,
       settings: widget.terminalSettings,
       viewKey: widget.terminalViewKey,
+      contextMenu: widget.contextMenu,
     );
 
     if (!widget.sftpVisible) {

@@ -31,7 +31,7 @@ Future<bool> showHostKeyConfirmDialog(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                '验证主机密钥',
+                'Verify Host Key',
                 style: TextStyle(
                   color: Color(0xFFD4D4D4),
                   fontSize: 15,
@@ -40,9 +40,9 @@ Future<bool> showHostKeyConfirmDialog(
               ),
               const SizedBox(height: 12),
               Text(
-                '无法验证 $host 的真实性。\n'
-                '这是首次连接该主机（未在 ~/.ssh/known_hosts 或 '
-                '~/.ssterm/known_hosts.json 中找到）。请确认指纹后继续。',
+                'The authenticity of $host cannot be verified.\n'
+                'This host was not found in ~/.ssh/known_hosts or '
+                '~/.ssterm/known_hosts.json. Confirm the fingerprint before connecting.',
                 style: const TextStyle(
                   color: Color(0xFF8E8E8E),
                   fontSize: 12,
@@ -57,7 +57,7 @@ Future<bool> showHostKeyConfirmDialog(
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('取消',
+                    child: const Text('Cancel',
                         style: TextStyle(color: Color(0xFF8E8E8E))),
                   ),
                   const SizedBox(width: 8),
@@ -67,13 +67,13 @@ Future<bool> showHostKeyConfirmDialog(
                       backgroundColor: const Color(0xFF2472C8),
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text('信任并连接'),
+                    child: const Text('Trust and Connect'),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               const Text(
-                '信任后将保存至 ~/.ssterm/known_hosts.json',
+                'Fingerprint will be saved to ~/.ssterm/known_hosts.json',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
               ),
@@ -113,7 +113,7 @@ Future<void> showHostKeyChangedDialog(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                '主机密钥已变更',
+                'Host Key Changed',
                 style: TextStyle(
                   color: Color(0xFFFF6E67),
                   fontSize: 15,
@@ -122,10 +122,10 @@ Future<void> showHostKeyChangedDialog(
               ),
               const SizedBox(height: 12),
               Text(
-                '警告：$host 的远程主机密钥已变更，可能存在中间人攻击。\n'
-                '连接已中止。若你确认服务器已更换密钥，请从 '
-                '~/.ssh/known_hosts 或 ~/.ssterm/known_hosts.json '
-                '中删除该主机对应条目后重试。',
+                'WARNING: The remote host key for $host has changed. '
+                'This may indicate a man-in-the-middle attack.\n'
+                'Connection aborted. If you are sure the server key was replaced, '
+                'remove the entry from ~/.ssh/known_hosts or ~/.ssterm/known_hosts.json and retry.',
                 style: const TextStyle(
                   color: Color(0xFF8E8E8E),
                   fontSize: 12,
@@ -133,7 +133,7 @@ Future<void> showHostKeyChangedDialog(
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('先前记录的指纹',
+              const Text('Known fingerprint',
                   style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11)),
               const SizedBox(height: 6),
               _FingerprintBlock(
@@ -141,7 +141,7 @@ Future<void> showHostKeyChangedDialog(
                 fingerprint: oldFp,
               ),
               const SizedBox(height: 12),
-              const Text('当前收到的指纹',
+              const Text('Received fingerprint',
                   style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11)),
               const SizedBox(height: 6),
               _FingerprintBlock(keyType: keyType, fingerprint: newFp),
@@ -154,7 +154,7 @@ Future<void> showHostKeyChangedDialog(
                     backgroundColor: const Color(0xFF3A3A3A),
                     foregroundColor: Colors.white,
                   ),
-                  child: const Text('关闭'),
+                  child: const Text('Close'),
                 ),
               ),
             ],

@@ -100,9 +100,7 @@ class SavedHostsStore {
     }
 
     if (host.password != null && host.password!.isNotEmpty) {
-      try {
-        map['passwordEnc'] = await CredentialCrypto.encrypt(host.password!);
-      } catch (_) {}
+      map['passwordEnc'] = await CredentialCrypto.encrypt(host.password!);
     }
     return map;
   }

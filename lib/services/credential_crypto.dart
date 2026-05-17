@@ -2,39 +2,25 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pointycastle/export.dart';
 
-/// Encrypts credentials at rest; master key lives in the OS keychain.
+/// AES-256-GCM password obfuscation with a hardcoded key.
+/// Protects against casual plaintext inspection; not a secret key system.
 class CredentialCrypto {
-  static const _masterKeyId = 'ssterm_credential_master_key_v1';
-  static const _storage = FlutterSecureStorage();
-
-  static Future<Uint8List> _masterKeyBytes() async {
-    var stored = await _storage.read(key: _masterKeyId);
-    if (stored == null) {
-      final key = _randomBytes(32);
-      await _storage.write(key: _masterKeyId, value: base64Encode(key));
-      return key;
-    }
-    return Uint8List.fromList(base64Decode(stored));
-  }
+  // 32-byte hardcoded key: "ssterm-password-encryption-keyv1"
+  static final _key = Uint8List.fromList([
+    0x73, 0x73, 0x74, 0x65, 0x72, 0x6d, 0x2d, 0x70,
+    0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x2d,
+    0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69,
+    0x6f, 0x6e, 0x2d, 0x6b, 0x65, 0x79, 0x76, 0x31,
+  ]);
 
   static Future<String> encrypt(String plaintext) async {
-    final key = await _masterKeyBytes();
     final iv = _randomBytes(12);
     final plain = Uint8List.fromList(utf8.encode(plaintext));
 
     final cipher = GCMBlockCipher(AESEngine())
-      ..init(
-        true,
-        AEADParameters(
-          KeyParameter(key),
-          128,
-          iv,
-          Uint8List(0),
-        ),
-      );
+      ..init(true, AEADParameters(KeyParameter(_key), 128, iv, Uint8List(0)));
 
     final out = Uint8List(plain.length + 16);
     final len = cipher.processBytes(plain, 0, plain.length, out, 0);
@@ -47,21 +33,12 @@ class CredentialCrypto {
     final sep = payload.indexOf(':');
     if (sep <= 0) return null;
     try {
-      final key = await _masterKeyBytes();
       final iv = Uint8List.fromList(base64Decode(payload.substring(0, sep)));
       final cipherText =
           Uint8List.fromList(base64Decode(payload.substring(sep + 1)));
 
       final cipher = GCMBlockCipher(AESEngine())
-        ..init(
-          false,
-          AEADParameters(
-            KeyParameter(key),
-            128,
-            iv,
-            Uint8List(0),
-          ),
-        );
+        ..init(false, AEADParameters(KeyParameter(_key), 128, iv, Uint8List(0)));
 
       final out = Uint8List(cipherText.length);
       var offset = cipher.processBytes(cipherText, 0, cipherText.length, out, 0);

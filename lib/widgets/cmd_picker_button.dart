@@ -44,7 +44,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
         enabled: false,
         height: 28,
         child: Text(
-          '插入命令',
+          'Insert command',
           style: TextStyle(
             color: Color(0xFF6E6E6E),
             fontSize: 10,
@@ -102,7 +102,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
   Widget build(BuildContext context) {
     final enabled = widget.onInsert != null;
     return Tooltip(
-      message: '插入命令',
+      message: 'Insert command',
       child: GestureDetector(
         onTap: enabled ? () => _showMenu(context) : null,
         child: Container(

@@ -24,7 +24,7 @@ import 'services/ssh_connection.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/split_view.dart';
-import 'widgets/terminal_surface.dart';
+import 'widgets/terminal_surface.dart' show TerminalSurface, TerminalContextMenuConfig;
 import 'views/ssh_session_view.dart';
 
 void main() {
@@ -133,6 +133,9 @@ class _Tab {
   final splitViewKey = GlobalKey<TerminalViewState>();
   Axis splitAxis = Axis.horizontal;
 
+  final terminalController = TerminalController();
+  final splitTerminalController = TerminalController();
+
   bool get isSplit => splitTerminal != null;
 
   _Tab._({
@@ -198,6 +201,8 @@ class _Tab {
     sshSession?.close();
     sshClient?.close();
     jumpClient?.close();
+    terminalController.dispose();
+    splitTerminalController.dispose();
   }
 
   IconData get icon => switch (kind) {
@@ -297,6 +302,24 @@ class _TerminalHomeState extends State<TerminalHome> {
       await SavedHostsStore.upsert(profile);
     } catch (_) {}
     await _loadSshHosts();
+  }
+
+  Future<void> _saveSavedHost(SshHost? original, SshHost updated) async {
+    final hosts = await SavedHostsStore.load();
+    if (original != null) {
+      hosts.removeWhere((h) => h.profileKey == original.profileKey);
+    }
+    hosts.removeWhere((h) => h.profileKey == updated.profileKey);
+    hosts.add(updated);
+    await SavedHostsStore.save(hosts);
+    if (mounted) await _loadSshHosts();
+  }
+
+  Future<void> _deleteSavedHost(SshHost host) async {
+    final hosts = await SavedHostsStore.load();
+    hosts.removeWhere((h) => h.profileKey == host.profileKey);
+    await SavedHostsStore.save(hosts);
+    if (mounted) await _loadSshHosts();
   }
 
   Future<void> _connectSavedHost(SshHost host) async {
@@ -435,10 +458,10 @@ class _TerminalHomeState extends State<TerminalHome> {
     session.done.then((_) async {
       tab.keepaliveTimer?.cancel();
       tab.keepaliveTimer = null;
-      if (mounted) terminal.write('\r\n[SSH 连接已断开]\r\n');
+      if (mounted) terminal.write('\r\n[SSH connection closed]\r\n');
       if (!mounted || tab.manuallyDisconnected) return;
       if (r.profile.autoReconnect) {
-        terminal.write('[3 秒后自动重连…]\r\n');
+        terminal.write('[Reconnecting in 3 seconds…]\r\n');
         await Future<void>.delayed(const Duration(seconds: 3));
         if (!mounted || tab.manuallyDisconnected) return;
         _reconnectTab(tab);
@@ -503,7 +526,7 @@ class _TerminalHomeState extends State<TerminalHome> {
 
     session.done.then((_) {
       if (mounted) {
-        splitTerminal.write('\r\n[分屏 SSH 会话已关闭]\r\n');
+        splitTerminal.write('\r\n[Split SSH session closed]\r\n');
       }
     });
 
@@ -580,7 +603,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     final profile = tab.sshProfile;
     if (profile == null || !mounted) return;
 
-    tab.terminal?.write('[重新连接到 ${profile.alias}…]\r\n');
+    tab.terminal?.write('[Reconnecting to ${profile.alias}…]\r\n');
 
     try {
       final result = await connectSshHost(
@@ -664,10 +687,10 @@ class _TerminalHomeState extends State<TerminalHome> {
 
       session.done.then((_) async {
         tab.keepaliveTimer?.cancel();
-        if (mounted) tab.terminal?.write('\r\n[SSH 连接已断开]\r\n');
+        if (mounted) tab.terminal?.write('\r\n[SSH connection closed]\r\n');
         if (!mounted || tab.manuallyDisconnected) return;
         if (profile.autoReconnect) {
-          tab.terminal?.write('[3 秒后自动重连…]\r\n');
+          tab.terminal?.write('[Reconnecting in 3 seconds…]\r\n');
           await Future<void>.delayed(const Duration(seconds: 3));
           if (!mounted || tab.manuallyDisconnected) return;
           _reconnectTab(tab);
@@ -675,11 +698,11 @@ class _TerminalHomeState extends State<TerminalHome> {
       });
 
       scheduleRemoteCwdSetup(session);
-      tab.terminal?.write('[重连成功]\r\n');
+      tab.terminal?.write('[Reconnected]\r\n');
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
-        tab.terminal?.write('[重连失败: $e]\r\n');
+        tab.terminal?.write('[Reconnect failed: $e]\r\n');
         if (tab.sshProfile?.autoReconnect == true &&
             !tab.manuallyDisconnected) {
           await Future<void>.delayed(const Duration(seconds: 5));
@@ -745,12 +768,14 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   Widget _buildTerminalView(
     Terminal terminal,
-    GlobalKey<TerminalViewState> viewKey,
-  ) {
+    GlobalKey<TerminalViewState> viewKey, {
+    TerminalContextMenuConfig? contextMenu,
+  }) {
     return TerminalSurface(
       terminal: terminal,
       settings: _config.terminal,
       viewKey: viewKey,
+      contextMenu: contextMenu,
     );
   }
 
@@ -829,10 +854,10 @@ class _TerminalHomeState extends State<TerminalHome> {
     );
   }
 
-  Widget _buildPrimaryContent(_Tab tab) {
+  Widget _buildPrimaryContent(_Tab tab, {TerminalContextMenuConfig? contextMenu}) {
     return switch (tab.kind) {
       _TabKind.local =>
-        _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+        _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
       _TabKind.ssh => tab.sftp != null
           ? SshSessionView(
               terminal: tab.terminal!,
@@ -849,8 +874,9 @@ class _TerminalHomeState extends State<TerminalHome> {
               sftpVisible: tab.sftpPanelVisible,
               onToggleSftp: () =>
                   setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
+              contextMenu: contextMenu,
             )
-          : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+          : _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
       _TabKind.settings => SettingsPage(
           settings: _config.terminal,
           onChanged: (next) {
@@ -858,16 +884,43 @@ class _TerminalHomeState extends State<TerminalHome> {
             _config.save();
             _syncAllTerminals();
           },
+          savedHosts: _savedHosts,
+          onSaveHost: (original, updated) => _saveSavedHost(original, updated),
+          onDeleteHost: (host) => _deleteSavedHost(host),
         ),
     };
   }
 
   Widget _buildTabBody(_Tab tab) {
-    final primary = _buildPrimaryContent(tab);
+    final canSplit = tab.kind == _TabKind.local || tab.kind == _TabKind.ssh;
+
+    final primaryMenu = TerminalContextMenuConfig(
+      controller: tab.terminalController,
+      canSplit: canSplit,
+      isSplit: tab.isSplit,
+      onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+      onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+      onCloseSplit: _closeSplitCurrentTab,
+    );
+
+    final primary = _buildPrimaryContent(tab, contextMenu: primaryMenu);
 
     if (!tab.isSplit) return primary;
 
-    final secondary = _buildTerminalView(tab.splitTerminal!, tab.splitViewKey);
+    final splitMenu = TerminalContextMenuConfig(
+      controller: tab.splitTerminalController,
+      canSplit: canSplit,
+      isSplit: true,
+      onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+      onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+      onCloseSplit: _closeSplitCurrentTab,
+    );
+
+    final secondary = _buildTerminalView(
+      tab.splitTerminal!,
+      tab.splitViewKey,
+      contextMenu: splitMenu,
+    );
 
     return SplitView(
       primary: primary,
@@ -1034,7 +1087,7 @@ class _SftpButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: sftpVisible ? '隐藏 SFTP' : '显示 SFTP',
+      message: sftpVisible ? 'Hide SFTP' : 'Show SFTP',
       child: GestureDetector(
         onTap: onToggle,
         child: Container(
@@ -1096,7 +1149,7 @@ class _SplitButton extends StatelessWidget {
               const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
               const SizedBox(width: 8),
               Text(
-                '水平分屏',
+                'Split horizontal',
                 style: TextStyle(
                   color: isSplit ? const Color(0xFF2472C8) : _kFgActive,
                   fontSize: 13,
@@ -1113,7 +1166,7 @@ class _SplitButton extends StatelessWidget {
               const Icon(Icons.vertical_split, size: 13, color: _kFgInactive),
               const SizedBox(width: 8),
               const Text(
-                '垂直分屏',
+                'Split vertical',
                 style: TextStyle(color: _kFgActive, fontSize: 13),
               ),
             ],
@@ -1128,7 +1181,7 @@ class _SplitButton extends StatelessWidget {
                 Icon(Icons.close, size: 13, color: _kFgInactive),
                 SizedBox(width: 8),
                 Text(
-                  '关闭分屏',
+                  'Close split',
                   style: TextStyle(color: _kFgActive, fontSize: 13),
                 ),
               ],
@@ -1145,7 +1198,7 @@ class _SplitButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '分屏',
+      message: 'Split',
       child: GestureDetector(
         onTap: canSplit ? () => _showMenu(context) : null,
         child: Container(
@@ -1390,7 +1443,7 @@ class _PlusMenu extends StatelessWidget {
               Icon(Icons.terminal, size: 13, color: _kFgInactive),
               SizedBox(width: 8),
               Text(
-                '系统终端',
+                'Local terminal',
                 style: TextStyle(color: _kFgActive, fontSize: 13),
               ),
             ],
@@ -1398,7 +1451,7 @@ class _PlusMenu extends StatelessWidget {
         ),
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
-          _sectionHeader('已保存'),
+          _sectionHeader('Saved'),
           for (final h in savedHosts) _hostItem(h, 'saved'),
         ],
         if (configHosts.isNotEmpty) ...[
@@ -1415,7 +1468,7 @@ class _PlusMenu extends StatelessWidget {
               Icon(Icons.add, size: 13, color: _kFgInactive),
               SizedBox(width: 8),
               Text(
-                '新建 SSH…',
+                'New SSH…',
                 style: TextStyle(color: _kFgActive, fontSize: 13),
               ),
             ],
@@ -1452,7 +1505,7 @@ class _PlusMenu extends StatelessWidget {
     return GestureDetector(
       onTap: () => _showMenu(context),
       child: Tooltip(
-        message: '新建标签',
+        message: 'New tab',
         child: Container(
           width: 28,
           height: 28,
