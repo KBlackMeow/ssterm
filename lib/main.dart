@@ -263,7 +263,10 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   void _newLocalTab() {
     final terminal = Terminal(maxLines: 5000);
-    final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    final shell = Platform.isWindows
+        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
+        : (Platform.environment['SHELL'] ?? '/bin/zsh');
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final env = Map<String, String>.from(Platform.environment)
       ..['TERM'] = 'xterm-256color'
       ..['COLORTERM'] = 'truecolor'
@@ -271,10 +274,11 @@ class _TerminalHomeState extends State<TerminalHome> {
 
     final pty = Pty.start(
       shell,
+      arguments: Platform.isWindows ? [] : ['-l'],
       columns: 80,
       rows: 24,
       environment: env,
-      workingDirectory: Platform.environment['HOME'],
+      workingDirectory: home,
     );
     final pipe = _OutputPipe(terminal)..bind(pty.output);
 
@@ -567,7 +571,10 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   void _openLocalSplitPane(_Tab tab, Axis axis) {
     final splitTerminal = Terminal(maxLines: 5000);
-    final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    final shell = Platform.isWindows
+        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
+        : (Platform.environment['SHELL'] ?? '/bin/zsh');
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final env = Map<String, String>.from(Platform.environment)
       ..['TERM'] = 'xterm-256color'
       ..['COLORTERM'] = 'truecolor'
@@ -575,10 +582,11 @@ class _TerminalHomeState extends State<TerminalHome> {
 
     final pty = Pty.start(
       shell,
+      arguments: Platform.isWindows ? [] : ['-l'],
       columns: 80,
       rows: 24,
       environment: env,
-      workingDirectory: Platform.environment['HOME'],
+      workingDirectory: home,
     );
     final pipe = _OutputPipe(splitTerminal)..bind(pty.output);
 
