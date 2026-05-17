@@ -16,3 +16,5 @@ android/**/GeneratedPluginRegistrant.java
 
 # Local tooling
 .claude/
+dist/SSTerm-1.0.0.dmg
+dist
