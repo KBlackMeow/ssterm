@@ -535,9 +535,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     pipe.bind(session.stderr);
 
     session.done.then((_) {
-      if (mounted) {
-        splitTerminal.write('\r\n[Split SSH session closed]\r\n');
-      }
+      if (mounted) setState(() => tab.clearSplit());
     });
 
     // cd to same directory as primary pane
@@ -593,10 +591,8 @@ class _TerminalHomeState extends State<TerminalHome> {
     splitTerminal.onOutput = (d) => pty.write(utf8.encode(d));
     splitTerminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
 
-    pty.exitCode.then((code) {
-      if (mounted) {
-        splitTerminal.write('\r\n[Process exited with code $code]\r\n');
-      }
+    pty.exitCode.then((_) {
+      if (mounted) setState(() => tab.clearSplit());
     });
 
     setState(() {
