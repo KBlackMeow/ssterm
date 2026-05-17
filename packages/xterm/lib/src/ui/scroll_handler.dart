@@ -1,6 +1,9 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/core.dart';
-import 'package:xterm/src/ui/infinite_scroll_view.dart';
+import 'package:xterm/src/core/input/handler.dart';
 
 /// Handles scrolling gestures in the alternate screen buffer. In alternate
 /// screen buffer, the terminal don't have a scrollback buffer, instead, the
@@ -13,6 +16,7 @@ class TerminalScrollGestureHandler extends StatefulWidget {
     required this.getCellOffset,
     required this.getLineHeight,
     this.simulateScroll = true,
+    this.onInteraction,
     required this.child,
   });
 
@@ -29,6 +33,9 @@ class TerminalScrollGestureHandler extends StatefulWidget {
   /// is the default behavior of most terminals.
   final bool simulateScroll;
 
+  /// Called when the user starts interacting with the scroll view.
+  final VoidCallback? onInteraction;
+
   final Widget child;
 
   @override
@@ -42,9 +49,23 @@ class _TerminalScrollGestureHandlerState
   /// widget does nothing.
   var isAltBuffer = false;
 
+  /// Accumulated vertical scroll distance in pixels (trackpad / drag).
+  double _scrollPixelOffset = 0;
+
   /// The variable that tracks the line offset in last scroll event. Used to
   /// determine how many the scroll events should be sent to the terminal.
   var lastLineOffset = 0;
+
+  /// Accumulated line delta not yet written to the PTY.
+  /// Flushed by [_flushScrollDelta] via a short timer so that all
+  /// PointerScrollEvents that land within the debounce window are coalesced
+  /// into one PTY write.  Without this, each event triggers a separate write
+  /// and vim redraws between keys, leaving DECRC-restored underline attrs on
+  /// newly drawn lines — visible as stripe artifacts at small font sizes on
+  /// local (zero-latency) PTYs.  SSH avoids this naturally because network
+  /// buffering already batches the writes at the server side.
+  int _pendingLineDelta = 0;
+  Timer? _scrollFlushTimer;
 
   /// This variable tracks the last offset where the scroll gesture started.
   /// Used to calculate the cell offset of the terminal mouse event.
@@ -59,6 +80,7 @@ class _TerminalScrollGestureHandlerState
 
   @override
   void dispose() {
+    _scrollFlushTimer?.cancel();
     widget.terminal.removeListener(_onTerminalUpdated);
     super.dispose();
   }
@@ -73,8 +95,19 @@ class _TerminalScrollGestureHandlerState
     super.didUpdateWidget(oldWidget);
   }
 
+  void _resetScrollTracking() {
+    _scrollPixelOffset = 0;
+    lastLineOffset = 0;
+    _pendingLineDelta = 0;
+    _scrollFlushTimer?.cancel();
+    _scrollFlushTimer = null;
+  }
+
   void _onTerminalUpdated() {
     if (isAltBuffer != widget.terminal.isUsingAltBuffer) {
+      if (widget.terminal.isUsingAltBuffer) {
+        _resetScrollTracking();
+      }
       isAltBuffer = widget.terminal.isUsingAltBuffer;
       setState(() {});
     }
@@ -83,32 +116,83 @@ class _TerminalScrollGestureHandlerState
   /// Send a single scroll event to the terminal. If [simulateScroll] is true,
   /// then if the application doesn't recognize mouse wheel events, this method
   /// will simulate scroll events by sending up/down arrow keys.
-  void _sendScrollEvent(bool up) {
+  void _applyLineDelta(int delta) {
+    if (delta == 0) return;
+
+    widget.onInteraction?.call();
+
+    final up = delta < 0;
+    final count = delta.abs();
     final position = widget.getCellOffset(lastPointerPosition);
 
-    final handled = widget.terminal.mouseInput(
-      up ? TerminalMouseButton.wheelUp : TerminalMouseButton.wheelDown,
-      TerminalMouseButtonState.down,
-      position,
-    );
+    var mouseHandled = false;
+    for (var i = 0; i < count; i++) {
+      if (widget.terminal.mouseInput(
+        up ? TerminalMouseButton.wheelUp : TerminalMouseButton.wheelDown,
+        TerminalMouseButtonState.down,
+        position,
+      )) {
+        mouseHandled = true;
+      }
+    }
 
-    if (!handled && widget.simulateScroll) {
-      widget.terminal.keyInput(
-        up ? TerminalKey.arrowUp : TerminalKey.arrowDown,
+    if (mouseHandled || !widget.simulateScroll) {
+      return;
+    }
+
+    // Coalesce arrow keys into one PTY write. Sending them separately (common
+    // on local PTY with fast trackpad input) makes vim redraw between keys and
+    // can leave DECRC-restored underline attrs on newly drawn lines. SSH is
+    // naturally throttled by latency so it rarely hit this.
+    final handler = widget.terminal.inputHandler ?? defaultInputHandler;
+    final keys = <String>[];
+    final key = up ? TerminalKey.arrowUp : TerminalKey.arrowDown;
+    for (var i = 0; i < count; i++) {
+      final output = handler.call(
+        TerminalKeyboardEvent(
+          key: key,
+          shift: false,
+          ctrl: false,
+          alt: false,
+          state: widget.terminal,
+          altBuffer: widget.terminal.isUsingAltBuffer,
+          platform: widget.terminal.platform,
+        ),
       );
+      if (output != null) {
+        keys.add(output);
+      }
+    }
+
+    if (keys.isNotEmpty) {
+      widget.terminal.onOutput?.call(keys.join());
     }
   }
 
-  void _onScroll(double offset) {
-    final currentLineOffset = offset ~/ widget.getLineHeight();
+  void _handleScrollPixels(double deltaPixels) {
+    final lineHeight = widget.getLineHeight();
+    if (lineHeight <= 0 || deltaPixels == 0) return;
 
-    final delta = currentLineOffset - lastLineOffset;
-
-    for (var i = 0; i < delta.abs(); i++) {
-      _sendScrollEvent(delta < 0);
-    }
-
+    _scrollPixelOffset += deltaPixels;
+    final currentLineOffset = _scrollPixelOffset ~/ lineHeight;
+    final lineDelta = currentLineOffset - lastLineOffset;
     lastLineOffset = currentLineOffset;
+
+    if (lineDelta == 0) return;
+    _pendingLineDelta += lineDelta;
+
+    _scrollFlushTimer ??= Timer(const Duration(milliseconds: 8), _flushScrollDelta);
+  }
+
+  /// Writes the accumulated scroll delta to the PTY as a single string.
+  /// The 8 ms timer coalesces PointerScrollEvents that arrive in rapid
+  /// succession into one PTY write, preventing vim from redrawing between
+  /// individual keys and leaving DECRC-restored underline attrs on new lines.
+  void _flushScrollDelta() {
+    _scrollFlushTimer = null;
+    final delta = _pendingLineDelta;
+    _pendingLineDelta = 0;
+    _applyLineDelta(delta);
   }
 
   @override
@@ -117,15 +201,24 @@ class _TerminalScrollGestureHandlerState
       return widget.child;
     }
 
+    // Do not wrap in a Scrollable here: translating the terminal widget while
+    // the buffer paint origin stays fixed misaligns rows so cell underlines
+    // appear on the wrong glyphs (especially in short panes).
     return Listener(
       onPointerSignal: (event) {
-        lastPointerPosition = event.position;
+        if (event is PointerScrollEvent) {
+          lastPointerPosition = event.position;
+          _handleScrollPixels(event.scrollDelta.dy);
+        }
       },
       onPointerDown: (event) {
         lastPointerPosition = event.position;
       },
-      child: InfiniteScrollView(
-        onScroll: _onScroll,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragUpdate: (details) {
+          _handleScrollPixels(-details.delta.dy);
+        },
         child: widget.child,
       ),
     );

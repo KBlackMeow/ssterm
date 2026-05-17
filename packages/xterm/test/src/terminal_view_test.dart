@@ -431,6 +431,8 @@ void main() {
       ));
 
       await tester.drag(find.byType(TerminalView), const Offset(0, -100));
+      // Scroll keys are flushed after an 8 ms debounce in scroll_handler.
+      await tester.pump(const Duration(milliseconds: 16));
 
       expect(terminalOutput.join(), contains('\x1B[B'));
     });

@@ -183,6 +183,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   var _stickToBottom = true;
   bool _editableRectUpdateScheduled = false;
+  bool _wasUsingAltBuffer = false;
 
   void _onScroll() {
     final lineHeight = _painter.cellSize.height;
@@ -197,6 +198,16 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _onTerminalChange() {
+    final usingAlt = _terminal.isUsingAltBuffer;
+    if (usingAlt != _wasUsingAltBuffer) {
+      _wasUsingAltBuffer = usingAlt;
+      // Main-buffer scroll offset must not carry into the alt screen (vi, less,
+      // etc.). A stale offset misaligns rows and looks like stray underlines.
+      if (usingAlt && _offset.pixels != 0) {
+        _offset.jumpTo(0);
+      }
+      _stickToBottom = true;
+    }
     // Show cursor at the new position immediately when typing/output arrives.
     _cursorBlinkPhase = true;
     markNeedsLayout();
@@ -231,6 +242,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
+    _wasUsingAltBuffer = _terminal.isUsingAltBuffer;
     _offset.addListener(_onScroll);
     _terminal.addListener(_onTerminalChange);
     _controller.addListener(_onControllerUpdate);
@@ -280,6 +292,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// Current scroll position in pixels (smooth sub-line scrolling).
   double get _scrollPixels => _offset.pixels;
 
+  /// Alt-screen apps have no scrollback; ignore outer scroll while active.
+  double get _effectiveScrollPixels =>
+      _terminal.isUsingAltBuffer ? 0.0 : _scrollPixels;
+
   /// The height of a terminal line in pixels. This includes the line spacing.
   /// Height of the entire terminal is expected to be a multiple of this value.
   double get lineHeight => _painter.cellSize.height;
@@ -300,7 +316,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// Get the [CellOffset] of the cell that [offset] is in.
   CellOffset getCellOffset(Offset offset) {
     final x = offset.dx;
-    final y = offset.dy - _padding.top + _scrollPixels;
+    final y = offset.dy - _padding.top + _effectiveScrollPixels;
     final row = y ~/ _painter.cellSize.height;
     final col = x ~/ _painter.cellSize.width;
     return CellOffset(
@@ -457,7 +473,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   double get _lineOffset {
-    return -_scrollPixels + _padding.top;
+    return -_effectiveScrollPixels + _padding.top;
   }
 
   /// The offset of the cursor from the top left corner of this render object.
@@ -486,8 +502,9 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final lines = _terminal.buffer.lines;
     final charHeight = _painter.cellSize.height;
 
-    final firstLineOffset = _scrollPixels - _padding.top;
-    final lastLineOffset = _scrollPixels + size.height - _padding.bottom;
+    final firstLineOffset = _effectiveScrollPixels - _padding.top;
+    final lastLineOffset =
+        _effectiveScrollPixels + size.height - _padding.bottom;
 
     final firstLine = (firstLineOffset / charHeight).ceil();
     final lastLine = (lastLineOffset / charHeight).floor() - 1;

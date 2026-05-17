@@ -144,6 +144,11 @@ class _TerminalDebuggerHandler implements EscapeHandler {
   }
 
   @override
+  void resetSavedCursor() {
+    onCommand('resetSavedCursor');
+  }
+
+  @override
   void index() {
     onCommand('index');
   }

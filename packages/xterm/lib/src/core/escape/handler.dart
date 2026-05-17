@@ -27,6 +27,9 @@ abstract class EscapeHandler {
 
   void restoreCursor();
 
+  /// Clears the DECSC save slot on the active buffer.
+  void resetSavedCursor();
+
   void index();
 
   void nextLine();

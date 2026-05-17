@@ -123,7 +123,8 @@ class BufferLine with IndexedItem {
     final offset = index * _cellSize;
     _data[offset + _cellForeground] = style.foreground;
     _data[offset + _cellBackground] = style.background;
-    _data[offset + _cellAttributes] = style.attrs;
+    // VT spec: erase uses background colour only, not text attributes.
+    _data[offset + _cellAttributes] = 0;
     _data[offset + _cellContent] = 0;
   }
 

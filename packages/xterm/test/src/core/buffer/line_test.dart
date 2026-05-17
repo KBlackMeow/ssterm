@@ -39,6 +39,14 @@ void main() {
       terminal.write('Hello World');
       expect(terminal.buffer.lines[0].getText(5, 0), '');
     });
+
+    test('erase should clear text attributes from blank cells', () {
+      final terminal = Terminal();
+      terminal.write('\x1b[4mhello');
+      terminal.write('\r\x1b[K');
+
+      expect(terminal.buffer.lines[0].getAttributes(0), equals(0));
+    });
   });
 
   group('BufferLine.getTrimmedLength()', () {

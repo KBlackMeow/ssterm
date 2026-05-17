@@ -4,6 +4,7 @@ import 'package:xterm/src/core/buffer/cell_offset.dart';
 import 'package:xterm/src/core/buffer/line.dart';
 import 'package:xterm/src/core/buffer/range_line.dart';
 import 'package:xterm/src/core/buffer/range.dart';
+import 'package:xterm/src/core/cell.dart';
 import 'package:xterm/src/core/charset.dart';
 import 'package:xterm/src/core/cursor.dart';
 import 'package:xterm/src/core/reflow.dart';
@@ -126,7 +127,7 @@ class Buffer {
     if (_cursorX >= line.length) {
       line.resize(terminal.viewWidth);
     }
-    line.setCell(_cursorX, codePoint, cellWidth, terminal.cursor);
+    line.setCell(_cursorX, codePoint, cellWidth, _cursorStyleForWrite());
 
     if (_cursorX < viewWidth) {
       _cursorX++;
@@ -139,7 +140,7 @@ class Buffer {
         if (_cursorX >= line.length) {
           line.resize(terminal.viewWidth);
         }
-        line.setCell(_cursorX, 0, 0, terminal.cursor);
+        line.setCell(_cursorX, 0, 0, _cursorStyleForWrite());
         _cursorX++;
       }
     }
@@ -333,24 +334,62 @@ class Buffer {
     setCursor(cursorX, cursorY);
   }
 
+  /// Clears the DECSC save slot (ESC 7). Used when entering the alt screen so a
+  /// stale save from a prior session cannot be restored by DECRC (ESC 8).
+  void resetSavedCursor() {
+    _savedCursorX = 0;
+    _savedCursorY = 0;
+    _savedCursorStyle.reset();
+  }
+
   /// Save cursor position, charmap and text attributes.
+  ///
+  /// In the alt buffer only the cursor coordinates are saved. Vim uses
+  /// DECSC/DECRC for motion and keeps graphic rendition in its own state,
+  /// re-applying SGR via CSI m as needed.
   void saveCursor() {
     _savedCursorX = _cursorX;
     _savedCursorY = _cursorY;
-    _savedCursorStyle.foreground = terminal.cursor.foreground;
-    _savedCursorStyle.background = terminal.cursor.background;
-    _savedCursorStyle.attrs = terminal.cursor.attrs;
-    charset.save();
+    if (!isAltBuffer) {
+      _savedCursorStyle.foreground = terminal.cursor.foreground;
+      _savedCursorStyle.background = terminal.cursor.background;
+      _savedCursorStyle.attrs = terminal.cursor.attrs;
+      charset.save();
+    }
   }
 
   /// Restore cursor position, charmap and text attributes.
+  ///
+  /// In the alt buffer only the cursor coordinates are restored. Restoring
+  /// saved colours or attrs desynchronises the terminal from vim's screen_attr
+  /// and leaks underline/bold onto newly scrolled-in lines.
   void restoreCursor() {
     _cursorX = _savedCursorX;
     _cursorY = _savedCursorY;
-    terminal.cursor.foreground = _savedCursorStyle.foreground;
-    terminal.cursor.background = _savedCursorStyle.background;
-    terminal.cursor.attrs = _savedCursorStyle.attrs;
-    charset.restore();
+    if (!isAltBuffer) {
+      terminal.cursor.foreground = _savedCursorStyle.foreground;
+      terminal.cursor.background = _savedCursorStyle.background;
+      terminal.cursor.attrs = _savedCursorStyle.attrs;
+      charset.restore();
+    }
+  }
+
+  /// Graphic rendition applied to newly written cells.
+  ///
+  /// In the alt buffer, underline is stripped from cell attrs. Vim often leaves
+  /// SGR underline on the terminal cursor while its internal screen_attr is
+  /// normal (especially after DECSC/DECRC during scroll redraw), which would
+  /// otherwise paint ~ filler lines and scroll-in text with spurious underlines.
+  CursorStyle _cursorStyleForWrite() {
+    final style = terminal.cursor;
+    if (!isAltBuffer || (style.attrs & CellAttr.underline) == 0) {
+      return style;
+    }
+    return CursorStyle(
+      foreground: style.foreground,
+      background: style.background,
+      attrs: style.attrs & ~CellAttr.underline,
+    );
   }
 
   /// Sets the vertical scrolling margin to [top] and [bottom].
@@ -393,10 +432,11 @@ class Buffer {
     for (int i = 0; i < viewHeight; i++) {
       lines.push(_newEmptyLine());
     }
+    resetSavedCursor();
   }
 
   void insertBlankChars(int count) {
-    currentLine.insertCells(_cursorX, count, terminal.cursor);
+    currentLine.insertCells(_cursorX, count, _cursorStyleForWrite());
   }
 
   void insertLines(int count) {

@@ -167,6 +167,10 @@ class TerminalViewState extends State<TerminalView> {
 
   String? _composingText;
 
+  bool _wasInAltBuffer = false;
+
+  bool _isAltBuffer = false;
+
   late TerminalController _controller;
 
   late ScrollController _scrollController;
@@ -182,6 +186,9 @@ class TerminalViewState extends State<TerminalView> {
     _shortcutManager = ShortcutManager(
       shortcuts: widget.shortcuts ?? defaultTerminalShortcuts,
     );
+    _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
+    _isAltBuffer = _wasInAltBuffer;
+    widget.terminal.addListener(_onTerminalStateChange);
     super.initState();
   }
 
@@ -205,12 +212,19 @@ class TerminalViewState extends State<TerminalView> {
       }
       _scrollController = widget.scrollController ?? ScrollController();
     }
+    if (oldWidget.terminal != widget.terminal) {
+      oldWidget.terminal.removeListener(_onTerminalStateChange);
+      _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
+      _isAltBuffer = _wasInAltBuffer;
+      widget.terminal.addListener(_onTerminalStateChange);
+    }
     _shortcutManager.shortcuts = widget.shortcuts ?? defaultTerminalShortcuts;
     super.didUpdateWidget(oldWidget);
   }
 
   @override
   void dispose() {
+    widget.terminal.removeListener(_onTerminalStateChange);
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
@@ -229,6 +243,11 @@ class TerminalViewState extends State<TerminalView> {
     Widget child = Scrollable(
       key: _scrollableKey,
       controller: _scrollController,
+      // In alt-screen (vi, less) the history scroll view must not move or rows
+      // paint misaligned; wheel → keys is handled in TerminalScrollGestureHandler.
+      physics: _isAltBuffer
+          ? const NeverScrollableScrollPhysics()
+          : const ClampingScrollPhysics(),
       viewportBuilder: (context, offset) {
         return _TerminalView(
           key: _viewportKey,
@@ -258,6 +277,7 @@ class TerminalViewState extends State<TerminalView> {
       simulateScroll: widget.simulateScroll,
       getCellOffset: (offset) => renderTerminal.getCellOffset(offset),
       getLineHeight: () => renderTerminal.lineHeight,
+      onInteraction: _onScrollInteraction,
       child: child,
     );
 
@@ -464,6 +484,37 @@ class TerminalViewState extends State<TerminalView> {
         _scrollToBottom();
       });
     }
+  }
+
+  void _onScrollInteraction() {
+    // Do not close the TextInput connection — that breaks CJK IME on macOS.
+    if (_composingText != null && mounted) {
+      setState(() => _composingText = null);
+    }
+  }
+
+  void _onTerminalStateChange() {
+    final isAlt = widget.terminal.isUsingAltBuffer;
+    if (isAlt != _wasInAltBuffer) {
+      if (isAlt) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
+      } else {
+        _scrollToBottom();
+        if (!widget.hardwareKeyboardOnly && _focusNode.hasFocus) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) requestKeyboard();
+          });
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _isAltBuffer = isAlt;
+        });
+      }
+    }
+    _wasInAltBuffer = isAlt;
   }
 
   void _onEditableRect(Rect rect, Rect caretRect) {

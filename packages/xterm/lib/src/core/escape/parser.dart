@@ -975,10 +975,20 @@ class EscapeParser {
         return handler.setCursorVisibleMode(enabled);
       case 47:
         if (enabled) {
-          return handler.useAltBuffer();
+          handler.saveCursor();
+          handler.useAltBuffer();
+          // Reset text attrs and input modes so leaked shell state (e.g.
+          // underline from PS1, application cursor mode from readline) does
+          // not affect what the full-screen app writes or reads.
+          handler.resetSavedCursor();
+          handler.resetCursorStyle();
+          handler.setCursorKeysMode(false);
+          handler.setAppKeypadMode(false);
         } else {
-          return handler.useMainBuffer();
+          handler.useMainBuffer();
+          handler.restoreCursor();
         }
+        return;
       case 66:
         return handler.setAppKeypadMode(enabled);
       case 1000:
@@ -1017,6 +1027,12 @@ class EscapeParser {
       case 1047:
         if (enabled) {
           handler.useAltBuffer();
+          // Reset text attrs and input modes so leaked shell state does not
+          // affect what the full-screen app writes or reads.
+          handler.resetSavedCursor();
+          handler.resetCursorStyle();
+          handler.setCursorKeysMode(false);
+          handler.setAppKeypadMode(false);
         } else {
           handler.clearAltBuffer();
           handler.useMainBuffer();
@@ -1033,8 +1049,14 @@ class EscapeParser {
           handler.saveCursor();
           handler.clearAltBuffer();
           handler.useAltBuffer();
+          // clearAltBuffer() already resetSavedCursor(); reset SGR / input modes
+          // so leaked shell state does not affect the full-screen app.
+          handler.resetCursorStyle();
+          handler.setCursorKeysMode(false);
+          handler.setAppKeypadMode(false);
         } else {
           handler.useMainBuffer();
+          handler.restoreCursor();
         }
         return;
       case 2004:

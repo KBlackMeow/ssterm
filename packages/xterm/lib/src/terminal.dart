@@ -463,6 +463,11 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   }
 
   @override
+  void resetSavedCursor() {
+    _buffer.resetSavedCursor();
+  }
+
+  @override
   void index() {
     _buffer.index();
   }

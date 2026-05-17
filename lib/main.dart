@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 import 'package:flutter_pty/flutter_pty.dart';
@@ -71,11 +70,11 @@ class _OutputPipe {
     _buf.add(chunk);
     if (!_pending) {
       _pending = true;
-      SchedulerBinding.instance.scheduleFrameCallback(_flush);
+      scheduleMicrotask(_flush);
     }
   }
 
-  void _flush(Duration _) {
+  void _flush() {
     _pending = false;
     var bytes = _buf.takeBytes();
     if (bytes.isEmpty) return;
