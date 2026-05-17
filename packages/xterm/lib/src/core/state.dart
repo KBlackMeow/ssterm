@@ -1,7 +1,9 @@
 import 'package:xterm/src/core/cursor.dart';
 import 'package:xterm/src/core/mouse/mode.dart';
+import 'package:xterm/src/core/terminal_compat.dart';
 
 abstract class TerminalState {
+  TerminalCompat get compat;
   int get viewWidth;
 
   int get viewHeight;

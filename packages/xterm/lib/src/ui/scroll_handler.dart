@@ -181,13 +181,18 @@ class _TerminalScrollGestureHandlerState
     if (lineDelta == 0) return;
     _pendingLineDelta += lineDelta;
 
-    _scrollFlushTimer ??= Timer(const Duration(milliseconds: 8), _flushScrollDelta);
+    final debounceMs = widget.terminal.compat.altScrollDebounceMs;
+    if (debounceMs <= 0) {
+      _flushScrollDelta();
+      return;
+    }
+    _scrollFlushTimer ??=
+        Timer(Duration(milliseconds: debounceMs), _flushScrollDelta);
   }
 
   /// Writes the accumulated scroll delta to the PTY as a single string.
-  /// The 8 ms timer coalesces PointerScrollEvents that arrive in rapid
-  /// succession into one PTY write, preventing vim from redrawing between
-  /// individual keys and leaving DECRC-restored underline attrs on new lines.
+  /// When [TerminalCompat.altScrollDebounceMs] is non-zero, coalesces rapid
+  /// wheel events into one PTY write so vim does not redraw between keys.
   void _flushScrollDelta() {
     _scrollFlushTimer = null;
     final delta = _pendingLineDelta;

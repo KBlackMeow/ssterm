@@ -16,6 +16,7 @@ import 'package:xterm/src/core/mouse/handler.dart';
 import 'package:xterm/src/core/mouse/mode.dart';
 import 'package:xterm/src/core/platform.dart';
 import 'package:xterm/src/core/state.dart';
+import 'package:xterm/src/core/terminal_compat.dart';
 import 'package:xterm/src/core/tabs.dart';
 import 'package:xterm/src/utils/ascii.dart';
 import 'package:xterm/src/utils/circular_buffer.dart';
@@ -66,6 +67,9 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// Flag to toggle os specific behaviors.
   final TerminalTargetPlatform platform;
 
+  /// vim / strict DEC compatibility toggles (alt buffer scroll, DECSC/DECRC).
+  final TerminalCompat compat;
+
   /// Characters that break selection when double clicking. If not set, the
   /// [Buffer.defaultWordSeparators] will be used.
   final Set<int>? wordSeparators;
@@ -78,6 +82,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     this.onOutput,
     this.onResize,
     this.platform = TerminalTargetPlatform.unknown,
+    this.compat = TerminalCompat.vim,
     this.inputHandler = defaultInputHandler,
     this.mouseHandler = defaultMouseHandler,
     this.onPrivateOSC,

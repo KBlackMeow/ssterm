@@ -150,9 +150,6 @@ class _Tab {
     this.sshProfile,
   });
 
-  factory _Tab.local(Terminal t, Pty p, String shell) =>
-      _Tab._(kind: _TabKind.local, title: shell, terminal: t, pty: p);
-
   factory _Tab.ssh(
     Terminal t,
     SSHClient c,
@@ -260,37 +257,73 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   // ── Local terminal ─────────────────────────────────────────────────────────
 
-  void _newLocalTab() {
-    final terminal = Terminal(maxLines: 5000);
+  Terminal _createTerminal() => Terminal(
+        maxLines: 5000,
+        platform: detectTerminalHostPlatform(),
+      );
+
+  /// Start the local PTY on the first [Terminal.onResize] so rows/cols match the
+  /// pane instead of a hard-coded 80×24.
+  void _wireDeferredLocalPty(
+    _Tab tab, {
+    bool showExitMessage = true,
+    void Function()? onProcessExit,
+    void Function(Pty pty, _OutputPipe pipe)? onPtyStarted,
+  }) {
+    final terminal = tab.terminal!;
     final shell = Platform.isWindows
         ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
         : (Platform.environment['SHELL'] ?? '/bin/zsh');
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final env = Map<String, String>.from(Platform.environment)
       ..['TERM'] = 'xterm-256color'
       ..['COLORTERM'] = 'truecolor'
       ..['TERM_PROGRAM'] = 'ssterm';
+    Pty? pty;
 
-    final pty = Pty.start(
-      shell,
-      arguments: Platform.isWindows ? [] : ['-l'],
-      columns: 80,
-      rows: 24,
-      environment: env,
-      workingDirectory: home,
+    terminal.onResize = (w, h, pw, ph) {
+      if (w < 1 || h < 1) return;
+      if (pty == null) {
+        pty = Pty.start(
+          shell,
+          arguments: Platform.isWindows ? [] : ['-l'],
+          columns: w,
+          rows: h,
+          environment: env,
+          workingDirectory: home,
+        );
+        tab.pty = pty;
+        final pipe = _OutputPipe(terminal)..bind(pty!.output);
+        tab.pipe = pipe;
+        onPtyStarted?.call(pty!, pipe);
+        terminal.onOutput = (d) => pty!.write(utf8.encode(d));
+        pty!.exitCode.then((code) {
+          if (showExitMessage && mounted) {
+            terminal.write('\r\n[Process exited with code $code]\r\n');
+          }
+          if (onProcessExit != null && mounted) {
+            onProcessExit();
+          }
+        });
+      } else {
+        pty!.resize(h, w);
+      }
+    };
+  }
+
+  void _newLocalTab() {
+    final shell = Platform.isWindows
+        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
+        : (Platform.environment['SHELL'] ?? '/bin/zsh');
+    final tab = _Tab._(
+      kind: _TabKind.local,
+      title: shell.split('/').last,
+      terminal: _createTerminal(),
     );
-    final pipe = _OutputPipe(terminal)..bind(pty.output);
-
-    pty.exitCode.then((code) {
-      if (mounted) terminal.write('\r\n[Process exited with code $code]\r\n');
-    });
-
-    terminal.onOutput = (d) => pty.write(utf8.encode(d));
-    terminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
+    _wireDeferredLocalPty(tab);
 
     setState(() {
-      final tab = _Tab.local(terminal, pty, shell.split('/').last);
-      tab.pipe = pipe;
       _tabs.add(tab);
       _active = _tabs.length - 1;
     });
@@ -383,7 +416,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   Future<void> _openSshTerminal(ConnectResult r) async {
-    final terminal = Terminal(maxLines: 5000);
+    final terminal = _createTerminal();
     final session = r.session!;
     final remotePath = ValueNotifier<String>('');
     final cwdParser = RemoteCwdParser();
@@ -507,7 +540,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   Future<void> _openSshSplitPane(_Tab tab, Axis axis) async {
-    final splitTerminal = Terminal(maxLines: 5000);
+    final splitTerminal = _createTerminal();
     SSHSession session;
     try {
       session = await tab.sshClient!.shell(
@@ -567,37 +600,24 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   void _openLocalSplitPane(_Tab tab, Axis axis) {
-    final splitTerminal = Terminal(maxLines: 5000);
-    final shell = Platform.isWindows
-        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
-        : (Platform.environment['SHELL'] ?? '/bin/zsh');
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
-    final env = Map<String, String>.from(Platform.environment)
-      ..['TERM'] = 'xterm-256color'
-      ..['COLORTERM'] = 'truecolor'
-      ..['TERM_PROGRAM'] = 'ssterm';
-
-    final pty = Pty.start(
-      shell,
-      arguments: Platform.isWindows ? [] : ['-l'],
-      columns: 80,
-      rows: 24,
-      environment: env,
-      workingDirectory: home,
+    final splitTerminal = _createTerminal();
+    final holder = _Tab._(
+      kind: _TabKind.local,
+      title: tab.title,
+      terminal: splitTerminal,
     );
-    final pipe = _OutputPipe(splitTerminal)..bind(pty.output);
-
-    splitTerminal.onOutput = (d) => pty.write(utf8.encode(d));
-    splitTerminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
-
-    pty.exitCode.then((_) {
-      if (mounted) setState(() => tab.clearSplit());
-    });
+    _wireDeferredLocalPty(
+      holder,
+      showExitMessage: false,
+      onProcessExit: () => setState(() => tab.clearSplit()),
+      onPtyStarted: (p, pipe) {
+        tab.splitPty = p;
+        tab.splitPipe = pipe;
+      },
+    );
 
     setState(() {
       tab.splitTerminal = splitTerminal;
-      tab.splitPty = pty;
-      tab.splitPipe = pipe;
       tab.splitAxis = axis;
     });
 

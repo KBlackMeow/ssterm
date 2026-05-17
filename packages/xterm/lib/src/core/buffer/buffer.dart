@@ -127,7 +127,7 @@ class Buffer {
     if (_cursorX >= line.length) {
       line.resize(terminal.viewWidth);
     }
-    line.setCell(_cursorX, codePoint, cellWidth, _cursorStyleForWrite());
+    line.setCell(_cursorX, codePoint, cellWidth, _cellStyleForMutation());
 
     if (_cursorX < viewWidth) {
       _cursorX++;
@@ -140,7 +140,7 @@ class Buffer {
         if (_cursorX >= line.length) {
           line.resize(terminal.viewWidth);
         }
-        line.setCell(_cursorX, 0, 0, _cursorStyleForWrite());
+        line.setCell(_cursorX, 0, 0, _cellStyleForMutation());
         _cursorX++;
       }
     }
@@ -170,7 +170,7 @@ class Buffer {
     for (var i = absoluteCursorY + 1; i < height; i++) {
       final line = lines[i];
       line.isWrapped = false;
-      line.eraseRange(0, viewWidth, terminal.cursor);
+      line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
   }
 
@@ -182,7 +182,7 @@ class Buffer {
     for (var i = 0; i < _cursorY; i++) {
       final line = lines[i + scrollBack];
       line.isWrapped = false;
-      line.eraseRange(0, viewWidth, terminal.cursor);
+      line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
   }
 
@@ -191,7 +191,7 @@ class Buffer {
     for (var i = 0; i < viewHeight; i++) {
       final line = lines[i + scrollBack];
       line.isWrapped = false;
-      line.eraseRange(0, viewWidth, terminal.cursor);
+      line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
   }
 
@@ -199,26 +199,26 @@ class Buffer {
   /// cursor position.
   void eraseLineFromCursor() {
     currentLine.isWrapped = false;
-    currentLine.eraseRange(_cursorX, viewWidth, terminal.cursor);
+    currentLine.eraseRange(_cursorX, viewWidth, _cellStyleForMutation());
   }
 
   /// Erases the line from the start of the line to the cursor, including the
   /// cursor.
   void eraseLineToCursor() {
     currentLine.isWrapped = false;
-    currentLine.eraseRange(0, _cursorX, terminal.cursor);
+    currentLine.eraseRange(0, _cursorX, _cellStyleForMutation());
   }
 
   /// Erases the line at the current cursor position.
   void eraseLine() {
     currentLine.isWrapped = false;
-    currentLine.eraseRange(0, viewWidth, terminal.cursor);
+    currentLine.eraseRange(0, viewWidth, _cellStyleForMutation());
   }
 
   /// Erases [count] cells starting at the cursor position.
   void eraseChars(int count) {
     final start = _cursorX;
-    currentLine.eraseRange(start, start + count, terminal.cursor);
+    currentLine.eraseRange(start, start + count, _cellStyleForMutation());
   }
 
   void scrollDown(int lines) {
@@ -344,13 +344,12 @@ class Buffer {
 
   /// Save cursor position, charmap and text attributes.
   ///
-  /// In the alt buffer only the cursor coordinates are saved. Vim uses
-  /// DECSC/DECRC for motion and keeps graphic rendition in its own state,
-  /// re-applying SGR via CSI m as needed.
+  /// When [TerminalCompat.altDecScRcPositionOnly] is set in the alt buffer,
+  /// only coordinates are saved (vim uses DECSC/DECRC for motion).
   void saveCursor() {
     _savedCursorX = _cursorX;
     _savedCursorY = _cursorY;
-    if (!isAltBuffer) {
+    if (!isAltBuffer || !terminal.compat.altDecScRcPositionOnly) {
       _savedCursorStyle.foreground = terminal.cursor.foreground;
       _savedCursorStyle.background = terminal.cursor.background;
       _savedCursorStyle.attrs = terminal.cursor.attrs;
@@ -360,13 +359,12 @@ class Buffer {
 
   /// Restore cursor position, charmap and text attributes.
   ///
-  /// In the alt buffer only the cursor coordinates are restored. Restoring
-  /// saved colours or attrs desynchronises the terminal from vim's screen_attr
-  /// and leaks underline/bold onto newly scrolled-in lines.
+  /// When [TerminalCompat.altDecScRcPositionOnly] is set in the alt buffer,
+  /// only coordinates are restored.
   void restoreCursor() {
     _cursorX = _savedCursorX;
     _cursorY = _savedCursorY;
-    if (!isAltBuffer) {
+    if (!isAltBuffer || !terminal.compat.altDecScRcPositionOnly) {
       terminal.cursor.foreground = _savedCursorStyle.foreground;
       terminal.cursor.background = _savedCursorStyle.background;
       terminal.cursor.attrs = _savedCursorStyle.attrs;
@@ -374,15 +372,15 @@ class Buffer {
     }
   }
 
-  /// Graphic rendition applied to newly written cells.
+  /// Cursor style for writes, inserts, deletes, and erases in this buffer.
   ///
-  /// In the alt buffer, underline is stripped from cell attrs. Vim often leaves
-  /// SGR underline on the terminal cursor while its internal screen_attr is
-  /// normal (especially after DECSC/DECRC during scroll redraw), which would
-  /// otherwise paint ~ filler lines and scroll-in text with spurious underlines.
-  CursorStyle _cursorStyleForWrite() {
+  /// When [TerminalCompat.altStripUnderlineOnWrite] is enabled in the alt
+  /// buffer, underline is not stored on cells (vim cursor SGR desync).
+  CursorStyle _cellStyleForMutation() {
     final style = terminal.cursor;
-    if (!isAltBuffer || (style.attrs & CellAttr.underline) == 0) {
+    if (!isAltBuffer ||
+        !terminal.compat.altStripUnderlineOnWrite ||
+        (style.attrs & CellAttr.underline) == 0) {
       return style;
     }
     return CursorStyle(
@@ -414,7 +412,7 @@ class Buffer {
     final start = _cursorX.clamp(0, viewWidth);
     count = min(count, viewWidth - start);
     if (count <= 0 || start >= currentLine.length) return;
-    currentLine.removeCells(start, count, terminal.cursor);
+    currentLine.removeCells(start, count, _cellStyleForMutation());
   }
 
   /// Remove all lines above the top of the viewport.
@@ -436,7 +434,7 @@ class Buffer {
   }
 
   void insertBlankChars(int count) {
-    currentLine.insertCells(_cursorX, count, _cursorStyleForWrite());
+    currentLine.insertCells(_cursorX, count, _cellStyleForMutation());
   }
 
   void insertLines(int count) {

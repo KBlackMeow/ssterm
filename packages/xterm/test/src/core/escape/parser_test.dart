@@ -187,5 +187,29 @@ void main() {
         }
       });
     });
+
+    group('TerminalCompat.strict', () {
+      test('DECRC restores saved underline attrs', () {
+        final terminal = Terminal(compat: TerminalCompat.strict);
+        terminal.write('\x1b[?1049h');
+        terminal.write('\x1b[4m');
+        terminal.write('id');
+        terminal.write('\x1b7');
+        terminal.write('\x1b[0m');
+        terminal.write('\x1b8');
+        expect(terminal.cursor.isUnderline, isTrue);
+      });
+
+      test('alt write stores underline on cells when cursor has underline', () {
+        final terminal = Terminal(compat: TerminalCompat.strict);
+        terminal.write('\x1b[?1049h');
+        terminal.write('\x1b[4m');
+        terminal.write('x');
+        expect(
+          terminal.buffer.lines[terminal.buffer.cursorY].getAttributes(0) & 8,
+          equals(8),
+        );
+      });
+    });
   });
 }

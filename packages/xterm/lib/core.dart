@@ -18,5 +18,7 @@ export 'src/core/mouse/button_state.dart';
 export 'src/core/mouse/handler.dart';
 export 'src/core/mouse/mode.dart';
 export 'src/core/platform.dart';
+export 'src/core/platform_detect.dart';
 export 'src/core/state.dart';
+export 'src/core/terminal_compat.dart';
 export 'src/terminal.dart';
