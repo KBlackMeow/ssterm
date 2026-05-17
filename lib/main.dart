@@ -269,7 +269,13 @@ class _TerminalHomeState extends State<TerminalHome> {
       ..['COLORTERM'] = 'truecolor'
       ..['TERM_PROGRAM'] = 'ssterm';
 
-    final pty = Pty.start(shell, columns: 80, rows: 24, environment: env);
+    final pty = Pty.start(
+      shell,
+      columns: 80,
+      rows: 24,
+      environment: env,
+      workingDirectory: Platform.environment['HOME'],
+    );
     final pipe = _OutputPipe(terminal)..bind(pty.output);
 
     pty.exitCode.then((code) {
@@ -567,7 +573,13 @@ class _TerminalHomeState extends State<TerminalHome> {
       ..['COLORTERM'] = 'truecolor'
       ..['TERM_PROGRAM'] = 'ssterm';
 
-    final pty = Pty.start(shell, columns: 80, rows: 24, environment: env);
+    final pty = Pty.start(
+      shell,
+      columns: 80,
+      rows: 24,
+      environment: env,
+      workingDirectory: Platform.environment['HOME'],
+    );
     final pipe = _OutputPipe(splitTerminal)..bind(pty.output);
 
     splitTerminal.onOutput = (d) => pty.write(utf8.encode(d));

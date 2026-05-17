@@ -72,30 +72,30 @@ class TerminalSurface extends StatelessWidget {
         PopupMenuItem<String>(
           value: 'copy',
           height: 36,
-          child: _menuRow(Icons.content_copy, '复制'),
+          child: _menuRow(Icons.content_copy, 'Copy'),
         ),
         PopupMenuItem<String>(
           value: 'paste',
           height: 36,
-          child: _menuRow(Icons.content_paste, '粘贴'),
+          child: _menuRow(Icons.content_paste, 'Paste'),
         ),
         if (config.canSplit) ...[
           const PopupMenuDivider(height: 1),
           PopupMenuItem<String>(
             value: 'split_h',
             height: 36,
-            child: _menuRow(Icons.splitscreen, '水平分屏'),
+            child: _menuRow(Icons.splitscreen, 'Split horizontally'),
           ),
           PopupMenuItem<String>(
             value: 'split_v',
             height: 36,
-            child: _menuRow(Icons.vertical_split, '垂直分屏'),
+            child: _menuRow(Icons.vertical_split, 'Split vertically'),
           ),
           if (config.isSplit)
             PopupMenuItem<String>(
               value: 'close_split',
               height: 36,
-              child: _menuRow(Icons.close, '关闭分屏'),
+              child: _menuRow(Icons.close, 'Close split'),
             ),
         ],
       ],
