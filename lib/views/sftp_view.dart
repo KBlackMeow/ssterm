@@ -16,6 +16,7 @@ class SftpView extends StatefulWidget {
     this.remotePath,
     this.panelPosition,
     this.onPanelPositionChanged,
+    this.onClose,
   });
 
   final SftpClient sftp;
@@ -26,6 +27,7 @@ class SftpView extends StatefulWidget {
 
   final SftpPanelPosition? panelPosition;
   final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
+  final VoidCallback? onClose;
 
   @override
   State<SftpView> createState() => _SftpViewState();
@@ -287,6 +289,18 @@ class _SftpViewState extends State<SftpView> {
             onTap: canDel ? () => _delete(_selected!) : null,
             danger: canDel,
           ),
+          if (widget.onClose != null) ...[
+            const SizedBox(width: 4),
+            const SizedBox(
+              height: 16,
+              child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+            ),
+            _ToolBtn(
+              icon: Icons.close,
+              tooltip: '隐藏 SFTP',
+              onTap: widget.onClose,
+            ),
+          ],
         ],
       ),
     );

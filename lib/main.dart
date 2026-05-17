@@ -16,11 +16,14 @@ import 'models/saved_hosts_store.dart';
 import 'models/ssh_config.dart';
 import 'models/ssh_host.dart';
 import 'services/host_key_verifier.dart';
+import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
+import 'services/session_logger.dart';
 import 'services/ssh_connection.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
+import 'widgets/split_view.dart';
 import 'widgets/terminal_surface.dart';
 import 'views/ssh_session_view.dart';
 
@@ -50,12 +53,12 @@ const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 
 // ── I/O → Terminal bridge ────────────────────────────────────────────────────
-// Flushes once per frame so notifyListeners() and VT parsing fire in one pass.
 class _OutputPipe {
-  _OutputPipe(this._terminal, {this.transform});
+  _OutputPipe(this._terminal, {this.transform, this.sessionLogger});
 
   final Terminal _terminal;
   final List<int> Function(List<int>)? transform;
+  final SessionLogger? sessionLogger;
   final _buf = BytesBuilder(copy: false);
   bool _pending = false;
   final _subs = <StreamSubscription<List<int>>>[];
@@ -76,6 +79,7 @@ class _OutputPipe {
     _pending = false;
     var bytes = _buf.takeBytes();
     if (bytes.isEmpty) return;
+    sessionLogger?.write(bytes);
     if (transform != null) {
       bytes = Uint8List.fromList(transform!(bytes));
     }
@@ -88,24 +92,48 @@ class _OutputPipe {
     for (final s in _subs) {
       s.cancel();
     }
+    sessionLogger?.close();
   }
 }
 
-// ── Tab model ───────────────────────────────────────────────────────────────
+// ── Tab model ────────────────────────────────────────────────────────────────
 enum _TabKind { local, ssh, settings }
 
 class _Tab {
   _TabKind kind;
   String title;
 
+  // Primary pane
   Terminal? terminal;
   Pty? pty;
   SSHClient? sshClient;
+  SSHClient? jumpClient;
   SSHSession? sshSession;
   SftpClient? sftp;
   ValueNotifier<String>? remotePath;
   _OutputPipe? pipe;
   final terminalViewKey = GlobalKey<TerminalViewState>();
+
+  // Feature 1: port forwarding
+  PortForwardService? forwardService;
+
+  // Feature 4: keepalive + auto-reconnect
+  SshHost? sshProfile;
+  bool manuallyDisconnected = false;
+  Timer? keepaliveTimer;
+
+  // SFTP panel visibility (default hidden)
+  bool sftpPanelVisible = false;
+
+  // Feature 3: in-tab split pane
+  Terminal? splitTerminal;
+  SSHSession? splitSshSession;
+  Pty? splitPty;
+  _OutputPipe? splitPipe;
+  final splitViewKey = GlobalKey<TerminalViewState>();
+  Axis splitAxis = Axis.horizontal;
+
+  bool get isSplit => splitTerminal != null;
 
   _Tab._({
     required this.kind,
@@ -113,9 +141,11 @@ class _Tab {
     this.terminal,
     this.pty,
     this.sshClient,
+    this.jumpClient,
     this.sshSession,
     this.sftp,
     this.remotePath,
+    this.sshProfile,
   });
 
   factory _Tab.local(Terminal t, Pty p, String shell) =>
@@ -126,36 +156,58 @@ class _Tab {
     SSHClient c,
     SSHSession s,
     String title, {
+    SSHClient? jumpClient,
     SftpClient? sftp,
     ValueNotifier<String>? remotePath,
-  }) => _Tab._(
-    kind: _TabKind.ssh,
-    title: title,
-    terminal: t,
-    sshClient: c,
-    sshSession: s,
-    sftp: sftp,
-    remotePath: remotePath,
-  );
+    SshHost? profile,
+  }) =>
+      _Tab._(
+        kind: _TabKind.ssh,
+        title: title,
+        terminal: t,
+        sshClient: c,
+        jumpClient: jumpClient,
+        sshSession: s,
+        sftp: sftp,
+        remotePath: remotePath,
+        sshProfile: profile,
+      );
+
+  factory _Tab.settings() =>
+      _Tab._(kind: _TabKind.settings, title: 'Settings');
+
+  void clearSplit() {
+    splitPipe?.dispose();
+    splitSshSession?.close();
+    splitPty?.kill();
+    splitTerminal = null;
+    splitSshSession = null;
+    splitPty = null;
+    splitPipe = null;
+  }
 
   void dispose() {
+    manuallyDisconnected = true;
+    keepaliveTimer?.cancel();
+    keepaliveTimer = null;
+    clearSplit();
     pipe?.dispose();
     remotePath?.dispose();
+    forwardService?.stopAll();
     pty?.kill();
     sshSession?.close();
     sshClient?.close();
+    jumpClient?.close();
   }
 
-  factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
-
   IconData get icon => switch (kind) {
-    _TabKind.local => Icons.terminal,
-    _TabKind.ssh => Icons.lock_outline,
-    _TabKind.settings => Icons.settings_outlined,
-  };
+        _TabKind.local => Icons.terminal,
+        _TabKind.ssh => Icons.lock_outline,
+        _TabKind.settings => Icons.settings_outlined,
+      };
 }
 
-// ── Home ────────────────────────────────────────────────────────────────────
+// ── Home ──────────────────────────────────────────────────────────────────────
 class TerminalHome extends StatefulWidget {
   const TerminalHome({super.key});
 
@@ -186,13 +238,11 @@ class _TerminalHomeState extends State<TerminalHome> {
     if (!mounted) return;
     setState(() {
       _savedHosts = saved
-        ..sort(
-          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
-        );
+        ..sort((a, b) =>
+            a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
       _configHosts = config
-        ..sort(
-          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
-        );
+        ..sort((a, b) =>
+            a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
     });
   }
 
@@ -204,7 +254,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     super.dispose();
   }
 
-  // ── Local terminal ────────────────────────────────────────────────────────
+  // ── Local terminal ─────────────────────────────────────────────────────────
 
   void _newLocalTab() {
     final terminal = Terminal(maxLines: 5000);
@@ -215,7 +265,6 @@ class _TerminalHomeState extends State<TerminalHome> {
       ..['TERM_PROGRAM'] = 'ssterm';
 
     final pty = Pty.start(shell, columns: 80, rows: 24, environment: env);
-
     final pipe = _OutputPipe(terminal)..bind(pty.output);
 
     pty.exitCode.then((code) {
@@ -234,7 +283,7 @@ class _TerminalHomeState extends State<TerminalHome> {
     _activateTab(_active);
   }
 
-  // ── SSH / SFTP ────────────────────────────────────────────────────────────
+  // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
   Future<void> _showConnectDialog({SshHost? initialHost}) async {
     final result = await showConnectDialog(context, initialHost: initialHost);
@@ -243,13 +292,10 @@ class _TerminalHomeState extends State<TerminalHome> {
     await _openSshTerminal(result);
   }
 
-  /// Persists and refreshes the + menu after a successful manual connect.
   Future<void> _rememberHostProfile(SshHost profile) async {
     try {
       await SavedHostsStore.upsert(profile);
-    } catch (_) {
-      // Fall through — still update the in-memory menu below.
-    }
+    } catch (_) {}
     await _loadSshHosts();
   }
 
@@ -310,8 +356,16 @@ class _TerminalHomeState extends State<TerminalHome> {
     final remotePath = ValueNotifier<String>('');
     final cwdParser = RemoteCwdParser();
 
+    SessionLogger? logger;
+    if (r.profile.sessionLog) {
+      try {
+        logger = await SessionLogger.create(r.alias);
+      } catch (_) {}
+    }
+
     final pipe = _OutputPipe(
       terminal,
+      sessionLogger: logger,
       transform: (bytes) {
         final parsed = cwdParser.process(bytes);
         if (parsed.cwd != null && parsed.cwd != remotePath.value) {
@@ -324,14 +378,9 @@ class _TerminalHomeState extends State<TerminalHome> {
     terminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
     terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
 
-    // Bind streams after the first layout so viewWidth matches the widget.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       pipe.bind(session.stdout);
       pipe.bind(session.stderr);
-    });
-
-    session.done.then((_) {
-      if (mounted) terminal.write('\r\n[SSH session closed]\r\n');
     });
 
     SftpClient? sftp;
@@ -350,23 +399,298 @@ class _TerminalHomeState extends State<TerminalHome> {
 
     scheduleRemoteCwdSetup(session);
 
-    setState(() {
-      final tab = _Tab.ssh(
-        terminal,
-        r.client,
-        session,
-        r.alias,
-        sftp: sftp,
-        remotePath: remotePath,
+    late _Tab tab;
+    tab = _Tab.ssh(
+      terminal,
+      r.client,
+      session,
+      r.alias,
+      jumpClient: r.jumpClient,
+      sftp: sftp,
+      remotePath: remotePath,
+      profile: r.profile,
+    );
+    tab.pipe = pipe;
+
+    // Feature 1: port forwarding
+    if (r.profile.forwardRules.isNotEmpty) {
+      final fwdService = PortForwardService();
+      tab.forwardService = fwdService;
+      fwdService.startAll(r.client, r.profile.forwardRules).ignore();
+    }
+
+    // Feature 4: keepalive
+    if (r.profile.keepaliveInterval > 0) {
+      tab.keepaliveTimer = Timer.periodic(
+        Duration(seconds: r.profile.keepaliveInterval),
+        (_) async {
+          try {
+            await r.client.run('true').timeout(const Duration(seconds: 5));
+          } catch (_) {}
+        },
       );
-      tab.pipe = pipe;
+    }
+
+    // Feature 4: auto-reconnect on session close
+    session.done.then((_) async {
+      tab.keepaliveTimer?.cancel();
+      tab.keepaliveTimer = null;
+      if (mounted) terminal.write('\r\n[SSH 连接已断开]\r\n');
+      if (!mounted || tab.manuallyDisconnected) return;
+      if (r.profile.autoReconnect) {
+        terminal.write('[3 秒后自动重连…]\r\n');
+        await Future<void>.delayed(const Duration(seconds: 3));
+        if (!mounted || tab.manuallyDisconnected) return;
+        _reconnectTab(tab);
+      }
+    });
+
+    setState(() {
       _tabs.add(tab);
       _active = _tabs.length - 1;
     });
     _activateTab(_active);
   }
 
-  // ── Tab management ────────────────────────────────────────────────────────
+  // ── Feature 3: In-tab split pane ──────────────────────────────────────────
+
+  Future<void> _splitCurrentTab(Axis axis) async {
+    final tab = _tabs[_active];
+    if (tab.isSplit) {
+      // Toggle off if same axis, switch axis otherwise
+      if (tab.splitAxis == axis) {
+        setState(() => tab.clearSplit());
+        return;
+      } else {
+        setState(() => tab.splitAxis = axis);
+        return;
+      }
+    }
+
+    if (tab.kind == _TabKind.ssh && tab.sshClient != null) {
+      await _openSshSplitPane(tab, axis);
+    } else if (tab.kind == _TabKind.local) {
+      _openLocalSplitPane(tab, axis);
+    }
+  }
+
+  Future<void> _openSshSplitPane(_Tab tab, Axis axis) async {
+    final splitTerminal = Terminal(maxLines: 5000);
+    SSHSession session;
+    try {
+      session = await tab.sshClient!.shell(
+        pty: const SSHPtyConfig(
+          width: 80,
+          height: 24,
+          type: 'xterm-256color',
+        ),
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return;
+    }
+
+    final cwdParser = RemoteCwdParser();
+    final pipe = _OutputPipe(
+      splitTerminal,
+      transform: (bytes) => cwdParser.process(bytes).cleaned,
+    );
+
+    splitTerminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
+    splitTerminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+
+    pipe.bind(session.stdout);
+    pipe.bind(session.stderr);
+
+    session.done.then((_) {
+      if (mounted) {
+        splitTerminal.write('\r\n[分屏 SSH 会话已关闭]\r\n');
+      }
+    });
+
+    // cd to same directory as primary pane
+    final cwd = tab.remotePath?.value ?? '';
+    if (cwd.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        final escaped = cwd.replaceAll("'", r"'\''");
+        session.stdin.add(utf8.encode("cd '$escaped'\n"));
+      });
+    }
+
+    scheduleRemoteCwdSetup(session);
+
+    if (!mounted) {
+      pipe.dispose();
+      session.close();
+      return;
+    }
+
+    setState(() {
+      tab.splitTerminal = splitTerminal;
+      tab.splitSshSession = session;
+      tab.splitPipe = pipe;
+      tab.splitAxis = axis;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      tab.splitViewKey.currentState?.syncAfterShown();
+    });
+  }
+
+  void _openLocalSplitPane(_Tab tab, Axis axis) {
+    final splitTerminal = Terminal(maxLines: 5000);
+    final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    final env = Map<String, String>.from(Platform.environment)
+      ..['TERM'] = 'xterm-256color'
+      ..['COLORTERM'] = 'truecolor'
+      ..['TERM_PROGRAM'] = 'ssterm';
+
+    final pty = Pty.start(shell, columns: 80, rows: 24, environment: env);
+    final pipe = _OutputPipe(splitTerminal)..bind(pty.output);
+
+    splitTerminal.onOutput = (d) => pty.write(utf8.encode(d));
+    splitTerminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
+
+    pty.exitCode.then((code) {
+      if (mounted) {
+        splitTerminal.write('\r\n[Process exited with code $code]\r\n');
+      }
+    });
+
+    setState(() {
+      tab.splitTerminal = splitTerminal;
+      tab.splitPty = pty;
+      tab.splitPipe = pipe;
+      tab.splitAxis = axis;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      tab.splitViewKey.currentState?.syncAfterShown();
+    });
+  }
+
+  void _closeSplitCurrentTab() {
+    if (_active < _tabs.length) {
+      setState(() => _tabs[_active].clearSplit());
+    }
+  }
+
+  // ── Feature 4: reconnect ───────────────────────────────────────────────────
+
+  Future<void> _reconnectTab(_Tab tab) async {
+    final profile = tab.sshProfile;
+    if (profile == null || !mounted) return;
+
+    tab.terminal?.write('[重新连接到 ${profile.alias}…]\r\n');
+
+    try {
+      final result = await connectSshHost(
+        profile,
+        verifyHostKey: createHostKeyVerifier(
+          context,
+          hostname: profile.hostname,
+          port: profile.port,
+        ),
+      );
+      if (!mounted || tab.manuallyDisconnected) {
+        result.client.close();
+        result.jumpClient?.close();
+        return;
+      }
+
+      final oldSession = tab.sshSession;
+      final oldClient = tab.sshClient;
+      final oldJump = tab.jumpClient;
+      tab.keepaliveTimer?.cancel();
+      tab.forwardService?.stopAll();
+      tab.clearSplit();
+
+      final session = result.session!;
+      final cwdParser = RemoteCwdParser();
+
+      SessionLogger? logger;
+      if (profile.sessionLog) {
+        try {
+          logger = await SessionLogger.create(profile.alias);
+        } catch (_) {}
+      }
+
+      final pipe = _OutputPipe(
+        tab.terminal!,
+        sessionLogger: logger,
+        transform: (bytes) {
+          final parsed = cwdParser.process(bytes);
+          if (parsed.cwd != null) tab.remotePath?.value = parsed.cwd!;
+          return parsed.cleaned;
+        },
+      );
+
+      tab.terminal!.onOutput = (d) => session.stdin.add(utf8.encode(d));
+      tab.terminal!.onResize =
+          (w, h, pw, ph) => session.resizeTerminal(w, h);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        pipe.bind(session.stdout);
+        pipe.bind(session.stderr);
+      });
+
+      tab.pipe?.dispose();
+      tab.pipe = pipe;
+      tab.sshSession = session;
+      tab.sshClient = result.client;
+      tab.jumpClient = result.jumpClient;
+
+      oldSession?.close();
+      oldClient?.close();
+      oldJump?.close();
+
+      if (profile.forwardRules.isNotEmpty) {
+        final fwdService = PortForwardService();
+        tab.forwardService = fwdService;
+        fwdService.startAll(result.client, profile.forwardRules).ignore();
+      }
+
+      if (profile.keepaliveInterval > 0) {
+        tab.keepaliveTimer = Timer.periodic(
+          Duration(seconds: profile.keepaliveInterval),
+          (_) async {
+            try {
+              await result.client
+                  .run('true')
+                  .timeout(const Duration(seconds: 5));
+            } catch (_) {}
+          },
+        );
+      }
+
+      session.done.then((_) async {
+        tab.keepaliveTimer?.cancel();
+        if (mounted) tab.terminal?.write('\r\n[SSH 连接已断开]\r\n');
+        if (!mounted || tab.manuallyDisconnected) return;
+        if (profile.autoReconnect) {
+          tab.terminal?.write('[3 秒后自动重连…]\r\n');
+          await Future<void>.delayed(const Duration(seconds: 3));
+          if (!mounted || tab.manuallyDisconnected) return;
+          _reconnectTab(tab);
+        }
+      });
+
+      scheduleRemoteCwdSetup(session);
+      tab.terminal?.write('[重连成功]\r\n');
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        tab.terminal?.write('[重连失败: $e]\r\n');
+        if (tab.sshProfile?.autoReconnect == true &&
+            !tab.manuallyDisconnected) {
+          await Future<void>.delayed(const Duration(seconds: 5));
+          if (!mounted || tab.manuallyDisconnected) return;
+          _reconnectTab(tab);
+        }
+      }
+    }
+  }
+
+  // ── Tab management ─────────────────────────────────────────────────────────
 
   void _closeTab(int i) {
     if (_tabs.length == 1) return;
@@ -396,13 +720,15 @@ class _TerminalHomeState extends State<TerminalHome> {
       if (!mounted) return;
       for (final tab in _tabs) {
         tab.terminalViewKey.currentState?.syncAfterShown();
+        if (tab.isSplit) {
+          tab.splitViewKey.currentState?.syncAfterShown();
+        }
       }
     });
   }
 
   void _insertCommand(String cmd) {
-    final tab = _tabs[_active];
-    tab.terminal?.onOutput?.call(cmd);
+    _tabs[_active].terminal?.onOutput?.call(cmd);
   }
 
   void _openSettings() {
@@ -428,7 +754,18 @@ class _TerminalHomeState extends State<TerminalHome> {
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // ── Build ──────────────────────────────────────────────────────────────────
+
+  bool get _activeTabCanSplit {
+    if (_tabs.isEmpty || _active >= _tabs.length) return false;
+    final kind = _tabs[_active].kind;
+    return kind == _TabKind.local || kind == _TabKind.ssh;
+  }
+
+  bool get _activeTabIsSplit =>
+      _tabs.isNotEmpty &&
+      _active < _tabs.length &&
+      _tabs[_active].isSplit;
 
   @override
   Widget build(BuildContext context) {
@@ -461,9 +798,27 @@ class _TerminalHomeState extends State<TerminalHome> {
                 savedHosts: _savedHosts,
                 configHosts: _configHosts,
                 onConnectHost: _connectSavedHost,
-                onInsertCommand: _tabs.isNotEmpty && _tabs[_active].terminal != null
-                    ? _insertCommand
-                    : null,
+                onInsertCommand:
+                    _tabs.isNotEmpty && _tabs[_active].terminal != null
+                        ? _insertCommand
+                        : null,
+                hasSftp: _tabs.isNotEmpty &&
+                    _active < _tabs.length &&
+                    _tabs[_active].sftp != null,
+                sftpVisible: _tabs.isNotEmpty &&
+                    _active < _tabs.length &&
+                    _tabs[_active].sftpPanelVisible,
+                onToggleSftp: () {
+                  if (_tabs.isNotEmpty && _active < _tabs.length) {
+                    setState(() => _tabs[_active].sftpPanelVisible =
+                        !_tabs[_active].sftpPanelVisible);
+                  }
+                },
+                canSplit: _activeTabCanSplit,
+                isSplit: _activeTabIsSplit,
+                onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+                onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+                onCloseSplit: _closeSplitCurrentTab,
               ),
               const Divider(height: 1, thickness: 1, color: _kDivider),
               Expanded(child: _buildBody()),
@@ -474,25 +829,28 @@ class _TerminalHomeState extends State<TerminalHome> {
     );
   }
 
-  Widget _buildTabBody(_Tab tab) {
+  Widget _buildPrimaryContent(_Tab tab) {
     return switch (tab.kind) {
-      _TabKind.local => _buildTerminalView(tab.terminal!, tab.terminalViewKey),
-      _TabKind.ssh =>
-        tab.sftp != null
-            ? SshSessionView(
-                terminal: tab.terminal!,
-                sftp: tab.sftp!,
-                host: tab.title,
-                remotePath: tab.remotePath!,
-                panelPosition: _config.sftpPanelPosition,
-                onPanelPositionChanged: (pos) {
-                  setState(() => _config.sftpPanelPosition = pos);
-                  _config.save();
-                },
-                terminalSettings: _config.terminal,
-                terminalViewKey: tab.terminalViewKey,
-              )
-            : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+      _TabKind.local =>
+        _buildTerminalView(tab.terminal!, tab.terminalViewKey),
+      _TabKind.ssh => tab.sftp != null
+          ? SshSessionView(
+              terminal: tab.terminal!,
+              sftp: tab.sftp!,
+              host: tab.title,
+              remotePath: tab.remotePath!,
+              panelPosition: _config.sftpPanelPosition,
+              onPanelPositionChanged: (pos) {
+                setState(() => _config.sftpPanelPosition = pos);
+                _config.save();
+              },
+              terminalSettings: _config.terminal,
+              terminalViewKey: tab.terminalViewKey,
+              sftpVisible: tab.sftpPanelVisible,
+              onToggleSftp: () =>
+                  setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
+            )
+          : _buildTerminalView(tab.terminal!, tab.terminalViewKey),
       _TabKind.settings => SettingsPage(
           settings: _config.terminal,
           onChanged: (next) {
@@ -502,6 +860,20 @@ class _TerminalHomeState extends State<TerminalHome> {
           },
         ),
     };
+  }
+
+  Widget _buildTabBody(_Tab tab) {
+    final primary = _buildPrimaryContent(tab);
+
+    if (!tab.isSplit) return primary;
+
+    final secondary = _buildTerminalView(tab.splitTerminal!, tab.splitViewKey);
+
+    return SplitView(
+      primary: primary,
+      secondary: secondary,
+      axis: tab.splitAxis,
+    );
   }
 
   Widget _buildBody() {
@@ -514,7 +886,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 }
 
-// ── Tab bar ──────────────────────────────────────────────────────────────────
+// ── Tab bar ───────────────────────────────────────────────────────────────────
 class _TabBar extends StatelessWidget {
   const _TabBar({
     required this.tabs,
@@ -527,6 +899,14 @@ class _TabBar extends StatelessWidget {
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
+    required this.hasSftp,
+    required this.sftpVisible,
+    required this.onToggleSftp,
+    required this.canSplit,
+    required this.isSplit,
+    required this.onSplitHorizontal,
+    required this.onSplitVertical,
+    required this.onCloseSplit,
     this.onInsertCommand,
   });
 
@@ -541,6 +921,14 @@ class _TabBar extends StatelessWidget {
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
   final ValueChanged<String>? onInsertCommand;
+  final bool hasSftp;
+  final bool sftpVisible;
+  final VoidCallback onToggleSftp;
+  final bool canSplit;
+  final bool isSplit;
+  final VoidCallback onSplitHorizontal;
+  final VoidCallback onSplitVertical;
+  final VoidCallback onCloseSplit;
 
   static const _minTabWidth = 100.0;
 
@@ -584,13 +972,12 @@ class _TabBar extends StatelessWidget {
                           ),
                 ];
 
-                if (canExpand) {
-                  return Row(children: chips);
-                }
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: chips),
-                );
+                return canExpand
+                    ? Row(children: chips)
+                    : SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: chips),
+                      );
               },
             ),
           ),
@@ -602,6 +989,18 @@ class _TabBar extends StatelessWidget {
             onConnectHost: onConnectHost,
           ),
           CmdPickerButton(onInsert: onInsertCommand),
+          if (hasSftp)
+            _SftpButton(
+              sftpVisible: sftpVisible,
+              onToggle: onToggleSftp,
+            ),
+          _SplitButton(
+            canSplit: canSplit,
+            isSplit: isSplit,
+            onSplitHorizontal: onSplitHorizontal,
+            onSplitVertical: onSplitVertical,
+            onCloseSplit: onCloseSplit,
+          ),
           GestureDetector(
             onTap: onSettings,
             child: Tooltip(
@@ -625,6 +1024,150 @@ class _TabBar extends StatelessWidget {
   }
 }
 
+// ── SFTP toggle button ────────────────────────────────────────────────────────
+class _SftpButton extends StatelessWidget {
+  const _SftpButton({required this.sftpVisible, required this.onToggle});
+
+  final bool sftpVisible;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: sftpVisible ? '隐藏 SFTP' : '显示 SFTP',
+      child: GestureDetector(
+        onTap: onToggle,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.folder_outlined,
+            size: 15,
+            color: sftpVisible
+                ? const Color(0xFF2472C8)
+                : _kFgInactive,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Split button ──────────────────────────────────────────────────────────────
+class _SplitButton extends StatelessWidget {
+  const _SplitButton({
+    required this.canSplit,
+    required this.isSplit,
+    required this.onSplitHorizontal,
+    required this.onSplitVertical,
+    required this.onCloseSplit,
+  });
+
+  final bool canSplit;
+  final bool isSplit;
+  final VoidCallback onSplitHorizontal;
+  final VoidCallback onSplitVertical;
+  final VoidCallback onCloseSplit;
+
+  void _showMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
+      color: const Color(0xFF2B2B2B),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: const BorderSide(color: _kDivider),
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'h',
+          height: 36,
+          child: Row(
+            children: [
+              const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
+              const SizedBox(width: 8),
+              Text(
+                '水平分屏',
+                style: TextStyle(
+                  color: isSplit ? const Color(0xFF2472C8) : _kFgActive,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'v',
+          height: 36,
+          child: Row(
+            children: [
+              const Icon(Icons.vertical_split, size: 13, color: _kFgInactive),
+              const SizedBox(width: 8),
+              const Text(
+                '垂直分屏',
+                style: TextStyle(color: _kFgActive, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        if (isSplit)
+          const PopupMenuItem(
+            value: 'close',
+            height: 36,
+            child: Row(
+              children: [
+                Icon(Icons.close, size: 13, color: _kFgInactive),
+                SizedBox(width: 8),
+                Text(
+                  '关闭分屏',
+                  style: TextStyle(color: _kFgActive, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ).then((v) {
+      if (v == 'h') onSplitHorizontal();
+      if (v == 'v') onSplitVertical();
+      if (v == 'close') onCloseSplit();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '分屏',
+      child: GestureDetector(
+        onTap: canSplit ? () => _showMenu(context) : null,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.splitscreen,
+            size: 15,
+            color: isSplit
+                ? const Color(0xFF2472C8)
+                : canSplit
+                    ? _kFgInactive
+                    : _kFgInactive.withAlpha(80),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Tab chip ──────────────────────────────────────────────────────────────────
 class _TabChip extends StatelessWidget {
   const _TabChip({
     required this.tab,
@@ -677,7 +1220,8 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight:
+                        isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               )
@@ -690,7 +1234,8 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight:
+                        isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               ),
@@ -737,8 +1282,8 @@ class _CloseBtnState extends State<_CloseBtn> {
             color: _hover
                 ? _kFgActive
                 : widget.isActive
-                ? _kFgInactive
-                : Colors.transparent,
+                    ? _kFgInactive
+                    : Colors.transparent,
           ),
         ),
       ),
@@ -746,6 +1291,7 @@ class _CloseBtnState extends State<_CloseBtn> {
   }
 }
 
+// ── Plus menu ─────────────────────────────────────────────────────────────────
 class _PlusMenu extends StatelessWidget {
   const _PlusMenu({
     required this.onLocal,
@@ -768,52 +1314,51 @@ class _PlusMenu extends StatelessWidget {
     letterSpacing: 0.3,
   );
 
-  PopupMenuItem<String> _sectionHeader(String label) {
-    return PopupMenuItem<String>(
-      enabled: false,
-      height: 28,
-      child: Text(label, style: _headerStyle),
-    );
-  }
+  PopupMenuItem<String> _sectionHeader(String label) =>
+      PopupMenuItem<String>(
+        enabled: false,
+        height: 28,
+        child: Text(label, style: _headerStyle),
+      );
 
-  PopupMenuItem<String> _hostItem(SshHost h, String prefix) {
-    return PopupMenuItem<String>(
-      value: '$prefix:${h.profileKey}',
-      height: 36,
-      child: Row(
-        children: [
-          Icon(
-            prefix == 'saved'
-                ? Icons.bookmark_outline
-                : Icons.description_outlined,
-            size: 13,
-            color: _kFgInactive,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  h.alias,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _kFgActive, fontSize: 13),
-                ),
-                Text(
-                  h.displayInfo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _kFgInactive, fontSize: 11),
-                ),
-              ],
+  PopupMenuItem<String> _hostItem(SshHost h, String prefix) =>
+      PopupMenuItem<String>(
+        value: '$prefix:${h.profileKey}',
+        height: 36,
+        child: Row(
+          children: [
+            Icon(
+              prefix == 'saved'
+                  ? Icons.bookmark_outline
+                  : Icons.description_outlined,
+              size: 13,
+              color: _kFgInactive,
             ),
-          ),
-        ],
-      ),
-    );
-  }
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    h.alias,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _kFgActive, fontSize: 13),
+                  ),
+                  Text(
+                    h.displayInfo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: _kFgInactive, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
 
   void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
@@ -844,7 +1389,10 @@ class _PlusMenu extends StatelessWidget {
             children: [
               Icon(Icons.terminal, size: 13, color: _kFgInactive),
               SizedBox(width: 8),
-              Text('系统终端', style: TextStyle(color: _kFgActive, fontSize: 13)),
+              Text(
+                '系统终端',
+                style: TextStyle(color: _kFgActive, fontSize: 13),
+              ),
             ],
           ),
         ),

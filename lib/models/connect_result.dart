@@ -6,6 +6,7 @@ enum ConnectMode { terminal, sftp }
 
 class ConnectResult {
   final SSHClient client;
+  final SSHClient? jumpClient;
   final SSHSession? session;
   final SftpClient? sftp;
   final String host;
@@ -16,6 +17,7 @@ class ConnectResult {
 
   ConnectResult({
     required this.client,
+    this.jumpClient,
     this.session,
     this.sftp,
     required this.host,

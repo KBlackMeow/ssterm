@@ -2,14 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../services/credential_crypto.dart';
+import 'port_forward_rule.dart';
 import 'ssh_host.dart';
 
-/// Recently connected SSH profiles at `~/.ssterm/hosts.json`.
-///
-/// Stores host, port, username, optional key path, and password (AES-GCM
-/// encrypted; master key in the OS keychain). Used to pre-fill the connect
-/// dialog and quick-reconnect from the + menu — not for host key trust
-/// (`~/.ssterm/known_hosts.json`).
 class SavedHostsStore {
   static Future<File> _file() async {
     final home = Platform.environment['HOME'] ?? '';
@@ -33,9 +28,7 @@ class SavedHostsStore {
       if (needsMigration) {
         try {
           await save(hosts);
-        } catch (_) {
-          // Still return loaded hosts even if encrypt/migrate fails.
-        }
+        } catch (_) {}
       }
       return hosts;
     } catch (_) {
@@ -67,6 +60,11 @@ class SavedHostsStore {
       password = json['password'] as String;
     }
 
+    SshHost? jumpHost;
+    if (json['jumpHost'] is Map<String, dynamic>) {
+      jumpHost = await _hostFromStorage(json['jumpHost'] as Map<String, dynamic>);
+    }
+
     return SshHost(
       alias: json['alias'] as String,
       hostname: json['hostname'] as String,
@@ -74,6 +72,11 @@ class SavedHostsStore {
       user: json['user'] as String?,
       identityFile: json['identityFile'] as String?,
       password: password,
+      forwardRules: PortForwardRule.listFromJson(json['forwardRules']),
+      jumpHost: jumpHost,
+      keepaliveInterval: json['keepaliveInterval'] as int? ?? 0,
+      autoReconnect: json['autoReconnect'] as bool? ?? false,
+      sessionLog: json['sessionLog'] as bool? ?? false,
     );
   }
 
@@ -84,14 +87,22 @@ class SavedHostsStore {
       'port': host.port,
       if (host.user != null) 'user': host.user,
       if (host.identityFile != null) 'identityFile': host.identityFile,
+      if (host.forwardRules.isNotEmpty)
+        'forwardRules': PortForwardRule.listToJson(host.forwardRules),
+      if (host.keepaliveInterval != 0)
+        'keepaliveInterval': host.keepaliveInterval,
+      if (host.autoReconnect) 'autoReconnect': host.autoReconnect,
+      if (host.sessionLog) 'sessionLog': host.sessionLog,
     };
+
+    if (host.jumpHost != null) {
+      map['jumpHost'] = await _hostToStorage(host.jumpHost!);
+    }
+
     if (host.password != null && host.password!.isNotEmpty) {
       try {
-        map['passwordEnc'] =
-            await CredentialCrypto.encrypt(host.password!);
-      } catch (_) {
-        // Keychain/encrypt unavailable — profile is still saved without password.
-      }
+        map['passwordEnc'] = await CredentialCrypto.encrypt(host.password!);
+      } catch (_) {}
     }
     return map;
   }

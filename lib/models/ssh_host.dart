@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'port_forward_rule.dart';
+
 class SshHost {
   final String alias;
   final String hostname;
@@ -8,6 +10,19 @@ class SshHost {
   final String? identityFile;
   final String? password;
 
+  // Feature 1: port forwarding
+  final List<PortForwardRule> forwardRules;
+
+  // Feature 2: jump host
+  final SshHost? jumpHost;
+
+  // Feature 4: keepalive + auto-reconnect
+  final int keepaliveInterval; // seconds, 0 = disabled
+  final bool autoReconnect;
+
+  // Feature 5: session logging
+  final bool sessionLog;
+
   const SshHost({
     required this.alias,
     required this.hostname,
@@ -15,6 +30,11 @@ class SshHost {
     this.user,
     this.identityFile,
     this.password,
+    this.forwardRules = const [],
+    this.jumpHost,
+    this.keepaliveInterval = 0,
+    this.autoReconnect = false,
+    this.sessionLog = false,
   });
 
   String get displayInfo {
@@ -25,7 +45,6 @@ class SshHost {
   static String get defaultUsername =>
       Platform.environment['USER'] ?? 'root';
 
-  /// Stable id for the same server profile (ignores auth method).
   String get profileKey =>
       '$hostname:$port:${user ?? defaultUsername}';
 
@@ -38,6 +57,34 @@ class SshHost {
 
   bool get usesIdentityFile =>
       identityFile != null && identityFile!.isNotEmpty;
+
+  SshHost copyWith({
+    String? alias,
+    String? hostname,
+    int? port,
+    String? user,
+    String? identityFile,
+    String? password,
+    List<PortForwardRule>? forwardRules,
+    SshHost? jumpHost,
+    bool clearJumpHost = false,
+    int? keepaliveInterval,
+    bool? autoReconnect,
+    bool? sessionLog,
+  }) =>
+      SshHost(
+        alias: alias ?? this.alias,
+        hostname: hostname ?? this.hostname,
+        port: port ?? this.port,
+        user: user ?? this.user,
+        identityFile: identityFile ?? this.identityFile,
+        password: password ?? this.password,
+        forwardRules: forwardRules ?? this.forwardRules,
+        jumpHost: clearJumpHost ? null : (jumpHost ?? this.jumpHost),
+        keepaliveInterval: keepaliveInterval ?? this.keepaliveInterval,
+        autoReconnect: autoReconnect ?? this.autoReconnect,
+        sessionLog: sessionLog ?? this.sessionLog,
+      );
 }
 
 bool looksLikeKeyPath(String value) {

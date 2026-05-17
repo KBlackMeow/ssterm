@@ -19,6 +19,8 @@ class SshSessionView extends StatefulWidget {
     required this.panelPosition,
     required this.onPanelPositionChanged,
     required this.terminalSettings,
+    required this.sftpVisible,
+    required this.onToggleSftp,
     this.terminalViewKey,
   });
 
@@ -29,6 +31,8 @@ class SshSessionView extends StatefulWidget {
   final SftpPanelPosition panelPosition;
   final ValueChanged<SftpPanelPosition> onPanelPositionChanged;
   final TerminalSettings terminalSettings;
+  final bool sftpVisible;
+  final VoidCallback onToggleSftp;
   final GlobalKey<TerminalViewState>? terminalViewKey;
 
   @override
@@ -39,8 +43,6 @@ class _SshSessionViewState extends State<SshSessionView> {
   static const _defaultRightWidth = 360.0;
   static const _minPanel = 160.0;
   static const _minTerminalHeight = 120.0;
-
-  /// Default bottom split: terminal 3, SFTP 2.
   static const _bottomTerminalFlex = 3;
   static const _bottomSftpFlex = 2;
 
@@ -51,7 +53,6 @@ class _SshSessionViewState extends State<SshSessionView> {
   void initState() {
     super.initState();
     _panelSize = _defaultRightWidth;
-    _bottomSizeLocked = false;
   }
 
   @override
@@ -67,7 +68,8 @@ class _SshSessionViewState extends State<SshSessionView> {
   }
 
   double _bottomPanelHeight(double totalHeight) {
-    final maxSftp = (totalHeight - _minTerminalHeight).clamp(_minPanel, totalHeight);
+    final maxSftp =
+        (totalHeight - _minTerminalHeight).clamp(_minPanel, totalHeight);
     final ratio = _bottomSftpFlex / (_bottomTerminalFlex + _bottomSftpFlex);
     return (totalHeight * ratio).clamp(_minPanel, maxSftp);
   }
@@ -80,57 +82,64 @@ class _SshSessionViewState extends State<SshSessionView> {
       viewKey: widget.terminalViewKey,
     );
 
+    if (!widget.sftpVisible) {
+      return terminal;
+    }
+
     final sftpPanel = SftpView(
       sftp: widget.sftp,
       host: widget.host,
       remotePath: widget.remotePath,
       panelPosition: widget.panelPosition,
       onPanelPositionChanged: widget.onPanelPositionChanged,
+      onClose: widget.onToggleSftp,
     );
 
-    return widget.panelPosition == SftpPanelPosition.right
-        ? Row(
-            children: [
-              Expanded(child: terminal),
-              _ResizeHandle(
-                axis: Axis.horizontal,
-                onDrag: (d) => setState(() {
-                  _panelSize = (_panelSize - d).clamp(_minPanel, 600);
-                }),
-              ),
-              SizedBox(width: _panelSize, child: sftpPanel),
-            ],
-          )
-        : LayoutBuilder(
-            builder: (context, constraints) {
-              final total = constraints.maxHeight;
-              final maxSftp =
-                  (total - _minTerminalHeight).clamp(_minPanel, total);
-              final sftpHeight = _bottomSizeLocked
-                  ? _panelSize.clamp(_minPanel, maxSftp)
-                  : _bottomPanelHeight(total);
+    if (widget.panelPosition == SftpPanelPosition.right) {
+      return Row(
+        children: [
+          Expanded(child: terminal),
+          _ResizeHandle(
+            axis: Axis.horizontal,
+            onDrag: (d) =>
+                setState(() => _panelSize = (_panelSize - d).clamp(_minPanel, 600)),
+          ),
+          SizedBox(width: _panelSize, child: sftpPanel),
+        ],
+      );
+    }
 
-              return Column(
-                children: [
-                  Expanded(child: terminal),
-                  _ResizeHandle(
-                    axis: Axis.vertical,
-                    onDrag: (d) => setState(() {
-                      if (!_bottomSizeLocked) {
-                        _bottomSizeLocked = true;
-                        _panelSize = sftpHeight;
-                      }
-                      _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
-                    }),
-                  ),
-                  SizedBox(height: sftpHeight, child: sftpPanel),
-                ],
-              );
-            },
-          );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final total = constraints.maxHeight;
+        final maxSftp =
+            (total - _minTerminalHeight).clamp(_minPanel, total);
+        final sftpHeight = _bottomSizeLocked
+            ? _panelSize.clamp(_minPanel, maxSftp)
+            : _bottomPanelHeight(total);
+
+        return Column(
+          children: [
+            Expanded(child: terminal),
+            _ResizeHandle(
+              axis: Axis.vertical,
+              onDrag: (d) => setState(() {
+                if (!_bottomSizeLocked) {
+                  _bottomSizeLocked = true;
+                  _panelSize = sftpHeight;
+                }
+                _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
+              }),
+            ),
+            SizedBox(height: sftpHeight, child: sftpPanel),
+          ],
+        );
+      },
+    );
   }
 }
 
+// ── Resize handle ─────────────────────────────────────────────────────────────
 class _ResizeHandle extends StatelessWidget {
   const _ResizeHandle({required this.axis, required this.onDrag});
 
@@ -145,9 +154,8 @@ class _ResizeHandle extends StatelessWidget {
           : SystemMouseCursors.resizeRow,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onPanUpdate: (d) => onDrag(
-          axis == Axis.horizontal ? d.delta.dx : d.delta.dy,
-        ),
+        onPanUpdate: (d) =>
+            onDrag(axis == Axis.horizontal ? d.delta.dx : d.delta.dy),
         child: Container(
           width: axis == Axis.horizontal ? 4 : double.infinity,
           height: axis == Axis.vertical ? 4 : double.infinity,
