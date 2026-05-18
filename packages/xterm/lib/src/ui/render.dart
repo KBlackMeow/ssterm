@@ -492,7 +492,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   @override
   void paint(PaintingContext context, Offset offset) {
+    context.canvas.save();
+    context.canvas.clipRect(offset & size);
     _paint(context, offset);
+    context.canvas.restore();
     context.setWillChangeHint();
   }
 
@@ -506,8 +509,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final lastLineOffset =
         _effectiveScrollPixels + size.height - _padding.bottom;
 
-    final firstLine = (firstLineOffset / charHeight).ceil();
-    final lastLine = (lastLineOffset / charHeight).floor() - 1;
+    final firstLine = (firstLineOffset / charHeight).floor();
+    final lastLine = (lastLineOffset / charHeight).ceil() - 1;
 
     final effectFirstLine = firstLine.clamp(0, lines.length - 1);
     final effectLastLine = lastLine.clamp(0, lines.length - 1);
