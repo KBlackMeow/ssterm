@@ -1,10 +1,29 @@
 import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
+
+/// Join a remote directory path with a file/dir name.
+String sftpJoin(String dir, String name) =>
+    dir.endsWith('/') ? '$dir$name' : '$dir/$name';
+
+/// Return the parent of a remote path, or '/' if already at root.
+String sftpParent(String path) {
+  if (path == '/') return '/';
+  final i = path.lastIndexOf('/');
+  return i <= 0 ? '/' : path.substring(0, i);
+}
+
+/// Sort rank for SFTP entries: 0 = directory, 1 = symlink, 2 = regular file.
+int sftpEntryRank({required bool isDirectory, required bool isSymbolicLink}) {
+  if (isDirectory) return 0;
+  if (isSymbolicLink) return 1;
+  return 2;
+}
 
 const _kSizeColWidth = 44.0;
 const _kDateColWidth = 72.0;
@@ -44,6 +63,7 @@ class _SftpViewState extends State<SftpView> {
   String? _error;
   SftpName? _selected;
   String? _status;
+  bool _isDragOver = false;
 
   @override
   void initState() {
@@ -82,10 +102,14 @@ class _SftpViewState extends State<SftpView> {
     try {
       final raw = await widget.sftp.listdir(path);
       raw.sort((a, b) {
-        final aDir = a.attr.isDirectory;
-        final bDir = b.attr.isDirectory;
-        if (aDir != bDir) return aDir ? -1 : 1;
-        return a.filename.compareTo(b.filename);
+        final r = sftpEntryRank(
+              isDirectory: a.attr.isDirectory,
+              isSymbolicLink: a.attr.isSymbolicLink,
+            ).compareTo(sftpEntryRank(
+              isDirectory: b.attr.isDirectory,
+              isSymbolicLink: b.attr.isSymbolicLink,
+            ));
+        return r != 0 ? r : a.filename.compareTo(b.filename);
       });
       if (mounted) {
         setState(() {
@@ -110,7 +134,7 @@ class _SftpViewState extends State<SftpView> {
     try {
       await widget.transferManager.startDownload(
         sftp: widget.sftp,
-        remotePath: _join(_path, entry.filename),
+        remotePath: sftpJoin(_path, entry.filename),
         localPath: dest,
       );
     } catch (e) {
@@ -121,13 +145,27 @@ class _SftpViewState extends State<SftpView> {
   Future<void> _upload() async {
     final localPath = await FilePickerService.pickFile();
     if (localPath == null) return;
+    await _uploadPath(localPath);
+  }
+
+  Future<void> _uploadPath(String localPath) async {
     final fileName = localPath.split(Platform.pathSeparator).last;
+    final uploadDir = _path;
     try {
-      await widget.transferManager.startUpload(
+      final task = await widget.transferManager.startUpload(
         sftp: widget.sftp,
         localPath: localPath,
-        remotePath: _join(_path, fileName),
+        remotePath: sftpJoin(uploadDir, fileName),
       );
+      void listener() {
+        if (!task.isActive) {
+          task.removeListener(listener);
+          if (mounted && task.status == TransferStatus.done && _path == uploadDir) {
+            _listDir(_path);
+          }
+        }
+      }
+      task.addListener(listener);
     } catch (e) {
       if (mounted) setState(() => _status = 'Upload error: $e');
     }
@@ -146,7 +184,7 @@ class _SftpViewState extends State<SftpView> {
     if (ok != true) return;
 
     try {
-      final p = _join(_path, entry.filename);
+      final p = sftpJoin(_path, entry.filename);
       if (entry.attr.isDirectory) {
         await widget.sftp.rmdir(p);
       } else {
@@ -169,8 +207,8 @@ class _SftpViewState extends State<SftpView> {
 
     try {
       await widget.sftp.rename(
-        _join(_path, entry.name.filename),
-        _join(_path, name),
+        sftpJoin(_path, entry.name.filename),
+        sftpJoin(_path, name),
       );
       _listDir(_path);
     } catch (e) {
@@ -188,20 +226,34 @@ class _SftpViewState extends State<SftpView> {
     if (name == null || name.isEmpty) return;
 
     try {
-      await widget.sftp.mkdir(_join(_path, name));
+      await widget.sftp.mkdir(sftpJoin(_path, name));
       _listDir(_path);
     } catch (e) {
       if (mounted) setState(() => _status = 'Error: $e');
     }
   }
 
-  String _join(String dir, String name) =>
-      dir.endsWith('/') ? '$dir$name' : '$dir/$name';
-
-  String _parent(String path) {
-    if (path == '/') return '/';
-    final i = path.lastIndexOf('/');
-    return i <= 0 ? '/' : path.substring(0, i);
+  /// Handle a tap on an entry. Directories and symlinks-to-dirs navigate;
+  /// everything else toggles selection.
+  Future<void> _navigateEntry(SftpName e) async {
+    if (e.attr.isDirectory) {
+      await _listDir(e.filename == '..'
+          ? sftpParent(_path)
+          : sftpJoin(_path, e.filename));
+      return;
+    }
+    if (e.attr.isSymbolicLink) {
+      try {
+        final targetPath = sftpJoin(_path, e.filename);
+        final stat = await widget.sftp.stat(targetPath);
+        if (stat.isDirectory) {
+          await _listDir(targetPath);
+          return;
+        }
+      } catch (_) {}
+    }
+    final isSel = _selected?.filename == e.filename;
+    setState(() => _selected = isSel ? null : e);
   }
 
   @override
@@ -212,7 +264,48 @@ class _SftpViewState extends State<SftpView> {
         children: [
           _buildToolbar(),
           _buildColumnHeader(),
-          Expanded(child: _buildBody()),
+          Expanded(
+            child: DropTarget(
+              onDragEntered: (_) => setState(() => _isDragOver = true),
+              onDragExited: (_) => setState(() => _isDragOver = false),
+              onDragDone: (detail) {
+                setState(() => _isDragOver = false);
+                for (final file in detail.files) {
+                  _uploadPath(file.path);
+                }
+              },
+              child: Stack(
+                children: [
+                  _buildBody(),
+                  if (_isDragOver)
+                    Container(
+                      color: const Color(0xFF2472C8).withAlpha(40),
+                      alignment: Alignment.center,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2472C8).withAlpha(200),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.upload, color: Colors.white, size: 16),
+                            SizedBox(width: 8),
+                            Text(
+                              'Drop to upload',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
           if (_status != null) _buildStatusBar(),
         ],
       ),
@@ -231,7 +324,7 @@ class _SftpViewState extends State<SftpView> {
           _ToolBtn(
             icon: Icons.arrow_upward,
             tooltip: 'Parent',
-            onTap: _path == '/' ? null : () => _listDir(_parent(_path)),
+            onTap: _path == '/' ? null : () => _listDir(sftpParent(_path)),
           ),
           _ToolBtn(
             icon: Icons.refresh,
@@ -387,20 +480,12 @@ class _SftpViewState extends State<SftpView> {
       itemBuilder: (_, i) {
         final e = _entries[i];
         final isDir = e.attr.isDirectory;
+        final isLink = e.attr.isSymbolicLink;
         final isSel = _selected?.filename == e.filename;
         return GestureDetector(
           onSecondaryTapDown: (d) => _showContextMenu(e, d.globalPosition),
           child: InkWell(
-            onTap: () => setState(() => _selected = isSel ? null : e),
-            onDoubleTap: () {
-              if (isDir) {
-                _listDir(
-                  e.filename == '..'
-                      ? _parent(_path)
-                      : _join(_path, e.filename),
-                );
-              }
-            },
+            onTap: () => _navigateEntry(e),
             child: Container(
               height: 24,
               color: isSel ? const Color(0xFF2472C8).withAlpha(70) : null,
@@ -408,11 +493,17 @@ class _SftpViewState extends State<SftpView> {
               child: Row(
                 children: [
                   Icon(
-                    isDir ? Icons.folder : _fileIcon(e.filename),
+                    isDir
+                        ? Icons.folder
+                        : isLink
+                            ? Icons.link
+                            : _fileIcon(e.filename),
                     size: 13,
                     color: isDir
                         ? const Color(0xFFFFD166)
-                        : const Color(0xFF686868),
+                        : isLink
+                            ? const Color(0xFF4EC9B0)
+                            : const Color(0xFF686868),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -424,7 +515,9 @@ class _SftpViewState extends State<SftpView> {
                         style: TextStyle(
                           color: isDir
                               ? const Color(0xFFC7C7C7)
-                              : const Color(0xFFAAAAAA),
+                              : isLink
+                                  ? const Color(0xFF4EC9B0)
+                                  : const Color(0xFFAAAAAA),
                           fontSize: 12,
                           fontFamily: 'Monaco',
                         ),

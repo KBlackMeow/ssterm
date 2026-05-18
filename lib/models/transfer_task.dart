@@ -80,7 +80,7 @@ class TransferManager extends ChangeNotifier {
   int get activeCount => _tasks.where((t) => t.isActive).length;
 
   /// Stat the file and enqueue an upload task. Throws on pre-flight error.
-  Future<void> startUpload({
+  Future<TransferTask> startUpload({
     required SftpClient sftp,
     required String localPath,
     required String remotePath,
@@ -94,6 +94,7 @@ class TransferManager extends ChangeNotifier {
     notifyListeners();
 
     _runUpload(task, sftp, localFile, remotePath);
+    return task;
   }
 
   /// Stat the remote file and enqueue a download task. Throws on pre-flight error.
