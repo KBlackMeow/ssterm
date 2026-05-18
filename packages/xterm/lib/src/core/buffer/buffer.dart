@@ -369,6 +369,11 @@ class Buffer {
       terminal.cursor.background = _savedCursorStyle.background;
       terminal.cursor.attrs = _savedCursorStyle.attrs;
       charset.restore();
+    } else {
+      // Position-only DECRC: clear attrs so stale SGR (e.g. underline left on
+      // the cursor from a status-bar draw) cannot leak into the next write.
+      // Apps that need a specific SGR after DECRC will re-apply it explicitly.
+      terminal.cursor.attrs = 0;
     }
   }
 
