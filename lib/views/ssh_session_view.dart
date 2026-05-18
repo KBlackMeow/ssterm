@@ -100,25 +100,23 @@ class _SshSessionViewState extends State<SshSessionView> {
       onClose: widget.onToggleSftp,
     );
 
-    if (!widget.sftpVisible) {
-      return Stack(
-        children: [
-          Positioned.fill(child: terminal),
-          Offstage(offstage: true, child: sftpPanel),
-        ],
-      );
-    }
+    final visible = widget.sftpVisible;
 
     if (widget.panelPosition == SftpPanelPosition.right) {
       return Row(
         children: [
           Expanded(child: terminal),
-          _ResizeHandle(
-            axis: Axis.horizontal,
-            onDrag: (d) =>
-                setState(() => _panelSize = (_panelSize - d).clamp(_minPanel, 600)),
-          ),
-          SizedBox(width: _panelSize, child: sftpPanel),
+          if (visible) ...[
+            _ResizeHandle(
+              axis: Axis.horizontal,
+              onDrag: (d) =>
+                  setState(() => _panelSize = (_panelSize - d).clamp(_minPanel, 600)),
+            ),
+            SizedBox(width: _panelSize, child: sftpPanel),
+          ] else
+            // SizedBox(width:0) gives Offstage a bounded maxWidth=0 so
+            // SftpView's Expanded children don't receive unbounded constraints.
+            SizedBox(width: 0, child: Offstage(offstage: true, child: sftpPanel)),
         ],
       );
     }
@@ -134,17 +132,20 @@ class _SshSessionViewState extends State<SshSessionView> {
         return Column(
           children: [
             Expanded(child: terminal),
-            _ResizeHandle(
-              axis: Axis.vertical,
-              onDrag: (d) => setState(() {
-                if (!_bottomSizeLocked) {
-                  _bottomSizeLocked = true;
-                  _panelSize = sftpHeight;
-                }
-                _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
-              }),
-            ),
-            SizedBox(height: sftpHeight, child: sftpPanel),
+            if (visible) ...[
+              _ResizeHandle(
+                axis: Axis.vertical,
+                onDrag: (d) => setState(() {
+                  if (!_bottomSizeLocked) {
+                    _bottomSizeLocked = true;
+                    _panelSize = sftpHeight;
+                  }
+                  _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
+                }),
+              ),
+              SizedBox(height: sftpHeight, child: sftpPanel),
+            ] else
+              SizedBox(height: 0, child: Offstage(offstage: true, child: sftpPanel)),
           ],
         );
       },

@@ -1,7 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-
-import 'package:dartssh2/dartssh2.dart';
 
 /// Parses OSC 7 (`file://host/path`) sequences emitted by the remote shell.
 class RemoteCwdParser {
@@ -68,21 +65,4 @@ class RemoteCwdParser {
       return raw;
     }
   }
-}
-
-/// One-line shell hook (no embedded newlines — those break zsh during login).
-const kRemoteCwdSetup =
-    'stty -echo 2>/dev/null; '
-    '__ssterm_cwd(){ printf \'\\033]7;file://%s\\033\\\\\' "\$PWD"; }; '
-    '[[ \$- == *i* ]] && { '
-    '[ -n "\${ZSH_VERSION:-}" ] && precmd_functions+=(__ssterm_cwd) || '
-    'export PROMPT_COMMAND="__ssterm_cwd\${PROMPT_COMMAND:+;\$PROMPT_COMMAND}"; '
-    '__ssterm_cwd; }; '
-    'stty echo 2>/dev/null\n';
-
-/// Installs the cwd hook after the login shell has finished loading profiles.
-void scheduleRemoteCwdSetup(SSHSession session) {
-  Future.delayed(const Duration(milliseconds: 1200), () {
-    session.stdin.add(utf8.encode(kRemoteCwdSetup));
-  });
 }

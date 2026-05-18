@@ -263,9 +263,10 @@ class _TerminalHomeState extends State<TerminalHome> {
 
   // ── Local terminal ─────────────────────────────────────────────────────────
 
-  Terminal _createTerminal() => Terminal(
+  Terminal _createTerminal({bool reflowEnabled = true}) => Terminal(
         maxLines: 5000,
         platform: detectTerminalHostPlatform(),
+        reflowEnabled: reflowEnabled,
       );
 
   /// Start the local PTY on the first [Terminal.onResize] so rows/cols match the
@@ -422,7 +423,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   Future<void> _openSshTerminal(ConnectResult r) async {
-    final terminal = _createTerminal();
+    final terminal = _createTerminal(reflowEnabled: false);
     final session = r.session!;
     final remotePath = ValueNotifier<String>('');
     final cwdParser = RemoteCwdParser();
@@ -469,8 +470,6 @@ class _TerminalHomeState extends State<TerminalHome> {
       remotePath.dispose();
       return;
     }
-
-    scheduleRemoteCwdSetup(session);
 
     late _Tab tab;
     tab = _Tab.ssh(
@@ -549,7 +548,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   Future<void> _openSshSplitPane(_Tab tab, Axis axis) async {
-    final splitTerminal = _createTerminal();
+    final splitTerminal = _createTerminal(reflowEnabled: false);
     SSHSession session;
     try {
       session = await tab.sshClient!.shell(
@@ -578,17 +577,6 @@ class _TerminalHomeState extends State<TerminalHome> {
     session.done.then((_) {
       if (mounted) setState(() => tab.clearSplit());
     });
-
-    // cd to same directory as primary pane
-    final cwd = tab.remotePath?.value ?? '';
-    if (cwd.isNotEmpty) {
-      Future.delayed(const Duration(milliseconds: 800), () {
-        final escaped = cwd.replaceAll("'", r"'\''");
-        session.stdin.add(utf8.encode("cd '$escaped'\n"));
-      });
-    }
-
-    scheduleRemoteCwdSetup(session);
 
     if (!mounted) {
       pipe.dispose();
@@ -741,7 +729,6 @@ class _TerminalHomeState extends State<TerminalHome> {
         }
       });
 
-      scheduleRemoteCwdSetup(session);
       tab.terminal?.write('[Reconnected]\r\n');
       if (mounted) setState(() {});
     } catch (e) {

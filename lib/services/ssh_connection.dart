@@ -112,7 +112,8 @@ Future<ConnectResult> connectSshHost(
 
     if (mode == ConnectMode.terminal) {
       session = await client
-          .shell(
+          .execute(
+            _interactiveShellWrapperCommand(),
             pty: const SSHPtyConfig(
               width: 80,
               height: 24,
@@ -140,6 +141,69 @@ Future<ConnectResult> connectSshHost(
     jumpClient?.close();
     rethrow;
   }
+}
+
+String _interactiveShellWrapperCommand() {
+  return r'''
+shell="${SHELL:-/bin/sh}"
+shell_name="${shell##*/}"
+
+case "$shell_name" in
+  zsh)
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ssterm-zsh.XXXXXX")"
+    cat >"$tmpdir/.zprofile" <<'EOF'
+if [ -f "$HOME/.zprofile" ]; then
+  . "$HOME/.zprofile"
+fi
+EOF
+    cat >"$tmpdir/.zshrc" <<'EOF'
+__ssterm_cwd() {
+  printf '\033]7;file://%s\033\\' "$PWD"
+}
+if [ -f "$HOME/.zshrc" ]; then
+  . "$HOME/.zshrc"
+fi
+case " ${precmd_functions[*]} " in
+  *" __ssterm_cwd "*) : ;;
+  *) precmd_functions+=(__ssterm_cwd) ;;
+esac
+__ssterm_cwd
+EOF
+    cat >"$tmpdir/.zlogin" <<'EOF'
+if [ -f "$HOME/.zlogin" ]; then
+  . "$HOME/.zlogin"
+fi
+EOF
+    exec env ZDOTDIR="$tmpdir" "$shell" -il
+    ;;
+  bash)
+    rcfile="$(mktemp "${TMPDIR:-/tmp}/ssterm-bash.XXXXXX")"
+    cat >"$rcfile" <<'EOF'
+__ssterm_cwd() {
+  printf '\033]7;file://%s\033\\' "$PWD"
+}
+if [ -f "$HOME/.bash_profile" ]; then
+  . "$HOME/.bash_profile"
+elif [ -f "$HOME/.bash_login" ]; then
+  . "$HOME/.bash_login"
+elif [ -f "$HOME/.profile" ]; then
+  . "$HOME/.profile"
+elif [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
+case ";${PROMPT_COMMAND:-};" in
+  *";__ssterm_cwd;"*) : ;;
+  *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+esac
+__ssterm_cwd
+EOF
+    exec "$shell" --noprofile --rcfile "$rcfile" -i
+    ;;
+  *)
+    exec "$shell" -i
+    ;;
+esac
+''';
 }
 
 /// Connect from dialog fields.
