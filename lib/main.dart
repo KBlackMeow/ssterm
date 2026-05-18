@@ -61,8 +61,12 @@ class _OutputPipe {
   final List<int> Function(List<int>)? transform;
   final SessionLogger? sessionLogger;
   final _buf = BytesBuilder(copy: false);
-  bool _pending = false;
+  Timer? _timer;
   final _subs = <StreamSubscription<List<int>>>[];
+
+  // Cap per-write to keep the main thread unblocked while streaming large output.
+  static const _kMaxBytesPerWrite = 65536; // 64 KB
+  static const _kFlushInterval = Duration(milliseconds: 16); // ~60 fps
 
   void bind(Stream<List<int>> stream) {
     _subs.add(stream.listen(_onChunk));
@@ -70,26 +74,35 @@ class _OutputPipe {
 
   void _onChunk(List<int> chunk) {
     _buf.add(chunk);
-    if (!_pending) {
-      _pending = true;
-      scheduleMicrotask(_flush);
-    }
+    _timer ??= Timer(_kFlushInterval, _flush);
   }
 
   void _flush() {
-    _pending = false;
-    var bytes = _buf.takeBytes();
-    if (bytes.isEmpty) return;
-    sessionLogger?.write(bytes);
-    if (transform != null) {
-      bytes = Uint8List.fromList(transform!(bytes));
+    _timer = null;
+    final all = _buf.takeBytes();
+    if (all.isEmpty) return;
+
+    final Uint8List toWrite;
+    if (all.length > _kMaxBytesPerWrite) {
+      toWrite = Uint8List.sublistView(all, 0, _kMaxBytesPerWrite);
+      _buf.add(Uint8List.sublistView(all, _kMaxBytesPerWrite));
+      _timer = Timer(_kFlushInterval, _flush);
+    } else {
+      toWrite = all;
     }
-    if (bytes.isNotEmpty) {
-      _terminal.write(utf8.decode(bytes, allowMalformed: true));
+
+    sessionLogger?.write(toWrite);
+    List<int> out = toWrite;
+    if (transform != null) {
+      out = Uint8List.fromList(transform!(toWrite));
+    }
+    if (out.isNotEmpty) {
+      _terminal.write(utf8.decode(out, allowMalformed: true));
     }
   }
 
   void dispose() {
+    _timer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
