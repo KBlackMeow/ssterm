@@ -19,6 +19,9 @@ class SshSessionView extends StatefulWidget {
     required this.sftpVisible,
     required this.onToggleSftp,
     required this.child,
+    this.initialPosition = SftpPanelPosition.right,
+    this.initialSize = 360.0,
+    this.onLayoutChanged,
   });
 
   final SftpClient sftp;
@@ -28,6 +31,9 @@ class SshSessionView extends StatefulWidget {
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
   final Widget child;
+  final SftpPanelPosition initialPosition;
+  final double initialSize;
+  final void Function(SftpPanelPosition position, double size)? onLayoutChanged;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -38,8 +44,15 @@ class _SshSessionViewState extends State<SshSessionView> {
   static const _kMinSide = 160.0;
   static const _kMaxSide = 680.0;
 
-  SftpPanelPosition _position = SftpPanelPosition.right;
-  double _panelSize = _kDefaultSide;
+  late SftpPanelPosition _position;
+  late double _panelSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _position = widget.initialPosition;
+    _panelSize = widget.initialSize;
+  }
   final _sftpKey = GlobalKey();
 
   @override
@@ -54,6 +67,7 @@ class _SshSessionViewState extends State<SshSessionView> {
       onPanelPositionChanged: (pos) => setState(() {
         _position = pos;
         _panelSize = _kDefaultSide;
+        widget.onLayoutChanged?.call(_position, _panelSize);
       }),
       onClose: widget.onToggleSftp,
     );
@@ -72,6 +86,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                     axis: Axis.horizontal,
                     onDrag: (d) => setState(() {
                       _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
+                      widget.onLayoutChanged?.call(_position, _panelSize);
                     }),
                   ),
                   Expanded(child: sftp),
@@ -92,6 +107,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                     axis: Axis.vertical,
                     onDrag: (d) => setState(() {
                       _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
+                      widget.onLayoutChanged?.call(_position, _panelSize);
                     }),
                   ),
                   Expanded(child: sftp),

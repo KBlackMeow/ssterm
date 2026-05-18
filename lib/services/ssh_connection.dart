@@ -189,6 +189,9 @@ EOF
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
+if [ -f /etc/profile ]; then
+  . /etc/profile
+fi
 if [ -f "$HOME/.bash_profile" ]; then
   . "$HOME/.bash_profile"
 elif [ -f "$HOME/.bash_login" ]; then
@@ -207,7 +210,7 @@ EOF
     exec "$shell" --noprofile --rcfile "$rcfile" -i
     ;;
   *)
-    exec "$shell" -i
+    exec "$shell" -il
     ;;
 esac
 ''';

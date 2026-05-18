@@ -1,13 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../views/ssh_session_view.dart';
 import 'terminal_settings.dart';
 
 class AppConfig {
-  AppConfig({TerminalSettings? terminal})
-      : terminal = terminal ?? TerminalSettings();
+  AppConfig({TerminalSettings? terminal, SftpPanelPosition? sftpPosition, double? sftpSize})
+      : terminal = terminal ?? TerminalSettings(),
+        sftpPosition = sftpPosition ?? SftpPanelPosition.right,
+        sftpSize = sftpSize ?? 360.0;
 
   TerminalSettings terminal;
+  SftpPanelPosition sftpPosition;
+  double sftpSize;
 
   static Future<File> _file() async {
     final home = Platform.environment['HOME'] ?? '';
@@ -25,6 +30,10 @@ class AppConfig {
         terminal: TerminalSettings.fromJson(
           json['terminal'] as Map<String, dynamic>?,
         ),
+        sftpPosition: json['sftpPosition'] == 'bottom'
+            ? SftpPanelPosition.bottom
+            : SftpPanelPosition.right,
+        sftpSize: (json['sftpSize'] as num?)?.toDouble(),
       );
     } catch (_) {
       return AppConfig();
@@ -36,6 +45,8 @@ class AppConfig {
     await f.writeAsString(
       const JsonEncoder.withIndent('  ').convert({
         'terminal': terminal.toJson(),
+        'sftpPosition': sftpPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
+        'sftpSize': sftpSize,
       }),
     );
   }

@@ -1067,6 +1067,13 @@ esac
         sftpVisible: tab.sftpPanelVisible,
         onToggleSftp: () =>
             setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
+        initialPosition: _config.sftpPosition,
+        initialSize: _config.sftpSize,
+        onLayoutChanged: (pos, size) {
+          _config.sftpPosition = pos;
+          _config.sftpSize = size;
+          _config.save();
+        },
         child: body,
       );
     }
