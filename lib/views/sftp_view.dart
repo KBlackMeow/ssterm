@@ -2,9 +2,9 @@ import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 
-import '../models/app_config.dart';
 import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
+import 'ssh_session_view.dart' show SftpPanelPosition;
 
 const _kSizeColWidth = 44.0;
 const _kDateColWidth = 72.0;
@@ -261,8 +261,8 @@ class _SftpViewState extends State<SftpView> {
             child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
           ),
           const SizedBox(width: 4),
-          if (widget.onPanelPositionChanged != null &&
-              widget.panelPosition != null)
+          if (widget.panelPosition != null &&
+              widget.onPanelPositionChanged != null)
             _ToolBtn(
               icon: widget.panelPosition == SftpPanelPosition.right
                   ? Icons.view_agenda_outlined
@@ -270,12 +270,11 @@ class _SftpViewState extends State<SftpView> {
               tooltip: widget.panelPosition == SftpPanelPosition.right
                   ? 'Move to bottom'
                   : 'Move to right',
-              onTap: () {
-                final next = widget.panelPosition == SftpPanelPosition.right
+              onTap: () => widget.onPanelPositionChanged!(
+                widget.panelPosition == SftpPanelPosition.right
                     ? SftpPanelPosition.bottom
-                    : SftpPanelPosition.right;
-                widget.onPanelPositionChanged!(next);
-              },
+                    : SftpPanelPosition.right,
+              ),
             ),
           _ToolBtn(
             icon: Icons.upload,

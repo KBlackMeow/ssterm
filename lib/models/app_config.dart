@@ -3,15 +3,10 @@ import 'dart:io';
 
 import 'terminal_settings.dart';
 
-enum SftpPanelPosition { right, bottom }
-
 class AppConfig {
-  AppConfig({
-    this.sftpPanelPosition = SftpPanelPosition.right,
-    TerminalSettings? terminal,
-  }) : terminal = terminal ?? TerminalSettings();
+  AppConfig({TerminalSettings? terminal})
+      : terminal = terminal ?? TerminalSettings();
 
-  SftpPanelPosition sftpPanelPosition;
   TerminalSettings terminal;
 
   static Future<File> _file() async {
@@ -26,11 +21,7 @@ class AppConfig {
     if (!await f.exists()) return AppConfig();
     try {
       final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      final pos = json['sftpPanelPosition'];
       return AppConfig(
-        sftpPanelPosition: pos == 'bottom'
-            ? SftpPanelPosition.bottom
-            : SftpPanelPosition.right,
         terminal: TerminalSettings.fromJson(
           json['terminal'] as Map<String, dynamic>?,
         ),
@@ -44,8 +35,6 @@ class AppConfig {
     final f = await _file();
     await f.writeAsString(
       const JsonEncoder.withIndent('  ').convert({
-        'sftpPanelPosition':
-            sftpPanelPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
         'terminal': terminal.toJson(),
       }),
     );

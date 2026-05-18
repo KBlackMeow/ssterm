@@ -1,159 +1,114 @@
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
-import 'package:xterm/xterm.dart';
 
-import '../models/app_config.dart';
-import '../models/terminal_settings.dart';
 import '../models/transfer_task.dart';
-import '../widgets/terminal_surface.dart';
 import 'sftp_view.dart';
 
 const _kDivider = Color(0xFF3A3A3A);
 
+enum SftpPanelPosition { right, bottom }
+
+/// Wraps [child] (terminal or split view) with a floating SFTP overlay panel.
 class SshSessionView extends StatefulWidget {
   const SshSessionView({
     super.key,
-    required this.terminal,
     required this.sftp,
     required this.host,
     required this.remotePath,
     required this.transferManager,
-    required this.panelPosition,
-    required this.onPanelPositionChanged,
-    required this.terminalSettings,
     required this.sftpVisible,
     required this.onToggleSftp,
-    this.terminalViewKey,
-    this.contextMenu,
+    required this.child,
   });
 
-  final Terminal terminal;
   final SftpClient sftp;
   final String host;
   final ValueNotifier<String> remotePath;
   final TransferManager transferManager;
-  final SftpPanelPosition panelPosition;
-  final ValueChanged<SftpPanelPosition> onPanelPositionChanged;
-  final TerminalSettings terminalSettings;
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
-  final GlobalKey<TerminalViewState>? terminalViewKey;
-  final TerminalContextMenuConfig? contextMenu;
+  final Widget child;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
 }
 
 class _SshSessionViewState extends State<SshSessionView> {
-  static const _defaultRightWidth = 360.0;
-  static const _minPanel = 160.0;
-  static const _minTerminalHeight = 120.0;
-  static const _bottomTerminalFlex = 3;
-  static const _bottomSftpFlex = 2;
+  static const _kDefaultSide = 360.0;
+  static const _kMinSide = 160.0;
+  static const _kMaxSide = 680.0;
 
-  late double _panelSize;
-  bool _bottomSizeLocked = false;
+  SftpPanelPosition _position = SftpPanelPosition.right;
+  double _panelSize = _kDefaultSide;
   final _sftpKey = GlobalKey();
 
   @override
-  void initState() {
-    super.initState();
-    _panelSize = _defaultRightWidth;
-  }
-
-  @override
-  void didUpdateWidget(covariant SshSessionView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.panelPosition != widget.panelPosition) {
-      if (widget.panelPosition == SftpPanelPosition.right) {
-        _panelSize = _defaultRightWidth;
-      } else {
-        _bottomSizeLocked = false;
-      }
-    }
-  }
-
-  double _bottomPanelHeight(double totalHeight) {
-    final maxSftp =
-        (totalHeight - _minTerminalHeight).clamp(_minPanel, totalHeight);
-    final ratio = _bottomSftpFlex / (_bottomTerminalFlex + _bottomSftpFlex);
-    return (totalHeight * ratio).clamp(_minPanel, maxSftp);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final terminal = TerminalSurface(
-      terminal: widget.terminal,
-      settings: widget.terminalSettings,
-      viewKey: widget.terminalViewKey,
-      contextMenu: widget.contextMenu,
-    );
-
-    final sftpPanel = SftpView(
+    final sftp = SftpView(
       key: _sftpKey,
       sftp: widget.sftp,
       host: widget.host,
       remotePath: widget.remotePath,
       transferManager: widget.transferManager,
-      panelPosition: widget.panelPosition,
-      onPanelPositionChanged: widget.onPanelPositionChanged,
+      panelPosition: _position,
+      onPanelPositionChanged: (pos) => setState(() {
+        _position = pos;
+        _panelSize = _kDefaultSide;
+      }),
       onClose: widget.onToggleSftp,
     );
 
-    final visible = widget.sftpVisible;
-
-    if (widget.panelPosition == SftpPanelPosition.right) {
-      return Row(
-        children: [
-          Expanded(child: terminal),
-          if (visible) ...[
-            _ResizeHandle(
-              axis: Axis.horizontal,
-              onDrag: (d) =>
-                  setState(() => _panelSize = (_panelSize - d).clamp(_minPanel, 600)),
-            ),
-            SizedBox(width: _panelSize, child: sftpPanel),
-          ] else
-            // SizedBox(width:0) gives Offstage a bounded maxWidth=0 so
-            // SftpView's Expanded children don't receive unbounded constraints.
-            SizedBox(width: 0, child: Offstage(offstage: true, child: sftpPanel)),
-        ],
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final total = constraints.maxHeight;
-        final maxSftp = (total - _minTerminalHeight).clamp(_minPanel, total);
-        final sftpHeight = _bottomSizeLocked
-            ? _panelSize.clamp(_minPanel, maxSftp)
-            : _bottomPanelHeight(total);
-
-        return Column(
-          children: [
-            Expanded(child: terminal),
-            if (visible) ...[
-              _ResizeHandle(
-                axis: Axis.vertical,
-                onDrag: (d) => setState(() {
-                  if (!_bottomSizeLocked) {
-                    _bottomSizeLocked = true;
-                    _panelSize = sftpHeight;
-                  }
-                  _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
-                }),
+    final panel = _position == SftpPanelPosition.right
+        ? Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: _panelSize,
+            child: Offstage(
+              offstage: !widget.sftpVisible,
+              child: Row(
+                children: [
+                  _ResizeHandle(
+                    axis: Axis.horizontal,
+                    onDrag: (d) => setState(() {
+                      _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
+                    }),
+                  ),
+                  Expanded(child: sftp),
+                ],
               ),
-              SizedBox(height: sftpHeight, child: sftpPanel),
-            ] else
-              SizedBox(height: 0, child: Offstage(offstage: true, child: sftpPanel)),
-          ],
-        );
-      },
+            ),
+          )
+        : Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: _panelSize,
+            child: Offstage(
+              offstage: !widget.sftpVisible,
+              child: Column(
+                children: [
+                  _ResizeHandle(
+                    axis: Axis.vertical,
+                    onDrag: (d) => setState(() {
+                      _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
+                    }),
+                  ),
+                  Expanded(child: sftp),
+                ],
+              ),
+            ),
+          );
+
+    return Stack(
+      children: [
+        Positioned.fill(child: widget.child),
+        panel,
+      ],
     );
   }
 }
 
-// ── Resize handle ─────────────────────────────────────────────────────────────
 class _ResizeHandle extends StatelessWidget {
   const _ResizeHandle({required this.axis, required this.onDrag});
 

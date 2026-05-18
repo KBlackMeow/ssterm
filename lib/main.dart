@@ -1006,28 +1006,8 @@ esac
 
   Widget _buildPrimaryContent(_Tab tab, {TerminalContextMenuConfig? contextMenu}) {
     return switch (tab.kind) {
-      _TabKind.local =>
+      _TabKind.local || _TabKind.ssh =>
         _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
-      _TabKind.ssh => tab.sftp != null && tab.transferManager != null
-          ? SshSessionView(
-              terminal: tab.terminal!,
-              sftp: tab.sftp!,
-              host: tab.title,
-              remotePath: tab.remotePath!,
-              transferManager: tab.transferManager!,
-              panelPosition: _config.sftpPanelPosition,
-              onPanelPositionChanged: (pos) {
-                setState(() => _config.sftpPanelPosition = pos);
-                _config.save();
-              },
-              terminalSettings: _config.terminal,
-              terminalViewKey: tab.terminalViewKey,
-              sftpVisible: tab.sftpPanelVisible,
-              onToggleSftp: () =>
-                  setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
-              contextMenu: contextMenu,
-            )
-          : _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
       _TabKind.settings => SettingsPage(
           settings: _config.terminal,
           onChanged: (next) {
@@ -1054,30 +1034,44 @@ esac
       onCloseSplit: _closeSplitCurrentTab,
     );
 
-    final primary = _buildPrimaryContent(tab, contextMenu: primaryMenu);
+    Widget body = _buildPrimaryContent(tab, contextMenu: primaryMenu);
 
-    if (!tab.isSplit) return primary;
+    if (tab.isSplit) {
+      final splitMenu = TerminalContextMenuConfig(
+        controller: tab.splitTerminalController,
+        canSplit: canSplit,
+        isSplit: true,
+        onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+        onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+        onCloseSplit: _closeSplitCurrentTab,
+      );
+      body = SplitView(
+        primary: body,
+        secondary: _buildTerminalView(
+          tab.splitTerminal!,
+          tab.splitViewKey,
+          contextMenu: splitMenu,
+        ),
+        axis: tab.splitAxis,
+      );
+    }
 
-    final splitMenu = TerminalContextMenuConfig(
-      controller: tab.splitTerminalController,
-      canSplit: canSplit,
-      isSplit: true,
-      onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
-      onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-      onCloseSplit: _closeSplitCurrentTab,
-    );
+    if (tab.kind == _TabKind.ssh &&
+        tab.sftp != null &&
+        tab.transferManager != null) {
+      body = SshSessionView(
+        sftp: tab.sftp!,
+        host: tab.title,
+        remotePath: tab.remotePath!,
+        transferManager: tab.transferManager!,
+        sftpVisible: tab.sftpPanelVisible,
+        onToggleSftp: () =>
+            setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
+        child: body,
+      );
+    }
 
-    final secondary = _buildTerminalView(
-      tab.splitTerminal!,
-      tab.splitViewKey,
-      contextMenu: splitMenu,
-    );
-
-    return SplitView(
-      primary: primary,
-      secondary: secondary,
-      axis: tab.splitAxis,
-    );
+    return body;
   }
 
   Widget _buildBody() {
