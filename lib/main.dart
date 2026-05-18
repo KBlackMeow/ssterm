@@ -1365,7 +1365,7 @@ class _SplitButton extends StatelessWidget {
           height: 36,
           child: Row(
             children: [
-              const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
+              const Icon(Icons.vertical_split, size: 13, color: _kFgInactive),
               const SizedBox(width: 8),
               Text(
                 'Split horizontal',
@@ -1382,7 +1382,7 @@ class _SplitButton extends StatelessWidget {
           height: 36,
           child: Row(
             children: [
-              const Icon(Icons.vertical_split, size: 13, color: _kFgInactive),
+              const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
               const SizedBox(width: 8),
               const Text(
                 'Split vertical',
