@@ -53,6 +53,7 @@ class _SshSessionViewState extends State<SshSessionView> {
 
   late double _panelSize;
   bool _bottomSizeLocked = false;
+  final _sftpKey = GlobalKey();
 
   @override
   void initState() {
@@ -89,6 +90,7 @@ class _SshSessionViewState extends State<SshSessionView> {
     );
 
     final sftpPanel = SftpView(
+      key: _sftpKey,
       sftp: widget.sftp,
       host: widget.host,
       remotePath: widget.remotePath,
@@ -98,11 +100,17 @@ class _SshSessionViewState extends State<SshSessionView> {
       onClose: widget.onToggleSftp,
     );
 
-    Widget content;
     if (!widget.sftpVisible) {
-      content = terminal;
-    } else if (widget.panelPosition == SftpPanelPosition.right) {
-      content = Row(
+      return Stack(
+        children: [
+          Positioned.fill(child: terminal),
+          Offstage(offstage: true, child: sftpPanel),
+        ],
+      );
+    }
+
+    if (widget.panelPosition == SftpPanelPosition.right) {
+      return Row(
         children: [
           Expanded(child: terminal),
           _ResizeHandle(
@@ -113,36 +121,34 @@ class _SshSessionViewState extends State<SshSessionView> {
           SizedBox(width: _panelSize, child: sftpPanel),
         ],
       );
-    } else {
-      content = LayoutBuilder(
-        builder: (context, constraints) {
-          final total = constraints.maxHeight;
-          final maxSftp = (total - _minTerminalHeight).clamp(_minPanel, total);
-          final sftpHeight = _bottomSizeLocked
-              ? _panelSize.clamp(_minPanel, maxSftp)
-              : _bottomPanelHeight(total);
-
-          return Column(
-            children: [
-              Expanded(child: terminal),
-              _ResizeHandle(
-                axis: Axis.vertical,
-                onDrag: (d) => setState(() {
-                  if (!_bottomSizeLocked) {
-                    _bottomSizeLocked = true;
-                    _panelSize = sftpHeight;
-                  }
-                  _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
-                }),
-              ),
-              SizedBox(height: sftpHeight, child: sftpPanel),
-            ],
-          );
-        },
-      );
     }
 
-    return content;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final total = constraints.maxHeight;
+        final maxSftp = (total - _minTerminalHeight).clamp(_minPanel, total);
+        final sftpHeight = _bottomSizeLocked
+            ? _panelSize.clamp(_minPanel, maxSftp)
+            : _bottomPanelHeight(total);
+
+        return Column(
+          children: [
+            Expanded(child: terminal),
+            _ResizeHandle(
+              axis: Axis.vertical,
+              onDrag: (d) => setState(() {
+                if (!_bottomSizeLocked) {
+                  _bottomSizeLocked = true;
+                  _panelSize = sftpHeight;
+                }
+                _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
+              }),
+            ),
+            SizedBox(height: sftpHeight, child: sftpPanel),
+          ],
+        );
+      },
+    );
   }
 }
 
