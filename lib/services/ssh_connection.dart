@@ -151,6 +151,11 @@ shell_name="${shell##*/}"
 case "$shell_name" in
   zsh)
     tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ssterm-zsh.XXXXXX")"
+    cat >"$tmpdir/.zshenv" <<'EOF'
+if [ -f "$HOME/.zshenv" ]; then
+  . "$HOME/.zshenv"
+fi
+EOF
     cat >"$tmpdir/.zprofile" <<'EOF'
 if [ -f "$HOME/.zprofile" ]; then
   . "$HOME/.zprofile"
@@ -160,6 +165,7 @@ EOF
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
+HISTFILE="$HOME/.zsh_history"
 if [ -f "$HOME/.zshrc" ]; then
   . "$HOME/.zshrc"
 fi
@@ -173,6 +179,7 @@ EOF
 if [ -f "$HOME/.zlogin" ]; then
   . "$HOME/.zlogin"
 fi
+zshexit() { rm -rf "$ZDOTDIR"; }
 EOF
     exec env ZDOTDIR="$tmpdir" "$shell" -il
     ;;
