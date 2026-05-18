@@ -3,6 +3,8 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_config.dart';
+import '../models/transfer_task.dart';
+import '../services/file_picker_service.dart';
 
 const _kSizeColWidth = 44.0;
 const _kDateColWidth = 72.0;
@@ -13,6 +15,7 @@ class SftpView extends StatefulWidget {
     super.key,
     required this.sftp,
     required this.host,
+    required this.transferManager,
     this.remotePath,
     this.panelPosition,
     this.onPanelPositionChanged,
@@ -21,6 +24,7 @@ class SftpView extends StatefulWidget {
 
   final SftpClient sftp;
   final String host;
+  final TransferManager transferManager;
 
   /// When set, the panel follows this path (e.g. synced from the SSH shell cwd).
   final ValueNotifier<String>? remotePath;
@@ -39,7 +43,6 @@ class _SftpViewState extends State<SftpView> {
   bool _loading = true;
   String? _error;
   SftpName? _selected;
-  bool _busy = false;
   String? _status;
 
   @override
@@ -92,40 +95,41 @@ class _SftpViewState extends State<SftpView> {
         });
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
           _error = e.toString();
         });
+      }
     }
   }
 
   Future<void> _download(SftpName entry) async {
-    final remotePath = _join(_path, entry.filename);
-    setState(() {
-      _busy = true;
-      _status = 'Downloading ${entry.filename}…';
-    });
+    final home = Platform.environment['HOME'] ?? '';
+    final dest = '$home/Downloads/${entry.filename}';
     try {
-      final file = await widget.sftp.open(remotePath);
-      final bytes = await file.readBytes();
-      await file.close();
-
-      final home = Platform.environment['HOME'] ?? '';
-      final dest = '$home/Downloads/${entry.filename}';
-      await File(dest).writeAsBytes(bytes);
-
-      if (mounted)
-        setState(() {
-          _busy = false;
-          _status = 'Saved to ~/Downloads/${entry.filename}';
-        });
+      await widget.transferManager.startDownload(
+        sftp: widget.sftp,
+        remotePath: _join(_path, entry.filename),
+        localPath: dest,
+      );
     } catch (e) {
-      if (mounted)
-        setState(() {
-          _busy = false;
-          _status = 'Error: $e';
-        });
+      if (mounted) setState(() => _status = 'Download error: $e');
+    }
+  }
+
+  Future<void> _upload() async {
+    final localPath = await FilePickerService.pickFile();
+    if (localPath == null) return;
+    final fileName = localPath.split(Platform.pathSeparator).last;
+    try {
+      await widget.transferManager.startUpload(
+        sftp: widget.sftp,
+        localPath: localPath,
+        remotePath: _join(_path, fileName),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Upload error: $e');
     }
   }
 
@@ -209,7 +213,7 @@ class _SftpViewState extends State<SftpView> {
           _buildToolbar(),
           _buildColumnHeader(),
           Expanded(child: _buildBody()),
-          if (_status != null || _busy) _buildStatusBar(),
+          if (_status != null) _buildStatusBar(),
         ],
       ),
     );
@@ -274,9 +278,14 @@ class _SftpViewState extends State<SftpView> {
               },
             ),
           _ToolBtn(
+            icon: Icons.upload,
+            tooltip: 'Upload',
+            onTap: _upload,
+          ),
+          _ToolBtn(
             icon: Icons.download,
             tooltip: 'Download',
-            onTap: canDown && !_busy ? () => _download(_selected!) : null,
+            onTap: canDown ? () => _download(_selected!) : null,
           ),
           _ToolBtn(
             icon: Icons.create_new_folder_outlined,
@@ -381,7 +390,7 @@ class _SftpViewState extends State<SftpView> {
         final isDir = e.attr.isDirectory;
         final isSel = _selected?.filename == e.filename;
         return GestureDetector(
-          onSecondaryTapDown: (_) => _showContextMenu(e),
+          onSecondaryTapDown: (d) => _showContextMenu(e, d.globalPosition),
           child: InkWell(
             onTap: () => setState(() => _selected = isSel ? null : e),
             onDoubleTap: () {
@@ -464,15 +473,18 @@ class _SftpViewState extends State<SftpView> {
     );
   }
 
-  void _showContextMenu(SftpName e) async {
+  void _showContextMenu(SftpName e, Offset globalPosition) async {
     final isDir = e.attr.isDirectory;
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final position = RelativeRect.fromRect(
+      globalPosition & Size.zero,
+      Offset.zero & overlay.size,
+    );
 
     await showMenu(
       context: context,
       color: const Color(0xFF2B2B2B),
-      position: RelativeRect.fromLTRB(0, 0, 0, 0),
+      position: position,
       items: [
         if (!isDir)
           PopupMenuItem(
@@ -507,17 +519,6 @@ class _SftpViewState extends State<SftpView> {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          if (_busy) ...[
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                color: Color(0xFF2472C8),
-              ),
-            ),
-            const SizedBox(width: 6),
-          ],
           Expanded(
             child: Text(
               _status ?? '',

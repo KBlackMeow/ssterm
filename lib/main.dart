@@ -24,7 +24,9 @@ import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/split_view.dart';
 import 'widgets/terminal_surface.dart' show TerminalSurface, TerminalContextMenuConfig;
+import 'models/transfer_task.dart';
 import 'views/ssh_session_view.dart';
+import 'widgets/transfer_panel.dart';
 
 void main() {
   runApp(const SsTermApp());
@@ -124,6 +126,9 @@ class _Tab {
   // SFTP panel visibility (default hidden)
   bool sftpPanelVisible = false;
 
+  // Transfer manager (created alongside the sftp client)
+  TransferManager? transferManager;
+
   // Feature 3: in-tab split pane
   Terminal? splitTerminal;
   SSHSession? splitSshSession;
@@ -199,6 +204,7 @@ class _Tab {
     jumpClient?.close();
     terminalController.dispose();
     splitTerminalController.dispose();
+    transferManager?.dispose();
   }
 
   IconData get icon => switch (kind) {
@@ -449,8 +455,10 @@ class _TerminalHomeState extends State<TerminalHome> {
     });
 
     SftpClient? sftp;
+    TransferManager? transferManager;
     try {
       sftp = await r.client.sftp();
+      transferManager = TransferManager();
       remotePath.value = await fetchRemoteHome(r.client);
     } catch (_) {
       remotePath.value = '/';
@@ -476,6 +484,7 @@ class _TerminalHomeState extends State<TerminalHome> {
       profile: r.profile,
     );
     tab.pipe = pipe;
+    tab.transferManager = transferManager;
 
     // Feature 1: port forwarding
     if (r.profile.forwardRules.isNotEmpty) {
@@ -874,6 +883,9 @@ class _TerminalHomeState extends State<TerminalHome> {
                         !_tabs[_active].sftpPanelVisible);
                   }
                 },
+                transferManager: _tabs.isNotEmpty && _active < _tabs.length
+                    ? _tabs[_active].transferManager
+                    : null,
                 canSplit: _activeTabCanSplit,
                 isSplit: _activeTabIsSplit,
                 onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
@@ -893,12 +905,13 @@ class _TerminalHomeState extends State<TerminalHome> {
     return switch (tab.kind) {
       _TabKind.local =>
         _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
-      _TabKind.ssh => tab.sftp != null
+      _TabKind.ssh => tab.sftp != null && tab.transferManager != null
           ? SshSessionView(
               terminal: tab.terminal!,
               sftp: tab.sftp!,
               host: tab.title,
               remotePath: tab.remotePath!,
+              transferManager: tab.transferManager!,
               panelPosition: _config.sftpPanelPosition,
               onPanelPositionChanged: (pos) {
                 setState(() => _config.sftpPanelPosition = pos);
@@ -990,6 +1003,7 @@ class _TabBar extends StatelessWidget {
     required this.hasSftp,
     required this.sftpVisible,
     required this.onToggleSftp,
+    this.transferManager,
     required this.canSplit,
     required this.isSplit,
     required this.onSplitHorizontal,
@@ -1012,6 +1026,7 @@ class _TabBar extends StatelessWidget {
   final bool hasSftp;
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
+  final TransferManager? transferManager;
   final bool canSplit;
   final bool isSplit;
   final VoidCallback onSplitHorizontal;
@@ -1077,11 +1092,14 @@ class _TabBar extends StatelessWidget {
             onConnectHost: onConnectHost,
           ),
           CmdPickerButton(onInsert: onInsertCommand),
-          if (hasSftp)
+          if (hasSftp) ...[
             _SftpButton(
               sftpVisible: sftpVisible,
               onToggle: onToggleSftp,
             ),
+            if (transferManager != null)
+              _TransferButton(manager: transferManager!),
+          ],
           _SplitButton(
             canSplit: canSplit,
             isSplit: isSplit,
@@ -1138,6 +1156,90 @@ class _SftpButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Transfer menu button ──────────────────────────────────────────────────────
+class _TransferButton extends StatelessWidget {
+  const _TransferButton({required this.manager});
+
+  final TransferManager manager;
+
+  void _showMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showMenu<void>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
+      color: const Color(0xFF2B2B2B),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: const BorderSide(color: _kDivider),
+      ),
+      constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
+      items: [
+        PopupMenuItem<void>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: TransferMenuContent(manager: manager),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: manager,
+      builder: (ctx, _) {
+        final activeCount = manager.activeCount;
+        return Tooltip(
+          message: 'Transfers',
+          child: GestureDetector(
+            onTap: () => _showMenu(ctx),
+            child: Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(Icons.swap_vert, size: 15, color: _kFgInactive),
+                  if (activeCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -3,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 3, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2472C8),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '$activeCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

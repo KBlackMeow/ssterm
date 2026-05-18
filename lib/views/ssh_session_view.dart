@@ -4,6 +4,7 @@ import 'package:xterm/xterm.dart';
 
 import '../models/app_config.dart';
 import '../models/terminal_settings.dart';
+import '../models/transfer_task.dart';
 import '../widgets/terminal_surface.dart';
 import 'sftp_view.dart';
 
@@ -16,6 +17,7 @@ class SshSessionView extends StatefulWidget {
     required this.sftp,
     required this.host,
     required this.remotePath,
+    required this.transferManager,
     required this.panelPosition,
     required this.onPanelPositionChanged,
     required this.terminalSettings,
@@ -29,6 +31,7 @@ class SshSessionView extends StatefulWidget {
   final SftpClient sftp;
   final String host;
   final ValueNotifier<String> remotePath;
+  final TransferManager transferManager;
   final SftpPanelPosition panelPosition;
   final ValueChanged<SftpPanelPosition> onPanelPositionChanged;
   final TerminalSettings terminalSettings;
@@ -85,21 +88,21 @@ class _SshSessionViewState extends State<SshSessionView> {
       contextMenu: widget.contextMenu,
     );
 
-    if (!widget.sftpVisible) {
-      return terminal;
-    }
-
     final sftpPanel = SftpView(
       sftp: widget.sftp,
       host: widget.host,
       remotePath: widget.remotePath,
+      transferManager: widget.transferManager,
       panelPosition: widget.panelPosition,
       onPanelPositionChanged: widget.onPanelPositionChanged,
       onClose: widget.onToggleSftp,
     );
 
-    if (widget.panelPosition == SftpPanelPosition.right) {
-      return Row(
+    Widget content;
+    if (!widget.sftpVisible) {
+      content = terminal;
+    } else if (widget.panelPosition == SftpPanelPosition.right) {
+      content = Row(
         children: [
           Expanded(child: terminal),
           _ResizeHandle(
@@ -110,35 +113,36 @@ class _SshSessionViewState extends State<SshSessionView> {
           SizedBox(width: _panelSize, child: sftpPanel),
         ],
       );
+    } else {
+      content = LayoutBuilder(
+        builder: (context, constraints) {
+          final total = constraints.maxHeight;
+          final maxSftp = (total - _minTerminalHeight).clamp(_minPanel, total);
+          final sftpHeight = _bottomSizeLocked
+              ? _panelSize.clamp(_minPanel, maxSftp)
+              : _bottomPanelHeight(total);
+
+          return Column(
+            children: [
+              Expanded(child: terminal),
+              _ResizeHandle(
+                axis: Axis.vertical,
+                onDrag: (d) => setState(() {
+                  if (!_bottomSizeLocked) {
+                    _bottomSizeLocked = true;
+                    _panelSize = sftpHeight;
+                  }
+                  _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
+                }),
+              ),
+              SizedBox(height: sftpHeight, child: sftpPanel),
+            ],
+          );
+        },
+      );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final total = constraints.maxHeight;
-        final maxSftp =
-            (total - _minTerminalHeight).clamp(_minPanel, total);
-        final sftpHeight = _bottomSizeLocked
-            ? _panelSize.clamp(_minPanel, maxSftp)
-            : _bottomPanelHeight(total);
-
-        return Column(
-          children: [
-            Expanded(child: terminal),
-            _ResizeHandle(
-              axis: Axis.vertical,
-              onDrag: (d) => setState(() {
-                if (!_bottomSizeLocked) {
-                  _bottomSizeLocked = true;
-                  _panelSize = sftpHeight;
-                }
-                _panelSize = (_panelSize - d).clamp(_minPanel, maxSftp);
-              }),
-            ),
-            SizedBox(height: sftpHeight, child: sftpPanel),
-          ],
-        );
-      },
-    );
+    return content;
   }
 }
 
