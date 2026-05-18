@@ -970,6 +970,7 @@ esac
                     : null,
                 canSplit: _activeTabCanSplit,
                 isSplit: _activeTabIsSplit,
+                splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
                 onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
                 onSplitVertical: () => _splitCurrentTab(Axis.vertical),
                 onCloseSplit: _closeSplitCurrentTab,
@@ -1088,6 +1089,7 @@ class _TabBar extends StatelessWidget {
     this.transferManager,
     required this.canSplit,
     required this.isSplit,
+    this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
     required this.onCloseSplit,
@@ -1111,6 +1113,7 @@ class _TabBar extends StatelessWidget {
   final TransferManager? transferManager;
   final bool canSplit;
   final bool isSplit;
+  final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
   final VoidCallback onCloseSplit;
@@ -1185,6 +1188,7 @@ class _TabBar extends StatelessWidget {
           _SplitButton(
             canSplit: canSplit,
             isSplit: isSplit,
+            splitAxis: splitAxis,
             onSplitHorizontal: onSplitHorizontal,
             onSplitVertical: onSplitVertical,
             onCloseSplit: onCloseSplit,
@@ -1331,6 +1335,7 @@ class _SplitButton extends StatelessWidget {
   const _SplitButton({
     required this.canSplit,
     required this.isSplit,
+    this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
     required this.onCloseSplit,
@@ -1338,6 +1343,7 @@ class _SplitButton extends StatelessWidget {
 
   final bool canSplit;
   final bool isSplit;
+  final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
   final VoidCallback onCloseSplit;
@@ -1370,7 +1376,9 @@ class _SplitButton extends StatelessWidget {
               Text(
                 'Split horizontal',
                 style: TextStyle(
-                  color: isSplit ? const Color(0xFF2472C8) : _kFgActive,
+                  color: splitAxis == Axis.horizontal
+                      ? const Color(0xFF2472C8)
+                      : _kFgActive,
                   fontSize: 13,
                 ),
               ),
@@ -1384,9 +1392,14 @@ class _SplitButton extends StatelessWidget {
             children: [
               const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'Split vertical',
-                style: TextStyle(color: _kFgActive, fontSize: 13),
+                style: TextStyle(
+                  color: splitAxis == Axis.vertical
+                      ? const Color(0xFF2472C8)
+                      : _kFgActive,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),

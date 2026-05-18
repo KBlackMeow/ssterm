@@ -84,12 +84,12 @@ class TerminalSurface extends StatelessWidget {
           PopupMenuItem<String>(
             value: 'split_h',
             height: 36,
-            child: _menuRow(Icons.splitscreen, 'Split horizontally'),
+            child: _menuRow(Icons.vertical_split, 'Split horizontally'),
           ),
           PopupMenuItem<String>(
             value: 'split_v',
             height: 36,
-            child: _menuRow(Icons.vertical_split, 'Split vertically'),
+            child: _menuRow(Icons.splitscreen, 'Split vertically'),
           ),
           if (config.isSplit)
             PopupMenuItem<String>(
