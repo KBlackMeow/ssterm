@@ -112,6 +112,7 @@ class _Tab {
   SSHSession? sshSession;
   SftpClient? sftp;
   ValueNotifier<String>? remotePath;
+  ValueNotifier<String>? localPath;
   _OutputPipe? pipe;
   final terminalViewKey = GlobalKey<TerminalViewState>();
 
@@ -152,6 +153,7 @@ class _Tab {
     this.sshSession,
     this.sftp,
     this.remotePath,
+    this.localPath,
     this.sshProfile,
   });
 
@@ -163,6 +165,7 @@ class _Tab {
     SSHClient? jumpClient,
     SftpClient? sftp,
     ValueNotifier<String>? remotePath,
+    ValueNotifier<String>? localPath,
     SshHost? profile,
   }) =>
       _Tab._(
@@ -174,6 +177,7 @@ class _Tab {
         sshSession: s,
         sftp: sftp,
         remotePath: remotePath,
+        localPath: localPath,
         sshProfile: profile,
       );
 
@@ -197,6 +201,7 @@ class _Tab {
     clearSplit();
     pipe?.dispose();
     remotePath?.dispose();
+    localPath?.dispose();
     forwardService?.stopAll();
     pty?.kill();
     sshSession?.close();
@@ -273,6 +278,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   /// pane instead of a hard-coded 80×24.
   void _wireDeferredLocalPty(
     _Tab tab, {
+    String? workingDirectory,
     bool showExitMessage = true,
     void Function()? onProcessExit,
     void Function(Pty pty, _OutputPipe pipe)? onPtyStarted,
@@ -292,16 +298,37 @@ class _TerminalHomeState extends State<TerminalHome> {
     terminal.onResize = (w, h, pw, ph) {
       if (w < 1 || h < 1) return;
       if (pty == null) {
-        pty = Pty.start(
-          shell,
-          arguments: Platform.isWindows ? [] : ['-l'],
-          columns: w,
-          rows: h,
-          environment: env,
-          workingDirectory: home,
-        );
+        if (Platform.isWindows) {
+          pty = Pty.start(
+            shell,
+            arguments: [],
+            columns: w,
+            rows: h,
+            environment: env,
+            workingDirectory: workingDirectory ?? home,
+          );
+        } else {
+          pty = Pty.start(
+            '/bin/sh',
+            arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
+            columns: w,
+            rows: h,
+            environment: env,
+            workingDirectory: workingDirectory ?? home,
+          );
+        }
         tab.pty = pty;
-        final pipe = _OutputPipe(terminal)..bind(pty!.output);
+        final cwdParser = RemoteCwdParser();
+        final pipe = _OutputPipe(
+          terminal,
+          transform: (bytes) {
+            final parsed = cwdParser.process(bytes);
+            if (parsed.cwd != null && tab.localPath != null) {
+              tab.localPath!.value = parsed.cwd!;
+            }
+            return parsed.cleaned;
+          },
+        )..bind(pty!.output);
         tab.pipe = pipe;
         onPtyStarted?.call(pty!, pipe);
         terminal.onOutput = (d) => pty!.write(utf8.encode(d));
@@ -319,16 +346,82 @@ class _TerminalHomeState extends State<TerminalHome> {
     };
   }
 
+  String _interactiveLocalShellWrapperCommand() {
+    return r'''
+shell="${SHELL:-/bin/sh}"
+shell_name="${shell##*/}"
+
+case "$shell_name" in
+  zsh)
+    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ssterm-zsh.XXXXXX")"
+    cat >"$tmpdir/.zprofile" <<'EOF'
+if [ -f "$HOME/.zprofile" ]; then
+  . "$HOME/.zprofile"
+fi
+EOF
+    cat >"$tmpdir/.zshrc" <<'EOF'
+__ssterm_cwd() {
+  printf '\033]7;file://%s\033\\' "$PWD"
+}
+if [ -f "$HOME/.zshrc" ]; then
+  . "$HOME/.zshrc"
+fi
+case " ${precmd_functions[*]} " in
+  *" __ssterm_cwd "*) : ;;
+  *) precmd_functions+=(__ssterm_cwd) ;;
+esac
+__ssterm_cwd
+EOF
+    cat >"$tmpdir/.zlogin" <<'EOF'
+if [ -f "$HOME/.zlogin" ]; then
+  . "$HOME/.zlogin"
+fi
+EOF
+    exec env ZDOTDIR="$tmpdir" "$shell" -il
+    ;;
+  bash)
+    rcfile="$(mktemp "${TMPDIR:-/tmp}/ssterm-bash.XXXXXX")"
+    cat >"$rcfile" <<'EOF'
+__ssterm_cwd() {
+  printf '\033]7;file://%s\033\\' "$PWD"
+}
+if [ -f "$HOME/.bash_profile" ]; then
+  . "$HOME/.bash_profile"
+elif [ -f "$HOME/.bash_login" ]; then
+  . "$HOME/.bash_login"
+elif [ -f "$HOME/.profile" ]; then
+  . "$HOME/.profile"
+elif [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
+case ";${PROMPT_COMMAND:-};" in
+  *";__ssterm_cwd;"*) : ;;
+  *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+esac
+__ssterm_cwd
+EOF
+    exec "$shell" --noprofile --rcfile "$rcfile" -i
+    ;;
+  *)
+    exec "$shell" -i
+    ;;
+esac
+''';
+  }
+
   void _newLocalTab() {
     final shell = Platform.isWindows
         ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
         : (Platform.environment['SHELL'] ?? '/bin/zsh');
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final tab = _Tab._(
       kind: _TabKind.local,
       title: shell.split('/').last,
       terminal: _createTerminal(),
+      localPath: ValueNotifier<String>(home ?? '/'),
     );
-    _wireDeferredLocalPty(tab);
+    _wireDeferredLocalPty(tab, workingDirectory: home);
 
     setState(() {
       _tabs.add(tab);
@@ -603,8 +696,10 @@ class _TerminalHomeState extends State<TerminalHome> {
       title: tab.title,
       terminal: splitTerminal,
     );
+    final cwd = tab.localPath?.value;
     _wireDeferredLocalPty(
       holder,
+      workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : null,
       showExitMessage: false,
       onProcessExit: () => setState(() => tab.clearSplit()),
       onPtyStarted: (p, pipe) {
