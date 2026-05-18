@@ -20,21 +20,24 @@ class CmdPickerButton extends StatefulWidget {
 }
 
 class _CmdPickerButtonState extends State<CmdPickerButton> {
-  List<Command>? _commands;
+  List<Command> _commands = const [];
 
-  Future<List<Command>> _loadCommands() async {
-    if (_commands != null) return _commands!;
-    final raw = await rootBundle.loadString('assets/scripts/cmd.json');
-    final list = jsonDecode(raw) as List<dynamic>;
-    _commands = list
-        .map((e) => Command.fromJson(e as Map<String, dynamic>))
-        .toList();
-    return _commands!;
+  @override
+  void initState() {
+    super.initState();
+    _preload();
   }
 
-  void _showMenu(BuildContext context) async {
-    final commands = await _loadCommands();
-    if (!context.mounted) return;
+  Future<void> _preload() async {
+    final raw = await rootBundle.loadString('assets/scripts/cmd.json');
+    final list = jsonDecode(raw) as List<dynamic>;
+    if (!mounted) return;
+    _commands =
+        list.map((e) => Command.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  void _showMenu(BuildContext context) {
+    if (_commands.isEmpty) return;
 
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
@@ -54,7 +57,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
         ),
       ),
       const PopupMenuDivider(height: 1),
-      for (var i = 0; i < commands.length; i++)
+      for (var i = 0; i < _commands.length; i++)
         PopupMenuItem<int>(
           value: i,
           height: 44,
@@ -63,11 +66,11 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                commands[i].name,
+                _commands[i].name,
                 style: const TextStyle(color: _kFgActive, fontSize: 13),
               ),
               Text(
-                commands[i].description,
+                _commands[i].description,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: _kFgInactive, fontSize: 11),
@@ -94,7 +97,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
       items: items,
     ).then((idx) {
       if (idx == null) return;
-      widget.onInsert?.call(commands[idx].command);
+      widget.onInsert?.call(_commands[idx].command);
     });
   }
 

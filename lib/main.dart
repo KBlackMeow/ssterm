@@ -786,7 +786,7 @@ class _TerminalHomeState extends State<TerminalHome> {
   }
 
   void _insertCommand(String cmd) {
-    _tabs[_active].terminal?.onOutput?.call(cmd);
+    _tabs[_active].terminal?.paste(cmd);
   }
 
   void _openSettings() {
