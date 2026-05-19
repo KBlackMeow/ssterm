@@ -39,7 +39,7 @@ class TerminalView extends StatefulWidget {
     this.onSecondaryTapDown,
     this.onSecondaryTapUp,
     this.mouseCursor = SystemMouseCursors.text,
-    this.keyboardType = TextInputType.emailAddress,
+    this.keyboardType = TextInputType.text,
     this.keyboardAppearance = Brightness.dark,
     this.cursorType = TerminalCursorType.block,
     this.alwaysShowCursor = false,
@@ -102,7 +102,7 @@ class TerminalView extends StatefulWidget {
   final MouseCursor mouseCursor;
 
   /// The type of information for which to optimize the text input control.
-  /// [TextInputType.emailAddress] by default.
+  /// [TextInputType.text] by default.
   final TextInputType keyboardType;
 
   /// The appearance of the keyboard. [Brightness.dark] by default.

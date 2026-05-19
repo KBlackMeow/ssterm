@@ -190,6 +190,8 @@ class TerminalPainter {
     final charCode = cellData.content & CellContent.codepointMask;
     if (charCode == 0) return;
 
+    final charWidth = cellData.content >> CellContent.widthShift;
+
     // Glyph cache ignores underline; underline is drawn in [paintCellUnderline].
     final cacheKey = hashValues(
           cellData.foreground,
@@ -208,7 +210,7 @@ class TerminalPainter {
           : resolveBackgroundColor(cellData.background);
 
       if (cellData.flags & CellFlags.faint != 0) {
-        color = color.withOpacity(0.5);
+        color = color.withValues(alpha: 0.5);
       }
 
       final style = _textStyle.toTextStyle(
@@ -225,7 +227,19 @@ class TerminalPainter {
       );
     }
 
-    canvas.drawParagraph(paragraph, offset);
+    // Double-width glyphs (CJK etc.) from proportional fallback fonts may
+    // exceed 2×cellWidth and bleed into the next character's cell.  Clip them
+    // to the exact expected bounds so they never corrupt adjacent glyphs.
+    if (charWidth >= 2) {
+      canvas.save();
+      canvas.clipRect(
+        Rect.fromLTWH(offset.dx, offset.dy, _cellSize.width * 2, _cellSize.height),
+      );
+      canvas.drawParagraph(paragraph, offset);
+      canvas.restore();
+    } else {
+      canvas.drawParagraph(paragraph, offset);
+    }
   }
 
   /// Draws an underline at the bottom of the cell, below the glyph.

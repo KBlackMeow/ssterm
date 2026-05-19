@@ -19,6 +19,9 @@ const _kDefaultFontFamilyFallback = [
   'Menlo',
   'Monaco',
   'Consolas',
+  'Cascadia Mono',        // Windows Terminal (good CJK coverage)
+  'NSimSun',              // Windows: Simplified Chinese monospace (built-in)
+  'MingLiU',              // Windows: Traditional Chinese monospace (built-in)
   'Liberation Mono',
   'Courier New',
   'Noto Sans Mono CJK SC',

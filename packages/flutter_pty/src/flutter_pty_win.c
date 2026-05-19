@@ -9,11 +9,11 @@
 
 static LPWSTR build_command(char *executable, char **arguments)
 {
-    int command_length = 0;
+    int utf8_len = 0;
 
     if (executable != NULL)
     {
-        command_length += (int)strlen(executable);
+        utf8_len += (int)strlen(executable);
     }
 
     if (arguments != NULL)
@@ -22,101 +22,105 @@ static LPWSTR build_command(char *executable, char **arguments)
 
         while (arguments[i] != NULL)
         {
-            command_length += (int)strlen(arguments[i]) + 1;
+            utf8_len += (int)strlen(arguments[i]) + 1;
             i++;
         }
     }
 
-    LPWSTR command = malloc((command_length + 1) * sizeof(WCHAR));
+    char *utf8_command = malloc(utf8_len + 1);
+
+    if (utf8_command == NULL)
+    {
+        return NULL;
+    }
+
+    int pos = 0;
+
+    if (executable != NULL)
+    {
+        int j = 0;
+
+        while (executable[j] != 0)
+        {
+            utf8_command[pos++] = executable[j++];
+        }
+    }
+
+    if (arguments != NULL)
+    {
+        int j = 0;
+
+        while (arguments[j] != NULL)
+        {
+            utf8_command[pos++] = ' ';
+
+            int k = 0;
+
+            while (arguments[j][k] != 0)
+            {
+                utf8_command[pos++] = arguments[j][k++];
+            }
+
+            j++;
+        }
+    }
+
+    utf8_command[pos] = 0;
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8_command, -1, NULL, 0);
+    LPWSTR command = malloc(wlen * sizeof(WCHAR));
 
     if (command != NULL)
     {
-        int i = 0;
-
-        if (executable != NULL)
-        {
-            int j = 0;
-
-            while (executable[j] != 0)
-            {
-                command[i] = (WCHAR)executable[j];
-                i++;
-                j++;
-            }
-        }
-
-        if (arguments != NULL)
-        {
-            int j = 0;
-
-            while (arguments[j] != NULL)
-            {
-                command[i++] = ' ';
-
-                int k = 0;
-
-                while (arguments[j][k] != 0)
-                {
-                    command[i] = (WCHAR)arguments[j][k];
-                    i++;
-                    k++;
-                }
-
-                j++;
-            }
-        }
-
-        command[i] = 0;
+        MultiByteToWideChar(CP_UTF8, 0, utf8_command, -1, command, wlen);
     }
+
+    free(utf8_command);
 
     return command;
 }
 
 static LPWSTR build_environment(char **environment)
 {
-    LPWSTR environment_block = NULL;
-    int environment_block_length = 0;
-
-    if (environment != NULL)
+    if (environment == NULL)
     {
-        int i = 0;
-
-        while (environment[i] != NULL)
+        LPWSTR empty = malloc(2 * sizeof(WCHAR));
+        if (empty != NULL)
         {
-            environment_block_length += (int)strlen(environment[i]) + 1;
-            i++;
+            empty[0] = 0;
+            empty[1] = 0;
         }
+        return empty;
     }
 
-    environment_block = malloc((environment_block_length + 1) * sizeof(WCHAR));
+    int total_wlen = 0;
+    int i = 0;
 
-    if (environment_block != NULL)
+    while (environment[i] != NULL)
     {
-        int i = 0;
-
-        if (environment != NULL)
-        {
-            int j = 0;
-
-            while (environment[j] != NULL)
-            {
-                int k = 0;
-
-                while (environment[j][k] != 0)
-                {
-                    environment_block[i] = (WCHAR)environment[j][k];
-                    i++;
-                    k++;
-                }
-
-                environment_block[i++] = 0;
-
-                j++;
-            }
-        }
-
-        environment_block[i] = 0;
+        total_wlen += MultiByteToWideChar(CP_UTF8, 0, environment[i], -1, NULL, 0);
+        i++;
     }
+    total_wlen += 1;
+
+    LPWSTR environment_block = malloc(total_wlen * sizeof(WCHAR));
+
+    if (environment_block == NULL)
+    {
+        return NULL;
+    }
+
+    int pos = 0;
+    i = 0;
+
+    while (environment[i] != NULL)
+    {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, environment[i], -1, environment_block + pos, total_wlen - pos);
+        pos += wlen;
+        i++;
+    }
+
+    environment_block[pos] = 0;
 
     return environment_block;
 }
@@ -128,23 +132,15 @@ static LPWSTR build_working_directory(char *working_directory)
         return NULL;
     }
 
-    int working_directory_length = (int)strlen(working_directory);
-
-    LPWSTR working_directory_block = malloc((working_directory_length + 1) * sizeof(WCHAR));
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, working_directory, -1, NULL, 0);
+    LPWSTR working_directory_block = malloc(wlen * sizeof(WCHAR));
 
     if (working_directory_block == NULL)
     {
         return NULL;
     }
 
-    int i = 0;
-
-    while (working_directory[i] != 0)
-    {
-        working_directory_block[i] = (WCHAR)working_directory[i++];
-    }
-
-    working_directory_block[i] = 0;
+    MultiByteToWideChar(CP_UTF8, 0, working_directory, -1, working_directory_block, wlen);
 
     return working_directory_block;
 }
