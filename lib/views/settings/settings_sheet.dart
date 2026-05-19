@@ -151,6 +151,15 @@ class _SettingsPageState extends State<SettingsPage>
         _sectionTitle('Family'),
         _fontDropdown(),
         const SizedBox(height: 12),
+        _sectionTitle('CJK / 中文'),
+        _controlLabel(
+          'Fallback for Chinese and other wide characters',
+          hint: 'English/code uses the monospace font above; '
+              '中文 uses this font (e.g. Microsoft YaHei UI)',
+        ),
+        const SizedBox(height: 6),
+        _cjkFontDropdown(),
+        const SizedBox(height: 12),
         _sectionTitle('Size & Spacing'),
         _slider(
           label: 'Size',
@@ -654,6 +663,32 @@ class _SettingsPageState extends State<SettingsPage>
           ),
         ],
       ],
+    );
+  }
+
+  Widget _cjkFontDropdown() {
+    final options = TerminalSettings.cjkFontOptions;
+    final value = options.contains(_s.cjkFontFamily)
+        ? _s.cjkFontFamily
+        : options.first;
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      dropdownColor: const Color(0xFF1C1C1C),
+      style: const TextStyle(color: _kFg, fontSize: 13),
+      decoration: const InputDecoration(
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+        enabledBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
+        focusedBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+      ),
+      items: [
+        for (final f in options) DropdownMenuItem(value: f, child: Text(f)),
+      ],
+      onChanged: (v) {
+        if (v != null) _apply(_s.copyWith(cjkFontFamily: v));
+      },
     );
   }
 

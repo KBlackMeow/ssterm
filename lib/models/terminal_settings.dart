@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/widgets.dart';
 import 'package:xterm/xterm.dart';
 
@@ -7,10 +9,25 @@ import 'terminal_theme_presets.dart';
 
 /// User preferences for terminal appearance and cursor behavior.
 class TerminalSettings {
+  /// Platform-aware default monospace face.
+  static String get defaultFontFamily {
+    if (Platform.isWindows) return 'Cascadia Mono';
+    if (Platform.isMacOS) return 'Monaco';
+    return 'JetBrains Mono';
+  }
+
+  /// Fallback face for CJK and other non-Latin glyphs in the terminal.
+  static String get defaultCjkFontFamily {
+    if (Platform.isWindows) return 'Microsoft YaHei UI';
+    if (Platform.isMacOS) return 'PingFang SC';
+    return 'Noto Sans Mono CJK SC';
+  }
+
   TerminalSettings({
     this.themePresetId = 'iterm2',
     TerminalTheme? customTheme,
-    this.fontFamily = 'Monaco',
+    String? fontFamily,
+    String? cjkFontFamily,
     this.fontSize = 13.5,
     this.lineHeight = 1.2,
     this.fontWeight = FontWeight.normal,
@@ -23,13 +40,16 @@ class TerminalSettings {
     this.wallpaperBlur = 12.0,
     this.backgroundOpacity = 0.88,
     CrtSettings? crt,
-  })  : customTheme = customTheme ?? TerminalThemePresets.iterm2,
+  })  : fontFamily = fontFamily ?? defaultFontFamily,
+        cjkFontFamily = cjkFontFamily ?? defaultCjkFontFamily,
+        customTheme = customTheme ?? TerminalThemePresets.iterm2,
         crt = crt ?? const CrtSettings();
 
   String themePresetId;
   TerminalTheme customTheme;
 
   String fontFamily;
+  String cjkFontFamily;
   double fontSize;
   double lineHeight;
   FontWeight fontWeight;
@@ -54,16 +74,90 @@ class TerminalSettings {
   double get effectiveBackgroundOpacity =>
       hasWallpaper ? backgroundOpacity.clamp(0.0, 1.0) : 1.0;
 
-  static const fontOptions = [
-    'Monaco',
-    'Menlo',
-    'SF Mono',
-    'JetBrains Mono',
-    'Fira Code',
-    'Consolas',
-    'Courier New',
-    'monospace',
-  ];
+  static List<String> get fontOptions {
+    if (Platform.isWindows) {
+      return const [
+        'Cascadia Mono',
+        'Cascadia Code',
+        'Consolas',
+        'JetBrains Mono',
+        'Fira Code',
+        'Courier New',
+        'Monaco',
+        'monospace',
+      ];
+    }
+    return const [
+      'Monaco',
+      'Menlo',
+      'SF Mono',
+      'JetBrains Mono',
+      'Fira Code',
+      'Consolas',
+      'Courier New',
+      'monospace',
+    ];
+  }
+
+  static List<String> get cjkFontOptions {
+    if (Platform.isWindows) {
+      return const [
+        'Microsoft YaHei UI',
+        'Microsoft YaHei',
+        'SimSun',
+        'NSimSun',
+        'Noto Sans Mono CJK SC',
+      ];
+    }
+    if (Platform.isMacOS) {
+      return const [
+        'PingFang SC',
+        'STHeiti',
+        'Noto Sans Mono CJK SC',
+      ];
+    }
+    return const [
+      'Noto Sans Mono CJK SC',
+      'Noto Sans Mono CJK TC',
+      'Noto Sans Mono CJK JP',
+    ];
+  }
+
+  List<String> buildFontFamilyFallback() {
+    if (Platform.isWindows) {
+      return [
+        cjkFontFamily,
+        if (cjkFontFamily != 'Microsoft YaHei') 'Microsoft YaHei',
+        'NSimSun',
+        'SimSun',
+        'Noto Sans Mono CJK SC',
+        'Noto Color Emoji',
+        'Noto Sans Symbols',
+        'monospace',
+        'sans-serif',
+      ];
+    }
+    if (Platform.isMacOS) {
+      return [
+        cjkFontFamily,
+        'PingFang SC',
+        'Hiragino Sans GB',
+        'Noto Sans Mono CJK SC',
+        'Noto Color Emoji',
+        'monospace',
+        'sans-serif',
+      ];
+    }
+    return [
+      cjkFontFamily,
+      'Noto Sans Mono CJK SC',
+      'Noto Sans Mono CJK TC',
+      'Noto Sans Mono CJK JP',
+      'Noto Color Emoji',
+      'monospace',
+      'sans-serif',
+    ];
+  }
 
   TerminalTheme resolveTheme() {
     final base = themePresetId == 'custom'
@@ -110,6 +204,7 @@ class TerminalSettings {
         fontSize: fontSize,
         height: lineHeight,
         fontFamily: fontFamily,
+        fontFamilyFallback: buildFontFamilyFallback(),
         fontWeight: fontWeight,
       );
 
@@ -117,6 +212,7 @@ class TerminalSettings {
     String? themePresetId,
     TerminalTheme? customTheme,
     String? fontFamily,
+    String? cjkFontFamily,
     double? fontSize,
     double? lineHeight,
     FontWeight? fontWeight,
@@ -135,6 +231,7 @@ class TerminalSettings {
       themePresetId: themePresetId ?? this.themePresetId,
       customTheme: customTheme ?? this.customTheme,
       fontFamily: fontFamily ?? this.fontFamily,
+      cjkFontFamily: cjkFontFamily ?? this.cjkFontFamily,
       fontSize: fontSize ?? this.fontSize,
       lineHeight: lineHeight ?? this.lineHeight,
       fontWeight: fontWeight ?? this.fontWeight,
@@ -176,10 +273,20 @@ class TerminalSettings {
       custom = TerminalThemePresets.all[preset] ?? TerminalThemePresets.iterm2;
     }
 
+    final savedFont = json['fontFamily'] as String?;
+    // Upgrade untouched Windows default (Monaco) to Cascadia Mono.
+    final fontFamily = savedFont == null
+        ? defaultFontFamily
+        : (Platform.isWindows && savedFont == 'Monaco'
+            ? defaultFontFamily
+            : savedFont);
+
     return TerminalSettings(
       themePresetId: preset,
       customTheme: custom,
-      fontFamily: json['fontFamily'] as String? ?? 'Monaco',
+      fontFamily: fontFamily,
+      cjkFontFamily:
+          json['cjkFontFamily'] as String? ?? defaultCjkFontFamily,
       fontSize: (json['fontSize'] as num?)?.toDouble() ?? 13.5,
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       fontWeight: _fontWeightFromString(json['fontWeight'] as String?),
@@ -200,6 +307,7 @@ class TerminalSettings {
         if (themePresetId == 'custom')
           'customTheme': TerminalThemeCodec.themeToJson(customTheme),
         'fontFamily': fontFamily,
+        'cjkFontFamily': cjkFontFamily,
         'fontSize': fontSize,
         'lineHeight': lineHeight,
         'fontWeight': _fontWeightToString(fontWeight),

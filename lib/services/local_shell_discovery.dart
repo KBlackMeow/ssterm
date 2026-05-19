@@ -132,21 +132,21 @@ class LocalShellDiscovery {
             id: 'powershell',
             name: 'PowerShell',
             path: r'$systemRoot\System32\WindowsPowerShell\v1.0\powershell.exe',
-            args: const ['-NoLogo'],
+            args: const <String>[],
             env: null,
           ),
           (
             id: 'pwsh',
             name: 'PowerShell 7',
             path: r'C:\Program Files\PowerShell\7\pwsh.exe',
-            args: const ['-NoLogo'],
+            args: const <String>[],
             env: null,
           ),
           (
             id: 'pwsh-x86',
             name: 'PowerShell 7',
             path: r'C:\Program Files (x86)\PowerShell\7\pwsh.exe',
-            args: const ['-NoLogo'],
+            args: const <String>[],
             env: null,
           ),
           (
@@ -226,6 +226,20 @@ class LocalShellDiscovery {
 
       final distros = _decodeWslDistroNames(result.stdout);
       for (final distro in distros) {
+        final launcher = _findDistroLauncher(distro);
+        if (launcher != null) {
+          _addShell(
+            shells,
+            seen,
+            id: 'wsl:$distro',
+            displayName: distro,
+            executable: launcher,
+            arguments: const [],
+            isWsl: true,
+          );
+          continue;
+        }
+
         final loginShell = await _wslLoginShell(wsl, distro);
         _addShell(
           shells,
@@ -238,6 +252,53 @@ class LocalShellDiscovery {
         );
       }
     } catch (_) {}
+  }
+
+  /// Store / side-by-side distros install launchers like `ubuntu.exe` under
+  /// WindowsApps. Prefer them over `wsl.exe -d …` when present.
+  static String? _findDistroLauncher(String distro) {
+    for (final name in _distroLauncherExeNames(distro)) {
+      final fromPath = _resolveExecutable(name);
+      if (fromPath != null) return fromPath;
+    }
+    return null;
+  }
+
+  /// Resolves an executable via `where` (handles WindowsApps app aliases that
+  /// [File.existsSync] cannot see) then falls back to a direct path check.
+  static String? _resolveExecutable(String name) {
+    try {
+      final result = Process.runSync('where', [name], runInShell: true);
+      if (result.exitCode == 0) {
+        for (final line in result.stdout.toString().split('\n')) {
+          final path = line.trim();
+          if (path.isNotEmpty) return path;
+        }
+      }
+    } catch (_) {}
+
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData != null) {
+      final candidate = '$localAppData\\Microsoft\\WindowsApps\\$name';
+      if (_fileExists(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  static List<String> _distroLauncherExeNames(String distro) {
+    final lower = distro.toLowerCase().trim();
+    final names = <String>{
+      '${lower.replaceAll(' ', '')}.exe',
+      '${lower.replaceAll(RegExp(r'[\s._-]+'), '')}.exe',
+    };
+
+    if (lower.startsWith('ubuntu')) {
+      final version = lower.replaceFirst(RegExp(r'^ubuntu[\s._-]*'), '');
+      final digits = version.replaceAll(RegExp(r'[^0-9]'), '');
+      names.add(digits.isEmpty ? 'ubuntu.exe' : 'ubuntu$digits.exe');
+    }
+
+    return names.toList();
   }
 
   static Future<String> _wslLoginShell(String wsl, String distro) async {
@@ -352,6 +413,12 @@ class LocalShellDiscovery {
     return !blocked.contains(base);
   }
 
+  static bool _isLaunchableExecutable(String executable) {
+    if (_fileExists(executable)) return true;
+    final base = executable.split(RegExp(r'[/\\]')).last;
+    return _resolveExecutable(base) != null;
+  }
+
   static void _addShell(
     List<LocalShellOption> shells,
     Set<String> seen, {
@@ -365,7 +432,7 @@ class LocalShellDiscovery {
   }) {
     final key = isWsl ? id : _normalizePath(executable);
     if (seen.contains(key)) return;
-    if (!_fileExists(executable)) return;
+    if (!_isLaunchableExecutable(executable)) return;
     seen.add(key);
 
     shells.add(
