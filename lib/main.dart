@@ -441,7 +441,15 @@ esac
       terminal: _createTerminal(),
       localPath: ValueNotifier<String>(home ?? '/'),
     );
-    _wireDeferredLocalPty(tab, workingDirectory: home);
+    _wireDeferredLocalPty(
+      tab,
+      workingDirectory: home,
+      showExitMessage: false,
+      onProcessExit: () {
+        final idx = _tabs.indexOf(tab);
+        if (idx >= 0) _closeTab(idx);
+      },
+    );
 
     setState(() {
       _tabs.add(tab);
@@ -621,13 +629,16 @@ esac
     session.done.then((_) async {
       tab.keepaliveTimer?.cancel();
       tab.keepaliveTimer = null;
-      if (mounted) terminal.write('\r\n[SSH connection closed]\r\n');
       if (!mounted || tab.manuallyDisconnected) return;
       if (r.profile.autoReconnect) {
+        if (mounted) terminal.write('\r\n[SSH connection closed]\r\n');
         terminal.write('[Reconnecting in 3 seconds…]\r\n');
         await Future<void>.delayed(const Duration(seconds: 3));
         if (!mounted || tab.manuallyDisconnected) return;
         _reconnectTab(tab);
+      } else {
+        final idx = _tabs.indexOf(tab);
+        if (mounted && idx >= 0) _closeTab(idx);
       }
     });
 
@@ -834,13 +845,16 @@ esac
 
       session.done.then((_) async {
         tab.keepaliveTimer?.cancel();
-        if (mounted) tab.terminal?.write('\r\n[SSH connection closed]\r\n');
         if (!mounted || tab.manuallyDisconnected) return;
         if (profile.autoReconnect) {
+          tab.terminal?.write('\r\n[SSH connection closed]\r\n');
           tab.terminal?.write('[Reconnecting in 3 seconds…]\r\n');
           await Future<void>.delayed(const Duration(seconds: 3));
           if (!mounted || tab.manuallyDisconnected) return;
           _reconnectTab(tab);
+        } else {
+          final idx = _tabs.indexOf(tab);
+          if (mounted && idx >= 0) _closeTab(idx);
         }
       });
 
@@ -862,8 +876,10 @@ esac
   // ── Tab management ─────────────────────────────────────────────────────────
 
   void _closeTab(int i) {
-    if (_tabs.length == 1) return;
     _tabs[i].dispose();
+    if (_tabs.length == 1) {
+      exit(0);
+    }
     setState(() {
       _tabs.removeAt(i);
       _active = _active.clamp(0, _tabs.length - 1);
@@ -944,12 +960,20 @@ esac
       shortcuts: {
         LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.comma):
             const _OpenSettingsIntent(),
+        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyW):
+            const _CloseTabIntent(),
       },
       child: Actions(
         actions: {
           _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
             onInvoke: (_) {
               _openSettings();
+              return null;
+            },
+          ),
+          _CloseTabIntent: CallbackAction<_CloseTabIntent>(
+            onInvoke: (_) {
+              _closeTab(_active);
               return null;
             },
           ),
@@ -1162,7 +1186,7 @@ class _TabBar extends StatelessWidget {
                             child: _TabChip(
                               tab: tabs[i],
                               isActive: i == active,
-                              showClose: tabs.length > 1,
+                              showClose: true,
                               expand: true,
                               onTap: () => onSelect(i),
                               onClose: () => onClose(i),
@@ -1173,7 +1197,7 @@ class _TabBar extends StatelessWidget {
                             child: _TabChip(
                               tab: tabs[i],
                               isActive: i == active,
-                              showClose: tabs.length > 1,
+                              showClose: true,
                               expand: false,
                               onTap: () => onSelect(i),
                               onClose: () => onClose(i),
@@ -1772,4 +1796,8 @@ class _PlusMenu extends StatelessWidget {
 
 class _OpenSettingsIntent extends Intent {
   const _OpenSettingsIntent();
+}
+
+class _CloseTabIntent extends Intent {
+  const _CloseTabIntent();
 }
