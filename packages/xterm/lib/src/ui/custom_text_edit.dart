@@ -135,7 +135,20 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
   KeyEventResult _onKeyEvent(FocusNode focusNode, KeyEvent event) {
     if (!_isImeComposing) {
-      return widget.onKeyEvent(focusNode, event);
+      final result = widget.onKeyEvent(focusNode, event);
+      // KeyRepeatEvent for plain chars (e.g. a-z) returns ignored because
+      // keyInput() has no keytab entry for them without a modifier. On some
+      // platforms the TextInput channel stops forwarding updateEditingValue
+      // after our setEditingState("") reset, so repeats never arrive. Handle
+      // them directly here, mirroring CustomKeyboardListener's behaviour.
+      if (result == KeyEventResult.ignored &&
+          event is KeyRepeatEvent &&
+          event.character != null &&
+          event.character!.isNotEmpty) {
+        widget.onInsert(event.character!);
+        return KeyEventResult.handled;
+      }
+      return result;
     }
 
     return KeyEventResult.skipRemainingHandlers;

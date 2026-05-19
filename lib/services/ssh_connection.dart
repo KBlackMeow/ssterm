@@ -206,6 +206,17 @@ case ";${PROMPT_COMMAND:-};" in
   *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
 esac
 __ssterm_cwd
+# Workaround for Tencent Cloud's custom bash (mupan build): it miscounts the
+# visible width of \u/\h/\w when they appear inside the \[\e]0;...\a\] window
+# title group, which makes readline redraw long input at the wrong column.
+case "$PS1" in
+  *'\[\e]0;'*'\a\]'*)
+    __ssterm_ps1_before="${PS1%%'\[\e]0;'*}"
+    __ssterm_ps1_after="${PS1#*'\a\]'}"
+    PS1="${__ssterm_ps1_before}${__ssterm_ps1_after}"
+    unset __ssterm_ps1_before __ssterm_ps1_after
+    ;;
+esac
 EOF
     exec "$shell" --noprofile --rcfile "$rcfile" -i
     ;;
