@@ -2,8 +2,8 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
-  // 4:3 content area (1024×768)
-  private static let defaultContentSize = NSSize(width: 1024, height: 768)
+  // 4:3 content area (960×720)
+  private static let defaultContentSize = NSSize(width: 960, height: 720)
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -12,7 +12,7 @@ class MainFlutterWindow: NSWindow {
     center()
 
     minSize = frameRect(
-      forContentRect: NSRect(origin: .zero, size: NSSize(width: 800, height: 600))
+      forContentRect: NSRect(origin: .zero, size: NSSize(width: 640, height: 480))
     ).size
 
     RegisterGeneratedPlugins(registry: flutterViewController)

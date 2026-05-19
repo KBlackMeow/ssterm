@@ -19,10 +19,13 @@ class SshSessionView extends StatefulWidget {
     required this.sftpVisible,
     required this.onToggleSftp,
     required this.child,
-    this.initialPosition = SftpPanelPosition.right,
-    this.initialSize = 360.0,
+    this.initialPosition = SftpPanelPosition.bottom,
+    this.initialSize,
     this.onLayoutChanged,
   });
+
+  /// Default SFTP panel share of the session area (2/5 of width or height).
+  static const defaultPanelFraction = 2 / 5;
 
   final SftpClient sftp;
   final String host;
@@ -32,95 +35,119 @@ class SshSessionView extends StatefulWidget {
   final VoidCallback onToggleSftp;
   final Widget child;
   final SftpPanelPosition initialPosition;
-  final double initialSize;
-  final void Function(SftpPanelPosition position, double size)? onLayoutChanged;
+  final double? initialSize;
+  final void Function(SftpPanelPosition position, double? size)? onLayoutChanged;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
 }
 
 class _SshSessionViewState extends State<SshSessionView> {
-  static const _kDefaultSide = 360.0;
   static const _kMinSide = 160.0;
-  static const _kMaxSide = 680.0;
+  static const _kMaxFraction = 0.8;
 
   late SftpPanelPosition _position;
-  late double _panelSize;
+  double? _customPanelSize;
 
   @override
   void initState() {
     super.initState();
     _position = widget.initialPosition;
-    _panelSize = widget.initialSize;
+    _customPanelSize = widget.initialSize;
   }
   final _sftpKey = GlobalKey();
 
+  double _panelExtent(BoxConstraints constraints) {
+    final total = _position == SftpPanelPosition.right
+        ? constraints.maxWidth
+        : constraints.maxHeight;
+    final maxSide = total * _kMaxFraction;
+    if (_customPanelSize != null) {
+      return _customPanelSize!.clamp(_kMinSide, maxSide);
+    }
+    return (total * SshSessionView.defaultPanelFraction)
+        .clamp(_kMinSide, maxSide);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final sftp = SftpView(
-      key: _sftpKey,
-      sftp: widget.sftp,
-      host: widget.host,
-      remotePath: widget.remotePath,
-      transferManager: widget.transferManager,
-      panelPosition: _position,
-      onPanelPositionChanged: (pos) => setState(() {
-        _position = pos;
-        _panelSize = _kDefaultSide;
-        widget.onLayoutChanged?.call(_position, _panelSize);
-      }),
-      onClose: widget.onToggleSftp,
-    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final panelSize = _panelExtent(constraints);
 
-    final panel = _position == SftpPanelPosition.right
-        ? Positioned(
-            top: 0,
-            bottom: 0,
-            right: 0,
-            width: _panelSize,
-            child: Offstage(
-              offstage: !widget.sftpVisible,
-              child: Row(
-                children: [
-                  _ResizeHandle(
-                    axis: Axis.horizontal,
-                    onDrag: (d) => setState(() {
-                      _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
-                      widget.onLayoutChanged?.call(_position, _panelSize);
-                    }),
-                  ),
-                  Expanded(child: sftp),
-                ],
-              ),
-            ),
-          )
-        : Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: _panelSize,
-            child: Offstage(
-              offstage: !widget.sftpVisible,
-              child: Column(
-                children: [
-                  _ResizeHandle(
-                    axis: Axis.vertical,
-                    onDrag: (d) => setState(() {
-                      _panelSize = (_panelSize - d).clamp(_kMinSide, _kMaxSide);
-                      widget.onLayoutChanged?.call(_position, _panelSize);
-                    }),
-                  ),
-                  Expanded(child: sftp),
-                ],
-              ),
-            ),
-          );
+        final sftp = SftpView(
+          key: _sftpKey,
+          sftp: widget.sftp,
+          host: widget.host,
+          remotePath: widget.remotePath,
+          transferManager: widget.transferManager,
+          panelPosition: _position,
+          onPanelPositionChanged: (pos) => setState(() {
+            _position = pos;
+            _customPanelSize = null;
+            widget.onLayoutChanged?.call(_position, null);
+          }),
+          onClose: widget.onToggleSftp,
+        );
 
-    return Stack(
-      children: [
-        Positioned.fill(child: widget.child),
-        panel,
-      ],
+        final panel = _position == SftpPanelPosition.right
+            ? Positioned(
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: panelSize,
+                child: Offstage(
+                  offstage: !widget.sftpVisible,
+                  child: Row(
+                    children: [
+                      _ResizeHandle(
+                        axis: Axis.horizontal,
+                        onDrag: (d) => setState(() {
+                          final maxSide = constraints.maxWidth * _kMaxFraction;
+                          _customPanelSize =
+                              (panelSize - d).clamp(_kMinSide, maxSide);
+                          widget.onLayoutChanged
+                              ?.call(_position, _customPanelSize);
+                        }),
+                      ),
+                      Expanded(child: sftp),
+                    ],
+                  ),
+                ),
+              )
+            : Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: panelSize,
+                child: Offstage(
+                  offstage: !widget.sftpVisible,
+                  child: Column(
+                    children: [
+                      _ResizeHandle(
+                        axis: Axis.vertical,
+                        onDrag: (d) => setState(() {
+                          final maxSide =
+                              constraints.maxHeight * _kMaxFraction;
+                          _customPanelSize =
+                              (panelSize - d).clamp(_kMinSide, maxSide);
+                          widget.onLayoutChanged
+                              ?.call(_position, _customPanelSize);
+                        }),
+                      ),
+                      Expanded(child: sftp),
+                    ],
+                  ),
+                ),
+              );
+
+        return Stack(
+          children: [
+            Positioned.fill(child: widget.child),
+            panel,
+          ],
+        );
+      },
     );
   }
 }

@@ -5,14 +5,14 @@ import '../views/ssh_session_view.dart';
 import 'terminal_settings.dart';
 
 class AppConfig {
-  AppConfig({TerminalSettings? terminal, SftpPanelPosition? sftpPosition, double? sftpSize})
+  AppConfig({TerminalSettings? terminal, SftpPanelPosition? sftpPosition, this.sftpSize})
       : terminal = terminal ?? TerminalSettings(),
-        sftpPosition = sftpPosition ?? SftpPanelPosition.right,
-        sftpSize = sftpSize ?? 360.0;
+        sftpPosition = sftpPosition ?? SftpPanelPosition.bottom;
 
   TerminalSettings terminal;
   SftpPanelPosition sftpPosition;
-  double sftpSize;
+  /// Custom panel size in logical pixels; `null` uses [SshSessionView.defaultPanelFraction].
+  double? sftpSize;
 
   static Future<File> _file() async {
     final home = Platform.environment['HOME'] ?? '';
@@ -46,7 +46,7 @@ class AppConfig {
       const JsonEncoder.withIndent('  ').convert({
         'terminal': terminal.toJson(),
         'sftpPosition': sftpPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
-        'sftpSize': sftpSize,
+        if (sftpSize != null) 'sftpSize': sftpSize,
       }),
     );
   }
