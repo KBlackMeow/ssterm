@@ -60,9 +60,13 @@ class RemoteCwdParser {
     final raw = m.group(1)!;
     if (raw.isEmpty) return '/';
     try {
-      return Uri.decodeComponent(raw);
+      final decoded = Uri.decodeComponent(raw);
+      // Reject paths with traversal segments to prevent a malicious server
+      // from redirecting the SFTP panel to unintended directories.
+      if (decoded.split('/').contains('..')) return null;
+      return decoded;
     } catch (_) {
-      return raw;
+      return null;
     }
   }
 }

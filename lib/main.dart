@@ -531,6 +531,13 @@ esac
           hostname: host.hostname,
           port: host.port,
         ),
+        jumpVerifyHostKey: host.jumpHost != null
+            ? createHostKeyVerifier(
+                context,
+                hostname: host.jumpHost!.hostname,
+                port: host.jumpHost!.port,
+              )
+            : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -771,6 +778,13 @@ esac
           hostname: profile.hostname,
           port: profile.port,
         ),
+        jumpVerifyHostKey: profile.jumpHost != null
+            ? createHostKeyVerifier(
+                context,
+                hostname: profile.jumpHost!.hostname,
+                port: profile.jumpHost!.port,
+              )
+            : null,
       );
       if (!mounted || tab.manuallyDisconnected) {
         result.client.close();

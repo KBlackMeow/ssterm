@@ -98,5 +98,6 @@ bool looksLikeKeyPath(String value) {
 String expandHomePath(String path) {
   final home = Platform.environment['HOME'] ?? '';
   if (path.startsWith('~/')) return '$home${path.substring(1)}';
-  return path.replaceAll('~', home);
+  if (path == '~') return home;
+  return path;
 }

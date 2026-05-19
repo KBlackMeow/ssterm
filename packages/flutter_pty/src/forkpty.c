@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -78,12 +79,42 @@ pid_t pty_forkpty(
         // Without this, the Flutter/Dart VM's internal fds (pipes, sockets,
         // etc.) leak into the child shell, pushing it toward ulimit -n and
         // causing errors like "cannot duplicate fd 1: too many open files".
-        struct rlimit rl;
-        getrlimit(RLIMIT_NOFILE, &rl);
-        int maxfd = (int)(rl.rlim_cur < 4096 ? rl.rlim_cur : 4096);
-        for (int fd = 3; fd < maxfd; fd++)
+        //
+        // Enumerate the live fd table rather than blindly looping to rlimit:
+        //   macOS exposes open fds under /dev/fd
+        //   Linux  exposes open fds under /proc/self/fd
+        // Collect all fds first, then close, so iterating the directory is
+        // not disturbed by closing entries mid-scan.
+#if defined(__APPLE__)
+        const char *fd_dir = "/dev/fd";
+#else
+        const char *fd_dir = "/proc/self/fd";
+#endif
+        int closed_via_dir = 0;
+        DIR *fddir = opendir(fd_dir);
+        if (fddir != NULL)
         {
-            close(fd);
+            int to_close[1024];
+            int n = 0;
+            int dfd = dirfd(fddir);
+            struct dirent *de;
+            while ((de = readdir(fddir)) != NULL)
+            {
+                if (de->d_name[0] == '.') continue;
+                int fd = atoi(de->d_name);
+                if (fd >= 3 && fd != dfd && n < 1024)
+                    to_close[n++] = fd;
+            }
+            closedir(fddir);
+            for (int i = 0; i < n; i++) close(to_close[i]);
+            closed_via_dir = 1;
+        }
+        if (!closed_via_dir)
+        {
+            // Fallback: /dev/fd or /proc unavailable (chroot, container, etc.)
+            struct rlimit rl;
+            getrlimit(RLIMIT_NOFILE, &rl);
+            for (int fd = 3; fd < (int)rl.rlim_cur; fd++) close(fd);
         }
     }
     else

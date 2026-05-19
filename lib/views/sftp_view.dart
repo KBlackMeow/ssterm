@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
+import 'package:path/path.dart' as p;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
@@ -130,7 +131,8 @@ class _SftpViewState extends State<SftpView> {
 
   Future<void> _download(SftpName entry) async {
     final home = Platform.environment['HOME'] ?? '';
-    final dest = '$home/Downloads/${entry.filename}';
+    final safeName = p.posix.basename(entry.filename);
+    final dest = '$home/Downloads/$safeName';
     try {
       await widget.transferManager.startDownload(
         sftp: widget.sftp,

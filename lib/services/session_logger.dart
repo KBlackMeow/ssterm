@@ -21,7 +21,12 @@ class SessionLogger {
         '${now.minute.toString().padLeft(2, '0')}'
         '${now.second.toString().padLeft(2, '0')}';
     final path = '${dir.path}/${safe}_$ts.log';
-    final sink = File(path).openWrite();
+    final file = File(path);
+    final sink = file.openWrite();
+    // Restrict log file so other local users cannot read terminal output (POSIX only).
+    if (!Platform.isWindows) {
+      await Process.run('chmod', ['600', path]);
+    }
     return SessionLogger._(sink, path);
   }
 

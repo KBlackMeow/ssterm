@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../services/credential_crypto.dart';
+import '../services/credential_storage.dart';
 import 'port_forward_rule.dart';
 import 'ssh_host.dart';
 
@@ -23,8 +24,11 @@ class SavedHostsStore {
       for (final item in list) {
         final json = item as Map<String, dynamic>;
         hosts.add(await _hostFromStorage(json));
-        if (json.containsKey('password')) needsMigration = true;
+        if (json.containsKey('passwordEnc') || json.containsKey('password')) {
+          needsMigration = true;
+        }
       }
+      // Rewrite file to strip legacy password fields now that they are in keychain.
       if (needsMigration) {
         try {
           await save(hosts);
@@ -43,6 +47,10 @@ class SavedHostsStore {
       data.add(await _hostToStorage(h));
     }
     await f.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
+    // Restrict access so other local users cannot read the file (POSIX only).
+    if (!Platform.isWindows) {
+      await Process.run('chmod', ['600', f.path]);
+    }
   }
 
   static Future<void> upsert(SshHost host) async {
@@ -53,11 +61,36 @@ class SavedHostsStore {
   }
 
   static Future<SshHost> _hostFromStorage(Map<String, dynamic> json) async {
+    final hostname = json['hostname'] as String;
+    final port = json['port'] as int? ?? 22;
+    final user = json['user'] as String?;
+    final profileKey = '$hostname:$port:${user ?? SshHost.defaultUsername}';
+
+    // 1. Primary source: OS keychain.
     String? password;
-    if (json['passwordEnc'] is String) {
+    try {
+      password = await CredentialStorage.load(profileKey);
+    } catch (_) {
+      // Keychain unavailable (permission denied, first-run prompt rejected, etc.).
+      // Fall through to legacy fields so the host list still loads.
+    }
+
+    // 2. Migration: decrypt legacy AES-GCM field and move to keychain.
+    if (password == null && json['passwordEnc'] is String) {
       password = await CredentialCrypto.decrypt(json['passwordEnc'] as String);
-    } else if (json['password'] is String) {
+      if (password != null) {
+        try {
+          await CredentialStorage.store(profileKey, password);
+        } catch (_) {}
+      }
+    }
+
+    // 3. Migration: plaintext field (very old format) and move to keychain.
+    if (password == null && json['password'] is String) {
       password = json['password'] as String;
+      try {
+        await CredentialStorage.store(profileKey, password);
+      } catch (_) {}
     }
 
     SshHost? jumpHost;
@@ -67,9 +100,9 @@ class SavedHostsStore {
 
     return SshHost(
       alias: json['alias'] as String,
-      hostname: json['hostname'] as String,
-      port: json['port'] as int? ?? 22,
-      user: json['user'] as String?,
+      hostname: hostname,
+      port: port,
+      user: user,
       identityFile: json['identityFile'] as String?,
       password: password,
       forwardRules: PortForwardRule.listFromJson(json['forwardRules']),
@@ -95,13 +128,33 @@ class SavedHostsStore {
       if (host.sessionLog) 'sessionLog': host.sessionLog,
     };
 
+    // Persist password in OS keychain; never write it to disk.
+    try {
+      if (host.password != null && host.password!.isNotEmpty) {
+        await CredentialStorage.store(host.profileKey, host.password!);
+      } else {
+        await CredentialStorage.delete(host.profileKey);
+      }
+      if (host.jumpHost != null) {
+        final j = host.jumpHost!;
+        if (j.password != null && j.password!.isNotEmpty) {
+          await CredentialStorage.store(j.profileKey, j.password!);
+        } else {
+          await CredentialStorage.delete(j.profileKey);
+        }
+      }
+    } catch (_) {
+      // Keychain unavailable — fall back to encrypting the password on disk.
+      // This is weaker than keychain but better than losing the credential.
+      if (host.password != null && host.password!.isNotEmpty) {
+        map['passwordEnc'] = await CredentialCrypto.encrypt(host.password!);
+      }
+    }
+
     if (host.jumpHost != null) {
       map['jumpHost'] = await _hostToStorage(host.jumpHost!);
     }
 
-    if (host.password != null && host.password!.isNotEmpty) {
-      map['passwordEnc'] = await CredentialCrypto.encrypt(host.password!);
-    }
     return map;
   }
 }

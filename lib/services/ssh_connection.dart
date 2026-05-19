@@ -46,14 +46,18 @@ Future<ConnectResult> connectSshHost(
       timeout: const Duration(seconds: 10),
     );
 
+    if (jumpVerifyHostKey == null) {
+      jumpSocket.destroy();
+      throw const FormatException(
+        'Jump host key verifier is required but was not provided',
+      );
+    }
     jumpClient = SSHClient(
       jumpSocket,
       username: jumpUser,
       identities: jumpIdentities,
       onPasswordRequest: jumpOnPassword,
-      onVerifyHostKey: jumpVerifyHostKey != null
-          ? (type, fp) => jumpVerifyHostKey(type, fp)
-          : (_, _) async => true,
+      onVerifyHostKey: (type, fp) => jumpVerifyHostKey(type, fp),
     );
 
     await jumpClient.authenticated
