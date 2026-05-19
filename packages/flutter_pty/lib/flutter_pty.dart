@@ -57,6 +57,7 @@ class Pty {
     _ensureInitialized();
 
     final effectiveEnv = <String, String>{};
+    final useExactEnv = environment?['SSTERM_EXACT_ENV'] == '1';
 
     effectiveEnv['TERM'] = 'xterm-256color';
     // Without this, tools like "vi" produce sequences that are not UTF-8 friendly
@@ -71,14 +72,17 @@ class Pty {
       'PATH'
     };
 
-    for (var entry in Platform.environment.entries) {
-      if (envValuesToCopy.contains(entry.key)) {
-        effectiveEnv[entry.key] = entry.value;
+    if (!useExactEnv) {
+      for (var entry in Platform.environment.entries) {
+        if (envValuesToCopy.contains(entry.key)) {
+          effectiveEnv[entry.key] = entry.value;
+        }
       }
     }
 
     if (environment != null) {
       for (var entry in environment.entries) {
+        if (entry.key == 'SSTERM_EXACT_ENV') continue;
         effectiveEnv[entry.key] = entry.value;
       }
     }

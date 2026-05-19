@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,6 +10,36 @@ const _kBg = Color(0xFF2B2B2B);
 const _kDivider = Color(0xFF3A3A3A);
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
+
+/// UI font that covers Latin and CJK in one face so mixed labels do not
+/// alternate between Segoe UI and SimSun/YaHei on Windows.
+String? get _menuFontFamily {
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.windows:
+      return 'Microsoft YaHei UI';
+    case TargetPlatform.macOS:
+      return 'PingFang SC';
+    case TargetPlatform.linux:
+      return 'Noto Sans CJK SC';
+    default:
+      return null;
+  }
+}
+
+TextStyle _menuTextStyle({
+  required Color color,
+  required double fontSize,
+  FontWeight fontWeight = FontWeight.w400,
+  double? letterSpacing,
+}) {
+  return TextStyle(
+    color: color,
+    fontSize: fontSize,
+    fontWeight: fontWeight,
+    letterSpacing: letterSpacing,
+    fontFamily: _menuFontFamily,
+  );
+}
 
 class CmdPickerButton extends StatefulWidget {
   const CmdPickerButton({super.key, required this.onInsert});
@@ -43,13 +74,13 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
     final pos = box.localToGlobal(Offset.zero);
 
     final items = <PopupMenuEntry<int>>[
-      const PopupMenuItem<int>(
+      PopupMenuItem<int>(
         enabled: false,
         height: 28,
         child: Text(
           'Insert command',
-          style: TextStyle(
-            color: Color(0xFF6E6E6E),
+          style: _menuTextStyle(
+            color: const Color(0xFF6E6E6E),
             fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.3,
@@ -67,13 +98,13 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
             children: [
               Text(
                 _commands[i].name,
-                style: const TextStyle(color: _kFgActive, fontSize: 13),
+                style: _menuTextStyle(color: _kFgActive, fontSize: 13),
               ),
               Text(
                 _commands[i].description,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _kFgInactive, fontSize: 11),
+                style: _menuTextStyle(color: _kFgInactive, fontSize: 11),
               ),
             ],
           ),

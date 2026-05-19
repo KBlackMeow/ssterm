@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <Windows.h>
 
 #include "flutter_pty.h"
@@ -7,65 +9,203 @@
 #include "include/dart_api_dl.h"
 #include "include/dart_native_api.h"
 
+static int arg_needs_quotes(const char *arg)
+{
+    if (arg == NULL || arg[0] == '\0')
+    {
+        return 1;
+    }
+
+    for (const char *p = arg; *p != '\0'; p++)
+    {
+        if (*p == ' ' || *p == '\t' || *p == '"')
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int append_bytes(char **buffer, int *length, int *capacity, const char *data, int data_len)
+{
+    if (data == NULL || data_len <= 0)
+    {
+        return 1;
+    }
+
+    if (*length + data_len + 1 > *capacity)
+    {
+        int new_capacity = *capacity == 0 ? 256 : *capacity;
+
+        while (*length + data_len + 1 > new_capacity)
+        {
+            new_capacity *= 2;
+        }
+
+        char *resized = realloc(*buffer, new_capacity);
+
+        if (resized == NULL)
+        {
+            return 0;
+        }
+
+        *buffer = resized;
+        *capacity = new_capacity;
+    }
+
+    memcpy(*buffer + *length, data, data_len);
+    *length += data_len;
+    (*buffer)[*length] = '\0';
+    return 1;
+}
+
+static int append_char(char **buffer, int *length, int *capacity, char ch)
+{
+    return append_bytes(buffer, length, capacity, &ch, 1);
+}
+
+static int append_cstring(char **buffer, int *length, int *capacity, const char *text)
+{
+    if (text == NULL)
+    {
+        return 1;
+    }
+
+    return append_bytes(buffer, length, capacity, text, (int)strlen(text));
+}
+
+static int append_quoted_token(
+    char **buffer,
+    int *length,
+    int *capacity,
+    const char *arg,
+    int leading_space)
+{
+    if (arg == NULL)
+    {
+        return 1;
+    }
+
+    if (leading_space && !append_char(buffer, length, capacity, ' '))
+    {
+        return 0;
+    }
+
+    if (!arg_needs_quotes(arg))
+    {
+        return append_cstring(buffer, length, capacity, arg);
+    }
+
+    if (!append_char(buffer, length, capacity, '"'))
+    {
+        return 0;
+    }
+
+    int backslashes = 0;
+    for (const char *p = arg; *p != '\0'; p++)
+    {
+        if (*p == '\\')
+        {
+            backslashes++;
+            continue;
+        }
+
+        if (*p == '"')
+        {
+            for (int i = 0; i < backslashes * 2 + 1; i++)
+            {
+                if (!append_char(buffer, length, capacity, '\\'))
+                {
+                    return 0;
+                }
+            }
+            backslashes = 0;
+            if (!append_char(buffer, length, capacity, '"'))
+            {
+                return 0;
+            }
+            continue;
+        }
+
+        while (backslashes > 0)
+        {
+            if (!append_char(buffer, length, capacity, '\\'))
+            {
+                return 0;
+            }
+            backslashes--;
+        }
+        if (!append_char(buffer, length, capacity, *p))
+        {
+            return 0;
+        }
+    }
+
+    while (backslashes > 0)
+    {
+        if (!append_char(buffer, length, capacity, '\\') ||
+            !append_char(buffer, length, capacity, '\\'))
+        {
+            return 0;
+        }
+        backslashes--;
+    }
+
+    return append_char(buffer, length, capacity, '"');
+}
+
 static LPWSTR build_command(char *executable, char **arguments)
 {
-    int utf8_len = 0;
+    char *utf8_command = NULL;
+    int length = 0;
+    int capacity = 0;
 
     if (executable != NULL)
     {
-        utf8_len += (int)strlen(executable);
+        if (!append_quoted_token(&utf8_command, &length, &capacity, executable, 0))
+        {
+            free(utf8_command);
+            return NULL;
+        }
     }
 
     if (arguments != NULL)
     {
+        // Dart builds argv execvp-style: arguments[0] is the executable.
+        // Do not duplicate it — otherwise WSL/Git Bash receive the Windows
+        // exe path as a command to run inside the Linux/MSYS session.
         int i = 0;
+        if (arguments[0] != NULL && executable != NULL &&
+            strcmp(arguments[0], executable) == 0)
+        {
+            i = 1;
+        }
 
         while (arguments[i] != NULL)
         {
-            utf8_len += (int)strlen(arguments[i]) + 1;
+            if (!append_quoted_token(
+                    &utf8_command, &length, &capacity, arguments[i], 1))
+            {
+                free(utf8_command);
+                return NULL;
+            }
+
             i++;
         }
     }
 
-    char *utf8_command = malloc(utf8_len + 1);
-
     if (utf8_command == NULL)
     {
-        return NULL;
-    }
+        utf8_command = malloc(1);
 
-    int pos = 0;
-
-    if (executable != NULL)
-    {
-        int j = 0;
-
-        while (executable[j] != 0)
+        if (utf8_command == NULL)
         {
-            utf8_command[pos++] = executable[j++];
+            return NULL;
         }
+
+        utf8_command[0] = '\0';
     }
-
-    if (arguments != NULL)
-    {
-        int j = 0;
-
-        while (arguments[j] != NULL)
-        {
-            utf8_command[pos++] = ' ';
-
-            int k = 0;
-
-            while (arguments[j][k] != 0)
-            {
-                utf8_command[pos++] = arguments[j][k++];
-            }
-
-            j++;
-        }
-    }
-
-    utf8_command[pos] = 0;
 
     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8_command, -1, NULL, 0);
     LPWSTR command = malloc(wlen * sizeof(WCHAR));
@@ -357,8 +497,6 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 
     PROCESS_INFORMATION processInfo;
     ZeroMemory(&processInfo, sizeof(processInfo));
-
-    Sleep(1000);
 
     ok = CreateProcessW(NULL,
                         command,

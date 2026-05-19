@@ -15,6 +15,7 @@ import 'models/saved_hosts_store.dart';
 import 'models/ssh_config.dart';
 import 'models/ssh_host.dart';
 import 'services/host_key_verifier.dart';
+import 'services/local_shell_discovery.dart';
 import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
@@ -23,7 +24,8 @@ import 'services/ssh_connection.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/split_view.dart';
-import 'widgets/terminal_surface.dart' show TerminalSurface, TerminalContextMenuConfig;
+import 'widgets/terminal_surface.dart'
+    show TerminalSurface, TerminalContextMenuConfig;
 import 'models/transfer_task.dart';
 import 'views/ssh_session_view.dart';
 import 'widgets/transfer_panel.dart';
@@ -116,6 +118,7 @@ enum _TabKind { local, ssh, settings }
 class _Tab {
   _TabKind kind;
   String title;
+  LocalShellOption? localShell;
 
   // Primary pane
   Terminal? terminal;
@@ -159,8 +162,8 @@ class _Tab {
   _Tab._({
     required this.kind,
     required this.title,
+    this.localShell,
     this.terminal,
-    this.pty,
     this.sshClient,
     this.jumpClient,
     this.sshSession,
@@ -180,22 +183,20 @@ class _Tab {
     ValueNotifier<String>? remotePath,
     ValueNotifier<String>? localPath,
     SshHost? profile,
-  }) =>
-      _Tab._(
-        kind: _TabKind.ssh,
-        title: title,
-        terminal: t,
-        sshClient: c,
-        jumpClient: jumpClient,
-        sshSession: s,
-        sftp: sftp,
-        remotePath: remotePath,
-        localPath: localPath,
-        sshProfile: profile,
-      );
+  }) => _Tab._(
+    kind: _TabKind.ssh,
+    title: title,
+    terminal: t,
+    sshClient: c,
+    jumpClient: jumpClient,
+    sshSession: s,
+    sftp: sftp,
+    remotePath: remotePath,
+    localPath: localPath,
+    sshProfile: profile,
+  );
 
-  factory _Tab.settings() =>
-      _Tab._(kind: _TabKind.settings, title: 'Settings');
+  factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
 
   void clearSplit() {
     splitPipe?.dispose();
@@ -226,10 +227,10 @@ class _Tab {
   }
 
   IconData get icon => switch (kind) {
-        _TabKind.local => Icons.terminal,
-        _TabKind.ssh => Icons.lock_outline,
-        _TabKind.settings => Icons.settings_outlined,
-      };
+    _TabKind.local => Icons.terminal,
+    _TabKind.ssh => Icons.lock_outline,
+    _TabKind.settings => Icons.settings_outlined,
+  };
 }
 
 // ── Home ──────────────────────────────────────────────────────────────────────
@@ -245,16 +246,25 @@ class _TerminalHomeState extends State<TerminalHome> {
   int _active = 0;
   List<SshHost> _savedHosts = [];
   List<SshHost> _configHosts = [];
+  List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
   AppConfig _config = AppConfig();
 
   @override
   void initState() {
     super.initState();
-    _newLocalTab();
+    _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
+    _refreshLocalShells();
     _loadSshHosts();
     AppConfig.load().then((c) {
       if (mounted) setState(() => _config = c);
     });
+  }
+
+  Future<List<LocalShellOption>> _refreshLocalShells() async {
+    final shells = await LocalShellDiscovery.discover(refresh: true);
+    if (!mounted) return _localShells;
+    setState(() => _localShells = shells);
+    return shells;
   }
 
   Future<void> _loadSshHosts() async {
@@ -263,11 +273,13 @@ class _TerminalHomeState extends State<TerminalHome> {
     if (!mounted) return;
     setState(() {
       _savedHosts = saved
-        ..sort((a, b) =>
-            a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
       _configHosts = config
-        ..sort((a, b) =>
-            a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
     });
   }
 
@@ -282,45 +294,147 @@ class _TerminalHomeState extends State<TerminalHome> {
   // ── Local terminal ─────────────────────────────────────────────────────────
 
   Terminal _createTerminal({bool reflowEnabled = true}) => Terminal(
-        maxLines: 5000,
-        platform: detectTerminalHostPlatform(),
-        reflowEnabled: reflowEnabled,
-      );
+    maxLines: 5000,
+    platform: detectTerminalHostPlatform(),
+    reflowEnabled: reflowEnabled,
+  );
+
+  Map<String, String> _environmentForLocalShell(LocalShellOption shell) {
+    // WSL must not inherit Windows SHELL/PATH — a value like
+    // C:\Windows\System32\wsl.exe breaks zsh/bash inside the distro.
+    if (shell.isWsl) {
+      return _wslEnvironment(shell);
+    }
+
+    if (shell.id.startsWith('git-bash')) {
+      return _gitBashEnvironment(shell);
+    }
+
+    final env = Map<String, String>.from(Platform.environment)
+      ..['TERM'] = 'xterm-256color'
+      ..['COLORTERM'] = 'truecolor'
+      ..['TERM_PROGRAM'] = 'ssterm';
+    if (shell.environment != null) {
+      env.addAll(shell.environment!);
+    }
+    if (shell.useUnixWrapper) {
+      env['SHELL'] = shell.executable;
+    }
+    return env;
+  }
+
+  Map<String, String> _wslEnvironment(LocalShellOption shell) {
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final env = <String, String>{
+      'SSTERM_EXACT_ENV': '1',
+      'TERM': 'xterm-256color',
+      'COLORTERM': 'truecolor',
+      'TERM_PROGRAM': 'ssterm',
+      // Empty WSLENV prevents WSL from translating any Windows env vars
+      // (notably SHELL=C:\Windows\System32\wsl.exe) into the Linux session.
+      'WSLENV': '',
+      'SystemRoot': systemRoot,
+      'WINDIR': Platform.environment['WINDIR'] ?? systemRoot,
+      'PATH': [
+        '$systemRoot\\System32',
+        systemRoot,
+        '$systemRoot\\System32\\Wbem',
+        '$systemRoot\\System32\\WindowsPowerShell\\v1.0',
+      ].join(';'),
+    };
+
+    for (final key in const [
+      'APPDATA',
+      'LOCALAPPDATA',
+      'ProgramData',
+      'ProgramFiles',
+      'ProgramFiles(x86)',
+      'PUBLIC',
+      'TEMP',
+      'TMP',
+      'USERNAME',
+      'USERDOMAIN',
+      'USERPROFILE',
+    ]) {
+      final value = Platform.environment[key];
+      if (value != null && value.isNotEmpty) {
+        env[key] = value;
+      }
+    }
+
+    return env;
+  }
+
+  Map<String, String> _gitBashEnvironment(LocalShellOption shell) {
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final userProfile = Platform.environment['USERPROFILE'];
+    final gitRoot = shell.executable
+        .replaceFirst(
+          RegExp(r'\\usr\\bin\\env\.exe$', caseSensitive: false),
+          '',
+        )
+        .replaceFirst(RegExp(r'\\bin\\bash\.exe$', caseSensitive: false), '');
+    final path = [
+      if (gitRoot != shell.executable) ...[
+        '$gitRoot\\usr\\bin',
+        '$gitRoot\\mingw64\\bin',
+        '$gitRoot\\bin',
+      ],
+      '$systemRoot\\System32',
+      systemRoot,
+    ].join(';');
+
+    final env = <String, String>{
+      'TERM': 'xterm-256color',
+      'COLORTERM': 'truecolor',
+      'TERM_PROGRAM': 'ssterm',
+      'SystemRoot': systemRoot,
+      'WINDIR': systemRoot,
+      'PATH': path,
+      'MSYSTEM': 'MINGW64',
+      'MSYS': 'enable_pcon winsymlink:nativestrict',
+      'CHERE_INVOKING': '1',
+      'SHELL': '/usr/bin/bash',
+    };
+
+    final username = Platform.environment['USERNAME'];
+    final temp = Platform.environment['TEMP'];
+    final tmp = Platform.environment['TMP'];
+    if (username != null) env['USERNAME'] = username;
+    if (userProfile != null) {
+      env['USERPROFILE'] = userProfile;
+      env['HOME'] = userProfile;
+    }
+    if (temp != null) env['TEMP'] = temp;
+    if (tmp != null) env['TMP'] = tmp;
+    if (shell.environment != null) {
+      env.addAll(shell.environment!);
+      env['SHELL'] = '/usr/bin/bash';
+    }
+    return env;
+  }
 
   /// Start the local PTY on the first [Terminal.onResize] so rows/cols match the
   /// pane instead of a hard-coded 80×24.
   void _wireDeferredLocalPty(
     _Tab tab, {
+    required LocalShellOption shell,
     String? workingDirectory,
     bool showExitMessage = true,
     void Function()? onProcessExit,
     void Function(Pty pty, _OutputPipe pipe)? onPtyStarted,
   }) {
     final terminal = tab.terminal!;
-    final shell = Platform.isWindows
-        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
-        : (Platform.environment['SHELL'] ?? '/bin/zsh');
     final home =
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
-    final env = Map<String, String>.from(Platform.environment)
-      ..['TERM'] = 'xterm-256color'
-      ..['COLORTERM'] = 'truecolor'
-      ..['TERM_PROGRAM'] = 'ssterm';
+    final env = _environmentForLocalShell(shell);
+    final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
     Pty? pty;
 
     terminal.onResize = (w, h, pw, ph) {
       if (w < 1 || h < 1) return;
       if (pty == null) {
-        if (Platform.isWindows) {
-          pty = Pty.start(
-            shell,
-            arguments: [],
-            columns: w,
-            rows: h,
-            environment: env,
-            workingDirectory: workingDirectory ?? home,
-          );
-        } else {
+        if (useUnixWrapper) {
           pty = Pty.start(
             '/bin/sh',
             arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
@@ -328,6 +442,15 @@ class _TerminalHomeState extends State<TerminalHome> {
             rows: h,
             environment: env,
             workingDirectory: workingDirectory ?? home,
+          );
+        } else {
+          pty = Pty.start(
+            shell.executable,
+            arguments: shell.arguments,
+            columns: w,
+            rows: h,
+            environment: env,
+            workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
           );
         }
         tab.pty = pty;
@@ -429,26 +552,22 @@ esac
 ''';
   }
 
-  void _newLocalTab() {
-    final shell = Platform.isWindows
-        ? (Platform.environment['COMSPEC'] ?? 'cmd.exe')
-        : (Platform.environment['SHELL'] ?? '/bin/zsh');
+  void _newLocalTab(LocalShellOption shell) {
     final home =
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final tab = _Tab._(
       kind: _TabKind.local,
-      title: shell.split('/').last,
+      title: shell.displayName,
+      localShell: shell,
       terminal: _createTerminal(),
       localPath: ValueNotifier<String>(home ?? '/'),
     );
     _wireDeferredLocalPty(
       tab,
+      shell: shell,
       workingDirectory: home,
-      showExitMessage: false,
-      onProcessExit: () {
-        final idx = _tabs.indexOf(tab);
-        if (idx >= 0) _closeTab(idx);
-      },
+      showExitMessage: true,
+      onProcessExit: null,
     );
 
     setState(() {
@@ -682,13 +801,15 @@ esac
     final splitTerminal = _createTerminal(reflowEnabled: false);
     SSHSession session;
     try {
-      session = await tab.sshClient!.shell(
-        pty: const SSHPtyConfig(
-          width: 80,
-          height: 24,
-          type: 'xterm-256color',
-        ),
-      ).timeout(const Duration(seconds: 10));
+      session = await tab.sshClient!
+          .shell(
+            pty: const SSHPtyConfig(
+              width: 80,
+              height: 24,
+              type: 'xterm-256color',
+            ),
+          )
+          .timeout(const Duration(seconds: 10));
     } catch (_) {
       return;
     }
@@ -728,15 +849,19 @@ esac
   }
 
   void _openLocalSplitPane(_Tab tab, Axis axis) {
+    final shell =
+        tab.localShell ?? LocalShellDiscovery.defaultShell(_localShells);
     final splitTerminal = _createTerminal();
     final holder = _Tab._(
       kind: _TabKind.local,
-      title: tab.title,
+      title: shell.displayName,
+      localShell: shell,
       terminal: splitTerminal,
     );
     final cwd = tab.localPath?.value;
     _wireDeferredLocalPty(
       holder,
+      shell: shell,
       workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : null,
       showExitMessage: false,
       onProcessExit: () => setState(() => tab.clearSplit()),
@@ -820,8 +945,7 @@ esac
       );
 
       tab.terminal!.onOutput = (d) => session.stdin.add(utf8.encode(d));
-      tab.terminal!.onResize =
-          (w, h, pw, ph) => session.resizeTerminal(w, h);
+      tab.terminal!.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         pipe.bind(session.stdout);
@@ -964,9 +1088,7 @@ esac
   }
 
   bool get _activeTabIsSplit =>
-      _tabs.isNotEmpty &&
-      _active < _tabs.length &&
-      _tabs[_active].isSplit;
+      _tabs.isNotEmpty && _active < _tabs.length && _tabs[_active].isSplit;
 
   @override
   Widget build(BuildContext context) {
@@ -1002,6 +1124,7 @@ esac
                 onSelect: _selectTab,
                 onClose: _closeTab,
                 onNewLocal: _newLocalTab,
+                onRefreshLocalShells: _refreshLocalShells,
                 onNewSsh: () => _showConnectDialog(),
                 onSettings: _openSettings,
                 savedHosts: _savedHosts,
@@ -1009,18 +1132,22 @@ esac
                 onConnectHost: _connectSavedHost,
                 onInsertCommand:
                     _tabs.isNotEmpty && _tabs[_active].terminal != null
-                        ? _insertCommand
-                        : null,
-                hasSftp: _tabs.isNotEmpty &&
+                    ? _insertCommand
+                    : null,
+                hasSftp:
+                    _tabs.isNotEmpty &&
                     _active < _tabs.length &&
                     _tabs[_active].sftp != null,
-                sftpVisible: _tabs.isNotEmpty &&
+                sftpVisible:
+                    _tabs.isNotEmpty &&
                     _active < _tabs.length &&
                     _tabs[_active].sftpPanelVisible,
                 onToggleSftp: () {
                   if (_tabs.isNotEmpty && _active < _tabs.length) {
-                    setState(() => _tabs[_active].sftpPanelVisible =
-                        !_tabs[_active].sftpPanelVisible);
+                    setState(
+                      () => _tabs[_active].sftpPanelVisible =
+                          !_tabs[_active].sftpPanelVisible,
+                    );
                   }
                 },
                 transferManager: _tabs.isNotEmpty && _active < _tabs.length
@@ -1042,21 +1169,27 @@ esac
     );
   }
 
-  Widget _buildPrimaryContent(_Tab tab, {TerminalContextMenuConfig? contextMenu}) {
+  Widget _buildPrimaryContent(
+    _Tab tab, {
+    TerminalContextMenuConfig? contextMenu,
+  }) {
     return switch (tab.kind) {
-      _TabKind.local || _TabKind.ssh =>
-        _buildTerminalView(tab.terminal!, tab.terminalViewKey, contextMenu: contextMenu),
+      _TabKind.local || _TabKind.ssh => _buildTerminalView(
+        tab.terminal!,
+        tab.terminalViewKey,
+        contextMenu: contextMenu,
+      ),
       _TabKind.settings => SettingsPage(
-          settings: _config.terminal,
-          onChanged: (next) {
-            setState(() => _config.terminal = next);
-            _config.save();
-            _syncAllTerminals();
-          },
-          savedHosts: _savedHosts,
-          onSaveHost: (original, updated) => _saveSavedHost(original, updated),
-          onDeleteHost: (host) => _deleteSavedHost(host),
-        ),
+        settings: _config.terminal,
+        onChanged: (next) {
+          setState(() => _config.terminal = next);
+          _config.save();
+          _syncAllTerminals();
+        },
+        savedHosts: _savedHosts,
+        onSaveHost: (original, updated) => _saveSavedHost(original, updated),
+        onDeleteHost: (host) => _deleteSavedHost(host),
+      ),
     };
   }
 
@@ -1137,6 +1270,7 @@ class _TabBar extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onNewLocal,
+    required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.onSettings,
     required this.savedHosts,
@@ -1159,7 +1293,8 @@ class _TabBar extends StatelessWidget {
   final int active;
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
-  final VoidCallback onNewLocal;
+  final ValueChanged<LocalShellOption> onNewLocal;
+  final Future<List<LocalShellOption>> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final VoidCallback onSettings;
   final List<SshHost> savedHosts;
@@ -1229,7 +1364,8 @@ class _TabBar extends StatelessWidget {
             ),
           ),
           _PlusMenu(
-            onLocal: onNewLocal,
+            onNewLocal: onNewLocal,
+            onRefreshLocalShells: onRefreshLocalShells,
             onNewSsh: onNewSsh,
             savedHosts: savedHosts,
             configHosts: configHosts,
@@ -1237,10 +1373,7 @@ class _TabBar extends StatelessWidget {
           ),
           CmdPickerButton(onInsert: onInsertCommand),
           if (hasSftp) ...[
-            _SftpButton(
-              sftpVisible: sftpVisible,
-              onToggle: onToggleSftp,
-            ),
+            _SftpButton(sftpVisible: sftpVisible, onToggle: onToggleSftp),
             if (transferManager != null)
               _TransferButton(manager: transferManager!),
           ],
@@ -1295,9 +1428,7 @@ class _SftpButton extends StatelessWidget {
           child: Icon(
             Icons.folder_outlined,
             size: 15,
-            color: sftpVisible
-                ? const Color(0xFF2472C8)
-                : _kFgInactive,
+            color: sftpVisible ? const Color(0xFF2472C8) : _kFgInactive,
           ),
         ),
       ),
@@ -1363,7 +1494,9 @@ class _TransferButton extends StatelessWidget {
                       top: -3,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 3, vertical: 1),
+                          horizontal: 3,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFF2472C8),
                           borderRadius: BorderRadius.circular(6),
@@ -1502,8 +1635,8 @@ class _SplitButton extends StatelessWidget {
             color: isSplit
                 ? const Color(0xFF2472C8)
                 : canSplit
-                    ? _kFgInactive
-                    : _kFgInactive.withAlpha(80),
+                ? _kFgInactive
+                : _kFgInactive.withAlpha(80),
           ),
         ),
       ),
@@ -1564,8 +1697,7 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight:
-                        isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               )
@@ -1578,8 +1710,7 @@ class _TabChip extends StatelessWidget {
                   style: TextStyle(
                     color: isActive ? _kFgActive : _kFgInactive,
                     fontSize: 12,
-                    fontWeight:
-                        isActive ? FontWeight.w500 : FontWeight.normal,
+                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
                   ),
                 ),
               ),
@@ -1626,8 +1757,8 @@ class _CloseBtnState extends State<_CloseBtn> {
             color: _hover
                 ? _kFgActive
                 : widget.isActive
-                    ? _kFgInactive
-                    : Colors.transparent,
+                ? _kFgInactive
+                : Colors.transparent,
           ),
         ),
       ),
@@ -1638,14 +1769,16 @@ class _CloseBtnState extends State<_CloseBtn> {
 // ── Plus menu ─────────────────────────────────────────────────────────────────
 class _PlusMenu extends StatelessWidget {
   const _PlusMenu({
-    required this.onLocal,
+    required this.onNewLocal,
+    required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
   });
 
-  final VoidCallback onLocal;
+  final ValueChanged<LocalShellOption> onNewLocal;
+  final Future<List<LocalShellOption>> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
@@ -1658,12 +1791,11 @@ class _PlusMenu extends StatelessWidget {
     letterSpacing: 0.3,
   );
 
-  PopupMenuItem<String> _sectionHeader(String label) =>
-      PopupMenuItem<String>(
-        enabled: false,
-        height: 28,
-        child: Text(label, style: _headerStyle),
-      );
+  PopupMenuItem<String> _sectionHeader(String label) => PopupMenuItem<String>(
+    enabled: false,
+    height: 28,
+    child: Text(label, style: _headerStyle),
+  );
 
   PopupMenuItem<String> _hostItem(SshHost h, String prefix) =>
       PopupMenuItem<String>(
@@ -1694,8 +1826,7 @@ class _PlusMenu extends StatelessWidget {
                     h.displayInfo,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        const TextStyle(color: _kFgInactive, fontSize: 11),
+                    style: const TextStyle(color: _kFgInactive, fontSize: 11),
                   ),
                 ],
               ),
@@ -1704,7 +1835,33 @@ class _PlusMenu extends StatelessWidget {
         ),
       );
 
-  void _showMenu(BuildContext context) {
+  PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
+    value: 'shell:${shell.id}',
+    height: 36,
+    child: Row(
+      children: [
+        Icon(
+          shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+          size: 13,
+          color: _kFgInactive,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            shell.displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _kFgActive, fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _showMenu(BuildContext context) async {
+    final shells = await onRefreshLocalShells();
+    if (!context.mounted) return;
+
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
@@ -1726,20 +1883,10 @@ class _PlusMenu extends StatelessWidget {
         minWidth: 220,
       ),
       items: [
-        const PopupMenuItem(
-          value: 'local',
-          height: 36,
-          child: Row(
-            children: [
-              Icon(Icons.terminal, size: 13, color: _kFgInactive),
-              SizedBox(width: 8),
-              Text(
-                'Local terminal',
-                style: TextStyle(color: _kFgActive, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
+        if (shells.isNotEmpty) ...[
+          _sectionHeader('Shells'),
+          for (final shell in shells) _shellItem(shell),
+        ],
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
           _sectionHeader('Saved'),
@@ -1768,8 +1915,14 @@ class _PlusMenu extends StatelessWidget {
       ],
     ).then((v) {
       if (v == null) return;
-      if (v == 'local') {
-        onLocal();
+      if (v.startsWith('shell:')) {
+        final id = v.substring('shell:'.length);
+        for (final shell in shells) {
+          if (shell.id == id) {
+            onNewLocal(shell);
+            return;
+          }
+        }
         return;
       }
       if (v == 'new') {
@@ -1794,7 +1947,7 @@ class _PlusMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => _showMenu(context),
+      onTap: () => unawaited(_showMenu(context)),
       child: Tooltip(
         message: 'New tab',
         child: Container(
