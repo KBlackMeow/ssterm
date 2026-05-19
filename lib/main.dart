@@ -1312,7 +1312,8 @@ class _TabBar extends StatelessWidget {
   final VoidCallback onSplitVertical;
   final VoidCallback onCloseSplit;
 
-  static const _minTabWidth = 100.0;
+  static const _preferredTabWidth = 160.0;
+  static const _minTabWidth = 80.0;
 
   @override
   Widget build(BuildContext context) {
@@ -1324,42 +1325,36 @@ class _TabBar extends StatelessWidget {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final canExpand =
-                    tabs.isNotEmpty &&
-                    tabs.length * _minTabWidth <= constraints.maxWidth;
+                if (tabs.isEmpty) return const SizedBox.shrink();
+
+                final equalWidth = constraints.maxWidth / tabs.length;
+                final tabWidth =
+                    equalWidth.clamp(_minTabWidth, _preferredTabWidth);
+                final needsScroll =
+                    tabWidth <= _minTabWidth &&
+                    tabs.length * _minTabWidth > constraints.maxWidth;
 
                 final chips = [
                   for (var i = 0; i < tabs.length; i++)
-                    canExpand
-                        ? Expanded(
-                            child: _TabChip(
-                              tab: tabs[i],
-                              isActive: i == active,
-                              showClose: true,
-                              expand: true,
-                              onTap: () => onSelect(i),
-                              onClose: () => onClose(i),
-                            ),
-                          )
-                        : SizedBox(
-                            width: _minTabWidth,
-                            child: _TabChip(
-                              tab: tabs[i],
-                              isActive: i == active,
-                              showClose: true,
-                              expand: false,
-                              onTap: () => onSelect(i),
-                              onClose: () => onClose(i),
-                            ),
-                          ),
+                    SizedBox(
+                      width: needsScroll ? _minTabWidth : tabWidth,
+                      child: _TabChip(
+                        tab: tabs[i],
+                        isActive: i == active,
+                        showClose: true,
+                        expand: true,
+                        onTap: () => onSelect(i),
+                        onClose: () => onClose(i),
+                      ),
+                    ),
                 ];
 
-                return canExpand
-                    ? Row(children: chips)
-                    : SingleChildScrollView(
+                return needsScroll
+                    ? SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(children: chips),
-                      );
+                      )
+                    : Row(children: chips);
               },
             ),
           ),
