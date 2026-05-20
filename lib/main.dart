@@ -862,6 +862,9 @@ class _TerminalHomeState extends State<TerminalHome> {
     }
     if (paneIndex == 1) {
       setState(() => tab.clearSplit());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        tab.terminalViewKey.currentState?.syncAfterShown();
+      });
       return;
     }
     setState(() => tab.retainPane1());
