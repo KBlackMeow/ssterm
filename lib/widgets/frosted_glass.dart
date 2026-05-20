@@ -50,6 +50,7 @@ class FrostedGlassSurface extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
       child: frosted
           ? BackdropFilter(
               filter: ImageFilter.blur(
@@ -99,23 +100,20 @@ Future<T?> showFrostedMenu<T>({
     elevation: 0,
     surfaceTintColor: Colors.transparent,
     shadowColor: Colors.transparent,
-    clipBehavior: Clip.none,
+    clipBehavior: Clip.antiAlias,
     shape: menuShape,
     items: [
       PopupMenuItem<T>(
         enabled: false,
         padding: EdgeInsets.zero,
-        child: ConstrainedBox(
-          constraints: constraints ?? const BoxConstraints(),
-          child: FrostedGlassSurface(
-            frosted: true,
-            borderRadius: FrostedGlassStyle.menuRadius,
-            fillColor: FrostedGlassStyle.menuFillFrosted,
-            child: _FrostedMenuList<T>(
-              entries: items,
-              maxHeight: constraints?.maxHeight,
-              onSelected: (value) => Navigator.of(context).pop<T>(value),
-            ),
+        child: FrostedGlassSurface(
+          frosted: true,
+          borderRadius: FrostedGlassStyle.menuRadius,
+          fillColor: FrostedGlassStyle.menuFillFrosted,
+          child: _FrostedMenuList<T>(
+            entries: items,
+            maxHeight: constraints?.maxHeight,
+            onSelected: (value) => Navigator.of(context).pop<T>(value),
           ),
         ),
       ),
