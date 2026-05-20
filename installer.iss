@@ -16,8 +16,8 @@ UninstallDisplayIcon={app}\ssterm.exe
 Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\ssterm"; Filename: "{app}\ssterm.exe"
-Name: "{commondesktop}\ssterm"; Filename: "{app}\ssterm.exe"
+Name: "{group}\SSTerm"; Filename: "{app}\ssterm.exe"
+Name: "{commondesktop}\SSTerm"; Filename: "{app}\ssterm.exe"
 
 [Run]
 Filename: "{app}\ssterm.exe"; Description: "Run ssterm"; Flags: nowait postinstall skipifsilent
