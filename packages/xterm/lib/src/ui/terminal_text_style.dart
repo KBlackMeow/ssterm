@@ -46,6 +46,7 @@ class TerminalStyle {
     this.fontFamily = _kDefaultFontFamily,
     this.fontFamilyFallback = _kDefaultFontFamilyFallback,
     this.fontWeight = FontWeight.normal,
+    this.letterSpacing = 0,
   });
 
   factory TerminalStyle.fromTextStyle(TextStyle textStyle) {
@@ -57,6 +58,7 @@ class TerminalStyle {
           _kDefaultFontFamily,
       fontFamilyFallback:
           textStyle.fontFamilyFallback ?? _kDefaultFontFamilyFallback,
+      letterSpacing: textStyle.letterSpacing ?? 0,
     );
   }
 
@@ -69,6 +71,9 @@ class TerminalStyle {
   final List<String> fontFamilyFallback;
 
   final FontWeight fontWeight;
+
+  /// Extra horizontal spacing between glyphs (negative tightens).
+  final double letterSpacing;
 
   TextStyle toTextStyle({
     Color? color,
@@ -85,6 +90,7 @@ class TerminalStyle {
       leadingDistribution: TextLeadingDistribution.proportional,
       fontFamily: fontFamily,
       fontFamilyFallback: fontFamilyFallback,
+      letterSpacing: letterSpacing,
       color: color,
       backgroundColor: backgroundColor,
       fontWeight: ansiBold ? FontWeight.bold : fontWeight,
@@ -117,6 +123,7 @@ class TerminalStyle {
     String? fontFamily,
     List<String>? fontFamilyFallback,
     FontWeight? fontWeight,
+    double? letterSpacing,
   }) {
     return TerminalStyle(
       fontSize: fontSize ?? this.fontSize,
@@ -124,6 +131,7 @@ class TerminalStyle {
       fontFamily: fontFamily ?? this.fontFamily,
       fontFamilyFallback: fontFamilyFallback ?? this.fontFamilyFallback,
       fontWeight: fontWeight ?? this.fontWeight,
+      letterSpacing: letterSpacing ?? this.letterSpacing,
     );
   }
 
@@ -134,6 +142,7 @@ class TerminalStyle {
         other.height == height &&
         other.fontFamily == fontFamily &&
         other.fontWeight == fontWeight &&
+        other.letterSpacing == letterSpacing &&
         _listEquals(other.fontFamilyFallback, fontFamilyFallback);
   }
 
@@ -143,6 +152,7 @@ class TerminalStyle {
         height,
         fontFamily,
         fontWeight,
+        letterSpacing,
         Object.hashAll(fontFamilyFallback),
       );
 }

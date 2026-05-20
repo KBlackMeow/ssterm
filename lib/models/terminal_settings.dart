@@ -23,12 +23,18 @@ class TerminalSettings {
     return 'Noto Sans Mono CJK SC';
   }
 
+  /// Windows: slightly tighter tracking and lower default size — Consolas and
+  /// other system monospaces read heavy on Skia compared to macOS.
+  static double get defaultFontSize => Platform.isWindows ? 13.0 : 13.5;
+
+  static double get defaultLetterSpacing => Platform.isWindows ? -0.6 : 0;
+
   TerminalSettings({
     this.themePresetId = 'iterm2',
     TerminalTheme? customTheme,
     String? fontFamily,
     String? cjkFontFamily,
-    this.fontSize = 13.5,
+    double? fontSize,
     this.lineHeight = 1.2,
     this.fontWeight = FontWeight.normal,
     this.cursorType = TerminalCursorType.block,
@@ -43,6 +49,7 @@ class TerminalSettings {
     CrtSettings? crt,
   })  : fontFamily = fontFamily ?? defaultFontFamily,
         cjkFontFamily = cjkFontFamily ?? defaultCjkFontFamily,
+        fontSize = fontSize ?? defaultFontSize,
         customTheme = customTheme ?? TerminalThemePresets.iterm2,
         crt = crt ?? const CrtSettings();
 
@@ -122,11 +129,12 @@ class TerminalSettings {
     if (Platform.isWindows) {
       return const [
         'Consolas',
+        'Courier New',
+        'Lucida Console',
         'JetBrains Mono',
         'Cascadia Mono',
         'Cascadia Code',
         'Fira Code',
-        'Courier New',
         'monospace',
       ];
     }
@@ -185,6 +193,8 @@ class TerminalSettings {
     // letter spacing inside fixed-width cells.
     final latinMono = <String>[
       if (Platform.isWindows) ...[
+        'Courier New',
+        'Lucida Console',
         'Consolas',
         'Cascadia Mono',
         'Cascadia Code',
@@ -245,32 +255,37 @@ class TerminalSettings {
 
   static const _kTextLift = 0.06;
   static const _kAnsiLift = 0.04;
+  static const _kWindowsTextLift = 0.02;
+  static const _kWindowsAnsiLift = 0.015;
 
   static TerminalTheme _brightenText(TerminalTheme t) {
+    final textLift = Platform.isWindows ? _kWindowsTextLift : _kTextLift;
+    final ansiLift = Platform.isWindows ? _kWindowsAnsiLift : _kAnsiLift;
+
     Color lift(Color c, double amount) =>
         Color.lerp(c, const Color(0xFFFFFFFF), amount)!;
 
     return TerminalTheme(
-      cursor: lift(t.cursor, _kTextLift),
+      cursor: lift(t.cursor, textLift),
       selection: t.selection,
-      foreground: lift(t.foreground, _kTextLift),
+      foreground: lift(t.foreground, textLift),
       background: t.background,
       black: t.black,
-      red: lift(t.red, _kAnsiLift),
-      green: lift(t.green, _kAnsiLift),
-      yellow: lift(t.yellow, _kAnsiLift),
-      blue: lift(t.blue, _kAnsiLift),
-      magenta: lift(t.magenta, _kAnsiLift),
-      cyan: lift(t.cyan, _kAnsiLift),
-      white: lift(t.white, _kTextLift),
-      brightBlack: lift(t.brightBlack, _kTextLift),
-      brightRed: lift(t.brightRed, _kAnsiLift),
-      brightGreen: lift(t.brightGreen, _kAnsiLift),
-      brightYellow: lift(t.brightYellow, _kAnsiLift),
-      brightBlue: lift(t.brightBlue, _kAnsiLift),
-      brightMagenta: lift(t.brightMagenta, _kAnsiLift),
-      brightCyan: lift(t.brightCyan, _kAnsiLift),
-      brightWhite: lift(t.brightWhite, _kTextLift * 0.5),
+      red: lift(t.red, ansiLift),
+      green: lift(t.green, ansiLift),
+      yellow: lift(t.yellow, ansiLift),
+      blue: lift(t.blue, ansiLift),
+      magenta: lift(t.magenta, ansiLift),
+      cyan: lift(t.cyan, ansiLift),
+      white: lift(t.white, textLift),
+      brightBlack: lift(t.brightBlack, textLift),
+      brightRed: lift(t.brightRed, ansiLift),
+      brightGreen: lift(t.brightGreen, ansiLift),
+      brightYellow: lift(t.brightYellow, ansiLift),
+      brightBlue: lift(t.brightBlue, ansiLift),
+      brightMagenta: lift(t.brightMagenta, ansiLift),
+      brightCyan: lift(t.brightCyan, ansiLift),
+      brightWhite: lift(t.brightWhite, textLift * 0.5),
       searchHitBackground: t.searchHitBackground,
       searchHitBackgroundCurrent: t.searchHitBackgroundCurrent,
       searchHitForeground: t.searchHitForeground,
@@ -283,6 +298,7 @@ class TerminalSettings {
         fontFamily: fontFamily,
         fontFamilyFallback: buildFontFamilyFallback(),
         fontWeight: fontWeight,
+        letterSpacing: defaultLetterSpacing,
       );
 
   TerminalSettings copyWith({
@@ -363,7 +379,7 @@ class TerminalSettings {
       fontFamily: fontFamily,
       cjkFontFamily:
           json['cjkFontFamily'] as String? ?? defaultCjkFontFamily,
-      fontSize: (json['fontSize'] as num?)?.toDouble() ?? 13.5,
+      fontSize: (json['fontSize'] as num?)?.toDouble() ?? defaultFontSize,
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       fontWeight: _fontWeightFromString(json['fontWeight'] as String?),
       cursorType: _cursorTypeFromString(json['cursorType'] as String?),
