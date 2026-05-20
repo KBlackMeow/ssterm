@@ -5,14 +5,20 @@ import '../views/ssh_session_view.dart';
 import 'terminal_settings.dart';
 
 class AppConfig {
-  AppConfig({TerminalSettings? terminal, SftpPanelPosition? sftpPosition, this.sftpSize})
-      : terminal = terminal ?? TerminalSettings(),
+  AppConfig({
+    TerminalSettings? terminal,
+    SftpPanelPosition? sftpPosition,
+    this.sftpSize,
+    this.sftpFrostedGlass = true,
+  })  : terminal = terminal ?? TerminalSettings(),
         sftpPosition = sftpPosition ?? SftpPanelPosition.bottom;
 
   TerminalSettings terminal;
   SftpPanelPosition sftpPosition;
   /// Custom panel size in logical pixels; `null` uses [SshSessionView.defaultPanelFraction].
   double? sftpSize;
+  /// Blur terminal content behind the SFTP overlay ([BackdropFilter]).
+  bool sftpFrostedGlass;
 
   static Future<File> _file() async {
     final home = Platform.environment['HOME'] ?? '';
@@ -34,6 +40,7 @@ class AppConfig {
             ? SftpPanelPosition.bottom
             : SftpPanelPosition.right,
         sftpSize: (json['sftpSize'] as num?)?.toDouble(),
+        sftpFrostedGlass: json['sftpFrostedGlass'] as bool? ?? true,
       );
     } catch (_) {
       return AppConfig();
@@ -47,6 +54,7 @@ class AppConfig {
         'terminal': terminal.toJson(),
         'sftpPosition': sftpPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
         if (sftpSize != null) 'sftpSize': sftpSize,
+        'sftpFrostedGlass': sftpFrostedGlass,
       }),
     );
   }

@@ -1,10 +1,17 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 
 import '../models/transfer_task.dart';
 import 'sftp_view.dart';
 
-const _kDivider = Color(0xFF3A3A3A);
+const _kSftpPanelRadius = 12.0;
+const _kSftpPanelMargin = 8.0;
+const _kSftpPanelFill = Color(0xD91C1C1C); // ~85% opacity
+const _kSftpFrostedFill = Color(0x991C1C1C); // ~60% over blurred terminal
+const _kSftpFrostedBlurSigma = 18.0;
+const _kSftpPanelBorder = Color(0x1FFFFFFF);
 
 enum SftpPanelPosition { right, bottom }
 
@@ -21,6 +28,7 @@ class SshSessionView extends StatefulWidget {
     required this.child,
     this.initialPosition = SftpPanelPosition.bottom,
     this.initialSize,
+    this.frostedGlass = true,
     this.onLayoutChanged,
   });
 
@@ -36,6 +44,7 @@ class SshSessionView extends StatefulWidget {
   final Widget child;
   final SftpPanelPosition initialPosition;
   final double? initialSize;
+  final bool frostedGlass;
   final void Function(SftpPanelPosition position, double? size)? onLayoutChanged;
 
   @override
@@ -110,7 +119,13 @@ class _SshSessionViewState extends State<SshSessionView> {
                               ?.call(_position, _customPanelSize);
                         }),
                       ),
-                      Expanded(child: sftp),
+                      Expanded(
+                        child: _SftpFloatingChrome(
+                          dockRight: true,
+                          frostedGlass: widget.frostedGlass,
+                          child: sftp,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -135,7 +150,13 @@ class _SshSessionViewState extends State<SshSessionView> {
                               ?.call(_position, _customPanelSize);
                         }),
                       ),
-                      Expanded(child: sftp),
+                      Expanded(
+                        child: _SftpFloatingChrome(
+                          dockRight: false,
+                          frostedGlass: widget.frostedGlass,
+                          child: sftp,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -149,6 +170,55 @@ class _SshSessionViewState extends State<SshSessionView> {
         );
       },
     );
+  }
+}
+
+/// Rounded, semi-transparent SFTP card over the terminal.
+class _SftpFloatingChrome extends StatelessWidget {
+  const _SftpFloatingChrome({
+    required this.dockRight,
+    required this.frostedGlass,
+    required this.child,
+  });
+
+  final bool dockRight;
+  final bool frostedGlass;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final margin = dockRight
+        ? const EdgeInsets.fromLTRB(0, _kSftpPanelMargin, _kSftpPanelMargin, _kSftpPanelMargin)
+        : const EdgeInsets.fromLTRB(
+            _kSftpPanelMargin,
+            0,
+            _kSftpPanelMargin,
+            _kSftpPanelMargin,
+          );
+
+    final radius = BorderRadius.circular(_kSftpPanelRadius);
+    final decoration = BoxDecoration(
+      color: frostedGlass ? _kSftpFrostedFill : _kSftpPanelFill,
+      border: Border.all(color: _kSftpPanelBorder),
+      borderRadius: radius,
+    );
+
+    Widget panel = DecoratedBox(decoration: decoration, child: child);
+
+    panel = ClipRRect(
+      borderRadius: radius,
+      child: frostedGlass
+          ? BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: _kSftpFrostedBlurSigma,
+                sigmaY: _kSftpFrostedBlurSigma,
+              ),
+              child: panel,
+            )
+          : panel,
+    );
+
+    return Padding(padding: margin, child: panel);
   }
 }
 
@@ -171,7 +241,7 @@ class _ResizeHandle extends StatelessWidget {
         child: Container(
           width: axis == Axis.horizontal ? 4 : double.infinity,
           height: axis == Axis.vertical ? 4 : double.infinity,
-          color: _kDivider,
+          color: Colors.transparent,
         ),
       ),
     );

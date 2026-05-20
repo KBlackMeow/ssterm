@@ -117,7 +117,7 @@ Future<ConnectResult> connectSshHost(
     if (mode == ConnectMode.terminal) {
       session = await client
           .execute(
-            _interactiveShellWrapperCommand(),
+            interactiveShellWrapperCommand(),
             pty: const SSHPtyConfig(
               width: 80,
               height: 24,
@@ -147,7 +147,8 @@ Future<ConnectResult> connectSshHost(
   }
 }
 
-String _interactiveShellWrapperCommand() {
+/// Shell bootstrap that emits OSC 7 cwd updates for SFTP path sync.
+String interactiveShellWrapperCommand() {
   return r'''
 shell="${SHELL:-/bin/sh}"
 shell_name="${shell##*/}"

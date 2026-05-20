@@ -19,7 +19,6 @@ class TerminalContextMenuConfig {
     this.isSplit = false,
     this.onSplitHorizontal,
     this.onSplitVertical,
-    this.onCloseSplit,
   });
 
   final TerminalController controller;
@@ -27,7 +26,6 @@ class TerminalContextMenuConfig {
   final bool isSplit;
   final VoidCallback? onSplitHorizontal;
   final VoidCallback? onSplitVertical;
-  final VoidCallback? onCloseSplit;
 }
 
 /// Terminal view with optional full-bleed wallpaper behind semi-transparent cells.
@@ -97,12 +95,6 @@ class TerminalSurface extends StatelessWidget {
             height: 36,
             child: _menuRow(Icons.splitscreen, 'Split vertically'),
           ),
-          if (config.isSplit)
-            PopupMenuItem<String>(
-              value: 'close_split',
-              height: 36,
-              child: _menuRow(Icons.close, 'Close split'),
-            ),
         ],
       ],
     ).then((value) async {
@@ -123,8 +115,6 @@ class TerminalSurface extends StatelessWidget {
         config.onSplitHorizontal?.call();
       } else if (value == 'split_v') {
         config.onSplitVertical?.call();
-      } else if (value == 'close_split') {
-        config.onCloseSplit?.call();
       }
     });
   }

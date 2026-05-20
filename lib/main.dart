@@ -123,7 +123,7 @@ class _Tab {
   String title;
   LocalShellOption? localShell;
 
-  // Primary pane
+  // Pane 0 (single-pane slot; left/top when split)
   Terminal? terminal;
   Pty? pty;
   SSHClient? sshClient;
@@ -131,6 +131,10 @@ class _Tab {
   SSHSession? sshSession;
   SftpClient? sftp;
   ValueNotifier<String>? remotePath;
+  /// Last cwd reported by pane 0 / pane 1 (OSC 7 from each shell).
+  String? remoteCwdPane0;
+  String? remoteCwdPane1;
+  int activeSshPane = 0;
   ValueNotifier<String>? localPath;
   _OutputPipe? pipe;
   final terminalViewKey = GlobalKey<TerminalViewState>();
@@ -149,7 +153,7 @@ class _Tab {
   // Transfer manager (created alongside the sftp client)
   TransferManager? transferManager;
 
-  // Feature 3: in-tab split pane
+  // Pane 1 (right/bottom when split) — peer of pane 0, not a "secondary" role
   Terminal? splitTerminal;
   SSHSession? splitSshSession;
   Pty? splitPty;
@@ -160,10 +164,10 @@ class _Tab {
   final terminalController = TerminalController();
   final splitTerminalController = TerminalController();
 
-  /// Primary pane shell/SSH ended; Enter restarts the session.
+  /// Pane 0 session ended (single pane, or before collapse).
   bool primarySessionEnded = false;
 
-  /// Split pane shell/SSH ended; Enter restarts the session.
+  /// Pane 1 session ended.
   bool splitSessionEnded = false;
 
   bool get isSplit => splitTerminal != null;
@@ -207,6 +211,8 @@ class _Tab {
 
   factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
 
+  /// Ends pane 1 and returns to a single pane (pane 0). Used when pane 1 exits
+  /// or on reconnect — not exposed as a manual "close split" action.
   void clearSplit() {
     splitPipe?.dispose();
     splitSshSession?.close();
@@ -215,6 +221,47 @@ class _Tab {
     splitSshSession = null;
     splitPty = null;
     splitPipe = null;
+    splitSessionEnded = false;
+    remoteCwdPane1 = null;
+    if (activeSshPane == 1) activeSshPane = 0;
+    syncRemotePathToActivePane();
+  }
+
+  void syncRemotePathToActivePane() {
+    if (remotePath == null) return;
+    final cwd = activeSshPane == 1 && isSplit
+        ? (remoteCwdPane1 ?? remoteCwdPane0)
+        : remoteCwdPane0;
+    if (cwd != null && cwd.isNotEmpty) {
+      remotePath!.value = cwd;
+    }
+  }
+
+  /// Pane 0 exited while split — move pane 1 into the single-pane slot.
+  void retainPane1() {
+    if (splitTerminal == null) return;
+
+    remoteCwdPane0 = remoteCwdPane1 ?? remoteCwdPane0;
+    remoteCwdPane1 = null;
+    activeSshPane = 0;
+    syncRemotePathToActivePane();
+
+    pipe?.dispose();
+    pipe = null;
+    pty?.kill();
+    pty = null;
+    sshSession?.close();
+    sshSession = null;
+
+    terminal = splitTerminal;
+    splitTerminal = null;
+    pty = splitPty;
+    splitPty = null;
+    sshSession = splitSshSession;
+    splitSshSession = null;
+    pipe = splitPipe;
+    splitPipe = null;
+    primarySessionEnded = false;
     splitSessionEnded = false;
   }
 
@@ -431,18 +478,70 @@ class _TerminalHomeState extends State<TerminalHome> {
     return data.codeUnits.every((c) => c == 0x0d || c == 0x0a);
   }
 
+  List<int> Function(List<int>) _sshOutputTransform(
+    _Tab tab,
+    int pane,
+    RemoteCwdParser parser,
+  ) {
+    return (bytes) {
+      final parsed = parser.process(bytes);
+      if (parsed.cwd != null) {
+        _noteRemoteCwd(tab, pane, parsed.cwd!);
+      }
+      return parsed.cleaned;
+    };
+  }
+
+  void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
+    // After retainPane1 the surviving shell still reports as pane 1 in its pipe
+    // transform; map to pane 0 storage while no longer split.
+    final storagePane = !tab.isSplit && pane == 1 ? 0 : pane;
+    if (storagePane == 0) {
+      tab.remoteCwdPane0 = cwd;
+    } else {
+      tab.remoteCwdPane1 = cwd;
+    }
+    if (!tab.isSplit || tab.activeSshPane == storagePane) {
+      tab.remotePath?.value = cwd;
+    }
+  }
+
+  /// Point SFTP at the cwd for the pane the user clicked (see [_buildTerminalView]).
+  void _activateSshPaneForSftp(_Tab tab, int pane) {
+    if (tab.kind != _TabKind.ssh || tab.sftp == null) return;
+    tab.activeSshPane = pane;
+    tab.syncRemotePathToActivePane();
+  }
+
+  /// Which pane owns [terminal] right now (0 or 1). Resolves after split collapse.
+  int? _paneIndexOf(_Tab tab, Terminal terminal) {
+    if (tab.terminal == terminal) return 0;
+    if (tab.splitTerminal == terminal) return 1;
+    return null;
+  }
+
+  bool _paneSessionEnded(_Tab tab, int pane) =>
+      pane == 1 ? tab.splitSessionEnded : tab.primarySessionEnded;
+
+  void _setPaneSessionEnded(_Tab tab, int pane, bool ended) {
+    if (pane == 1) {
+      tab.splitSessionEnded = ended;
+    } else {
+      tab.primarySessionEnded = ended;
+    }
+  }
+
   void _bindTerminalInput(
     Terminal terminal,
     _Tab tab, {
-    required bool isSplit,
     required void Function(String data) forward,
   }) {
     terminal.onOutput = (data) {
-      final ended =
-          isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
-      if (ended) {
+      final pane = _paneIndexOf(tab, terminal);
+      if (pane == null) return;
+      if (_paneSessionEnded(tab, pane)) {
         if (_isRestartKey(data)) {
-          unawaited(_restartSession(tab, isSplit: isSplit));
+          unawaited(_restartSession(tab, terminal: terminal));
         }
         return;
       }
@@ -450,19 +549,11 @@ class _TerminalHomeState extends State<TerminalHome> {
     };
   }
 
-  Future<void> _restartSession(_Tab tab, {required bool isSplit}) async {
-    final ended =
-        isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
-    if (!ended || !mounted) return;
+  Future<void> _restartSession(_Tab tab, {required Terminal terminal}) async {
+    final pane = _paneIndexOf(tab, terminal);
+    if (pane == null || !_paneSessionEnded(tab, pane) || !mounted) return;
 
-    final terminal = isSplit ? tab.splitTerminal : tab.terminal;
-    if (terminal == null) return;
-
-    if (isSplit) {
-      tab.splitSessionEnded = false;
-    } else {
-      tab.primarySessionEnded = false;
-    }
+    _setPaneSessionEnded(tab, pane, false);
 
     if (tab.kind == _TabKind.local) {
       final shell =
@@ -477,11 +568,52 @@ class _TerminalHomeState extends State<TerminalHome> {
         columns: terminal.viewWidth,
         rows: terminal.viewHeight,
         workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : home,
-        isSplit: isSplit,
+        pane: pane,
       );
     } else if (tab.kind == _TabKind.ssh) {
-      await _restartSshShell(tab, terminal: terminal, isSplit: isSplit);
+      await _restartSshShell(tab, terminal: terminal, pane: pane);
     }
+  }
+
+  void _handlePaneExited(
+    _Tab tab, {
+    required Terminal terminal,
+    required int pane,
+    int? exitCode,
+    bool showExitMessage = true,
+    bool ssh = false,
+  }) {
+    if (!mounted) return;
+
+    if (pane == 1) {
+      tab.splitPty = null;
+      tab.splitPipe?.dispose();
+      tab.splitPipe = null;
+      tab.splitSshSession?.close();
+      tab.splitSshSession = null;
+    } else {
+      tab.pty = null;
+      tab.pipe?.dispose();
+      tab.pipe = null;
+      tab.sshSession?.close();
+      tab.sshSession = null;
+    }
+
+    if (showExitMessage && exitCode != null && !ssh) {
+      terminal.write('\r\n[Process exited with code $exitCode]\r\n');
+    }
+    if (ssh) {
+      terminal.write('\r\n[SSH connection closed]\r\n');
+    }
+
+    final paneNow = _paneIndexOf(tab, terminal) ?? pane;
+    if (tab.isSplit) {
+      _collapseSplitAfterExit(tab, paneIndex: paneNow);
+      return;
+    }
+
+    terminal.write(_kRestartPrompt);
+    _setPaneSessionEnded(tab, paneNow, true);
   }
 
   void _spawnLocalPty({
@@ -491,11 +623,12 @@ class _TerminalHomeState extends State<TerminalHome> {
     required int columns,
     required int rows,
     String? workingDirectory,
-    required bool isSplit,
+    required int pane,
     bool showExitMessage = true,
   }) {
     if (columns < 1 || rows < 1) return;
 
+    final isSplit = pane == 1;
     final home =
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final env = _environmentForLocalShell(shell);
@@ -553,27 +686,17 @@ class _TerminalHomeState extends State<TerminalHome> {
     _bindTerminalInput(
       terminal,
       tab,
-      isSplit: isSplit,
       forward: (d) => pty.write(utf8.encode(d)),
     );
 
     pty.exitCode.then((code) {
-      if (!mounted) return;
-      if (showExitMessage) {
-        terminal.write('\r\n[Process exited with code $code]\r\n');
-      }
-      terminal.write(_kRestartPrompt);
-      if (isSplit) {
-        tab.splitSessionEnded = true;
-        tab.splitPty = null;
-        tab.splitPipe?.dispose();
-        tab.splitPipe = null;
-      } else {
-        tab.primarySessionEnded = true;
-        tab.pty = null;
-        tab.pipe?.dispose();
-        tab.pipe = null;
-      }
+      _handlePaneExited(
+        tab,
+        terminal: terminal,
+        pane: pane,
+        exitCode: code,
+        showExitMessage: showExitMessage,
+      );
     });
   }
 
@@ -589,10 +712,9 @@ class _TerminalHomeState extends State<TerminalHome> {
   }) {
     terminal.onResize = (w, h, pw, ph) {
       if (w < 1 || h < 1) return;
-      final activePty = isSplit ? tab.splitPty : tab.pty;
-      final ended =
-          isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
-      if (activePty == null && !ended) {
+      final pane = _paneIndexOf(tab, terminal) ?? (isSplit ? 1 : 0);
+      final activePty = pane == 1 ? tab.splitPty : tab.pty;
+      if (activePty == null && !_paneSessionEnded(tab, pane)) {
         _spawnLocalPty(
           tab: tab,
           terminal: terminal,
@@ -600,7 +722,7 @@ class _TerminalHomeState extends State<TerminalHome> {
           columns: w,
           rows: h,
           workingDirectory: workingDirectory,
-          isSplit: isSplit,
+          pane: pane,
           showExitMessage: showExitMessage,
         );
       } else if (activePty != null) {
@@ -612,17 +734,28 @@ class _TerminalHomeState extends State<TerminalHome> {
   Future<void> _handleSshSessionDone(
     _Tab tab,
     Terminal terminal, {
-    required bool isSplit,
     SshHost? profile,
   }) async {
-    if (!isSplit) {
+    final pane = _paneIndexOf(tab, terminal) ?? 0;
+
+    if (pane == 0) {
       tab.keepaliveTimer?.cancel();
       tab.keepaliveTimer = null;
     }
     if (!mounted || tab.manuallyDisconnected) return;
 
     final prof = profile ?? tab.sshProfile;
-    if (!isSplit && prof != null && prof.autoReconnect) {
+
+    if (pane == 0 && tab.isSplit) {
+      tab.sshSession?.close();
+      tab.sshSession = null;
+      tab.pipe?.dispose();
+      tab.pipe = null;
+      _handlePaneExited(tab, terminal: terminal, pane: 0, ssh: true);
+      return;
+    }
+
+    if (pane == 0 && prof != null && prof.autoReconnect) {
       terminal.write('\r\n[SSH connection closed]\r\n');
       terminal.write('[Reconnecting in 3 seconds…]\r\n');
       await Future<void>.delayed(const Duration(seconds: 3));
@@ -631,46 +764,42 @@ class _TerminalHomeState extends State<TerminalHome> {
       return;
     }
 
-    if (isSplit) {
+    if (tab.isSplit && pane == 1) {
       tab.splitSshSession?.close();
       tab.splitSshSession = null;
       tab.splitPipe?.dispose();
       tab.splitPipe = null;
-      tab.splitSessionEnded = true;
-    } else {
-      tab.sshSession?.close();
-      tab.sshSession = null;
-      tab.pipe?.dispose();
-      tab.pipe = null;
-      tab.primarySessionEnded = true;
+      _handlePaneExited(tab, terminal: terminal, pane: 1, ssh: true);
+      return;
     }
-    terminal.write('\r\n[SSH connection closed]\r\n');
-    terminal.write(_kRestartPrompt);
+
+    tab.sshSession?.close();
+    tab.sshSession = null;
+    tab.pipe?.dispose();
+    tab.pipe = null;
+    _handlePaneExited(tab, terminal: terminal, pane: pane, ssh: true);
   }
 
   Future<void> _restartSshShell(
     _Tab tab, {
     required Terminal terminal,
-    required bool isSplit,
+    required int pane,
   }) async {
     final client = tab.sshClient;
     if (client == null) {
-      if (!isSplit && tab.sshProfile != null) {
+      if (pane == 0 && tab.sshProfile != null) {
         await _reconnectTab(tab);
       } else {
         terminal.write('[Not connected]\r\n$_kRestartPrompt');
-        if (isSplit) {
-          tab.splitSessionEnded = true;
-        } else {
-          tab.primarySessionEnded = true;
-        }
+        _setPaneSessionEnded(tab, pane, true);
       }
       return;
     }
 
     try {
       final session = await client
-          .shell(
+          .execute(
+            interactiveShellWrapperCommand(),
             pty: SSHPtyConfig(
               width: terminal.viewWidth,
               height: terminal.viewHeight,
@@ -682,19 +811,12 @@ class _TerminalHomeState extends State<TerminalHome> {
       final cwdParser = RemoteCwdParser();
       final pipe = _OutputPipe(
         terminal,
-        transform: (bytes) {
-          final parsed = cwdParser.process(bytes);
-          if (parsed.cwd != null && tab.remotePath != null) {
-            tab.remotePath!.value = parsed.cwd!;
-          }
-          return parsed.cleaned;
-        },
+        transform: _sshOutputTransform(tab, pane, cwdParser),
       );
 
       _bindTerminalInput(
         terminal,
         tab,
-        isSplit: isSplit,
         forward: (d) => session.stdin.add(utf8.encode(d)),
       );
       terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
@@ -702,7 +824,7 @@ class _TerminalHomeState extends State<TerminalHome> {
       pipe.bind(session.stdout);
       pipe.bind(session.stderr);
 
-      if (isSplit) {
+      if (pane == 1) {
         tab.splitSshSession?.close();
         tab.splitSshSession = session;
         tab.splitPipe?.dispose();
@@ -714,18 +836,59 @@ class _TerminalHomeState extends State<TerminalHome> {
         tab.pipe = pipe;
       }
 
-      session.done.then(
-        (_) => _handleSshSessionDone(tab, terminal, isSplit: isSplit),
-      );
+      session.done.then((_) => _handleSshSessionDone(tab, terminal, profile: tab.sshProfile));
     } catch (e) {
       if (!mounted) return;
       terminal.write('[Reconnect failed: $e]\r\n$_kRestartPrompt');
-      if (isSplit) {
-        tab.splitSessionEnded = true;
+      final paneNow = _paneIndexOf(tab, terminal) ?? pane;
+      if (tab.isSplit) {
+        _collapseSplitAfterExit(tab, paneIndex: paneNow);
       } else {
-        tab.primarySessionEnded = true;
+        _setPaneSessionEnded(tab, paneNow, true);
       }
     }
+  }
+
+  /// [paneIndex] 0 = pane 0 (terminal), 1 = pane 1 (splitTerminal).
+  void _collapseSplitAfterExit(_Tab tab, {required int paneIndex}) {
+    if (!tab.isSplit) {
+      _setPaneSessionEnded(tab, 0, true);
+      return;
+    }
+    if (paneIndex == 1) {
+      setState(() => tab.clearSplit());
+      return;
+    }
+    setState(() => tab.retainPane1());
+    _rewirePane0AfterCollapse(tab);
+  }
+
+  void _rewirePane0AfterCollapse(_Tab tab) {
+    final terminal = tab.terminal;
+    if (terminal == null) return;
+
+    if (tab.kind == _TabKind.local && tab.pty != null) {
+      _bindTerminalInput(
+        terminal,
+        tab,
+        forward: (d) => tab.pty!.write(utf8.encode(d)),
+      );
+      terminal.onResize = (w, h, pw, ph) {
+        if (w >= 1 && h >= 1) tab.pty!.resize(h, w);
+      };
+    } else if (tab.sshSession != null) {
+      _bindTerminalInput(
+        terminal,
+        tab,
+        forward: (d) => tab.sshSession!.stdin.add(utf8.encode(d)),
+      );
+      terminal.onResize = (w, h, pw, ph) =>
+          tab.sshSession!.resizeTerminal(w, h);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      tab.terminalViewKey.currentState?.syncAfterShown();
+    });
   }
 
   void _wireSshSession(
@@ -739,17 +902,11 @@ class _TerminalHomeState extends State<TerminalHome> {
     _bindTerminalInput(
       terminal,
       tab,
-      isSplit: isSplit,
       forward: (d) => session.stdin.add(utf8.encode(d)),
     );
     terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
     session.done.then(
-      (_) => _handleSshSessionDone(
-        tab,
-        terminal,
-        isSplit: isSplit,
-        profile: profile,
-      ),
+      (_) => _handleSshSessionDone(tab, terminal, profile: profile),
     );
   }
 
@@ -944,7 +1101,6 @@ esac
     final terminal = _createTerminal(reflowEnabled: false);
     final session = r.session!;
     final remotePath = ValueNotifier<String>('');
-    final cwdParser = RemoteCwdParser();
 
     SessionLogger? logger;
     if (r.profile.sessionLog) {
@@ -953,22 +1109,25 @@ esac
       } catch (_) {}
     }
 
+    // Tab must exist before the output pipe can run — SSH may send data immediately.
+    final tab = _Tab.ssh(
+      terminal,
+      r.client,
+      session,
+      r.alias,
+      jumpClient: r.jumpClient,
+      remotePath: remotePath,
+      profile: r.profile,
+    );
+    tab.activeSshPane = 0;
+
+    final cwdParser = RemoteCwdParser();
     final pipe = _OutputPipe(
       terminal,
       sessionLogger: logger,
-      transform: (bytes) {
-        final parsed = cwdParser.process(bytes);
-        if (parsed.cwd != null && parsed.cwd != remotePath.value) {
-          remotePath.value = parsed.cwd!;
-        }
-        return parsed.cleaned;
-      },
+      transform: _sshOutputTransform(tab, 0, cwdParser),
     );
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      pipe.bind(session.stdout);
-      pipe.bind(session.stderr);
-    });
+    tab.pipe = pipe;
 
     SftpClient? sftp;
     TransferManager? transferManager;
@@ -983,22 +1142,13 @@ esac
     if (!mounted) {
       pipe.dispose();
       remotePath.dispose();
+      tab.dispose();
       return;
     }
 
-    late _Tab tab;
-    tab = _Tab.ssh(
-      terminal,
-      r.client,
-      session,
-      r.alias,
-      jumpClient: r.jumpClient,
-      sftp: sftp,
-      remotePath: remotePath,
-      profile: r.profile,
-    );
-    tab.pipe = pipe;
+    tab.sftp = sftp;
     tab.transferManager = transferManager;
+    tab.remoteCwdPane0 = remotePath.value;
 
     _wireSshSession(
       tab,
@@ -1008,6 +1158,12 @@ esac
       isSplit: false,
       profile: r.profile,
     );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      pipe.bind(session.stdout);
+      pipe.bind(session.stderr);
+    });
 
     // Feature 1: port forwarding
     if (r.profile.forwardRules.isNotEmpty) {
@@ -1040,14 +1196,10 @@ esac
   Future<void> _splitCurrentTab(Axis axis) async {
     final tab = _tabs[_active];
     if (tab.isSplit) {
-      // Toggle off if same axis, switch axis otherwise
-      if (tab.splitAxis == axis) {
-        setState(() => tab.clearSplit());
-        return;
-      } else {
+      if (tab.splitAxis != axis) {
         setState(() => tab.splitAxis = axis);
-        return;
       }
+      return;
     }
 
     if (tab.kind == _TabKind.ssh && tab.sshClient != null) {
@@ -1062,10 +1214,11 @@ esac
     SSHSession session;
     try {
       session = await tab.sshClient!
-          .shell(
-            pty: const SSHPtyConfig(
-              width: 80,
-              height: 24,
+          .execute(
+            interactiveShellWrapperCommand(),
+            pty: SSHPtyConfig(
+              width: splitTerminal.viewWidth,
+              height: splitTerminal.viewHeight,
               type: 'xterm-256color',
             ),
           )
@@ -1077,7 +1230,7 @@ esac
     final cwdParser = RemoteCwdParser();
     final pipe = _OutputPipe(
       splitTerminal,
-      transform: (bytes) => cwdParser.process(bytes).cleaned,
+      transform: _sshOutputTransform(tab, 1, cwdParser),
     );
 
     _wireSshSession(tab, session, splitTerminal, pipe, isSplit: true);
@@ -1096,6 +1249,7 @@ esac
       tab.splitSshSession = session;
       tab.splitPipe = pipe;
       tab.splitAxis = axis;
+      tab.remoteCwdPane1 = tab.remoteCwdPane0;
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1126,12 +1280,6 @@ esac
     WidgetsBinding.instance.addPostFrameCallback((_) {
       tab.splitViewKey.currentState?.syncAfterShown();
     });
-  }
-
-  void _closeSplitCurrentTab() {
-    if (_active < _tabs.length) {
-      setState(() => _tabs[_active].clearSplit());
-    }
   }
 
   // ── Feature 4: reconnect ───────────────────────────────────────────────────
@@ -1184,11 +1332,7 @@ esac
       final pipe = _OutputPipe(
         tab.terminal!,
         sessionLogger: logger,
-        transform: (bytes) {
-          final parsed = cwdParser.process(bytes);
-          if (parsed.cwd != null) tab.remotePath?.value = parsed.cwd!;
-          return parsed.cleaned;
-        },
+        transform: _sshOutputTransform(tab, 0, cwdParser),
       );
 
       tab.primarySessionEnded = false;
@@ -1309,16 +1453,30 @@ esac
   Widget _buildTerminalView(
     Terminal terminal,
     GlobalKey<TerminalViewState> viewKey, {
+    required _Tab tab,
+    int sshPane = 0,
     TerminalContextMenuConfig? contextMenu,
   }) {
-    return TerminalSurface(
+    Widget surface = TerminalSurface(
+      key: ValueKey(terminal),
       terminal: terminal,
       settings: _config.terminal,
       viewKey: viewKey,
       contextMenu: contextMenu,
       includeWallpaper: false,
       includeCrt: false,
+      autofocus: sshPane == 0,
     );
+
+    if (tab.kind == _TabKind.ssh && tab.sftp != null) {
+      surface = Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _activateSshPaneForSftp(tab, sshPane),
+        child: surface,
+      );
+    }
+
+    return surface;
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -1383,7 +1541,6 @@ esac
           splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
           onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
           onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-          onCloseSplit: _closeSplitCurrentTab,
         ),
         Expanded(child: _buildBody()),
       ],
@@ -1451,6 +1608,8 @@ esac
       _TabKind.local || _TabKind.ssh => _buildTerminalView(
         tab.terminal!,
         tab.terminalViewKey,
+        tab: tab,
+        sshPane: 0,
         contextMenu: contextMenu,
       ),
       _TabKind.settings => SettingsPage(
@@ -1459,6 +1618,11 @@ esac
           setState(() => _config.terminal = next);
           _config.save();
           _syncAllTerminals();
+        },
+        sftpFrostedGlass: _config.sftpFrostedGlass,
+        onSftpFrostedGlassChanged: (v) {
+          setState(() => _config.sftpFrostedGlass = v);
+          _config.save();
         },
         savedHosts: _savedHosts,
         onSaveHost: (original, updated) => _saveSavedHost(original, updated),
@@ -1476,7 +1640,6 @@ esac
       isSplit: tab.isSplit,
       onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
       onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-      onCloseSplit: _closeSplitCurrentTab,
     );
 
     Widget body = _buildPrimaryContent(tab, contextMenu: primaryMenu);
@@ -1488,13 +1651,14 @@ esac
         isSplit: true,
         onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
         onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-        onCloseSplit: _closeSplitCurrentTab,
       );
       body = SplitView(
         primary: body,
         secondary: _buildTerminalView(
           tab.splitTerminal!,
           tab.splitViewKey,
+          tab: tab,
+          sshPane: 1,
           contextMenu: splitMenu,
         ),
         axis: tab.splitAxis,
@@ -1514,6 +1678,7 @@ esac
             setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
         initialPosition: _config.sftpPosition,
         initialSize: _config.sftpSize,
+        frostedGlass: _config.sftpFrostedGlass,
         onLayoutChanged: (pos, size) {
           _config.sftpPosition = pos;
           _config.sftpSize = size;
@@ -1562,7 +1727,6 @@ class _TabBar extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
-    required this.onCloseSplit,
     this.onInsertCommand,
   });
 
@@ -1590,7 +1754,6 @@ class _TabBar extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
-  final VoidCallback onCloseSplit;
 
   static const _preferredTabWidth = 160.0;
   static const _minTabWidth = 80.0;
@@ -1667,7 +1830,6 @@ class _TabBar extends StatelessWidget {
             splitAxis: splitAxis,
             onSplitHorizontal: onSplitHorizontal,
             onSplitVertical: onSplitVertical,
-            onCloseSplit: onCloseSplit,
           ),
           GestureDetector(
             onTap: onSettings,
@@ -1814,7 +1976,6 @@ class _SplitButton extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
-    required this.onCloseSplit,
   });
 
   final bool canSplit;
@@ -1822,7 +1983,6 @@ class _SplitButton extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
-  final VoidCallback onCloseSplit;
 
   void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
@@ -1880,26 +2040,10 @@ class _SplitButton extends StatelessWidget {
             ],
           ),
         ),
-        if (isSplit)
-          const PopupMenuItem(
-            value: 'close',
-            height: 36,
-            child: Row(
-              children: [
-                Icon(Icons.close, size: 13, color: _kFgInactive),
-                SizedBox(width: 8),
-                Text(
-                  'Close split',
-                  style: TextStyle(color: _kFgActive, fontSize: 13),
-                ),
-              ],
-            ),
-          ),
       ],
     ).then((v) {
       if (v == 'h') onSplitHorizontal();
       if (v == 'v') onSplitVertical();
-      if (v == 'close') onCloseSplit();
     });
   }
 

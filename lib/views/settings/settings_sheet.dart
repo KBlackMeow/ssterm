@@ -22,6 +22,8 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.settings,
     required this.onChanged,
+    this.sftpFrostedGlass = true,
+    this.onSftpFrostedGlassChanged,
     this.savedHosts = const [],
     this.onSaveHost,
     this.onDeleteHost,
@@ -29,6 +31,8 @@ class SettingsPage extends StatefulWidget {
 
   final TerminalSettings settings;
   final ValueChanged<TerminalSettings> onChanged;
+  final bool sftpFrostedGlass;
+  final ValueChanged<bool>? onSftpFrostedGlassChanged;
   final List<SshHost> savedHosts;
   final void Function(SshHost? original, SshHost updated)? onSaveHost;
   final ValueChanged<SshHost>? onDeleteHost;
@@ -138,7 +142,28 @@ class _SettingsPageState extends State<SettingsPage>
         const SizedBox(height: 12),
         _sectionTitle('Wallpaper'),
         _wallpaperSection(),
+        const SizedBox(height: 12),
+        _sectionTitle('SFTP panel'),
+        _sftpPanelSection(),
       ],
+    );
+  }
+
+  Widget _sftpPanelSection() {
+    final onChanged = widget.onSftpFrostedGlassChanged;
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text(
+        'Frosted glass',
+        style: TextStyle(color: _kFg, fontSize: 13),
+      ),
+      subtitle: const Text(
+        'Blur the terminal behind the file panel',
+        style: TextStyle(color: _kFgMuted, fontSize: 11),
+      ),
+      value: widget.sftpFrostedGlass,
+      activeTrackColor: _kAccent,
+      onChanged: onChanged == null ? null : (v) => onChanged(v),
     );
   }
 

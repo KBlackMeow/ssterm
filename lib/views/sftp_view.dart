@@ -30,6 +30,9 @@ const _kSizeColWidth = 44.0;
 const _kDateColWidth = 72.0;
 const _kMetaFontSize = 9.0;
 
+const _kChromeBar = Color(0x66252525);
+const _kChromeHeader = Color(0x55222222);
+
 class SftpView extends StatefulWidget {
   const SftpView({
     super.key,
@@ -260,8 +263,8 @@ class _SftpViewState extends State<SftpView> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF1C1C1C),
+    return ColoredBox(
+      color: Colors.transparent,
       child: Column(
         children: [
           _buildToolbar(),
@@ -319,7 +322,7 @@ class _SftpViewState extends State<SftpView> {
     final canDel = _selected != null;
     return Container(
       height: 34,
-      color: const Color(0xFF252525),
+      color: _kChromeBar,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(
         children: [
@@ -412,7 +415,7 @@ class _SftpViewState extends State<SftpView> {
   Widget _buildColumnHeader() {
     return Container(
       height: 24,
-      color: const Color(0xFF222222),
+      color: _kChromeHeader,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
@@ -609,7 +612,7 @@ class _SftpViewState extends State<SftpView> {
   Widget _buildStatusBar() {
     return Container(
       height: 22,
-      color: const Color(0xFF252525),
+      color: _kChromeBar,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [

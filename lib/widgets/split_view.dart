@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-const _kDividerColor = Color(0xFF3A3A3A);
-const _kDividerThickness = 4.0;
+const _kHandleThickness = 6.0;
 
 class SplitView extends StatefulWidget {
   const SplitView({
@@ -53,47 +52,59 @@ class _SplitViewState extends State<SplitView> {
       return LayoutBuilder(
         builder: (context, constraints) {
           final totalW = constraints.maxWidth;
-          final primaryW = totalW * _ratio - _kDividerThickness / 2;
-          final secondaryW =
-              totalW * (1 - _ratio) - _kDividerThickness / 2;
-          return Row(
+          final splitX = (totalW * _ratio).clamp(0.0, totalW);
+          return Stack(
             children: [
-              SizedBox(width: primaryW.clamp(0, totalW), child: widget.primary),
-              _Handle(
-                axis: Axis.horizontal,
-                onDrag: (d) => _onDrag(d, totalW),
+              Row(
+                children: [
+                  SizedBox(width: splitX, child: widget.primary),
+                  Expanded(child: widget.secondary),
+                ],
               ),
-              SizedBox(
-                width: secondaryW.clamp(0, totalW),
-                child: widget.secondary,
-              ),
-            ],
-          );
-        },
-      );
-    } else {
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          final totalH = constraints.maxHeight;
-          final primaryH = totalH * _ratio - _kDividerThickness / 2;
-          final secondaryH =
-              totalH * (1 - _ratio) - _kDividerThickness / 2;
-          return Column(
-            children: [
-              SizedBox(height: primaryH.clamp(0, totalH), child: widget.primary),
-              _Handle(
-                axis: Axis.vertical,
-                onDrag: (d) => _onDrag(d, totalH),
-              ),
-              SizedBox(
-                height: secondaryH.clamp(0, totalH),
-                child: widget.secondary,
+              Positioned(
+                left: (splitX - _kHandleThickness / 2)
+                    .clamp(0.0, totalW - _kHandleThickness),
+                top: 0,
+                bottom: 0,
+                width: _kHandleThickness,
+                child: _Handle(
+                  axis: Axis.horizontal,
+                  onDrag: (d) => _onDrag(d, totalW),
+                ),
               ),
             ],
           );
         },
       );
     }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalH = constraints.maxHeight;
+        final splitY = (totalH * _ratio).clamp(0.0, totalH);
+        return Stack(
+          children: [
+            Column(
+              children: [
+                SizedBox(height: splitY, child: widget.primary),
+                Expanded(child: widget.secondary),
+              ],
+            ),
+            Positioned(
+              top: (splitY - _kHandleThickness / 2)
+                  .clamp(0.0, totalH - _kHandleThickness),
+              left: 0,
+              right: 0,
+              height: _kHandleThickness,
+              child: _Handle(
+                axis: Axis.vertical,
+                onDrag: (d) => _onDrag(d, totalH),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -114,11 +125,7 @@ class _Handle extends StatelessWidget {
         onPanUpdate: (d) => onDrag(
           axis == Axis.horizontal ? d.delta.dx : d.delta.dy,
         ),
-        child: Container(
-          width: axis == Axis.horizontal ? _kDividerThickness : double.infinity,
-          height: axis == Axis.vertical ? _kDividerThickness : double.infinity,
-          color: _kDividerColor,
-        ),
+        child: const SizedBox.expand(),
       ),
     );
   }
