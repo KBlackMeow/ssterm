@@ -335,11 +335,18 @@ class BufferLine with IndexedItem {
       to = _length;
     }
 
+    // Trim trailing empty cells so copied lines don't end with trailing spaces,
+    // but preserve interior empty cells as spaces to match visual layout.
+    final trimmed = getTrimmedLength(to);
+    if (trimmed < to) to = trimmed;
+
     final builder = StringBuffer();
     for (var i = from; i < to; i++) {
       final codePoint = getCodePoint(i);
       final width = getWidth(i);
-      if (codePoint != 0 && i + width <= to) {
+      if (codePoint == 0) {
+        builder.writeCharCode(0x20); // empty cell → space to preserve visual spacing
+      } else if (i + width <= to) {
         builder.writeCharCode(codePoint);
       }
     }

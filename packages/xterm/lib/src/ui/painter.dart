@@ -87,7 +87,8 @@ class TerminalPainter {
     final height = heightParagraph.height;
     heightParagraph.dispose();
 
-    return Size(width, height);
+    // Ceil to integer pixels: every cell is the same whole-pixel width/height.
+    return Size(width.ceilToDouble(), height.ceilToDouble());
   }
 
   /// The size of each character in the terminal.
@@ -192,6 +193,20 @@ class TerminalPainter {
 
     final charWidth = cellData.content >> CellContent.widthShift;
 
+    // Block elements (U+2580–U+259F): render directly as canvas shapes so they
+    // tile seamlessly regardless of font metrics or line-height settings.
+    if (charCode >= 0x2580 && charCode <= 0x259F) {
+      final cellFlags = cellData.flags;
+      var color = cellFlags & CellFlags.inverse == 0
+          ? resolveForegroundColor(cellData.foreground)
+          : resolveBackgroundColor(cellData.background);
+      if (cellFlags & CellFlags.faint != 0) {
+        color = color.withValues(alpha: 0.5);
+      }
+      _paintBlockElement(canvas, offset, charCode, color);
+      return;
+    }
+
     // Glyph cache ignores underline; underline is drawn in [paintCellUnderline].
     final cacheKey = hashValues(
           cellData.foreground,
@@ -242,6 +257,93 @@ class TerminalPainter {
     }
   }
 
+  /// Renders a Unicode Block Element (U+2580–U+259F) as filled canvas
+  /// rectangles. This guarantees pixel-perfect cell coverage with no font
+  /// metric or line-height artifacts.
+  void _paintBlockElement(Canvas canvas, Offset offset, int charCode, Color color) {
+    final w = _cellSize.width;
+    final h = _cellSize.height;
+    final x = offset.dx;
+    final y = offset.dy;
+    final hw = w / 2;
+    final hh = h / 2;
+
+    final paint = Paint()
+      ..color = color
+      ..isAntiAlias = false;
+
+    // Use floor for start coords and ceil for end coords so that fractional
+    // midpoints (e.g. hw=4.5 for odd w=9) expand symmetrically: both the left
+    // half (▌) and right half (▐) round to ceil(w/2)=5px rather than 5px vs 4px.
+    // Full-cell edges (0, w, h) are integers so floor/ceil is a no-op there.
+    void fill(double l, double t, double r, double b) {
+      canvas.drawRect(
+        Rect.fromLTRB(
+          (x + l).floorToDouble(),
+          (y + t).floorToDouble(),
+          (x + r).ceilToDouble(),
+          (y + b).ceilToDouble(),
+        ),
+        paint,
+      );
+    }
+
+    switch (charCode) {
+      case 0x2580: fill(0, 0, w, hh); // ▀ upper half
+      case 0x2581: fill(0, h * 7 / 8, w, h); // ▁ lower 1/8
+      case 0x2582: fill(0, h * 3 / 4, w, h); // ▂ lower 1/4
+      case 0x2583: fill(0, h * 5 / 8, w, h); // ▃ lower 3/8
+      case 0x2584: fill(0, hh, w, h); // ▄ lower half
+      case 0x2585: fill(0, h * 3 / 8, w, h); // ▅ lower 5/8
+      case 0x2586: fill(0, h / 4, w, h); // ▆ lower 3/4
+      case 0x2587: fill(0, h / 8, w, h); // ▇ lower 7/8
+      case 0x2588: fill(0, 0, w, h); // █ full
+      case 0x2589: fill(0, 0, w * 7 / 8, h); // ▉ left 7/8
+      case 0x258A: fill(0, 0, w * 3 / 4, h); // ▊ left 3/4
+      case 0x258B: fill(0, 0, w * 5 / 8, h); // ▋ left 5/8
+      case 0x258C: fill(0, 0, hw, h); // ▌ left half
+      case 0x258D: fill(0, 0, w * 3 / 8, h); // ▍ left 3/8
+      case 0x258E: fill(0, 0, w / 4, h); // ▎ left 1/4
+      case 0x258F: fill(0, 0, w / 8, h); // ▏ left 1/8
+      case 0x2590: fill(hw, 0, w, h); // ▐ right half
+      // Shade chars: approximate as semi-transparent full-cell fill
+      case 0x2591:
+        paint.color = color.withValues(alpha: color.a * 0.25);
+        fill(0, 0, w, h);
+      case 0x2592:
+        paint.color = color.withValues(alpha: color.a * 0.50);
+        fill(0, 0, w, h);
+      case 0x2593:
+        paint.color = color.withValues(alpha: color.a * 0.75);
+        fill(0, 0, w, h);
+      case 0x2594: fill(0, 0, w, h / 8); // ▔ upper 1/8
+      case 0x2595: fill(w * 7 / 8, 0, w, h); // ▕ right 1/8
+      // Quadrant blocks
+      case 0x2596: fill(0, hh, hw, h); // ▖ lower-left
+      case 0x2597: fill(hw, hh, w, h); // ▗ lower-right
+      case 0x2598: fill(0, 0, hw, hh); // ▘ upper-left
+      case 0x2599: // ▙ upper-left + lower half
+        fill(0, 0, hw, hh);
+        fill(0, hh, w, h);
+      case 0x259A: // ▚ upper-left + lower-right
+        fill(0, 0, hw, hh);
+        fill(hw, hh, w, h);
+      case 0x259B: // ▛ upper half + lower-left
+        fill(0, 0, w, hh);
+        fill(0, hh, hw, h);
+      case 0x259C: // ▜ upper half + lower-right
+        fill(0, 0, w, hh);
+        fill(hw, hh, w, h);
+      case 0x259D: fill(hw, 0, w, hh); // ▝ upper-right
+      case 0x259E: // ▞ upper-right + lower-left
+        fill(hw, 0, w, hh);
+        fill(0, hh, hw, h);
+      case 0x259F: // ▟ upper-right + lower half
+        fill(hw, 0, w, hh);
+        fill(0, hh, w, h);
+    }
+  }
+
   /// Draws an underline at the bottom of the cell, below the glyph.
   @pragma('vm:prefer-inline')
   void paintCellUnderline(Canvas canvas, Offset offset, CellData cellData) {
@@ -256,7 +358,7 @@ class TerminalPainter {
         : resolveBackgroundColor(cellData.background);
 
     if (cellFlags & CellFlags.faint != 0) {
-      color = color.withOpacity(0.5);
+      color = color.withValues(alpha: 0.5);
     }
 
     final doubleWidth = cellData.content >> CellContent.widthShift == 2;
@@ -290,7 +392,7 @@ class TerminalPainter {
     final paint = Paint()..color = color;
     final doubleWidth = cellData.content >> CellContent.widthShift == 2;
     final widthScale = doubleWidth ? 2 : 1;
-    final size = Size(_cellSize.width * widthScale + 1, _cellSize.height);
+    final size = Size(_cellSize.width * widthScale, _cellSize.height);
     canvas.drawRect(offset & size, paint);
   }
 
