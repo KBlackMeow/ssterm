@@ -157,6 +157,12 @@ class _Tab {
   final terminalController = TerminalController();
   final splitTerminalController = TerminalController();
 
+  /// Primary pane shell/SSH ended; Enter restarts the session.
+  bool primarySessionEnded = false;
+
+  /// Split pane shell/SSH ended; Enter restarts the session.
+  bool splitSessionEnded = false;
+
   bool get isSplit => splitTerminal != null;
 
   _Tab._({
@@ -206,6 +212,7 @@ class _Tab {
     splitSshSession = null;
     splitPty = null;
     splitPipe = null;
+    splitSessionEnded = false;
   }
 
   void dispose() {
@@ -414,72 +421,333 @@ class _TerminalHomeState extends State<TerminalHome> {
     return env;
   }
 
-  /// Start the local PTY on the first [Terminal.onResize] so rows/cols match the
-  /// pane instead of a hard-coded 80×24.
-  void _wireDeferredLocalPty(
+  static const _kRestartPrompt = '\r\nPress Enter to restart.\r\n';
+
+  static bool _isRestartKey(String data) {
+    if (data.isEmpty) return false;
+    return data.codeUnits.every((c) => c == 0x0d || c == 0x0a);
+  }
+
+  void _bindTerminalInput(
+    Terminal terminal,
     _Tab tab, {
-    required LocalShellOption shell,
-    String? workingDirectory,
-    bool showExitMessage = true,
-    void Function()? onProcessExit,
-    void Function(Pty pty, _OutputPipe pipe)? onPtyStarted,
+    required bool isSplit,
+    required void Function(String data) forward,
   }) {
-    final terminal = tab.terminal!;
+    terminal.onOutput = (data) {
+      final ended =
+          isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
+      if (ended) {
+        if (_isRestartKey(data)) {
+          unawaited(_restartSession(tab, isSplit: isSplit));
+        }
+        return;
+      }
+      forward(data);
+    };
+  }
+
+  Future<void> _restartSession(_Tab tab, {required bool isSplit}) async {
+    final ended =
+        isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
+    if (!ended || !mounted) return;
+
+    final terminal = isSplit ? tab.splitTerminal : tab.terminal;
+    if (terminal == null) return;
+
+    if (isSplit) {
+      tab.splitSessionEnded = false;
+    } else {
+      tab.primarySessionEnded = false;
+    }
+
+    if (tab.kind == _TabKind.local) {
+      final shell =
+          tab.localShell ?? LocalShellDiscovery.defaultShell(_localShells);
+      final cwd = tab.localPath?.value;
+      final home =
+          Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+      _spawnLocalPty(
+        tab: tab,
+        terminal: terminal,
+        shell: shell,
+        columns: terminal.viewWidth,
+        rows: terminal.viewHeight,
+        workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : home,
+        isSplit: isSplit,
+      );
+    } else if (tab.kind == _TabKind.ssh) {
+      await _restartSshShell(tab, terminal: terminal, isSplit: isSplit);
+    }
+  }
+
+  void _spawnLocalPty({
+    required _Tab tab,
+    required Terminal terminal,
+    required LocalShellOption shell,
+    required int columns,
+    required int rows,
+    String? workingDirectory,
+    required bool isSplit,
+    bool showExitMessage = true,
+  }) {
+    if (columns < 1 || rows < 1) return;
+
     final home =
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     final env = _environmentForLocalShell(shell);
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
-    Pty? pty;
 
+    final Pty pty;
+    if (useUnixWrapper) {
+      pty = Pty.start(
+        '/bin/sh',
+        arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
+        columns: columns,
+        rows: rows,
+        environment: env,
+        workingDirectory: workingDirectory ?? home,
+      );
+    } else {
+      pty = Pty.start(
+        shell.executable,
+        arguments: shell.arguments,
+        columns: columns,
+        rows: rows,
+        environment: env,
+        workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
+      );
+    }
+
+    if (isSplit) {
+      tab.splitPty?.kill();
+      tab.splitPty = pty;
+    } else {
+      tab.pty?.kill();
+      tab.pty = pty;
+    }
+
+    final cwdParser = RemoteCwdParser();
+    final pipe = _OutputPipe(
+      terminal,
+      transform: (bytes) {
+        final parsed = cwdParser.process(bytes);
+        if (parsed.cwd != null && tab.localPath != null) {
+          tab.localPath!.value = parsed.cwd!;
+        }
+        return parsed.cleaned;
+      },
+    )..bind(pty.output);
+
+    if (isSplit) {
+      tab.splitPipe?.dispose();
+      tab.splitPipe = pipe;
+    } else {
+      tab.pipe?.dispose();
+      tab.pipe = pipe;
+    }
+
+    _bindTerminalInput(
+      terminal,
+      tab,
+      isSplit: isSplit,
+      forward: (d) => pty.write(utf8.encode(d)),
+    );
+
+    pty.exitCode.then((code) {
+      if (!mounted) return;
+      if (showExitMessage) {
+        terminal.write('\r\n[Process exited with code $code]\r\n');
+      }
+      terminal.write(_kRestartPrompt);
+      if (isSplit) {
+        tab.splitSessionEnded = true;
+        tab.splitPty = null;
+        tab.splitPipe?.dispose();
+        tab.splitPipe = null;
+      } else {
+        tab.primarySessionEnded = true;
+        tab.pty = null;
+        tab.pipe?.dispose();
+        tab.pipe = null;
+      }
+    });
+  }
+
+  /// Start the local PTY on the first [Terminal.onResize] so rows/cols match the
+  /// pane instead of a hard-coded 80×24.
+  void _wireDeferredLocalPty(
+    _Tab tab, {
+    required Terminal terminal,
+    required LocalShellOption shell,
+    String? workingDirectory,
+    required bool isSplit,
+    bool showExitMessage = true,
+  }) {
     terminal.onResize = (w, h, pw, ph) {
       if (w < 1 || h < 1) return;
-      if (pty == null) {
-        if (useUnixWrapper) {
-          pty = Pty.start(
-            '/bin/sh',
-            arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
-            columns: w,
-            rows: h,
-            environment: env,
-            workingDirectory: workingDirectory ?? home,
-          );
-        } else {
-          pty = Pty.start(
-            shell.executable,
-            arguments: shell.arguments,
-            columns: w,
-            rows: h,
-            environment: env,
-            workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
-          );
-        }
-        tab.pty = pty;
-        final cwdParser = RemoteCwdParser();
-        final pipe = _OutputPipe(
-          terminal,
-          transform: (bytes) {
-            final parsed = cwdParser.process(bytes);
-            if (parsed.cwd != null && tab.localPath != null) {
-              tab.localPath!.value = parsed.cwd!;
-            }
-            return parsed.cleaned;
-          },
-        )..bind(pty!.output);
-        tab.pipe = pipe;
-        onPtyStarted?.call(pty!, pipe);
-        terminal.onOutput = (d) => pty!.write(utf8.encode(d));
-        pty!.exitCode.then((code) {
-          if (showExitMessage && mounted) {
-            terminal.write('\r\n[Process exited with code $code]\r\n');
-          }
-          if (onProcessExit != null && mounted) {
-            onProcessExit();
-          }
-        });
-      } else {
-        pty!.resize(h, w);
+      final activePty = isSplit ? tab.splitPty : tab.pty;
+      final ended =
+          isSplit ? tab.splitSessionEnded : tab.primarySessionEnded;
+      if (activePty == null && !ended) {
+        _spawnLocalPty(
+          tab: tab,
+          terminal: terminal,
+          shell: shell,
+          columns: w,
+          rows: h,
+          workingDirectory: workingDirectory,
+          isSplit: isSplit,
+          showExitMessage: showExitMessage,
+        );
+      } else if (activePty != null) {
+        activePty.resize(h, w);
       }
     };
+  }
+
+  Future<void> _handleSshSessionDone(
+    _Tab tab,
+    Terminal terminal, {
+    required bool isSplit,
+    SshHost? profile,
+  }) async {
+    if (!isSplit) {
+      tab.keepaliveTimer?.cancel();
+      tab.keepaliveTimer = null;
+    }
+    if (!mounted || tab.manuallyDisconnected) return;
+
+    final prof = profile ?? tab.sshProfile;
+    if (!isSplit && prof != null && prof.autoReconnect) {
+      terminal.write('\r\n[SSH connection closed]\r\n');
+      terminal.write('[Reconnecting in 3 seconds…]\r\n');
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (!mounted || tab.manuallyDisconnected) return;
+      await _reconnectTab(tab);
+      return;
+    }
+
+    if (isSplit) {
+      tab.splitSshSession?.close();
+      tab.splitSshSession = null;
+      tab.splitPipe?.dispose();
+      tab.splitPipe = null;
+      tab.splitSessionEnded = true;
+    } else {
+      tab.sshSession?.close();
+      tab.sshSession = null;
+      tab.pipe?.dispose();
+      tab.pipe = null;
+      tab.primarySessionEnded = true;
+    }
+    terminal.write('\r\n[SSH connection closed]\r\n');
+    terminal.write(_kRestartPrompt);
+  }
+
+  Future<void> _restartSshShell(
+    _Tab tab, {
+    required Terminal terminal,
+    required bool isSplit,
+  }) async {
+    final client = tab.sshClient;
+    if (client == null) {
+      if (!isSplit && tab.sshProfile != null) {
+        await _reconnectTab(tab);
+      } else {
+        terminal.write('[Not connected]\r\n$_kRestartPrompt');
+        if (isSplit) {
+          tab.splitSessionEnded = true;
+        } else {
+          tab.primarySessionEnded = true;
+        }
+      }
+      return;
+    }
+
+    try {
+      final session = await client
+          .shell(
+            pty: SSHPtyConfig(
+              width: terminal.viewWidth,
+              height: terminal.viewHeight,
+              type: 'xterm-256color',
+            ),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final cwdParser = RemoteCwdParser();
+      final pipe = _OutputPipe(
+        terminal,
+        transform: (bytes) {
+          final parsed = cwdParser.process(bytes);
+          if (parsed.cwd != null && tab.remotePath != null) {
+            tab.remotePath!.value = parsed.cwd!;
+          }
+          return parsed.cleaned;
+        },
+      );
+
+      _bindTerminalInput(
+        terminal,
+        tab,
+        isSplit: isSplit,
+        forward: (d) => session.stdin.add(utf8.encode(d)),
+      );
+      terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+
+      pipe.bind(session.stdout);
+      pipe.bind(session.stderr);
+
+      if (isSplit) {
+        tab.splitSshSession?.close();
+        tab.splitSshSession = session;
+        tab.splitPipe?.dispose();
+        tab.splitPipe = pipe;
+      } else {
+        tab.sshSession?.close();
+        tab.sshSession = session;
+        tab.pipe?.dispose();
+        tab.pipe = pipe;
+      }
+
+      session.done.then(
+        (_) => _handleSshSessionDone(tab, terminal, isSplit: isSplit),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      terminal.write('[Reconnect failed: $e]\r\n$_kRestartPrompt');
+      if (isSplit) {
+        tab.splitSessionEnded = true;
+      } else {
+        tab.primarySessionEnded = true;
+      }
+    }
+  }
+
+  void _wireSshSession(
+    _Tab tab,
+    SSHSession session,
+    Terminal terminal,
+    _OutputPipe pipe, {
+    required bool isSplit,
+    SshHost? profile,
+  }) {
+    _bindTerminalInput(
+      terminal,
+      tab,
+      isSplit: isSplit,
+      forward: (d) => session.stdin.add(utf8.encode(d)),
+    );
+    terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+    session.done.then(
+      (_) => _handleSshSessionDone(
+        tab,
+        terminal,
+        isSplit: isSplit,
+        profile: profile,
+      ),
+    );
   }
 
   String _interactiveLocalShellWrapperCommand() {
@@ -564,10 +832,10 @@ esac
     );
     _wireDeferredLocalPty(
       tab,
+      terminal: tab.terminal!,
       shell: shell,
       workingDirectory: home,
-      showExitMessage: true,
-      onProcessExit: null,
+      isSplit: false,
     );
 
     setState(() {
@@ -694,9 +962,6 @@ esac
       },
     );
 
-    terminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
-    terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       pipe.bind(session.stdout);
       pipe.bind(session.stderr);
@@ -732,6 +997,15 @@ esac
     tab.pipe = pipe;
     tab.transferManager = transferManager;
 
+    _wireSshSession(
+      tab,
+      session,
+      terminal,
+      pipe,
+      isSplit: false,
+      profile: r.profile,
+    );
+
     // Feature 1: port forwarding
     if (r.profile.forwardRules.isNotEmpty) {
       final fwdService = PortForwardService();
@@ -750,23 +1024,6 @@ esac
         },
       );
     }
-
-    // Feature 4: auto-reconnect on session close
-    session.done.then((_) async {
-      tab.keepaliveTimer?.cancel();
-      tab.keepaliveTimer = null;
-      if (!mounted || tab.manuallyDisconnected) return;
-      if (r.profile.autoReconnect) {
-        if (mounted) terminal.write('\r\n[SSH connection closed]\r\n');
-        terminal.write('[Reconnecting in 3 seconds…]\r\n');
-        await Future<void>.delayed(const Duration(seconds: 3));
-        if (!mounted || tab.manuallyDisconnected) return;
-        _reconnectTab(tab);
-      } else {
-        final idx = _tabs.indexOf(tab);
-        if (mounted && idx >= 0) _closeTab(idx);
-      }
-    });
 
     setState(() {
       _tabs.add(tab);
@@ -820,15 +1077,10 @@ esac
       transform: (bytes) => cwdParser.process(bytes).cleaned,
     );
 
-    splitTerminal.onOutput = (d) => session.stdin.add(utf8.encode(d));
-    splitTerminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+    _wireSshSession(tab, session, splitTerminal, pipe, isSplit: true);
 
     pipe.bind(session.stdout);
     pipe.bind(session.stderr);
-
-    session.done.then((_) {
-      if (mounted) setState(() => tab.clearSplit());
-    });
 
     if (!mounted) {
       pipe.dispose();
@@ -852,28 +1104,20 @@ esac
     final shell =
         tab.localShell ?? LocalShellDiscovery.defaultShell(_localShells);
     final splitTerminal = _createTerminal();
-    final holder = _Tab._(
-      kind: _TabKind.local,
-      title: shell.displayName,
-      localShell: shell,
-      terminal: splitTerminal,
-    );
     final cwd = tab.localPath?.value;
     _wireDeferredLocalPty(
-      holder,
+      tab,
+      terminal: splitTerminal,
       shell: shell,
       workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : null,
+      isSplit: true,
       showExitMessage: false,
-      onProcessExit: () => setState(() => tab.clearSplit()),
-      onPtyStarted: (p, pipe) {
-        tab.splitPty = p;
-        tab.splitPipe = pipe;
-      },
     );
 
     setState(() {
       tab.splitTerminal = splitTerminal;
       tab.splitAxis = axis;
+      tab.splitSessionEnded = false;
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -944,8 +1188,15 @@ esac
         },
       );
 
-      tab.terminal!.onOutput = (d) => session.stdin.add(utf8.encode(d));
-      tab.terminal!.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+      tab.primarySessionEnded = false;
+      _wireSshSession(
+        tab,
+        session,
+        tab.terminal!,
+        pipe,
+        isSplit: false,
+        profile: profile,
+      );
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         pipe.bind(session.stdout);
@@ -981,26 +1232,12 @@ esac
         );
       }
 
-      session.done.then((_) async {
-        tab.keepaliveTimer?.cancel();
-        if (!mounted || tab.manuallyDisconnected) return;
-        if (profile.autoReconnect) {
-          tab.terminal?.write('\r\n[SSH connection closed]\r\n');
-          tab.terminal?.write('[Reconnecting in 3 seconds…]\r\n');
-          await Future<void>.delayed(const Duration(seconds: 3));
-          if (!mounted || tab.manuallyDisconnected) return;
-          _reconnectTab(tab);
-        } else {
-          final idx = _tabs.indexOf(tab);
-          if (mounted && idx >= 0) _closeTab(idx);
-        }
-      });
-
       tab.terminal?.write('[Reconnected]\r\n');
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
-        tab.terminal?.write('[Reconnect failed: $e]\r\n');
+        tab.terminal?.write('[Reconnect failed: $e]\r\n$_kRestartPrompt');
+        tab.primarySessionEnded = true;
         if (tab.sshProfile?.autoReconnect == true &&
             !tab.manuallyDisconnected) {
           await Future<void>.delayed(const Duration(seconds: 5));
