@@ -168,8 +168,31 @@ class TerminalSettings {
   }
 
   List<String> buildFontFamilyFallback() {
+    // Latin monospace faces must come before CJK fallbacks. When the primary
+    // font is missing, Flutter walks this list for every glyph — putting CJK
+    // first makes Windows render ASCII in proportional YaHei/SimSun with huge
+    // letter spacing inside fixed-width cells.
+    final latinMono = <String>[
+      if (Platform.isWindows) ...[
+        'Consolas',
+        'Cascadia Mono',
+        'Cascadia Code',
+      ],
+      if (Platform.isMacOS) ...[
+        'Menlo',
+        'Monaco',
+        'SF Mono',
+      ],
+      'JetBrains Mono',
+      'Fira Code',
+      'Courier New',
+      'Liberation Mono',
+      'monospace',
+    ];
+
     if (Platform.isWindows) {
       return [
+        ...latinMono,
         cjkFontFamily,
         if (cjkFontFamily != 'Microsoft YaHei') 'Microsoft YaHei',
         'NSimSun',
@@ -177,28 +200,27 @@ class TerminalSettings {
         'Noto Sans Mono CJK SC',
         'Noto Color Emoji',
         'Noto Sans Symbols',
-        'monospace',
         'sans-serif',
       ];
     }
     if (Platform.isMacOS) {
       return [
+        ...latinMono,
         cjkFontFamily,
         'PingFang SC',
         'Hiragino Sans GB',
         'Noto Sans Mono CJK SC',
         'Noto Color Emoji',
-        'monospace',
         'sans-serif',
       ];
     }
     return [
+      ...latinMono,
       cjkFontFamily,
       'Noto Sans Mono CJK SC',
       'Noto Sans Mono CJK TC',
       'Noto Sans Mono CJK JP',
       'Noto Color Emoji',
-      'monospace',
       'sans-serif',
     ];
   }

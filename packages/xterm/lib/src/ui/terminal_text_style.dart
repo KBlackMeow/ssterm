@@ -16,16 +16,18 @@ const kTerminalTextHeightBehavior = TextHeightBehavior(
 );
 
 const _kDefaultFontFamilyFallback = [
-  'Microsoft YaHei UI',   // Windows: clean CJK sans (terminal fallback)
-  'Microsoft YaHei',
+  'Cascadia Mono',
+  'Cascadia Code',
+  'Consolas',
+  'JetBrains Mono',
   'Menlo',
   'Monaco',
-  'Consolas',
-  'Cascadia Mono',
+  'Courier New',
+  'Liberation Mono',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
   'NSimSun',
   'MingLiU',
-  'Liberation Mono',
-  'Courier New',
   'Noto Sans Mono CJK SC',
   'Noto Sans Mono CJK TC',
   'Noto Sans Mono CJK KR',

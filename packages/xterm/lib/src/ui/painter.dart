@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/painting.dart';
 
+import 'package:xterm/src/ui/char_metrics.dart';
 import 'package:xterm/src/ui/palette_builder.dart';
 import 'package:xterm/src/ui/paragraph_cache.dart';
 import 'package:xterm/src/utils/hash_values.dart';
@@ -55,40 +56,7 @@ class TerminalPainter {
   }
 
   Size _measureCharSize() {
-    const test = 'mmmmmmmmmm';
-
-    double widthForWeight(FontWeight weight) {
-      final style = _textStyle.copyWith(fontWeight: weight);
-      final builder = ParagraphBuilder(style.toParagraphStyle());
-      builder.pushStyle(
-        style.toTextStyle().getTextStyle(textScaler: _textScaler),
-      );
-      builder.addText(test);
-      final paragraph = builder.build();
-      paragraph.layout(ParagraphConstraints(width: double.infinity));
-      final width = paragraph.maxIntrinsicWidth / test.length;
-      paragraph.dispose();
-      return width;
-    }
-
-    // ANSI bold and the configured weight can be wider than regular glyphs.
-    final width = [
-      widthForWeight(_textStyle.fontWeight),
-      widthForWeight(FontWeight.bold),
-    ].reduce((a, b) => a > b ? a : b);
-
-    final heightBuilder = ParagraphBuilder(_textStyle.toParagraphStyle());
-    heightBuilder.pushStyle(
-      _textStyle.toTextStyle().getTextStyle(textScaler: _textScaler),
-    );
-    heightBuilder.addText(test);
-    final heightParagraph = heightBuilder.build();
-    heightParagraph.layout(ParagraphConstraints(width: double.infinity));
-    final height = heightParagraph.height;
-    heightParagraph.dispose();
-
-    // Ceil to integer pixels: every cell is the same whole-pixel width/height.
-    return Size(width.ceilToDouble(), height.ceilToDouble());
+    return measureCellSize(_textStyle, _textScaler);
   }
 
   /// The size of each character in the terminal.
@@ -242,19 +210,15 @@ class TerminalPainter {
       );
     }
 
-    // Double-width glyphs (CJK etc.) from proportional fallback fonts may
-    // exceed 2×cellWidth and bleed into the next character's cell.  Clip them
-    // to the exact expected bounds so they never corrupt adjacent glyphs.
-    if (charWidth >= 2) {
-      canvas.save();
-      canvas.clipRect(
-        Rect.fromLTWH(offset.dx, offset.dy, _cellSize.width * 2, _cellSize.height),
-      );
-      canvas.drawParagraph(paragraph, offset);
-      canvas.restore();
-    } else {
-      canvas.drawParagraph(paragraph, offset);
-    }
+    // Clip to the cell bounds so bold / fallback glyphs never widen the grid
+    // or bleed into adjacent columns.
+    final clipWidth = _cellSize.width * (charWidth >= 2 ? 2 : 1);
+    canvas.save();
+    canvas.clipRect(
+      Rect.fromLTWH(offset.dx, offset.dy, clipWidth, _cellSize.height),
+    );
+    canvas.drawParagraph(paragraph, offset);
+    canvas.restore();
   }
 
   /// Renders a Unicode Block Element (U+2580–U+259F) as filled canvas
