@@ -22,6 +22,7 @@ import 'services/remote_home.dart';
 import 'services/session_logger.dart';
 import 'services/ssh_connection.dart';
 import 'services/wallpaper_storage.dart';
+import 'utils/fd_limit.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/frosted_glass.dart';
@@ -35,6 +36,10 @@ import 'widgets/transfer_panel.dart';
 import 'widgets/wallpaper_background.dart';
 
 void main() {
+  // Must run before the first Pty.start: spawned shells inherit RLIMIT_NOFILE
+  // from this process, and macOS's default 256 is too low for plugin-heavy
+  // zsh setups.
+  raiseFileDescriptorLimit();
   runApp(const SsTermApp());
 }
 
