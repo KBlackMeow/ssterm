@@ -522,6 +522,18 @@ class Buffer {
     // 2. Adjust the width.
     if (newWidth != oldWidth) {
       if (terminal.reflowEnabled && !isAltBuffer) {
+        // Anchor the cursor before reflow. reflow() reparents anchors as it
+        // splits/joins wrapped lines, so the anchor follows the cursor's
+        // logical row to its new physical index. Without this, _cursorY would
+        // stay at its old viewport-relative row while the buffer's row count
+        // changed, leaving the cursor on a different physical line — visible
+        // as a row offset after split→collapse on PowerShell/ConPTY.
+        final cursorAbsY = _cursorY + (lines.length - newHeight);
+        CellAnchor? cursorAnchor;
+        if (cursorAbsY >= 0 && cursorAbsY < lines.length) {
+          cursorAnchor = lines[cursorAbsY].createAnchor(_cursorX);
+        }
+
         final reflowResult = reflow(lines, oldWidth, newWidth);
 
         while (reflowResult.length < newHeight) {
@@ -529,6 +541,13 @@ class Buffer {
         }
 
         lines.replaceWith(reflowResult);
+
+        if (cursorAnchor != null && cursorAnchor.attached) {
+          final newScrollBack = lines.length - newHeight;
+          _cursorY = (cursorAnchor.y - newScrollBack).clamp(0, newHeight - 1);
+          _cursorX = cursorAnchor.x.clamp(0, newWidth - 1);
+        }
+        cursorAnchor?.dispose();
       } else {
         lines.forEach((item) => item.resize(newWidth));
       }
