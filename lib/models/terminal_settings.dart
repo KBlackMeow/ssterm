@@ -95,7 +95,8 @@ class TerminalSettings {
         alpha: (effectiveBackgroundOpacity * 0.65).clamp(0.0, 1.0),
       );
     }
-    return base.withValues(alpha: 0.32);
+    // Opaque lift — alpha on a same-color bar is invisible without wallpaper.
+    return _tabButtonTint(base, 0.16);
   }
 
   /// Unselected tab button fill — same hue, lower opacity.
@@ -106,7 +107,15 @@ class TerminalSettings {
         alpha: (effectiveBackgroundOpacity * 0.28).clamp(0.0, 1.0),
       );
     }
-    return base.withValues(alpha: 0.14);
+    return _tabButtonTint(base, 0.08);
+  }
+
+  /// Lighten dark themes / darken light themes for visible tab pills.
+  static Color _tabButtonTint(Color base, double amount) {
+    final toward = base.computeLuminance() > 0.5
+        ? const Color(0xFF000000)
+        : const Color(0xFFFFFFFF);
+    return Color.lerp(base, toward, amount.clamp(0.0, 1.0))!;
   }
 
   static List<String> get fontOptions {

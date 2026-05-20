@@ -29,6 +29,7 @@ import 'widgets/terminal_surface.dart'
     show TerminalSurface, TerminalContextMenuConfig;
 import 'models/transfer_task.dart';
 import 'views/ssh_session_view.dart';
+import 'widgets/crt_overlay.dart';
 import 'widgets/transfer_panel.dart';
 import 'widgets/wallpaper_background.dart';
 
@@ -1316,6 +1317,7 @@ esac
       viewKey: viewKey,
       contextMenu: contextMenu,
       includeWallpaper: false,
+      includeCrt: false,
     );
   }
 
@@ -1399,6 +1401,10 @@ esac
           chrome,
         ],
       );
+    }
+
+    if (ts.crt.enabled) {
+      chrome = CrtOverlay(settings: ts.crt, child: chrome);
     }
 
     return Scaffold(

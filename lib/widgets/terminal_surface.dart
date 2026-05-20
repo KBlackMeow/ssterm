@@ -44,6 +44,8 @@ class TerminalSurface extends StatelessWidget {
     this.contextMenu,
     /// When false, wallpaper is expected from a parent (e.g. app chrome / tab bar).
     this.includeWallpaper = true,
+    /// When false, CRT is expected from a parent (e.g. full window chrome).
+    this.includeCrt = true,
   });
 
   final Terminal terminal;
@@ -54,6 +56,7 @@ class TerminalSurface extends StatelessWidget {
   final bool hardwareKeyboardOnly;
   final TerminalContextMenuConfig? contextMenu;
   final bool includeWallpaper;
+  final bool includeCrt;
 
   void _showContextMenu(BuildContext context, Offset position) {
     final config = contextMenu!;
@@ -177,7 +180,7 @@ class TerminalSurface extends StatelessWidget {
             ],
           );
 
-    if (t.crt.enabled) {
+    if (includeCrt && t.crt.enabled) {
       surface = CrtOverlay(settings: t.crt, child: surface);
     }
 
