@@ -11,8 +11,17 @@ build/
 # Generated platform files
 **/Flutter/ephemeral/
 **/Pods/
-android/local.properties
-android/**/GeneratedPluginRegistrant.java
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Runner/GeneratedPluginRegistrant.h
+**/ios/Runner/GeneratedPluginRegistrant.m
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+
+# Local packages: pub-generated lockfiles (libraries + their example apps)
+packages/*/pubspec.lock
+packages/*/example/pubspec.lock
 
 # Local tooling
 .claude/
