@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
@@ -45,12 +46,20 @@ class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   late TerminalSettings _s;
   late TabController _tabController;
+  PackageInfo? _packageInfo;
 
   @override
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
+    _loadPackageInfo();
+  }
+
+  Future<void> _loadPackageInfo() async {
+    final info = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    setState(() => _packageInfo = info);
   }
 
   @override
@@ -106,6 +115,7 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'Cursor'),
               Tab(text: 'Effects'),
               Tab(text: 'SSH'),
+              Tab(text: 'About'),
             ],
           ),
           Expanded(
@@ -117,6 +127,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildCursorTab(),
                 _buildEffectsTab(),
                 _buildSshTab(),
+                _buildAboutTab(),
               ],
             ),
           ),
@@ -387,6 +398,56 @@ class _SettingsPageState extends State<SettingsPage>
         2 => 800,
         _ => 530,
       };
+
+  // ── About tab ─────────────────────────────────────────────────────────────
+
+  Widget _buildAboutTab() {
+    final info = _packageInfo;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('Application'),
+        const SizedBox(height: 4),
+        Text(
+          'SSTerm',
+          style: const TextStyle(
+            color: _kFg,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _sectionTitle('Version'),
+        if (info == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: _kAccent,
+              ),
+            ),
+          )
+        else ...[
+          Text(
+            info.version,
+            style: const TextStyle(
+              color: _kFg,
+              fontSize: 15,
+              fontFamily: 'Monaco',
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Build ${info.buildNumber}',
+            style: const TextStyle(color: _kFgMuted, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
 
   // ── SSH tab ─────────────────────────────────────────────────────────────────
 
