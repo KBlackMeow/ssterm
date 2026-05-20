@@ -24,6 +24,7 @@ import 'services/ssh_connection.dart';
 import 'services/wallpaper_storage.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
+import 'widgets/frosted_glass.dart';
 import 'widgets/split_view.dart';
 import 'widgets/terminal_surface.dart'
     show TerminalSurface, TerminalContextMenuConfig;
@@ -52,8 +53,7 @@ class SsTermApp extends StatelessWidget {
   }
 }
 
-// Chrome palette — foreground/divider; backgrounds come from [TerminalSettings].
-const _kDivider = Color(0xFF3A3A3A);
+// Chrome palette — foreground; backgrounds come from [TerminalSettings].
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 const _kTabRadius = 6.0;
@@ -1463,6 +1463,7 @@ esac
       settings: _config.terminal,
       viewKey: viewKey,
       contextMenu: contextMenu,
+      frostedGlass: _config.sftpFrostedGlass,
       includeWallpaper: false,
       includeCrt: false,
       autofocus: sshPane == 0,
@@ -1541,6 +1542,11 @@ esac
           splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
           onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
           onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+          frostedGlass: _config.sftpFrostedGlass,
+          onFrostedGlassChanged: (v) {
+            setState(() => _config.sftpFrostedGlass = v);
+            _config.save();
+          },
         ),
         Expanded(child: _buildBody()),
       ],
@@ -1727,6 +1733,8 @@ class _TabBar extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
+    required this.frostedGlass,
+    this.onFrostedGlassChanged,
     this.onInsertCommand,
   });
 
@@ -1754,6 +1762,8 @@ class _TabBar extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
+  final bool frostedGlass;
+  final ValueChanged<bool>? onFrostedGlassChanged;
 
   static const _preferredTabWidth = 160.0;
   static const _minTabWidth = 80.0;
@@ -1817,12 +1827,20 @@ class _TabBar extends StatelessWidget {
             savedHosts: savedHosts,
             configHosts: configHosts,
             onConnectHost: onConnectHost,
+            frostedGlass: frostedGlass,
+            onFrostedGlassChanged: onFrostedGlassChanged,
           ),
-          CmdPickerButton(onInsert: onInsertCommand),
+          CmdPickerButton(
+            onInsert: onInsertCommand,
+            frostedGlass: frostedGlass,
+          ),
           if (hasSftp) ...[
             _SftpButton(sftpVisible: sftpVisible, onToggle: onToggleSftp),
             if (transferManager != null)
-              _TransferButton(manager: transferManager!),
+              _TransferButton(
+                manager: transferManager!,
+                frostedGlass: frostedGlass,
+              ),
           ],
           _SplitButton(
             canSplit: canSplit,
@@ -1830,6 +1848,7 @@ class _TabBar extends StatelessWidget {
             splitAxis: splitAxis,
             onSplitHorizontal: onSplitHorizontal,
             onSplitVertical: onSplitVertical,
+            frostedGlass: frostedGlass,
           ),
           GestureDetector(
             onTap: onSettings,
@@ -1884,26 +1903,26 @@ class _SftpButton extends StatelessWidget {
 
 // ── Transfer menu button ──────────────────────────────────────────────────────
 class _TransferButton extends StatelessWidget {
-  const _TransferButton({required this.manager});
+  const _TransferButton({
+    required this.manager,
+    required this.frostedGlass,
+  });
 
   final TransferManager manager;
+  final bool frostedGlass;
 
   void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
-    showMenu<void>(
+    showFrostedMenu<void>(
       context: context,
+      frostedGlass: frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
         pos.dx + box.size.width,
         pos.dy,
-      ),
-      color: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: _kDivider),
       ),
       constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
       items: [
@@ -1976,6 +1995,7 @@ class _SplitButton extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
+    required this.frostedGlass,
   });
 
   final bool canSplit;
@@ -1983,23 +2003,20 @@ class _SplitButton extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
+  final bool frostedGlass;
 
   void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
-    showMenu<String>(
+    showFrostedMenu<String>(
       context: context,
+      frostedGlass: frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
         pos.dx + box.size.width,
         pos.dy,
-      ),
-      color: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: _kDivider),
       ),
       items: [
         PopupMenuItem(
@@ -2221,7 +2238,11 @@ class _PlusMenu extends StatelessWidget {
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
+    required this.frostedGlass,
+    this.onFrostedGlassChanged,
   });
+
+  static const _frostedToggleValue = '__frosted_glass__';
 
   final ValueChanged<LocalShellOption> onNewLocal;
   final Future<List<LocalShellOption>> Function() onRefreshLocalShells;
@@ -2229,6 +2250,8 @@ class _PlusMenu extends StatelessWidget {
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
+  final bool frostedGlass;
+  final ValueChanged<bool>? onFrostedGlassChanged;
 
   static const _headerStyle = TextStyle(
     color: Color(0xFF6E6E6E),
@@ -2311,18 +2334,14 @@ class _PlusMenu extends StatelessWidget {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
-    showMenu<String>(
+    showFrostedMenu<String>(
       context: context,
+      frostedGlass: frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
         pos.dx + box.size.width,
         pos.dy,
-      ),
-      color: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: _kDivider),
       ),
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.6,
@@ -2358,9 +2377,38 @@ class _PlusMenu extends StatelessWidget {
             ],
           ),
         ),
+        if (onFrostedGlassChanged != null) ...[
+          const PopupMenuDivider(height: 1),
+          PopupMenuItem(
+            value: _frostedToggleValue,
+            height: 36,
+            child: Row(
+              children: [
+                const Icon(Icons.blur_on, size: 13, color: _kFgInactive),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Frosted glass',
+                    style: TextStyle(color: _kFgActive, fontSize: 13),
+                  ),
+                ),
+                if (frostedGlass)
+                  const Icon(
+                    Icons.check,
+                    size: 14,
+                    color: Color(0xFF2472C8),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ],
     ).then((v) {
       if (v == null) return;
+      if (v == _frostedToggleValue) {
+        onFrostedGlassChanged?.call(!frostedGlass);
+        return;
+      }
       if (v.startsWith('shell:')) {
         final id = v.substring('shell:'.length);
         for (final shell in shells) {

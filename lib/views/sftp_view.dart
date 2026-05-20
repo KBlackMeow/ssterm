@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
+import '../widgets/frosted_glass.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
 
 /// Join a remote directory path with a file/dir name.
@@ -43,6 +44,7 @@ class SftpView extends StatefulWidget {
     this.panelPosition,
     this.onPanelPositionChanged,
     this.onClose,
+    this.frostedGlass = true,
   });
 
   final SftpClient sftp;
@@ -55,6 +57,7 @@ class SftpView extends StatefulWidget {
   final SftpPanelPosition? panelPosition;
   final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
   final VoidCallback? onClose;
+  final bool frostedGlass;
 
   @override
   State<SftpView> createState() => _SftpViewState();
@@ -578,35 +581,47 @@ class _SftpViewState extends State<SftpView> {
       Offset.zero & overlay.size,
     );
 
-    await showMenu(
+    final action = await showFrostedMenu<String>(
       context: context,
-      color: const Color(0xFF2B2B2B),
+      frostedGlass: widget.frostedGlass,
       position: position,
       items: [
         if (!isDir)
-          PopupMenuItem(
-            onTap: () => _download(e),
-            child: const Text(
+          const PopupMenuItem(
+            value: 'download',
+            height: 36,
+            child: Text(
               'Download',
               style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
             ),
           ),
-        PopupMenuItem(
-          onTap: () => _rename(SshFtpEntry(e)),
-          child: const Text(
+        const PopupMenuItem(
+          value: 'rename',
+          height: 36,
+          child: Text(
             'Rename',
             style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
           ),
         ),
-        PopupMenuItem(
-          onTap: () => _delete(e),
-          child: const Text(
+        const PopupMenuItem(
+          value: 'delete',
+          height: 36,
+          child: Text(
             'Delete',
             style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13),
           ),
         ),
       ],
     );
+
+    switch (action) {
+      case 'download':
+        await _download(e);
+      case 'rename':
+        await _rename(SshFtpEntry(e));
+      case 'delete':
+        await _delete(e);
+    }
   }
 
   Widget _buildStatusBar() {

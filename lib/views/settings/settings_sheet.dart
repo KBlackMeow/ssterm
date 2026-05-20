@@ -158,7 +158,7 @@ class _SettingsPageState extends State<SettingsPage>
         style: TextStyle(color: _kFg, fontSize: 13),
       ),
       subtitle: const Text(
-        'Blur the terminal behind the file panel',
+        'SFTP, tab bar menus, and right-click context menus',
         style: TextStyle(color: _kFgMuted, fontSize: 11),
       ),
       value: widget.sftpFrostedGlass,

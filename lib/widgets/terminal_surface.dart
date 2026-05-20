@@ -5,10 +5,9 @@ import 'package:xterm/xterm.dart';
 import '../models/terminal_settings.dart';
 import '../services/wallpaper_storage.dart';
 import 'crt_overlay.dart';
+import 'frosted_glass.dart';
 import 'wallpaper_background.dart';
 
-const _kMenuBg = Color(0xFF2B2B2B);
-const _kMenuDivider = Color(0xFF3A3A3A);
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 
@@ -40,6 +39,7 @@ class TerminalSurface extends StatelessWidget {
     // IME (e.g. Chinese) needs [CustomTextEdit] / TextInput, not hardware keys only.
     this.hardwareKeyboardOnly = false,
     this.contextMenu,
+    this.frostedGlass = true,
     /// When false, wallpaper is expected from a parent (e.g. app chrome / tab bar).
     this.includeWallpaper = true,
     /// When false, CRT is expected from a parent (e.g. full window chrome).
@@ -53,6 +53,7 @@ class TerminalSurface extends StatelessWidget {
   final bool autofocus;
   final bool hardwareKeyboardOnly;
   final TerminalContextMenuConfig? contextMenu;
+  final bool frostedGlass;
   final bool includeWallpaper;
   final bool includeCrt;
 
@@ -64,14 +65,10 @@ class TerminalSurface extends StatelessWidget {
       Offset.zero & overlay.size,
     );
 
-    showMenu<String>(
+    showFrostedMenu<String>(
       context: context,
+      frostedGlass: frostedGlass,
       position: relativeRect,
-      color: _kMenuBg,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: _kMenuDivider),
-      ),
       items: [
         PopupMenuItem<String>(
           value: 'copy',

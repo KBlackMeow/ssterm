@@ -1,17 +1,11 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 
 import '../models/transfer_task.dart';
+import '../widgets/frosted_glass.dart';
 import 'sftp_view.dart';
 
-const _kSftpPanelRadius = 12.0;
 const _kSftpPanelMargin = 8.0;
-const _kSftpPanelFill = Color(0xD91C1C1C); // ~85% opacity
-const _kSftpFrostedFill = Color(0x991C1C1C); // ~60% over blurred terminal
-const _kSftpFrostedBlurSigma = 18.0;
-const _kSftpPanelBorder = Color(0x1FFFFFFF);
 
 enum SftpPanelPosition { right, bottom }
 
@@ -97,6 +91,7 @@ class _SshSessionViewState extends State<SshSessionView> {
             widget.onLayoutChanged?.call(_position, null);
           }),
           onClose: widget.onToggleSftp,
+          frostedGlass: widget.frostedGlass,
         );
 
         final panel = _position == SftpPanelPosition.right
@@ -196,29 +191,17 @@ class _SftpFloatingChrome extends StatelessWidget {
             _kSftpPanelMargin,
           );
 
-    final radius = BorderRadius.circular(_kSftpPanelRadius);
-    final decoration = BoxDecoration(
-      color: frostedGlass ? _kSftpFrostedFill : _kSftpPanelFill,
-      border: Border.all(color: _kSftpPanelBorder),
-      borderRadius: radius,
+    return Padding(
+      padding: margin,
+      child: FrostedGlassSurface(
+        frosted: frostedGlass,
+        borderRadius: FrostedGlassStyle.panelRadius,
+        fillColor: frostedGlass
+            ? FrostedGlassStyle.panelFillFrosted
+            : FrostedGlassStyle.panelFillSolid,
+        child: child,
+      ),
     );
-
-    Widget panel = DecoratedBox(decoration: decoration, child: child);
-
-    panel = ClipRRect(
-      borderRadius: radius,
-      child: frostedGlass
-          ? BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: _kSftpFrostedBlurSigma,
-                sigmaY: _kSftpFrostedBlurSigma,
-              ),
-              child: panel,
-            )
-          : panel,
-    );
-
-    return Padding(padding: margin, child: panel);
   }
 }
 

@@ -5,9 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/command.dart';
+import 'frosted_glass.dart';
 
-const _kBg = Color(0xFF2B2B2B);
-const _kDivider = Color(0xFF3A3A3A);
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 
@@ -42,9 +41,14 @@ TextStyle _menuTextStyle({
 }
 
 class CmdPickerButton extends StatefulWidget {
-  const CmdPickerButton({super.key, required this.onInsert});
+  const CmdPickerButton({
+    super.key,
+    required this.onInsert,
+    this.frostedGlass = true,
+  });
 
   final ValueChanged<String>? onInsert;
+  final bool frostedGlass;
 
   @override
   State<CmdPickerButton> createState() => _CmdPickerButtonState();
@@ -111,18 +115,14 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
         ),
     ];
 
-    showMenu<int>(
+    showFrostedMenu<int>(
       context: context,
+      frostedGlass: widget.frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
         pos.dx + box.size.width,
         pos.dy,
-      ),
-      color: _kBg,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: const BorderSide(color: _kDivider),
       ),
       constraints: const BoxConstraints(minWidth: 240, maxWidth: 320),
       items: items,
