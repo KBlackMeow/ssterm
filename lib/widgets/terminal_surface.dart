@@ -42,6 +42,8 @@ class TerminalSurface extends StatelessWidget {
     // IME (e.g. Chinese) needs [CustomTextEdit] / TextInput, not hardware keys only.
     this.hardwareKeyboardOnly = false,
     this.contextMenu,
+    /// When false, wallpaper is expected from a parent (e.g. app chrome / tab bar).
+    this.includeWallpaper = true,
   });
 
   final Terminal terminal;
@@ -51,6 +53,7 @@ class TerminalSurface extends StatelessWidget {
   final bool autofocus;
   final bool hardwareKeyboardOnly;
   final TerminalContextMenuConfig? contextMenu;
+  final bool includeWallpaper;
 
   void _showContextMenu(BuildContext context, Offset position) {
     final config = contextMenu!;
@@ -156,7 +159,9 @@ class TerminalSurface extends StatelessWidget {
           : null,
     );
 
-    final wallpaper = WallpaperStorage.resolveFile(t.wallpaperId);
+    final wallpaper = includeWallpaper && t.hasWallpaper
+        ? WallpaperStorage.resolveFile(t.wallpaperId)
+        : null;
 
     Widget surface = wallpaper == null
         ? terminalView

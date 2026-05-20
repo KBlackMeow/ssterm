@@ -26,7 +26,9 @@ class TerminalPreview extends StatelessWidget {
           fontStyle: italic ? FontStyle.italic : FontStyle.normal,
         );
 
-    final wallpaper = WallpaperStorage.resolveFile(settings.wallpaperId);
+    final wallpaper = settings.hasWallpaper
+        ? WallpaperStorage.resolveFile(settings.wallpaperId)
+        : null;
     final bgOpacity = settings.effectiveBackgroundOpacity;
 
     Widget preview = ClipRRect(

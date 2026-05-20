@@ -36,6 +36,7 @@ class TerminalSettings {
     this.cursorBlinkPeriodMs = 530,
     this.textScale = 1.0,
     this.wallpaperId,
+    this.wallpaperEnabled = false,
     this.wallpaperOpacity = 1.0,
     this.wallpaperBlur = 12.0,
     this.backgroundOpacity = 0.88,
@@ -59,8 +60,10 @@ class TerminalSettings {
   int cursorBlinkPeriodMs;
   double textScale;
 
-  /// Filename under `~/.ssterm/wallpapers/`, or null when disabled.
+  /// Filename under `~/.ssterm/wallpapers/`, or null when none chosen.
   String? wallpaperId;
+  /// When false, [wallpaperId] is kept but wallpaper is not shown.
+  bool wallpaperEnabled;
   double wallpaperOpacity;
   /// Gaussian blur radius (sigma) for the wallpaper, 0 = none.
   double wallpaperBlur;
@@ -69,10 +72,42 @@ class TerminalSettings {
 
   CrtSettings crt;
 
-  bool get hasWallpaper => wallpaperId != null && wallpaperId!.isNotEmpty;
+  bool get hasWallpaper =>
+      wallpaperEnabled && wallpaperId != null && wallpaperId!.isNotEmpty;
 
   double get effectiveBackgroundOpacity =>
       hasWallpaper ? backgroundOpacity.clamp(0.0, 1.0) : 1.0;
+
+  /// Tab bar strip + terminal backdrop — same as [TerminalView]'s `Container`.
+  Color get chromeBackground {
+    final background = resolveTheme().background;
+    if (hasWallpaper) {
+      return background.withValues(alpha: effectiveBackgroundOpacity);
+    }
+    return background;
+  }
+
+  /// Selected tab button fill (pill only — not the tab bar strip).
+  Color get chromeTabSelected {
+    final base = resolveTheme().background;
+    if (hasWallpaper) {
+      return base.withValues(
+        alpha: (effectiveBackgroundOpacity * 0.65).clamp(0.0, 1.0),
+      );
+    }
+    return base.withValues(alpha: 0.32);
+  }
+
+  /// Unselected tab button fill — same hue, lower opacity.
+  Color get chromeTabUnselected {
+    final base = resolveTheme().background;
+    if (hasWallpaper) {
+      return base.withValues(
+        alpha: (effectiveBackgroundOpacity * 0.28).clamp(0.0, 1.0),
+      );
+    }
+    return base.withValues(alpha: 0.14);
+  }
 
   static List<String> get fontOptions {
     if (Platform.isWindows) {
@@ -222,6 +257,7 @@ class TerminalSettings {
     double? textScale,
     String? wallpaperId,
     bool clearWallpaper = false,
+    bool? wallpaperEnabled,
     double? wallpaperOpacity,
     double? wallpaperBlur,
     double? backgroundOpacity,
@@ -240,6 +276,9 @@ class TerminalSettings {
       cursorBlinkPeriodMs: cursorBlinkPeriodMs ?? this.cursorBlinkPeriodMs,
       textScale: textScale ?? this.textScale,
       wallpaperId: clearWallpaper ? null : (wallpaperId ?? this.wallpaperId),
+      wallpaperEnabled: clearWallpaper
+          ? false
+          : (wallpaperEnabled ?? this.wallpaperEnabled),
       wallpaperOpacity: wallpaperOpacity ?? this.wallpaperOpacity,
       wallpaperBlur: wallpaperBlur ?? this.wallpaperBlur,
       backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
@@ -295,6 +334,9 @@ class TerminalSettings {
       cursorBlinkPeriodMs: json['cursorBlinkPeriodMs'] as int? ?? 530,
       textScale: (json['textScale'] as num?)?.toDouble() ?? 1.0,
       wallpaperId: json['wallpaperId'] as String?,
+      wallpaperEnabled: json['wallpaperEnabled'] as bool? ??
+          (json['wallpaperId'] != null &&
+              (json['wallpaperId'] as String).isNotEmpty),
       wallpaperOpacity: (json['wallpaperOpacity'] as num?)?.toDouble() ?? 1.0,
       wallpaperBlur: (json['wallpaperBlur'] as num?)?.toDouble() ?? 12.0,
       backgroundOpacity: (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.88,
@@ -316,6 +358,7 @@ class TerminalSettings {
         'cursorBlinkPeriodMs': cursorBlinkPeriodMs,
         'textScale': textScale,
         if (wallpaperId != null) 'wallpaperId': wallpaperId,
+        'wallpaperEnabled': wallpaperEnabled,
         'wallpaperOpacity': wallpaperOpacity,
         'wallpaperBlur': wallpaperBlur,
         'backgroundOpacity': backgroundOpacity,

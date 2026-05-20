@@ -21,6 +21,7 @@ import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/session_logger.dart';
 import 'services/ssh_connection.dart';
+import 'services/wallpaper_storage.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/split_view.dart';
@@ -29,6 +30,7 @@ import 'widgets/terminal_surface.dart'
 import 'models/transfer_task.dart';
 import 'views/ssh_session_view.dart';
 import 'widgets/transfer_panel.dart';
+import 'widgets/wallpaper_background.dart';
 
 void main() {
   runApp(const SsTermApp());
@@ -49,11 +51,11 @@ class SsTermApp extends StatelessWidget {
   }
 }
 
-const _kBg = Color(0xFF1C1C1C);
-const _kTabBarBg = Color(0xFF2B2B2B);
+// Chrome palette — foreground/divider; backgrounds come from [TerminalSettings].
 const _kDivider = Color(0xFF3A3A3A);
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
+const _kTabRadius = 6.0;
 
 // ── I/O → Terminal bridge ────────────────────────────────────────────────────
 class _OutputPipe {
@@ -1313,6 +1315,7 @@ esac
       settings: _config.terminal,
       viewKey: viewKey,
       contextMenu: contextMenu,
+      includeWallpaper: false,
     );
   }
 
@@ -1326,6 +1329,84 @@ esac
 
   bool get _activeTabIsSplit =>
       _tabs.isNotEmpty && _active < _tabs.length && _tabs[_active].isSplit;
+
+  Widget _buildChrome() {
+    final ts = _config.terminal;
+    final hasWallpaper = ts.hasWallpaper;
+    final wallpaperFile =
+        hasWallpaper ? WallpaperStorage.resolveFile(ts.wallpaperId) : null;
+
+    Widget chrome = Column(
+      children: [
+        _TabBar(
+          tabs: _tabs,
+          active: _active,
+          backgroundColor: ts.chromeBackground,
+          tabSelectedColor: ts.chromeTabSelected,
+          tabUnselectedColor: ts.chromeTabUnselected,
+          onSelect: _selectTab,
+          onClose: _closeTab,
+          onNewLocal: _newLocalTab,
+          onRefreshLocalShells: _refreshLocalShells,
+          onNewSsh: () => _showConnectDialog(),
+          onSettings: _openSettings,
+          savedHosts: _savedHosts,
+          configHosts: _configHosts,
+          onConnectHost: _connectSavedHost,
+          onInsertCommand:
+              _tabs.isNotEmpty && _tabs[_active].terminal != null
+              ? _insertCommand
+              : null,
+          hasSftp:
+              _tabs.isNotEmpty &&
+              _active < _tabs.length &&
+              _tabs[_active].sftp != null,
+          sftpVisible:
+              _tabs.isNotEmpty &&
+              _active < _tabs.length &&
+              _tabs[_active].sftpPanelVisible,
+          onToggleSftp: () {
+            if (_tabs.isNotEmpty && _active < _tabs.length) {
+              setState(
+                () => _tabs[_active].sftpPanelVisible =
+                    !_tabs[_active].sftpPanelVisible,
+              );
+            }
+          },
+          transferManager: _tabs.isNotEmpty && _active < _tabs.length
+              ? _tabs[_active].transferManager
+              : null,
+          canSplit: _activeTabCanSplit,
+          isSplit: _activeTabIsSplit,
+          splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
+          onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+          onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+          onCloseSplit: _closeSplitCurrentTab,
+        ),
+        Expanded(child: _buildBody()),
+      ],
+    );
+
+    if (wallpaperFile != null) {
+      chrome = Stack(
+        fit: StackFit.expand,
+        children: [
+          WallpaperBackground(
+            file: wallpaperFile,
+            opacity: ts.wallpaperOpacity,
+            blur: ts.wallpaperBlur,
+          ),
+          chrome,
+        ],
+      );
+    }
+
+    return Scaffold(
+      backgroundColor:
+          wallpaperFile != null ? Colors.transparent : ts.chromeBackground,
+      body: chrome,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1351,57 +1432,7 @@ esac
             },
           ),
         },
-        child: Scaffold(
-          backgroundColor: _kBg,
-          body: Column(
-            children: [
-              _TabBar(
-                tabs: _tabs,
-                active: _active,
-                onSelect: _selectTab,
-                onClose: _closeTab,
-                onNewLocal: _newLocalTab,
-                onRefreshLocalShells: _refreshLocalShells,
-                onNewSsh: () => _showConnectDialog(),
-                onSettings: _openSettings,
-                savedHosts: _savedHosts,
-                configHosts: _configHosts,
-                onConnectHost: _connectSavedHost,
-                onInsertCommand:
-                    _tabs.isNotEmpty && _tabs[_active].terminal != null
-                    ? _insertCommand
-                    : null,
-                hasSftp:
-                    _tabs.isNotEmpty &&
-                    _active < _tabs.length &&
-                    _tabs[_active].sftp != null,
-                sftpVisible:
-                    _tabs.isNotEmpty &&
-                    _active < _tabs.length &&
-                    _tabs[_active].sftpPanelVisible,
-                onToggleSftp: () {
-                  if (_tabs.isNotEmpty && _active < _tabs.length) {
-                    setState(
-                      () => _tabs[_active].sftpPanelVisible =
-                          !_tabs[_active].sftpPanelVisible,
-                    );
-                  }
-                },
-                transferManager: _tabs.isNotEmpty && _active < _tabs.length
-                    ? _tabs[_active].transferManager
-                    : null,
-                canSplit: _activeTabCanSplit,
-                isSplit: _activeTabIsSplit,
-                splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
-                onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
-                onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-                onCloseSplit: _closeSplitCurrentTab,
-              ),
-              const Divider(height: 1, thickness: 1, color: _kDivider),
-              Expanded(child: _buildBody()),
-            ],
-          ),
-        ),
+        child: _buildChrome(),
       ),
     );
   }
@@ -1504,6 +1535,9 @@ class _TabBar extends StatelessWidget {
   const _TabBar({
     required this.tabs,
     required this.active,
+    required this.backgroundColor,
+    required this.tabSelectedColor,
+    required this.tabUnselectedColor,
     required this.onSelect,
     required this.onClose,
     required this.onNewLocal,
@@ -1528,6 +1562,9 @@ class _TabBar extends StatelessWidget {
 
   final List<_Tab> tabs;
   final int active;
+  final Color backgroundColor;
+  final Color tabSelectedColor;
+  final Color tabUnselectedColor;
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final ValueChanged<LocalShellOption> onNewLocal;
@@ -1555,8 +1592,8 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 24,
-      color: _kTabBarBg,
+      color: backgroundColor,
+      padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
       child: Row(
         children: [
           Expanded(
@@ -1564,24 +1601,33 @@ class _TabBar extends StatelessWidget {
               builder: (context, constraints) {
                 if (tabs.isEmpty) return const SizedBox.shrink();
 
-                final equalWidth = constraints.maxWidth / tabs.length;
-                final tabWidth =
-                    equalWidth.clamp(_minTabWidth, _preferredTabWidth);
+                const tabGap = 4.0;
+                final slotWidth =
+                    (constraints.maxWidth - tabGap * (tabs.length - 1)) /
+                    tabs.length;
+                final tabWidth = slotWidth.clamp(_minTabWidth, _preferredTabWidth);
                 final needsScroll =
                     tabWidth <= _minTabWidth &&
-                    tabs.length * _minTabWidth > constraints.maxWidth;
+                    tabs.length * (_minTabWidth + tabGap) > constraints.maxWidth;
 
                 final chips = [
                   for (var i = 0; i < tabs.length; i++)
-                    SizedBox(
-                      width: needsScroll ? _minTabWidth : tabWidth,
-                      child: _TabChip(
-                        tab: tabs[i],
-                        isActive: i == active,
-                        showClose: true,
-                        expand: true,
-                        onTap: () => onSelect(i),
-                        onClose: () => onClose(i),
+                    Padding(
+                      padding: EdgeInsets.only(
+                        right: i < tabs.length - 1 ? tabGap : 0,
+                      ),
+                      child: SizedBox(
+                        width: needsScroll ? _minTabWidth : tabWidth,
+                        child: _TabChip(
+                          tab: tabs[i],
+                          isActive: i == active,
+                          tabSelectedColor: tabSelectedColor,
+                          tabUnselectedColor: tabUnselectedColor,
+                          showClose: true,
+                          expand: true,
+                          onTap: () => onSelect(i),
+                          onClose: () => onClose(i),
+                        ),
                       ),
                     ),
                 ];
@@ -1877,10 +1923,12 @@ class _SplitButton extends StatelessWidget {
 }
 
 // ── Tab chip ──────────────────────────────────────────────────────────────────
-class _TabChip extends StatelessWidget {
+class _TabChip extends StatefulWidget {
   const _TabChip({
     required this.tab,
     required this.isActive,
+    required this.tabSelectedColor,
+    required this.tabUnselectedColor,
     required this.showClose,
     required this.expand,
     required this.onTap,
@@ -1889,68 +1937,85 @@ class _TabChip extends StatelessWidget {
 
   final _Tab tab;
   final bool isActive;
+  final Color tabSelectedColor;
+  final Color tabUnselectedColor;
   final bool showClose;
   final bool expand;
   final VoidCallback onTap;
   final VoidCallback onClose;
 
   @override
+  State<_TabChip> createState() => _TabChipState();
+}
+
+class _TabChipState extends State<_TabChip> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: isActive ? _kBg : Colors.transparent,
-          border: Border(
-            right: const BorderSide(color: _kDivider),
-            bottom: BorderSide(
-              color: isActive ? _kBg : Colors.transparent,
-              width: 2,
-            ),
+    final isActive = widget.isActive;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: isActive
+                ? widget.tabSelectedColor
+                : widget.tabUnselectedColor,
+            borderRadius: BorderRadius.circular(_kTabRadius),
           ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              tab.icon,
-              size: 11,
-              color: isActive ? _kFgActive : _kFgInactive,
-            ),
-            const SizedBox(width: 5),
-            if (expand)
-              Expanded(
-                child: Text(
-                  tab.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isActive ? _kFgActive : _kFgInactive,
-                    fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
-                  ),
-                ),
-              )
-            else
-              Flexible(
-                child: Text(
-                  tab.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isActive ? _kFgActive : _kFgInactive,
-                    fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w500 : FontWeight.normal,
-                  ),
-                ),
+          child: Row(
+            children: [
+              Icon(
+                widget.tab.icon,
+                size: 12,
+                color: isActive ? _kFgActive : _kFgInactive,
               ),
-            if (showClose) ...[
               const SizedBox(width: 6),
-              _CloseBtn(onTap: onClose, isActive: isActive),
+              if (widget.expand)
+                Expanded(
+                  child: Text(
+                    widget.tab.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive ? _kFgActive : _kFgInactive,
+                      fontSize: 12,
+                      fontWeight:
+                          isActive ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                )
+              else
+                Flexible(
+                  child: Text(
+                    widget.tab.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive ? _kFgActive : _kFgInactive,
+                      fontSize: 12,
+                      fontWeight:
+                          isActive ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              if (widget.showClose) ...[
+                const SizedBox(width: 4),
+                _CloseBtn(
+                  onTap: widget.onClose,
+                  visible: isActive || _hover,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -1958,9 +2023,10 @@ class _TabChip extends StatelessWidget {
 }
 
 class _CloseBtn extends StatefulWidget {
-  const _CloseBtn({required this.onTap, required this.isActive});
+  const _CloseBtn({required this.onTap, required this.visible});
+
   final VoidCallback onTap;
-  final bool isActive;
+  final bool visible;
 
   @override
   State<_CloseBtn> createState() => _CloseBtnState();
@@ -1977,19 +2043,17 @@ class _CloseBtnState extends State<_CloseBtn> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: Container(
-          width: 14,
-          height: 14,
+          width: 16,
+          height: 16,
           decoration: BoxDecoration(
             color: _hover ? const Color(0xFF4A4A4A) : Colors.transparent,
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             Icons.close,
-            size: 10,
-            color: _hover
-                ? _kFgActive
-                : widget.isActive
-                ? _kFgInactive
+            size: 11,
+            color: widget.visible
+                ? (_hover ? _kFgActive : _kFgInactive)
                 : Colors.transparent,
           ),
         ),

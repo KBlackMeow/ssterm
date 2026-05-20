@@ -574,6 +574,7 @@ class _SettingsPageState extends State<SettingsPage>
     _apply(
       _s.copyWith(
         wallpaperId: id,
+        wallpaperEnabled: true,
         backgroundOpacity: hadWallpaper ? _s.backgroundOpacity : 0.88,
         wallpaperBlur: hadWallpaper ? _s.wallpaperBlur : 12.0,
       ),
@@ -588,21 +589,50 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Widget _wallpaperSection() {
-    final file = WallpaperStorage.resolveFile(_s.wallpaperId);
+    final storedFile = WallpaperStorage.resolveFile(_s.wallpaperId);
+    final enabled = _s.wallpaperEnabled;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (file != null) ...[
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Enable wallpaper',
+            style: TextStyle(color: _kFg, fontSize: 13),
+          ),
+          subtitle: Text(
+            storedFile == null
+                ? 'Choose an image to use as background'
+                : enabled
+                ? 'Shown behind terminal and tabs'
+                : 'Image kept — turn on to show',
+            style: const TextStyle(color: _kFgMuted, fontSize: 11),
+          ),
+          value: enabled,
+          activeTrackColor: _kAccent,
+          onChanged: (v) {
+            if (v && storedFile == null) {
+              _pickWallpaper();
+              return;
+            }
+            _apply(_s.copyWith(wallpaperEnabled: v));
+          },
+        ),
+        if (storedFile != null) ...[
+          const SizedBox(height: 4),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              height: 72,
-              width: double.infinity,
-              child: WallpaperBackground(
-                file: file,
-                opacity: _s.wallpaperOpacity,
-                blur: _s.wallpaperBlur,
+            child: Opacity(
+              opacity: enabled ? 1.0 : 0.45,
+              child: SizedBox(
+                height: 72,
+                width: double.infinity,
+                child: WallpaperBackground(
+                  file: storedFile,
+                  opacity: _s.wallpaperOpacity,
+                  blur: _s.wallpaperBlur,
+                ),
               ),
             ),
           ),
@@ -614,11 +644,11 @@ class _SettingsPageState extends State<SettingsPage>
               onPressed: _pickWallpaper,
               icon: const Icon(Icons.image_outlined, size: 16, color: _kAccent),
               label: Text(
-                file == null ? 'Choose image…' : 'Change image…',
+                storedFile == null ? 'Choose image…' : 'Change image…',
                 style: const TextStyle(color: _kAccent, fontSize: 13),
               ),
             ),
-            if (file != null) ...[
+            if (storedFile != null) ...[
               const Spacer(),
               TextButton(
                 onPressed: _removeWallpaper,
@@ -630,7 +660,7 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ],
         ),
-        if (file != null) ...[
+        if (storedFile != null && enabled) ...[
           _slider(
             label: 'Opacity',
             hint: 'Image visibility',
