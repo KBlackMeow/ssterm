@@ -127,7 +127,6 @@ class TerminalSettings {
         'Cascadia Code',
         'Fira Code',
         'Courier New',
-        'Monaco',
         'monospace',
       ];
     }
@@ -137,7 +136,6 @@ class TerminalSettings {
       'Menlo',
       'JetBrains Mono',
       'Fira Code',
-      'Consolas',
       'Courier New',
       'monospace',
     ];
@@ -147,9 +145,8 @@ class TerminalSettings {
   static String resolveFontFamily(String? savedFont) {
     if (savedFont == null) return defaultFontFamily;
 
-    // Previous Windows builds defaulted to Cascadia Mono / upgraded Monaco.
-    if (Platform.isWindows &&
-        (savedFont == 'Monaco' || savedFont == 'Cascadia Mono')) {
+    // Legacy: Windows builds once shipped Monaco as a placeholder default.
+    if (Platform.isWindows && savedFont == 'Monaco') {
       return defaultFontFamily;
     }
 
@@ -202,7 +199,7 @@ class TerminalSettings {
       'Courier New',
       'Liberation Mono',
       'monospace',
-    ];
+    ].where((face) => face != fontFamily).toList();
 
     if (Platform.isWindows) {
       return [
