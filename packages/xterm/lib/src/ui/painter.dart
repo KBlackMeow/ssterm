@@ -199,6 +199,9 @@ class TerminalPainter {
       final style = _textStyle.toTextStyle(
         color: color,
         bold: cellFlags & CellFlags.bold != 0,
+        // Wide glyphs (CJK, emoji) use fallback fonts that often lack a real
+        // bold cut; Flutter then synthesizes bold and strokes look too heavy.
+        applyBoldWeight: charWidth < 2,
         italic: cellFlags & CellFlags.italic != 0,
       );
 

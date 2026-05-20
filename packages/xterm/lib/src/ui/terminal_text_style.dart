@@ -74,9 +74,11 @@ class TerminalStyle {
     Color? color,
     Color? backgroundColor,
     bool bold = false,
+    bool applyBoldWeight = true,
     bool italic = false,
     bool underline = false,
   }) {
+    final ansiBold = bold && applyBoldWeight;
     return TextStyle(
       fontSize: fontSize,
       height: height,
@@ -85,7 +87,7 @@ class TerminalStyle {
       fontFamilyFallback: fontFamilyFallback,
       color: color,
       backgroundColor: backgroundColor,
-      fontWeight: bold ? FontWeight.bold : fontWeight,
+      fontWeight: ansiBold ? FontWeight.bold : fontWeight,
       fontStyle: italic ? FontStyle.italic : FontStyle.normal,
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
@@ -95,6 +97,7 @@ class TerminalStyle {
     Color? color,
     Color? backgroundColor,
     bool bold = false,
+    bool applyBoldWeight = true,
     bool italic = false,
     bool underline = false,
   }) {
@@ -102,6 +105,7 @@ class TerminalStyle {
       color: color,
       backgroundColor: backgroundColor,
       bold: bold,
+      applyBoldWeight: applyBoldWeight,
       italic: italic,
       underline: underline,
     ).getParagraphStyle(textHeightBehavior: kTerminalTextHeightBehavior);
