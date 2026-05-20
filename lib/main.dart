@@ -1915,23 +1915,16 @@ class _TransferButton extends StatelessWidget {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
-    showFrostedMenu<void>(
+    showTransferMenu(
       context: context,
       frostedGlass: frostedGlass,
+      manager: manager,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
         pos.dx + box.size.width,
         pos.dy,
       ),
-      constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
-      items: [
-        PopupMenuItem<void>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: TransferMenuContent(manager: manager),
-        ),
-      ],
     );
   }
 

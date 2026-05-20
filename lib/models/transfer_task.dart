@@ -23,6 +23,8 @@ class TransferTask extends ChangeNotifier {
 
   SftpFileWriter? _writer;
   StreamSubscription<Uint8List>? _downloadSub;
+  DateTime? _lastProgressNotify;
+  static const _progressNotifyInterval = Duration(milliseconds: 100);
 
   bool get isActive =>
       status == TransferStatus.running || status == TransferStatus.paused;
@@ -55,6 +57,12 @@ class TransferTask extends ChangeNotifier {
 
   void _onProgress(int b) {
     bytes = b;
+    final now = DateTime.now();
+    if (_lastProgressNotify != null &&
+        now.difference(_lastProgressNotify!) < _progressNotifyInterval) {
+      return;
+    }
+    _lastProgressNotify = now;
     notifyListeners();
   }
 

@@ -24,12 +24,17 @@ class FrostedGlassSurface extends StatelessWidget {
     required this.child,
     this.borderRadius = FrostedGlassStyle.menuRadius,
     this.fillColor,
+    this.blur,
   });
 
   final bool frosted;
   final Widget child;
   final double borderRadius;
   final Color? fillColor;
+
+  /// Backdrop blur; defaults to [frosted]. Disable for live-updating overlays
+  /// (e.g. transfer panel over SFTP) to avoid compositor/layout issues.
+  final bool? blur;
 
   @override
   Widget build(BuildContext context) {
@@ -48,10 +53,12 @@ class FrostedGlassSurface extends StatelessWidget {
       child: child,
     );
 
+    final useBlur = blur ?? frosted;
+
     return ClipRRect(
       borderRadius: radius,
       clipBehavior: Clip.antiAlias,
-      child: frosted
+      child: useBlur
           ? BackdropFilter(
               filter: ImageFilter.blur(
                 sigmaX: FrostedGlassStyle.blurSigma,
@@ -92,6 +99,11 @@ Future<T?> showFrostedMenu<T>({
     );
   }
 
+  final shellHeight = _frostedMenuShellHeight(items, constraints);
+  final fixedHeight = constraints != null &&
+      constraints.hasBoundedHeight &&
+      constraints.minHeight == constraints.maxHeight;
+
   return showMenu<T>(
     context: context,
     position: position,
@@ -106,19 +118,59 @@ Future<T?> showFrostedMenu<T>({
       PopupMenuItem<T>(
         enabled: false,
         padding: EdgeInsets.zero,
+        height: shellHeight,
         child: FrostedGlassSurface(
           frosted: true,
           borderRadius: FrostedGlassStyle.menuRadius,
           fillColor: FrostedGlassStyle.menuFillFrosted,
           child: _FrostedMenuList<T>(
             entries: items,
-            maxHeight: constraints?.maxHeight,
+            maxHeight: fixedHeight ? null : constraints?.maxHeight,
             onSelected: (value) => Navigator.of(context).pop<T>(value),
           ),
         ),
       ),
     ],
   );
+}
+
+/// Height for the single [showMenu] shell item so the route matches real content.
+double _frostedMenuShellHeight<T>(
+  List<PopupMenuEntry<T>> entries,
+  BoxConstraints? constraints,
+) {
+  var total = 0.0;
+  for (final entry in entries) {
+    if (entry is PopupMenuDivider) {
+      total += entry.height;
+    } else if (entry is PopupMenuItem<T>) {
+      total += entry.height;
+    }
+  }
+
+  if (constraints != null && constraints.hasBoundedHeight) {
+    final maxH = constraints.maxHeight;
+    if (constraints.minHeight == maxH && maxH.isFinite) {
+      return maxH;
+    }
+    if (maxH.isFinite && total > maxH) {
+      return maxH;
+    }
+  }
+
+  return total > 0 ? total : kMinInteractiveDimension;
+}
+
+double _entriesTotalHeight<T>(List<PopupMenuEntry<T>> entries) {
+  var total = 0.0;
+  for (final entry in entries) {
+    if (entry is PopupMenuDivider) {
+      total += entry.height;
+    } else if (entry is PopupMenuItem<T>) {
+      total += entry.height;
+    }
+  }
+  return total;
 }
 
 class _FrostedMenuList<T> extends StatelessWidget {
@@ -157,16 +209,19 @@ class _FrostedMenuList<T> extends StatelessWidget {
               .resolve(Directionality.of(context));
 
       if (!item.enabled) {
-        rows.add(SizedBox(
-          height: height,
-          child: Padding(
-            padding: padding,
-            child: Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: item.child,
+        rows.add(
+          SizedBox(
+            height: height,
+            width: double.infinity,
+            child: Padding(
+              padding: padding,
+              child: Align(
+                alignment: AlignmentDirectional.topStart,
+                child: item.child,
+              ),
             ),
           ),
-        ));
+        );
         continue;
       }
 
@@ -201,10 +256,13 @@ class _FrostedMenuList<T> extends StatelessWidget {
 
     final maxH = maxHeight;
     if (maxH != null && maxH.isFinite) {
-      return ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxH),
-        child: SingleChildScrollView(child: list),
-      );
+      final contentHeight = _entriesTotalHeight(entries);
+      if (contentHeight > maxH) {
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxH),
+          child: SingleChildScrollView(child: list),
+        );
+      }
     }
     return list;
   }
