@@ -812,7 +812,7 @@ class _SettingsPageState extends State<SettingsPage>
     return DropdownButtonFormField<String>(
       initialValue: TerminalSettings.fontOptions.contains(_s.fontFamily)
           ? _s.fontFamily
-          : TerminalSettings.fontOptions.first,
+          : TerminalSettings.defaultFontFamily,
       dropdownColor: const Color(0xFF1C1C1C),
       style: const TextStyle(color: _kFg, fontSize: 13),
       decoration: const InputDecoration(

@@ -11,7 +11,7 @@ import 'terminal_theme_presets.dart';
 class TerminalSettings {
   /// Platform-aware default monospace face.
   static String get defaultFontFamily {
-    if (Platform.isWindows) return 'Cascadia Mono';
+    if (Platform.isWindows) return 'Consolas';
     if (Platform.isMacOS) return 'Monaco';
     return 'JetBrains Mono';
   }
@@ -121,10 +121,10 @@ class TerminalSettings {
   static List<String> get fontOptions {
     if (Platform.isWindows) {
       return const [
-        'Cascadia Mono',
-        'Cascadia Code',
         'Consolas',
         'JetBrains Mono',
+        'Cascadia Mono',
+        'Cascadia Code',
         'Fira Code',
         'Courier New',
         'Monaco',
@@ -133,14 +133,28 @@ class TerminalSettings {
     }
     return const [
       'Monaco',
-      'Menlo',
       'SF Mono',
+      'Menlo',
       'JetBrains Mono',
       'Fira Code',
       'Consolas',
       'Courier New',
       'monospace',
     ];
+  }
+
+  /// Resolves a persisted [savedFont] to a face available on this platform.
+  static String resolveFontFamily(String? savedFont) {
+    if (savedFont == null) return defaultFontFamily;
+
+    // Previous Windows builds defaulted to Cascadia Mono / upgraded Monaco.
+    if (Platform.isWindows &&
+        (savedFont == 'Monaco' || savedFont == 'Cascadia Mono')) {
+      return defaultFontFamily;
+    }
+
+    if (fontOptions.contains(savedFont)) return savedFont;
+    return defaultFontFamily;
   }
 
   static List<String> get cjkFontOptions {
@@ -232,8 +246,8 @@ class TerminalSettings {
     return _brightenText(base);
   }
 
-  static const _kTextLift = 0.10;
-  static const _kAnsiLift = 0.05;
+  static const _kTextLift = 0.06;
+  static const _kAnsiLift = 0.04;
 
   static TerminalTheme _brightenText(TerminalTheme t) {
     Color lift(Color c, double amount) =>
@@ -344,12 +358,7 @@ class TerminalSettings {
     }
 
     final savedFont = json['fontFamily'] as String?;
-    // Upgrade untouched Windows default (Monaco) to Cascadia Mono.
-    final fontFamily = savedFont == null
-        ? defaultFontFamily
-        : (Platform.isWindows && savedFont == 'Monaco'
-            ? defaultFontFamily
-            : savedFont);
+    final fontFamily = resolveFontFamily(savedFont);
 
     return TerminalSettings(
       themePresetId: preset,
