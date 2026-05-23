@@ -189,8 +189,8 @@ EOF
     exec env ZDOTDIR="$tmpdir" "$shell" -il
     ;;
   bash)
-    rcfile="$(mktemp "${TMPDIR:-/tmp}/ssterm-bash.XXXXXX")"
-    cat >"$rcfile" <<'EOF'
+    ENV=/dev/fd/3 exec "$shell" --posix --noprofile -i 3<<'RCEOF'
+set +o posix
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
@@ -222,8 +222,7 @@ case "$PS1" in
     unset __ssterm_ps1_before __ssterm_ps1_after
     ;;
 esac
-EOF
-    exec "$shell" --noprofile --rcfile "$rcfile" -i
+RCEOF
     ;;
   *)
     exec "$shell" -il

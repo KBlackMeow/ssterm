@@ -959,8 +959,8 @@ EOF
     exec env ZDOTDIR="$tmpdir" "$shell" -il
     ;;
   bash)
-    rcfile="$(mktemp "${TMPDIR:-/tmp}/ssterm-bash.XXXXXX")"
-    cat >"$rcfile" <<'EOF'
+    ENV=/dev/fd/3 exec "$shell" --posix --noprofile -i 3<<'RCEOF'
+set +o posix
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
@@ -978,8 +978,7 @@ case ";${PROMPT_COMMAND:-};" in
   *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
 esac
 __ssterm_cwd
-EOF
-    exec "$shell" --noprofile --rcfile "$rcfile" -i
+RCEOF
     ;;
   *)
     exec "$shell" -i
