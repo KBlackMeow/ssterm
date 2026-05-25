@@ -8,11 +8,18 @@ import 'terminal_theme_presets.dart';
 
 /// User preferences for terminal appearance and cursor behavior.
 class TerminalSettings {
-  /// Platform-aware default monospace face.
+  /// Defaults match each platform's native monospace conventions:
+  ///   Windows → Consolas    (VS Code default, system font)
+  ///   macOS   → Monaco      (classic Mac terminal face, system font)
+  ///   Linux   → JetBrainsMono (bundled — Linux distros vary too much)
+  /// On Windows/macOS, the bundled JetBrains Mono still loads as a fallback
+  /// for glyphs Consolas/Monaco lack (➜, Powerline, etc.) — see
+  /// [buildFontFamilyFallback]. Family name for JetBrains Mono must match
+  /// pubspec's `family:` exactly.
   static String get defaultFontFamily {
     if (Platform.isWindows) return 'Consolas';
     if (Platform.isMacOS) return 'Monaco';
-    return 'JetBrains Mono';
+    return 'JetBrainsMono';
   }
 
   /// Fallback face for CJK and other non-Latin glyphs in the terminal.
@@ -22,11 +29,13 @@ class TerminalSettings {
     return 'Noto Sans Mono CJK SC';
   }
 
-  /// Windows: slightly tighter tracking and lower default size — Consolas and
-  /// other system monospaces read heavy on Skia compared to macOS.
   static double get defaultFontSize => Platform.isWindows ? 13.0 : 13.5;
 
-  static double get defaultLetterSpacing => Platform.isWindows ? -0.6 : 0;
+  /// Natural advance, no tracking adjustment. A previous -0.6 on Windows
+  /// (meant to tighten Consolas) shrank the cell below fallback-glyph width,
+  /// so xterm's per-cell clip chopped the right edge off symbols that fell
+  /// back to Cascadia / JetBrains Mono — most visibly the ➜ arrow tip.
+  static const double defaultLetterSpacing = 0;
 
   TerminalSettings({
     this.themePresetId = 'iterm2',
@@ -35,7 +44,7 @@ class TerminalSettings {
     String? cjkFontFamily,
     double? fontSize,
     this.lineHeight = 1.2,
-    this.fontWeight = FontWeight.normal,
+    this.fontWeight = FontWeight.w400,
     this.cursorType = TerminalCursorType.block,
     this.cursorBlink = true,
     this.cursorBlinkPeriodMs = 530,
@@ -120,42 +129,9 @@ class TerminalSettings {
     return Color.lerp(base, toward, amount.clamp(0.0, 1.0))!;
   }
 
-  static List<String> get fontOptions {
-    if (Platform.isWindows) {
-      return const [
-        'Consolas',
-        'Courier New',
-        'Lucida Console',
-        'JetBrains Mono',
-        'Cascadia Mono',
-        'Cascadia Code',
-        'Fira Code',
-        'monospace',
-      ];
-    }
-    return const [
-      'Monaco',
-      'SF Mono',
-      'Menlo',
-      'JetBrains Mono',
-      'Fira Code',
-      'Courier New',
-      'monospace',
-    ];
-  }
-
-  /// Resolves a persisted [savedFont] to a face available on this platform.
-  static String resolveFontFamily(String? savedFont) {
-    if (savedFont == null) return defaultFontFamily;
-
-    // Legacy: Windows builds once shipped Monaco as a placeholder default.
-    if (Platform.isWindows && savedFont == 'Monaco') {
-      return defaultFontFamily;
-    }
-
-    if (fontOptions.contains(savedFont)) return savedFont;
-    return defaultFontFamily;
-  }
+  /// Terminal font is locked to the platform default. Saved values from
+  /// older configs are intentionally ignored — the font picker was removed.
+  static String resolveFontFamily(String? savedFont) => defaultFontFamily;
 
   static List<String> get cjkFontOptions {
     if (Platform.isWindows) {
@@ -182,33 +158,25 @@ class TerminalSettings {
   }
 
   List<String> buildFontFamilyFallback() {
-    // Latin monospace faces must come before CJK fallbacks. When the primary
-    // font is missing, Flutter walks this list for every glyph — putting CJK
-    // first makes Windows render ASCII in proportional YaHei/SimSun with huge
-    // letter spacing inside fixed-width cells.
-    final latinMono = <String>[
-      if (Platform.isWindows) ...[
-        'Courier New',
-        'Lucida Console',
-        'Consolas',
-        'Cascadia Mono',
-        'Cascadia Code',
-      ],
-      if (Platform.isMacOS) ...[
-        'Menlo',
-        'Monaco',
-        'SF Mono',
-      ],
-      'JetBrains Mono',
-      'Fira Code',
-      'Courier New',
-      'Liberation Mono',
-      'monospace',
-    ].where((face) => face != fontFamily).toList();
+    // xterm hard-clips fallback glyphs to the cell width measured from the
+    // primary font (see packages/xterm/lib/src/ui/painter.dart). When primary
+    // is Consolas/Monaco and a glyph (e.g. ➜ U+279C) falls back to JetBrains
+    // Mono, JBM's wider advance gets clipped on the right.
+    //
+    // Order matters: try metric-compatible faces first per platform, then
+    // bundled JBM as a guaranteed-present last resort, then CJK + emoji.
+    final bundledSymbols = fontFamily == 'JetBrainsMono'
+        ? const <String>[]
+        : const ['JetBrainsMono'];
 
     if (Platform.isWindows) {
       return [
-        ...latinMono,
+        // Cascadia ships with Win10 1809+ / Win11 and is designed to share
+        // Consolas's cell metrics, so its ➜/Powerline glyphs slot into the
+        // Consolas-sized cell without being clipped.
+        'Cascadia Mono',
+        'Cascadia Code',
+        ...bundledSymbols,
         cjkFontFamily,
         if (cjkFontFamily != 'Microsoft YaHei') 'Microsoft YaHei',
         'NSimSun',
@@ -221,7 +189,11 @@ class TerminalSettings {
     }
     if (Platform.isMacOS) {
       return [
-        ...latinMono,
+        // Menlo and SF Mono share Monaco's cell metrics on macOS, so symbol
+        // fallback through them avoids clipping. Both are preinstalled.
+        'Menlo',
+        'SF Mono',
+        ...bundledSymbols,
         cjkFontFamily,
         'PingFang SC',
         'Hiragino Sans GB',
@@ -231,7 +203,7 @@ class TerminalSettings {
       ];
     }
     return [
-      ...latinMono,
+      ...bundledSymbols,
       cjkFontFamily,
       'Noto Sans Mono CJK SC',
       'Noto Sans Mono CJK TC',
@@ -410,17 +382,19 @@ class TerminalSettings {
       };
 
   static FontWeight _fontWeightFromString(String? s) => switch (s) {
+        'light' => FontWeight.w300,
         'medium' => FontWeight.w500,
         'semibold' => FontWeight.w600,
         'bold' => FontWeight.bold,
-        _ => FontWeight.normal,
+        _ => FontWeight.w400,
       };
 
   static String _fontWeightToString(FontWeight w) {
     if (w == FontWeight.bold) return 'bold';
     if (w == FontWeight.w600) return 'semibold';
     if (w == FontWeight.w500) return 'medium';
-    return 'normal';
+    if (w == FontWeight.w400) return 'normal';
+    return 'light';
   }
 
   static TerminalCursorType _cursorTypeFromString(String? s) =>

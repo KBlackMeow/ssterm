@@ -351,7 +351,7 @@ class _SftpViewState extends State<SftpView> {
               style: const TextStyle(
                 color: Color(0xFF8E8E8E),
                 fontSize: 11,
-                fontFamily: 'Monaco',
+                fontFamily: 'JetBrainsMono',
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -527,7 +527,7 @@ class _SftpViewState extends State<SftpView> {
                                   ? const Color(0xFF4EC9B0)
                                   : const Color(0xFFAAAAAA),
                           fontSize: 12,
-                          fontFamily: 'Monaco',
+                          fontFamily: 'JetBrainsMono',
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -545,7 +545,7 @@ class _SftpViewState extends State<SftpView> {
                       style: const TextStyle(
                         color: Color(0xFF686868),
                         fontSize: _kMetaFontSize,
-                        fontFamily: 'Monaco',
+                        fontFamily: 'JetBrainsMono',
                       ),
                     ),
                   ),
@@ -560,7 +560,7 @@ class _SftpViewState extends State<SftpView> {
                       style: const TextStyle(
                         color: Color(0xFF686868),
                         fontSize: _kMetaFontSize,
-                        fontFamily: 'Monaco',
+                        fontFamily: 'JetBrainsMono',
                       ),
                     ),
                   ),

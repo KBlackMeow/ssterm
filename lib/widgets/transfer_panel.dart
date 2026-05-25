@@ -299,7 +299,7 @@ class _TransferRowState extends State<_TransferRow> {
                 style: const TextStyle(
                     color: _kFgMuted,
                     fontSize: 10,
-                    fontFamily: 'Monaco'),
+                    fontFamily: 'JetBrainsMono'),
               ),
               const SizedBox(width: 4),
               if (isActive) ...[
@@ -347,7 +347,7 @@ class _TransferRowState extends State<_TransferRow> {
           Text(
             '${(task.progress * 100).round()}%',
             style: const TextStyle(
-                color: _kFgMuted, fontSize: 10, fontFamily: 'Monaco'),
+                color: _kFgMuted, fontSize: 10, fontFamily: 'JetBrainsMono'),
           ),
         ],
       );

@@ -198,7 +198,7 @@ class _FingerprintBlock extends StatelessWidget {
         style: const TextStyle(
           color: Color(0xFFC7C7C7),
           fontSize: 12,
-          fontFamily: 'Menlo',
+          fontFamily: 'JetBrainsMono',
           height: 1.5,
         ),
       ),

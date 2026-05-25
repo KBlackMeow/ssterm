@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
@@ -180,12 +182,20 @@ class _SettingsPageState extends State<SettingsPage>
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       children: [
         _sectionTitle('Family'),
-        _fontDropdown(),
+        _controlLabel(
+          _s.fontFamily == 'JetBrainsMono'
+              ? 'JetBrains Mono (bundled)'
+              : '${_s.fontFamily} (system)',
+          hint: Platform.isWindows
+              ? 'Matches VS Code\'s default. Symbol fallback uses the '
+                  'bundled JetBrains Mono so ➜ and Powerline glyphs render.'
+              : 'Ships with the app — same look on every machine.',
+        ),
         const SizedBox(height: 12),
         _sectionTitle('CJK / 中文'),
         _controlLabel(
           'Fallback for Chinese and other wide characters',
-          hint: 'English/code uses the monospace font above; '
+          hint: 'English/code uses JetBrains Mono; '
               '中文 uses this font (e.g. Microsoft YaHei UI)',
         ),
         const SizedBox(height: 6),
@@ -313,7 +323,7 @@ class _SettingsPageState extends State<SettingsPage>
             style: const TextStyle(
               color: _kFg,
               fontSize: 15,
-              fontFamily: 'Monaco',
+              fontFamily: 'JetBrainsMono',
             ),
           ),
           const SizedBox(height: 4),
@@ -685,31 +695,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  Widget _fontDropdown() {
-    return DropdownButtonFormField<String>(
-      initialValue: TerminalSettings.fontOptions.contains(_s.fontFamily)
-          ? _s.fontFamily
-          : TerminalSettings.defaultFontFamily,
-      dropdownColor: const Color(0xFF1C1C1C),
-      style: const TextStyle(color: _kFg, fontSize: 13),
-      decoration: const InputDecoration(
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
-      ),
-      items: [
-        for (final f in TerminalSettings.fontOptions)
-          DropdownMenuItem(value: f, child: Text(f)),
-      ],
-      onChanged: (v) {
-        if (v != null) _apply(_s.copyWith(fontFamily: v));
-      },
-    );
-  }
-
   Widget _controlLabel(String label, {String? hint}) {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
@@ -728,7 +713,8 @@ class _SettingsPageState extends State<SettingsPage>
 
   Widget _fontWeightChips() {
     const options = [
-      (FontWeight.normal, 'Normal'),
+      (FontWeight.w300, 'Light'),
+      (FontWeight.w400, 'Normal'),
       (FontWeight.w500, 'Medium'),
       (FontWeight.w600, 'Semibold'),
     ];
