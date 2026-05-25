@@ -201,7 +201,7 @@ SSH：`russh` shell channel → 同一 `BaseSession.emitOutput` → 同上。
   2. `TerminalPainter` 逐格绘制；`ParagraphCache`（LRU 10240）缓存相同样式+码点的 `Paragraph.layout`。
   3. 任意 `Terminal` 变更 → `markNeedsPaint()`（**整组件重绘**，但只画可见行）。
 - 无 GPU 纹理图集；依赖 Flutter 文本布局。
-- 应用层 `terminal_surface.dart` 可加 CRT/壁纸等效果。
+- 应用层 `terminal_surface.dart` 可加壁纸等效果。
 
 #### iTerm2
 

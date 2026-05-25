@@ -3,7 +3,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
-import '../../models/crt_settings.dart';
 import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
@@ -52,7 +51,7 @@ class _SettingsPageState extends State<SettingsPage>
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadPackageInfo();
   }
 
@@ -72,8 +71,6 @@ class _SettingsPageState extends State<SettingsPage>
     setState(() => _s = next);
     widget.onChanged(next);
   }
-
-  void _applyCrt(CrtSettings crt) => _apply(_s.copyWith(crt: crt));
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +110,6 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'Appearance'),
               Tab(text: 'Font'),
               Tab(text: 'Cursor'),
-              Tab(text: 'Effects'),
               Tab(text: 'SSH'),
               Tab(text: 'About'),
             ],
@@ -125,7 +121,6 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildAppearanceTab(),
                 _buildFontTab(),
                 _buildCursorTab(),
-                _buildEffectsTab(),
                 _buildSshTab(),
                 _buildAboutTab(),
               ],
@@ -257,124 +252,6 @@ class _SettingsPageState extends State<SettingsPage>
               _s.copyWith(cursorBlinkPeriodMs: _periodFromIndex(v.round())),
             ),
           ),
-      ],
-    );
-  }
-
-  // ── Effects tab: CRT with sub-groups ───────────────────────────────────────
-
-  Widget _buildEffectsTab() {
-    final crt = _s.crt;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      children: [
-        _sectionTitle('CRT Monitor'),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Enable CRT mode', style: TextStyle(color: _kFg, fontSize: 13)),
-          subtitle: const Text(
-            'Scanlines · glow · vignette · flicker',
-            style: TextStyle(color: _kFgMuted, fontSize: 11),
-          ),
-          value: crt.enabled,
-          activeTrackColor: _kAccent,
-          onChanged: (v) => _applyCrt(crt.copyWith(enabled: v)),
-        ),
-        if (crt.enabled) ...[
-          const SizedBox(height: 8),
-          _sectionTitle('Phosphor'),
-          const SizedBox(height: 4),
-          Text(
-            'Pair with Pip-Boy or Amber color scheme for best results',
-            style: const TextStyle(color: _kFgMuted, fontSize: 11),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final p in CrtPhosphor.values)
-                ChoiceChip(
-                  label: Text(
-                    p.label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: crt.phosphor == p ? Colors.white : _kFg,
-                    ),
-                  ),
-                  selected: crt.phosphor == p,
-                  selectedColor: _kAccent,
-                  backgroundColor: const Color(0xFF1C1C1C),
-                  side: const BorderSide(color: _kDivider),
-                  onSelected: (_) => _applyCrt(crt.copyWith(phosphor: p)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _sectionTitle('Intensity'),
-          _slider(
-            label: 'Scanlines',
-            hint: 'Horizontal dark lines',
-            value: crt.scanlineOpacity,
-            min: 0,
-            max: 0.6,
-            divisions: 12,
-            display: '${(crt.scanlineOpacity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(scanlineOpacity: v)),
-          ),
-          _slider(
-            label: 'Glow',
-            hint: 'Phosphor electron-beam spread',
-            value: crt.glowIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.glowIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(glowIntensity: v)),
-          ),
-          _slider(
-            label: 'Flicker',
-            hint: 'Brightness oscillation',
-            value: crt.flickerIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.flickerIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(flickerIntensity: v)),
-          ),
-          _slider(
-            label: 'Noise',
-            hint: 'Static grain',
-            value: crt.noiseIntensity,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.noiseIntensity * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(noiseIntensity: v)),
-          ),
-          const SizedBox(height: 12),
-          _sectionTitle('Geometry'),
-          _slider(
-            label: 'Vignette',
-            hint: 'Edge darkening',
-            value: crt.vignette,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.vignette * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(vignette: v)),
-          ),
-          _slider(
-            label: 'Curvature',
-            hint: 'Rounded screen corners',
-            value: crt.curvature,
-            min: 0,
-            max: 1,
-            divisions: 20,
-            display: '${(crt.curvature * 100).round()}%',
-            onChanged: (v) => _applyCrt(crt.copyWith(curvature: v)),
-          ),
-        ],
       ],
     );
   }

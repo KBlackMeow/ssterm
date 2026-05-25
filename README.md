@@ -58,8 +58,7 @@ heading, not what it does today.
 ### Workspace
 - **Tabs and split panes** — multiple sessions per window, horizontal or
   vertical split per tab.
-- **Settings panel** — terminal palette, font, wallpaper, frosted glass
-  and CRT overlay.
+- **Settings panel** — terminal palette, font, wallpaper, frosted glass.
 - **Command picker** — preset snippets driven by `assets/scripts/cmd.json`.
 
 ---

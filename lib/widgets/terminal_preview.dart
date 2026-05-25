@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/terminal_settings.dart';
 import '../services/wallpaper_storage.dart';
-import 'crt_overlay.dart';
 import 'wallpaper_background.dart';
 
 /// Static sample lines styled with current [TerminalSettings] (no live Terminal).
@@ -102,10 +101,6 @@ class TerminalPreview extends StatelessWidget {
         ),
       ),
     );
-
-    if (settings.crt.enabled) {
-      preview = CrtOverlay(settings: settings.crt, child: preview);
-    }
 
     return preview;
   }

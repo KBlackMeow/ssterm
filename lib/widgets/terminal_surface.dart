@@ -4,7 +4,6 @@ import 'package:xterm/xterm.dart';
 
 import '../models/terminal_settings.dart';
 import '../services/wallpaper_storage.dart';
-import 'crt_overlay.dart';
 import 'frosted_glass.dart';
 import 'wallpaper_background.dart';
 
@@ -42,8 +41,6 @@ class TerminalSurface extends StatelessWidget {
     this.frostedGlass = true,
     /// When false, wallpaper is expected from a parent (e.g. app chrome / tab bar).
     this.includeWallpaper = true,
-    /// When false, CRT is expected from a parent (e.g. full window chrome).
-    this.includeCrt = true,
   });
 
   final Terminal terminal;
@@ -55,7 +52,6 @@ class TerminalSurface extends StatelessWidget {
   final TerminalContextMenuConfig? contextMenu;
   final bool frostedGlass;
   final bool includeWallpaper;
-  final bool includeCrt;
 
   void _showContextMenu(BuildContext context, Offset position) {
     final config = contextMenu!;
@@ -166,10 +162,6 @@ class TerminalSurface extends StatelessWidget {
               terminalView,
             ],
           );
-
-    if (includeCrt && t.crt.enabled) {
-      surface = CrtOverlay(settings: t.crt, child: surface);
-    }
 
     return surface;
   }
