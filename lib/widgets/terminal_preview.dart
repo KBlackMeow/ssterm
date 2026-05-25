@@ -64,7 +64,7 @@ class TerminalPreview extends StatelessWidget {
                         TextSpan(
                           children: [
                             TextSpan(
-                              text: 'ssterm ',
+                              text: 'SSTerm ',
                               style: c(const Color(0xFFFD971F)),
                             ),
                             TextSpan(text: 'ok ', style: c(theme.green)),

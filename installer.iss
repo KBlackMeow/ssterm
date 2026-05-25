@@ -1,10 +1,10 @@
 [Setup]
-AppName=ssterm
+AppName=SSTerm
 AppVersion=1.1.0
 DefaultDirName={autopf}\ssterm
-DefaultGroupName=ssterm
+DefaultGroupName=SSTerm
 OutputDir=dist
-OutputBaseFilename=ssterm_Setup
+OutputBaseFilename=SSTerm_Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -20,4 +20,4 @@ Name: "{group}\SSTerm"; Filename: "{app}\ssterm.exe"
 Name: "{commondesktop}\SSTerm"; Filename: "{app}\ssterm.exe"
 
 [Run]
-Filename: "{app}\ssterm.exe"; Description: "Run ssterm"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ssterm.exe"; Description: "Run SSTerm"; Flags: nowait postinstall skipifsilent

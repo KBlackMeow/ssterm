@@ -1,6 +1,6 @@
 {
-    "name": "ssterm",
-    "short_name": "ssterm",
+    "name": "SSTerm",
+    "short_name": "SSTerm",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

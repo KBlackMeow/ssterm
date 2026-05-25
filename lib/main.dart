@@ -49,7 +49,7 @@ class SsTermApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ssterm',
+      title: 'SSTerm',
       debugShowCheckedModeBanner: false,
       darkTheme: ThemeData.dark(useMaterial3: true),
       themeMode: ThemeMode.dark,
