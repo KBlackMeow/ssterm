@@ -92,11 +92,18 @@ class TerminalPainter {
         canvas.drawRect(offset & _cellSize, paint);
         return;
       case TerminalCursorType.underline:
-        return canvas.drawLine(
-          Offset(offset.dx, offset.dy + _cellSize.height - 1),
-          Offset(offset.dx + _cellSize.width, offset.dy + _cellSize.height - 1),
+        final thickness = (_cellSize.height * 0.12).clamp(2.0, 4.0);
+        paint.style = PaintingStyle.fill;
+        canvas.drawRect(
+          Rect.fromLTWH(
+            offset.dx,
+            offset.dy + _cellSize.height - thickness,
+            _cellSize.width,
+            thickness,
+          ),
           paint,
         );
+        return;
       case TerminalCursorType.verticalBar:
         return canvas.drawLine(
           Offset(offset.dx, offset.dy),
