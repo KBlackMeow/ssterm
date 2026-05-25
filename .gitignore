@@ -4,6 +4,7 @@ build/
 .flutter-plugins-dependencies
 
 # IDE / OS
+.vscode/
 .idea/
 *.iml
 .DS_Store
