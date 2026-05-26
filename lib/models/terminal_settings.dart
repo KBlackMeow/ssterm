@@ -29,13 +29,16 @@ class TerminalSettings {
     return 'Noto Sans Mono CJK SC';
   }
 
-  static double get defaultFontSize => Platform.isWindows ? 13.0 : 13.5;
+  /// Matches VS Code's per-platform `editor.fontSize` defaults:
+  ///   Windows / Linux → 14
+  ///   macOS           → 12
+  static double get defaultFontSize => Platform.isMacOS ? 12.0 : 14.0;
 
-  /// Natural advance, no tracking adjustment. A previous -0.6 on Windows
-  /// (meant to tighten Consolas) shrank the cell below fallback-glyph width,
-  /// so xterm's per-cell clip chopped the right edge off symbols that fell
-  /// back to Cascadia / JetBrains Mono — most visibly the ➜ arrow tip.
-  static const double defaultLetterSpacing = 0;
+  /// Windows tightens by 0.2px — Consolas reads loose in Skia (no ClearType)
+  /// at small sizes. The painter's per-glyph adaptive clip (see
+  /// packages/xterm/lib/src/ui/painter.dart) handles fallback glyphs wider
+  /// than the cell, so this tracking adjustment no longer risks clipping.
+  static double get defaultLetterSpacing => Platform.isWindows ? -0.2 : 0;
 
   TerminalSettings({
     this.themePresetId = 'iterm2',

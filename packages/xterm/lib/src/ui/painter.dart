@@ -221,8 +221,16 @@ class TerminalPainter {
     }
 
     // Clip to the cell bounds so bold / fallback glyphs never widen the grid
-    // or bleed into adjacent columns.
-    final clipWidth = _cellSize.width * (charWidth >= 2 ? 2 : 1);
+    // or bleed into adjacent columns — *unless* the glyph's natural ink is
+    // wider than the cell (common when a single-width Unicode symbol like
+    // ➜ U+279C falls back from a narrow primary font to a wider face).
+    // In that case, expand the clip to the glyph's intrinsic width so the
+    // arrow tip / right edge is preserved. The next cell's content may
+    // visually overlap by a fraction of a pixel, which is acceptable since
+    // the common pattern is `➜ ` (symbol + space).
+    final cellClip = _cellSize.width * (charWidth >= 2 ? 2 : 1);
+    final glyphWidth = paragraph.maxIntrinsicWidth;
+    final clipWidth = glyphWidth > cellClip ? glyphWidth : cellClip;
     canvas.save();
     canvas.clipRect(
       Rect.fromLTWH(offset.dx, offset.dy, clipWidth, _cellSize.height),
