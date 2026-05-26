@@ -187,9 +187,12 @@ class _SettingsPageState extends State<SettingsPage>
               ? 'JetBrains Mono (bundled)'
               : '${_s.fontFamily} (system)',
           hint: Platform.isWindows
-              ? 'Matches VS Code\'s default. Symbol fallback uses the '
-                  'bundled JetBrains Mono so ➜ and Powerline glyphs render.'
-              : 'Ships with the app — same look on every machine.',
+              ? 'Matches Windows Terminal\'s default. Native ➜/Powerline '
+                  'glyphs, no fallback needed.'
+              : Platform.isMacOS
+                  ? 'Classic macOS terminal face. Menlo / SF Mono / bundled '
+                      'JetBrains Mono fall back for symbols Monaco lacks.'
+                  : 'Ships with the app — same look on every machine.',
         ),
         const SizedBox(height: 12),
         _sectionTitle('CJK / 中文'),

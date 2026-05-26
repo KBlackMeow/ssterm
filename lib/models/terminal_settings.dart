@@ -8,16 +8,15 @@ import 'terminal_theme_presets.dart';
 
 /// User preferences for terminal appearance and cursor behavior.
 class TerminalSettings {
-  /// Defaults match each platform's native monospace conventions:
-  ///   Windows → Consolas    (VS Code default, system font)
-  ///   macOS   → Monaco      (classic Mac terminal face, system font)
-  ///   Linux   → JetBrainsMono (bundled — Linux distros vary too much)
-  /// On Windows/macOS, the bundled JetBrains Mono still loads as a fallback
-  /// for glyphs Consolas/Monaco lack (➜, Powerline, etc.) — see
-  /// [buildFontFamilyFallback]. Family name for JetBrains Mono must match
-  /// pubspec's `family:` exactly.
+  /// Defaults match each platform's native terminal conventions:
+  ///   Windows → Cascadia Mono  (Windows Terminal default, ships with Win10
+  ///                             1809+/Win11, native ➜/Powerline glyphs)
+  ///   macOS   → Monaco          (classic Mac terminal face, system font)
+  ///   Linux   → JetBrainsMono   (bundled — distros vary too much to rely on)
+  /// Family names must match the font's actual registered family
+  /// (e.g. pubspec's `family:` for JetBrainsMono).
   static String get defaultFontFamily {
-    if (Platform.isWindows) return 'Consolas';
+    if (Platform.isWindows) return 'Cascadia Mono';
     if (Platform.isMacOS) return 'Monaco';
     return 'JetBrainsMono';
   }
@@ -29,10 +28,11 @@ class TerminalSettings {
     return 'Noto Sans Mono CJK SC';
   }
 
-  /// Matches VS Code's per-platform `editor.fontSize` defaults:
-  ///   Windows / Linux → 14
-  ///   macOS           → 12
-  static double get defaultFontSize => Platform.isMacOS ? 12.0 : 14.0;
+  /// Matches each platform's native terminal default:
+  ///   Windows → 12  (Windows Terminal default)
+  ///   macOS   → 12  (matches VS Code on macOS; Terminal.app uses 11)
+  ///   Linux   → 14
+  static double get defaultFontSize => Platform.isLinux ? 14.0 : 12.0;
 
   /// Windows tightens by 0.2px — Consolas reads loose in Skia (no ClearType)
   /// at small sizes. The painter's per-glyph adaptive clip (see
@@ -174,11 +174,12 @@ class TerminalSettings {
 
     if (Platform.isWindows) {
       return [
-        // Cascadia ships with Win10 1809+ / Win11 and is designed to share
-        // Consolas's cell metrics, so its ➜/Powerline glyphs slot into the
-        // Consolas-sized cell without being clipped.
-        'Cascadia Mono',
-        'Cascadia Code',
+        // Cascadia Code shares Cascadia Mono's metrics (same family designed
+        // together) and adds programming-ligature glyphs as backup. Consolas
+        // is kept as a last resort for any glyph both Cascadia faces lack.
+        if (fontFamily != 'Cascadia Code') 'Cascadia Code',
+        if (fontFamily != 'Cascadia Mono') 'Cascadia Mono',
+        'Consolas',
         ...bundledSymbols,
         cjkFontFamily,
         if (cjkFontFamily != 'Microsoft YaHei') 'Microsoft YaHei',
