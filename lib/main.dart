@@ -314,18 +314,37 @@ class _TerminalHomeState extends State<TerminalHome> {
   void initState() {
     super.initState();
     _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
-    _refreshLocalShells();
     _loadSshHosts();
     AppConfig.load().then((c) {
-      if (mounted) setState(() => _config = c);
+      if (!mounted) return;
+      setState(() {
+        _config = c;
+        // Prefer the persisted list (includes WSL distros on Windows) over the
+        // boot-time sync discovery. Falls back to the sync result when the
+        // config has nothing yet (first launch).
+        if (c.cachedShells.isNotEmpty) _localShells = c.cachedShells;
+      });
+      // Background diff: only setState + save when the discovered list
+      // actually differs from what we just restored. This keeps subsequent
+      // `+` clicks free of any discovery cost and avoids gratuitous rebuilds
+      // of the chrome (which would otherwise thrash the paragraph caches of
+      // every open terminal).
+      unawaited(_refreshLocalShellsIfChanged());
     });
   }
 
-  Future<List<LocalShellOption>> _refreshLocalShells() async {
+  /// Re-runs discovery in the background. Only mutates state when the result
+  /// differs from the current [_localShells]; the persisted cache in
+  /// [_config.cachedShells] is updated in the same step.
+  Future<void> _refreshLocalShellsIfChanged() async {
     final shells = await LocalShellDiscovery.discover(refresh: true);
-    if (!mounted) return _localShells;
+    if (!mounted) return;
+    if (LocalShellDiscovery.listsStructurallyEqual(shells, _localShells)) {
+      return;
+    }
     setState(() => _localShells = shells);
-    return shells;
+    _config.cachedShells = shells;
+    unawaited(_config.save());
   }
 
   Future<void> _loadSshHosts() async {
@@ -1513,7 +1532,8 @@ esac
           onSelect: _selectTab,
           onClose: _closeTab,
           onNewLocal: _newLocalTab,
-          onRefreshLocalShells: _refreshLocalShells,
+          localShells: _localShells,
+          onRefreshLocalShells: _refreshLocalShellsIfChanged,
           onNewSsh: () => _showConnectDialog(),
           onSettings: _openSettings,
           savedHosts: _savedHosts,
@@ -1719,6 +1739,7 @@ class _TabBar extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onNewLocal,
+    required this.localShells,
     required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.onSettings,
@@ -1747,7 +1768,8 @@ class _TabBar extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final ValueChanged<LocalShellOption> onNewLocal;
-  final Future<List<LocalShellOption>> Function() onRefreshLocalShells;
+  final List<LocalShellOption> localShells;
+  final Future<void> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final VoidCallback onSettings;
   final List<SshHost> savedHosts;
@@ -1823,6 +1845,7 @@ class _TabBar extends StatelessWidget {
           ),
           _PlusMenu(
             onNewLocal: onNewLocal,
+            shells: localShells,
             onRefreshLocalShells: onRefreshLocalShells,
             onNewSsh: onNewSsh,
             savedHosts: savedHosts,
@@ -2227,6 +2250,7 @@ class _CloseBtnState extends State<_CloseBtn> {
 class _PlusMenu extends StatelessWidget {
   const _PlusMenu({
     required this.onNewLocal,
+    required this.shells,
     required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.savedHosts,
@@ -2237,9 +2261,13 @@ class _PlusMenu extends StatelessWidget {
   });
 
   static const _frostedToggleValue = '__frosted_glass__';
+  static const _refreshShellsValue = '__refresh_shells__';
 
   final ValueChanged<LocalShellOption> onNewLocal;
-  final Future<List<LocalShellOption>> Function() onRefreshLocalShells;
+  /// Cached list rendered synchronously. Updated by the host via
+  /// [onRefreshLocalShells] (background diff; no per-open work).
+  final List<LocalShellOption> shells;
+  final Future<void> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
@@ -2321,10 +2349,7 @@ class _PlusMenu extends StatelessWidget {
     ),
   );
 
-  Future<void> _showMenu(BuildContext context) async {
-    final shells = await onRefreshLocalShells();
-    if (!context.mounted) return;
-
+  void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
@@ -2346,6 +2371,20 @@ class _PlusMenu extends StatelessWidget {
           _sectionHeader('Shells'),
           for (final shell in shells) _shellItem(shell),
         ],
+        PopupMenuItem<String>(
+          value: _refreshShellsValue,
+          height: 32,
+          child: Row(
+            children: const [
+              Icon(Icons.refresh, size: 13, color: _kFgInactive),
+              SizedBox(width: 8),
+              Text(
+                'Refresh shells',
+                style: TextStyle(color: _kFgInactive, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
           _sectionHeader('Saved'),
@@ -2403,6 +2442,10 @@ class _PlusMenu extends StatelessWidget {
         onFrostedGlassChanged?.call(!frostedGlass);
         return;
       }
+      if (v == _refreshShellsValue) {
+        unawaited(onRefreshLocalShells());
+        return;
+      }
       if (v.startsWith('shell:')) {
         final id = v.substring('shell:'.length);
         for (final shell in shells) {
@@ -2435,7 +2478,7 @@ class _PlusMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => unawaited(_showMenu(context)),
+      onTap: () => _showMenu(context),
       child: Tooltip(
         message: 'New tab',
         child: Container(

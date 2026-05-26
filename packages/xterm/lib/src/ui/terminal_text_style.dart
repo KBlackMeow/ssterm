@@ -46,6 +46,7 @@ class TerminalStyle {
     this.fontFamily = _kDefaultFontFamily,
     this.fontFamilyFallback = _kDefaultFontFamilyFallback,
     this.fontWeight = FontWeight.normal,
+    this.boldFontWeight = FontWeight.bold,
     this.letterSpacing = 0,
   });
 
@@ -72,6 +73,13 @@ class TerminalStyle {
 
   final FontWeight fontWeight;
 
+  /// Font weight applied to cells with the ANSI bold (SGR 1) flag. Set to the
+  /// same value as [fontWeight] to opt out of synthesized bold on platforms
+  /// where the active font lacks a real bold cut (e.g. Consolas under Skia on
+  /// Windows), where the synthesized strokes turn entire lines noticeably
+  /// heavier than expected.
+  final FontWeight boldFontWeight;
+
   /// Extra horizontal spacing between glyphs (negative tightens).
   final double letterSpacing;
 
@@ -93,7 +101,7 @@ class TerminalStyle {
       letterSpacing: letterSpacing,
       color: color,
       backgroundColor: backgroundColor,
-      fontWeight: ansiBold ? FontWeight.bold : fontWeight,
+      fontWeight: ansiBold ? boldFontWeight : fontWeight,
       fontStyle: italic ? FontStyle.italic : FontStyle.normal,
       decoration: underline ? TextDecoration.underline : TextDecoration.none,
     );
@@ -123,6 +131,7 @@ class TerminalStyle {
     String? fontFamily,
     List<String>? fontFamilyFallback,
     FontWeight? fontWeight,
+    FontWeight? boldFontWeight,
     double? letterSpacing,
   }) {
     return TerminalStyle(
@@ -131,6 +140,7 @@ class TerminalStyle {
       fontFamily: fontFamily ?? this.fontFamily,
       fontFamilyFallback: fontFamilyFallback ?? this.fontFamilyFallback,
       fontWeight: fontWeight ?? this.fontWeight,
+      boldFontWeight: boldFontWeight ?? this.boldFontWeight,
       letterSpacing: letterSpacing ?? this.letterSpacing,
     );
   }
@@ -142,6 +152,7 @@ class TerminalStyle {
         other.height == height &&
         other.fontFamily == fontFamily &&
         other.fontWeight == fontWeight &&
+        other.boldFontWeight == boldFontWeight &&
         other.letterSpacing == letterSpacing &&
         _listEquals(other.fontFamilyFallback, fontFamilyFallback);
   }
@@ -152,6 +163,7 @@ class TerminalStyle {
         height,
         fontFamily,
         fontWeight,
+        boldFontWeight,
         letterSpacing,
         Object.hashAll(fontFamilyFallback),
       );

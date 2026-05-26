@@ -265,6 +265,13 @@ class TerminalSettings {
         fontFamily: fontFamily,
         fontFamilyFallback: buildFontFamilyFallback(),
         fontWeight: fontWeight,
+        // Windows: Consolas and most system monospaces lack a real bold cut,
+        // so Skia synthesizes bold by thickening strokes. Combined with
+        // prompt SGR-1 residue from plugin-heavy zsh setups under WSL, plain
+        // command output (e.g. `ifconfig`) ends up rendered noticeably
+        // heavier than on macOS. Match the bold weight to the regular weight
+        // on Windows so the ANSI bold flag stops triggering synthesized bold.
+        boldFontWeight: Platform.isWindows ? fontWeight : FontWeight.bold,
         letterSpacing: defaultLetterSpacing,
       );
 

@@ -30,6 +30,79 @@ class LocalShellOption {
 
   @override
   int get hashCode => id.hashCode;
+
+  /// Field-by-field equality, used to decide whether a freshly discovered list
+  /// actually differs from the persisted cache (id-only [==] would miss
+  /// changes to launcher path, args, or env).
+  bool structuralEquals(LocalShellOption other) {
+    if (identical(this, other)) return true;
+    return id == other.id &&
+        displayName == other.displayName &&
+        executable == other.executable &&
+        useUnixWrapper == other.useUnixWrapper &&
+        isWsl == other.isWsl &&
+        _listEquals(arguments, other.arguments) &&
+        _mapEquals(environment, other.environment);
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'executable': executable,
+        if (arguments.isNotEmpty) 'arguments': arguments,
+        if (environment != null && environment!.isNotEmpty)
+          'environment': environment,
+        if (useUnixWrapper) 'useUnixWrapper': true,
+        if (isWsl) 'isWsl': true,
+      };
+
+  static LocalShellOption? fromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    final displayName = json['displayName'];
+    final executable = json['executable'];
+    if (id is! String || displayName is! String || executable is! String) {
+      return null;
+    }
+    final args = (json['arguments'] as List?)?.whereType<String>().toList() ??
+        const <String>[];
+    Map<String, String>? env;
+    final rawEnv = json['environment'];
+    if (rawEnv is Map) {
+      env = <String, String>{};
+      rawEnv.forEach((k, v) {
+        if (k is String && v is String) env![k] = v;
+      });
+      if (env.isEmpty) env = null;
+    }
+    return LocalShellOption(
+      id: id,
+      displayName: displayName,
+      executable: executable,
+      arguments: args,
+      environment: env,
+      useUnixWrapper: json['useUnixWrapper'] as bool? ?? false,
+      isWsl: json['isWsl'] as bool? ?? false,
+    );
+  }
+}
+
+bool _listEquals(List<String> a, List<String> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+bool _mapEquals(Map<String, String>? a, Map<String, String>? b) {
+  if (identical(a, b)) return true;
+  if (a == null || b == null) return a == null && b == null;
+  if (a.length != b.length) return false;
+  for (final entry in a.entries) {
+    if (b[entry.key] != entry.value) return false;
+  }
+  return true;
 }
 
 /// Discovers shells available on the current machine.
@@ -42,6 +115,20 @@ class LocalShellDiscovery {
     final shells = await _discoverAll();
     _cache = shells;
     return shells;
+  }
+
+  /// Returns true when [a] and [b] describe the exact same set of shells in
+  /// the same order, comparing every field (not just [LocalShellOption.id]).
+  static bool listsStructurallyEqual(
+    List<LocalShellOption> a,
+    List<LocalShellOption> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!a[i].structuralEquals(b[i])) return false;
+    }
+    return true;
   }
 
   /// Synchronous discovery without WSL (fast path for startup).
