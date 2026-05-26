@@ -120,12 +120,15 @@ class _OutputPipe {
 }
 
 // ── Tab model ────────────────────────────────────────────────────────────────
-enum _TabKind { local, ssh, settings }
+enum _TabKind { local, ssh, sshConnecting, sshError, settings }
 
 class _Tab {
   _TabKind kind;
   String title;
   LocalShellOption? localShell;
+
+  /// Populated while [kind] is [_TabKind.sshError]; cleared on retry.
+  String? connectionError;
 
   // Pane 0 (single-pane slot; left/top when split)
   Terminal? terminal;
@@ -181,39 +184,21 @@ class _Tab {
     required this.title,
     this.localShell,
     this.terminal,
-    this.sshClient,
-    this.jumpClient,
-    this.sshSession,
-    this.sftp,
-    this.remotePath,
     this.localPath,
     this.sshProfile,
   });
 
-  factory _Tab.ssh(
-    Terminal t,
-    SSHClient c,
-    SSHSession s,
-    String title, {
-    SSHClient? jumpClient,
-    SftpClient? sftp,
-    ValueNotifier<String>? remotePath,
-    ValueNotifier<String>? localPath,
-    SshHost? profile,
-  }) => _Tab._(
-    kind: _TabKind.ssh,
-    title: title,
-    terminal: t,
-    sshClient: c,
-    jumpClient: jumpClient,
-    sshSession: s,
-    sftp: sftp,
-    remotePath: remotePath,
-    localPath: localPath,
+  factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
+
+  /// Placeholder tab while an SSH connection is being established in the
+  /// background. The tab is fully interactive in the chrome (selectable,
+  /// closable) but its body shows a "connecting" indicator until the session
+  /// is wired up — see [_TerminalHomeState._runConnectionForTab].
+  factory _Tab.connecting(SshHost profile) => _Tab._(
+    kind: _TabKind.sshConnecting,
+    title: profile.alias,
     sshProfile: profile,
   );
-
-  factory _Tab.settings() => _Tab._(kind: _TabKind.settings, title: 'Settings');
 
   /// Ends pane 1 and returns to a single pane (pane 0). Used when pane 1 exits
   /// or on reconnect — not exposed as a manual "close split" action.
@@ -290,6 +275,8 @@ class _Tab {
   IconData get icon => switch (kind) {
     _TabKind.local => Icons.terminal,
     _TabKind.ssh => Icons.lock_outline,
+    _TabKind.sshConnecting => Icons.lock_outline,
+    _TabKind.sshError => Icons.error_outline,
     _TabKind.settings => Icons.settings_outlined,
   };
 }
@@ -1033,10 +1020,11 @@ esac
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
   Future<void> _showConnectDialog({SshHost? initialHost}) async {
-    final result = await showConnectDialog(context, initialHost: initialHost);
-    if (result == null || !mounted) return;
-    await _rememberHostProfile(result.profile);
-    await _openSshTerminal(result);
+    final profile = await showConnectDialog(context, initialHost: initialHost);
+    if (profile == null || !mounted) return;
+    await _rememberHostProfile(profile);
+    if (!mounted) return;
+    _openConnectingTab(profile);
   }
 
   Future<void> _rememberHostProfile(SshHost profile) async {
@@ -1064,65 +1052,62 @@ esac
     if (mounted) await _loadSshHosts();
   }
 
-  Future<void> _connectSavedHost(SshHost host) async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const PopScope(
-        canPop: false,
-        child: Center(
-          child: Card(
-            color: Color(0xFF2B2B2B),
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(
-                    color: Color(0xFF2472C8),
-                    strokeWidth: 2,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'Connecting…',
-                    style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+  void _connectSavedHost(SshHost host) {
+    _openConnectingTab(host);
+  }
+
+  /// Inserts a tab in the [_TabKind.sshConnecting] state immediately and runs
+  /// the connection in the background. The rest of the UI stays interactive
+  /// (other tabs can be selected / used) while the handshake completes.
+  void _openConnectingTab(SshHost profile) {
+    final tab = _Tab.connecting(profile);
+    setState(() {
+      _tabs.add(tab);
+      _active = _tabs.length - 1;
+    });
+    unawaited(_runConnectionForTab(tab));
+  }
+
+  Future<void> _runConnectionForTab(_Tab tab) async {
+    final profile = tab.sshProfile;
+    if (profile == null) return;
 
     try {
       final result = await connectSshHost(
-        host,
+        profile,
         verifyHostKey: createHostKeyVerifier(
           context,
-          hostname: host.hostname,
-          port: host.port,
+          hostname: profile.hostname,
+          port: profile.port,
         ),
-        jumpVerifyHostKey: host.jumpHost != null
+        jumpVerifyHostKey: profile.jumpHost != null
             ? createHostKeyVerifier(
                 context,
-                hostname: host.jumpHost!.hostname,
-                port: host.jumpHost!.port,
+                hostname: profile.jumpHost!.hostname,
+                port: profile.jumpHost!.port,
               )
             : null,
       );
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      await _loadSshHosts();
-      await _openSshTerminal(result);
-    } catch (_) {
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      await _showConnectDialog(initialHost: host);
+
+      if (!mounted || tab.manuallyDisconnected || !_tabs.contains(tab)) {
+        result.session?.close();
+        result.client.close();
+        result.jumpClient?.close();
+        return;
+      }
+      await _materializeSshTab(tab, result);
+    } catch (e) {
+      if (!mounted || tab.manuallyDisconnected || !_tabs.contains(tab)) return;
+      setState(() {
+        tab.kind = _TabKind.sshError;
+        tab.connectionError = _friendlyConnectError(e);
+      });
     }
   }
 
-  Future<void> _openSshTerminal(ConnectResult r) async {
+  /// Transforms a placeholder [tab] (in [_TabKind.sshConnecting]) into a fully
+  /// wired SSH tab once [connectSshHost] has produced a session.
+  Future<void> _materializeSshTab(_Tab tab, ConnectResult r) async {
     final terminal = _createTerminal(reflowEnabled: false);
     final session = r.session!;
     final remotePath = ValueNotifier<String>('');
@@ -1134,17 +1119,14 @@ esac
       } catch (_) {}
     }
 
-    // Tab must exist before the output pipe can run — SSH may send data immediately.
-    final tab = _Tab.ssh(
-      terminal,
-      r.client,
-      session,
-      r.alias,
-      jumpClient: r.jumpClient,
-      remotePath: remotePath,
-      profile: r.profile,
-    );
-    tab.activeSshPane = 0;
+    if (!mounted || tab.manuallyDisconnected) {
+      logger?.close();
+      remotePath.dispose();
+      session.close();
+      r.client.close();
+      r.jumpClient?.close();
+      return;
+    }
 
     final cwdParser = RemoteCwdParser();
     final pipe = _OutputPipe(
@@ -1152,7 +1134,6 @@ esac
       sessionLogger: logger,
       transform: _sshOutputTransform(tab, 0, cwdParser),
     );
-    tab.pipe = pipe;
 
     SftpClient? sftp;
     TransferManager? transferManager;
@@ -1164,16 +1145,32 @@ esac
       remotePath.value = '/';
     }
 
-    if (!mounted) {
+    if (!mounted || tab.manuallyDisconnected) {
       pipe.dispose();
       remotePath.dispose();
-      tab.dispose();
+      transferManager?.dispose();
+      session.close();
+      r.client.close();
+      r.jumpClient?.close();
       return;
     }
 
+    // Populate tab fields and wire input/resize before [setState] so the new
+    // TerminalView sees a fully-configured Terminal when it mounts — matches
+    // the order used by the previous _openSshTerminal path.
+    tab.terminal = terminal;
+    tab.sshClient = r.client;
+    tab.jumpClient = r.jumpClient;
+    tab.sshSession = session;
     tab.sftp = sftp;
     tab.transferManager = transferManager;
+    tab.remotePath = remotePath;
     tab.remoteCwdPane0 = remotePath.value;
+    tab.sshProfile = r.profile;
+    tab.activeSshPane = 0;
+    tab.pipe = pipe;
+    tab.connectionError = null;
+    tab.primarySessionEnded = false;
 
     _wireSshSession(
       tab,
@@ -1183,12 +1180,6 @@ esac
       isSplit: false,
       profile: r.profile,
     );
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      pipe.bind(session.stdout);
-      pipe.bind(session.stderr);
-    });
 
     // Feature 1: port forwarding
     if (r.profile.forwardRules.isNotEmpty) {
@@ -1210,10 +1201,63 @@ esac
     }
 
     setState(() {
-      _tabs.add(tab);
-      _active = _tabs.length - 1;
+      tab.kind = _TabKind.ssh;
+      tab.title = r.alias;
     });
-    _activateTab(_active);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      pipe.bind(session.stdout);
+      pipe.bind(session.stderr);
+    });
+
+    final idx = _tabs.indexOf(tab);
+    if (idx == _active) _activateTab(idx);
+  }
+
+  String _friendlyConnectError(Object e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('userauth') ||
+        s.contains('authentication') ||
+        s.contains('permission')) {
+      return 'Authentication failed, check password or key';
+    }
+    if (s.contains('refused')) return 'Connection refused, check IP and port';
+    if (s.contains('timeout') || s.contains('timedout')) {
+      return 'Connection timed out';
+    }
+    if (s.contains('hostkey') || s.contains('host key')) {
+      return 'Host key verification failed';
+    }
+    if (s.contains('nodename') || s.contains('socketexception')) {
+      return 'Cannot resolve host';
+    }
+    return e.toString().replaceAll('Exception: ', '').replaceAll('Error: ', '');
+  }
+
+  void _retryConnectingTab(_Tab tab) {
+    if (tab.sshProfile == null) return;
+    setState(() {
+      tab.kind = _TabKind.sshConnecting;
+      tab.connectionError = null;
+    });
+    unawaited(_runConnectionForTab(tab));
+  }
+
+  Future<void> _editAndRetryConnectingTab(_Tab tab) async {
+    final profile = tab.sshProfile;
+    if (profile == null) return;
+    final updated = await showConnectDialog(context, initialHost: profile);
+    if (updated == null || !mounted) return;
+    await _rememberHostProfile(updated);
+    if (!mounted) return;
+    setState(() {
+      tab.sshProfile = updated;
+      tab.title = updated.alias;
+      tab.kind = _TabKind.sshConnecting;
+      tab.connectionError = null;
+    });
+    unawaited(_runConnectionForTab(tab));
   }
 
   // ── Feature 3: In-tab split pane ──────────────────────────────────────────
@@ -1639,6 +1683,8 @@ esac
         sshPane: 0,
         contextMenu: contextMenu,
       ),
+      _TabKind.sshConnecting => _buildConnectingBody(tab),
+      _TabKind.sshError => _buildErrorBody(tab),
       _TabKind.settings => SettingsPage(
         settings: _config.terminal,
         onChanged: (next) {
@@ -1656,6 +1702,101 @@ esac
         onDeleteHost: (host) => _deleteSavedHost(host),
       ),
     };
+  }
+
+  Widget _buildConnectingBody(_Tab tab) {
+    final alias = tab.sshProfile?.alias ?? tab.title;
+    return Container(
+      color: _config.terminal.chromeBackground,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              color: Color(0xFF2472C8),
+              strokeWidth: 2,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Connecting to $alias…',
+            style: const TextStyle(color: _kFgInactive, fontSize: 13),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'You can switch to other tabs while waiting.',
+            style: TextStyle(color: Color(0xFF6E6E6E), fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorBody(_Tab tab) {
+    final alias = tab.sshProfile?.alias ?? tab.title;
+    return Container(
+      color: _config.terminal.chromeBackground,
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              size: 36,
+              color: Color(0xFFFF6E67),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              alias,
+              style: const TextStyle(
+                color: _kFgActive,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Text(
+                tab.connectionError ?? 'Connection failed',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _kFgInactive, fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _retryConnectingTab(tab),
+                  icon: const Icon(Icons.refresh, size: 14),
+                  label: const Text('Retry'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _kFgActive,
+                    side: const BorderSide(color: Color(0xFF3A3A3A)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _editAndRetryConnectingTab(tab),
+                  icon: const Icon(Icons.edit, size: 14),
+                  label: const Text('Edit…'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _kFgActive,
+                    side: const BorderSide(color: Color(0xFF3A3A3A)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildTabBody(_Tab tab) {

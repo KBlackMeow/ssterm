@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
 
-import '../models/connect_result.dart';
 import '../models/port_forward_rule.dart';
 import '../models/ssh_host.dart';
-import '../services/host_key_verifier.dart';
-import '../services/ssh_connection.dart';
 
 export '../models/connect_result.dart';
 
 enum _AuthMode { password, key }
 
-Future<ConnectResult?> showConnectDialog(
+/// Returns the [SshHost] profile to connect with, or `null` if the user
+/// cancelled. The dialog no longer performs the SSH handshake itself — the
+/// caller is expected to open a tab and run the connection asynchronously so
+/// the rest of the UI stays interactive while waiting.
+Future<SshHost?> showConnectDialog(
   BuildContext context, {
   SshHost? initialHost,
 }) {
-  return showDialog<ConnectResult>(
+  return showDialog<SshHost>(
     context: context,
     barrierColor: Colors.black54,
     builder: (ctx) => _ConnectDialog(initialHost: initialHost),
@@ -80,7 +81,6 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   bool _autoReconnect = false;
   bool _sessionLog = false;
 
-  bool _connecting = false;
   String? _error;
 
   @override
@@ -210,7 +210,10 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     );
   }
 
-  Future<void> _create() async {
+  /// Validates the form and pops with an [SshHost] profile. The actual SSH
+  /// handshake is performed by the caller in the new tab so the dialog can
+  /// close immediately and the rest of the UI stays interactive.
+  void _create() {
     final host = _hostCtrl.text.trim();
     final user = _userCtrl.text.trim();
     final port = int.tryParse(_portCtrl.text.trim()) ?? 22;
@@ -228,81 +231,30 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       return;
     }
 
-    setState(() {
-      _connecting = true;
-      _error = null;
-    });
-
-    try {
-      final jumpHost = _buildJumpHost();
-      final result = await connectSshParams(
+    final alias = _nameCtrl.text.trim();
+    Navigator.of(context).pop(
+      SshHost(
+        alias: alias.isEmpty
+            ? '$user@$host${port != 22 ? ":$port" : ""}'
+            : alias,
         hostname: host,
         port: port,
-        username: user,
-        alias: _nameCtrl.text,
-        password: _authMode == _AuthMode.password ? _passwordCtrl.text : null,
-        identityFile: _authMode == _AuthMode.key ? _keyCtrl.text : null,
-        jumpHost: jumpHost,
+        user: user,
+        password: _authMode == _AuthMode.password
+            ? (_passwordCtrl.text.isNotEmpty
+                  ? _passwordCtrl.text
+                  : widget.initialHost?.password)
+            : null,
+        identityFile: _authMode == _AuthMode.key
+            ? (_keyCtrl.text.trim().isEmpty ? null : _keyCtrl.text.trim())
+            : null,
+        forwardRules: List.of(_forwardRules),
+        jumpHost: _buildJumpHost(),
         keepaliveInterval: _keepaliveInterval,
         autoReconnect: _autoReconnect,
         sessionLog: _sessionLog,
-        verifyHostKey: createHostKeyVerifier(
-          context,
-          hostname: host,
-          port: port,
-        ),
-        jumpVerifyHostKey: jumpHost != null
-            ? createHostKeyVerifier(
-                context,
-                hostname: jumpHost.hostname,
-                port: jumpHost.port,
-              )
-            : null,
-      );
-
-      // Attach forward rules to the profile stored in ConnectResult
-      final profileWithRules = result.profile.copyWith(
-        forwardRules: List.of(_forwardRules),
-      );
-
-      if (!mounted) return;
-      Navigator.of(context).pop(
-        ConnectResult(
-          client: result.client,
-          jumpClient: result.jumpClient,
-          session: result.session,
-          sftp: result.sftp,
-          host: result.host,
-          username: result.username,
-          alias: result.alias,
-          profile: profileWithRules,
-          mode: result.mode,
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _connecting = false;
-          _error = _friendlyError(e);
-        });
-      }
-    }
-  }
-
-  String _friendlyError(Object e) {
-    final s = e.toString().toLowerCase();
-    if (s.contains('userauth') ||
-        s.contains('authentication') ||
-        s.contains('permission')) {
-      return 'Authentication failed, check password or key';
-    }
-    if (s.contains('refused')) return 'Connection refused, check IP and port';
-    if (s.contains('timeout') || s.contains('timedout')) return 'Connection timed out';
-    if (s.contains('hostkey') || s.contains('host key')) return 'Host key verification failed';
-    if (s.contains('nodename') || s.contains('socketexception')) {
-      return 'Cannot resolve host';
-    }
-    return e.toString().replaceAll('Exception: ', '').replaceAll('Error: ', '');
+      ),
+    );
   }
 
   @override
@@ -314,33 +266,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         width: 420,
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Stack(
-            children: [
-              _buildScrollable(),
-              if (_connecting)
-                Positioned.fill(
-                  child: Container(
-                    color: const Color(0xCC2B2B2B),
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(
-                            color: _kAccent,
-                            strokeWidth: 2,
-                          ),
-                          SizedBox(height: 16),
-                          Text(
-                            'Connecting…',
-                            style: TextStyle(color: _kLabel, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          child: _buildScrollable(),
         ),
       ),
     );
@@ -444,7 +370,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _connecting ? null : (widget.editOnly ? _save : _create),
+              onPressed: widget.editOnly ? _save : _create,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _kAccent,
                 foregroundColor: Colors.white,
@@ -507,8 +433,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         ),
       ],
       selected: {current},
-      onSelectionChanged:
-          _connecting ? null : (s) => onChanged(s.first),
+      onSelectionChanged: (s) => onChanged(s.first),
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
         foregroundColor: WidgetStateProperty.resolveWith((states) {
