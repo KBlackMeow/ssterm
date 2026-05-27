@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../models/transfer_task.dart';
 import 'frosted_glass.dart';
@@ -255,10 +254,7 @@ class _TransferRowState extends State<_TransferRow> {
   }
 
   void _scheduleRebuild() {
-    if (!mounted) return;
-    SchedulerBinding.instance.scheduleFrameCallback((_) {
-      if (mounted) setState(() {});
-    });
+    if (mounted) setState(() {});
   }
 
   @override

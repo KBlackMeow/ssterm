@@ -1,6 +1,8 @@
 import 'dart:io';
 
-class SessionLogger {
+import 'package:ssterm/io/output_pipe.dart';
+
+class SessionLogger implements LogSink {
   final IOSink _sink;
   final String path;
 
@@ -30,9 +32,11 @@ class SessionLogger {
     return SessionLogger._(sink, path);
   }
 
+  @override
   void write(List<int> bytes) {
     _sink.add(bytes);
   }
 
+  @override
   Future<void> close() => _sink.close();
 }

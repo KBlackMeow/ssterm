@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/foundation.dart';
+
+import 'ssh_host.dart';
+import '../services/sftp_download_worker.dart';
 
 enum TransferType { upload, download }
 
@@ -22,7 +26,10 @@ class TransferTask extends ChangeNotifier {
   String? error;
 
   SftpFileWriter? _writer;
-  StreamSubscription<Uint8List>? _downloadSub;
+  // Used only by isolated downloads for cancellation.
+  Isolate? _downloadIsolate;
+  ReceivePort? _downloadReceivePort;
+
   DateTime? _lastProgressNotify;
   static const _progressNotifyInterval = Duration(milliseconds: 100);
 
@@ -34,7 +41,6 @@ class TransferTask extends ChangeNotifier {
   void pause() {
     if (status != TransferStatus.running) return;
     _writer?.pause();
-    _downloadSub?.pause();
     status = TransferStatus.paused;
     notifyListeners();
   }
@@ -42,15 +48,17 @@ class TransferTask extends ChangeNotifier {
   void resume() {
     if (status != TransferStatus.paused) return;
     _writer?.resume();
-    _downloadSub?.resume();
     status = TransferStatus.running;
     notifyListeners();
   }
 
   Future<void> cancel() async {
     if (!isActive) return;
-    await _downloadSub?.cancel();
     await _writer?.abort();
+    _downloadIsolate?.kill(priority: Isolate.immediate);
+    _downloadIsolate = null;
+    _downloadReceivePort?.close();
+    _downloadReceivePort = null;
     status = TransferStatus.cancelled;
     notifyListeners();
   }
@@ -81,6 +89,12 @@ class TransferTask extends ChangeNotifier {
 }
 
 class TransferManager extends ChangeNotifier {
+  TransferManager({this.sshProfile});
+
+  /// SSH credentials used to open a dedicated download connection in an
+  /// isolate, keeping the main isolate free for Flutter rendering.
+  final SshHost? sshProfile;
+
   final _tasks = <TransferTask>[];
 
   List<TransferTask> get tasks => List.unmodifiable(_tasks);
@@ -105,12 +119,19 @@ class TransferManager extends ChangeNotifier {
     return task;
   }
 
-  /// Stat the remote file and enqueue a download task. Throws on pre-flight error.
+  /// Stat the remote file and enqueue a download task.
+  /// The actual transfer runs in a background [Isolate] so the main isolate
+  /// (and Flutter's rendering) is unaffected by SSH crypto overhead.
   Future<void> startDownload({
     required SftpClient sftp,
     required String remotePath,
     required String localPath,
   }) async {
+    final profile = sshProfile;
+    if (profile == null) {
+      throw StateError('TransferManager has no sshProfile; cannot start isolated download');
+    }
+
     final attr = await sftp.stat(remotePath);
     final total = attr.size ?? 0;
     final name = remotePath.split('/').last;
@@ -119,7 +140,7 @@ class TransferManager extends ChangeNotifier {
     _tasks.insert(0, task);
     notifyListeners();
 
-    _runDownload(task, sftp, remotePath, localPath, total);
+    unawaited(_runIsolatedDownload(task, profile, remotePath, localPath));
   }
 
   void remove(TransferTask task) {
@@ -161,52 +182,57 @@ class TransferManager extends ChangeNotifier {
     }
   }
 
-  void _runDownload(
+  Future<void> _runIsolatedDownload(
     TransferTask task,
-    SftpClient sftp,
+    SshHost profile,
     String remotePath,
     String localPath,
-    int total,
   ) async {
-    IOSink? sink;
+    final receivePort = ReceivePort();
+
+    Isolate isolate;
     try {
-      final remoteFile = await sftp.open(remotePath, mode: SftpFileOpenMode.read);
-      sink = File(localPath).openWrite();
-
-      int received = 0;
-      final completer = Completer<void>();
-
-      final sub = remoteFile
-          .read(length: total > 0 ? total : null)
-          .cast<Uint8List>()
-          .listen(
-        (chunk) {
-          sink!.add(chunk);
-          received += chunk.length;
-          task._onProgress(received);
-        },
-        onDone: () async {
-          await sink?.flush();
-          await sink?.close();
-          await remoteFile.close();
-          task._complete();
-          if (!completer.isCompleted) completer.complete();
-        },
-        onError: (e) {
-          task._fail(e);
-          if (!completer.isCompleted) completer.completeError(e);
-        },
-        cancelOnError: true,
+      isolate = await Isolate.spawn<SftpDownloadArgs>(
+        sftpDownloadMain,
+        SftpDownloadArgs(
+          host: profile,
+          remotePath: remotePath,
+          localPath: localPath,
+          replyPort: receivePort.sendPort,
+        ),
+        errorsAreFatal: false,
       );
-
-      task._downloadSub = sub;
-      // If cancelled before the subscription was assigned, honour it now
-      if (!task.isActive) await sub.cancel();
-
-      await completer.future.catchError((_) {});
     } catch (e) {
-      await sink?.close();
+      receivePort.close();
       task._fail(e);
+      return;
+    }
+
+    task._downloadIsolate = isolate;
+    task._downloadReceivePort = receivePort;
+
+    await for (final msg in receivePort) {
+      if (!task.isActive) {
+        // Cancelled while a message was in flight — clean up.
+        isolate.kill(priority: Isolate.immediate);
+        receivePort.close();
+        return;
+      }
+      if (msg is int) {
+        task._onProgress(msg);
+      } else if (msg == null) {
+        receivePort.close();
+        task._downloadIsolate = null;
+        task._downloadReceivePort = null;
+        task._complete();
+        return;
+      } else if (msg is String) {
+        receivePort.close();
+        task._downloadIsolate = null;
+        task._downloadReceivePort = null;
+        task._fail(msg);
+        return;
+      }
     }
   }
 
