@@ -3,6 +3,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
+import '../../models/command.dart';
+import '../../models/commands_store.dart';
 import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
@@ -46,13 +48,25 @@ class _SettingsPageState extends State<SettingsPage>
   late TerminalSettings _s;
   late TabController _tabController;
   PackageInfo? _packageInfo;
+  List<Command> _commands = const [];
 
   @override
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _loadPackageInfo();
+    _loadCommands();
+  }
+
+  Future<void> _loadCommands() async {
+    final cmds = await CommandsStore.load();
+    if (!mounted) return;
+    setState(() => _commands = cmds);
+  }
+
+  Future<void> _saveCommands() async {
+    await CommandsStore.save(_commands);
   }
 
   Future<void> _loadPackageInfo() async {
@@ -111,6 +125,7 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'Font'),
               Tab(text: 'Cursor'),
               Tab(text: 'SSH'),
+              Tab(text: 'Commands'),
               Tab(text: 'About'),
             ],
           ),
@@ -122,6 +137,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildFontTab(),
                 _buildCursorTab(),
                 _buildSshTab(),
+                _buildCommandsTab(),
                 _buildAboutTab(),
               ],
             ),
@@ -281,6 +297,169 @@ class _SettingsPageState extends State<SettingsPage>
         2 => 800,
         _ => 530,
       };
+
+  // ── Commands tab ────────────────────────────────────────────────────────────
+
+  Widget _buildCommandsTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        Row(
+          children: [
+            Expanded(child: _sectionTitle('Quick Commands')),
+            TextButton.icon(
+              onPressed: _addCommand,
+              icon: const Icon(Icons.add, size: 14, color: _kAccent),
+              label: const Text('Add', style: TextStyle(color: _kAccent, fontSize: 12)),
+            ),
+          ],
+        ),
+        if (_commands.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                'No commands yet — tap Add to create one',
+                style: TextStyle(color: _kFgMuted, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          for (var i = 0; i < _commands.length; i++)
+            _buildCommandTile(i),
+      ],
+    );
+  }
+
+  Widget _buildCommandTile(int index) {
+    final cmd = _commands[index];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1C),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _kDivider),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        leading: const Icon(Icons.terminal, color: _kFgMuted, size: 18),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                cmd.name,
+                style: const TextStyle(color: _kFg, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (cmd.builtIn) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: _kAccent.withAlpha(40),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: _kAccent.withAlpha(100)),
+                ),
+                child: const Text(
+                  '官方',
+                  style: TextStyle(
+                    color: _kAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        subtitle: Text(
+          cmd.command,
+          style: const TextStyle(
+            color: _kFgMuted,
+            fontSize: 11,
+            fontFamily: 'JetBrainsMono',
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: cmd.builtIn
+            ? const SizedBox(width: 8)
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
+                    onPressed: () => _editCommand(index),
+                    tooltip: 'Edit',
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: const EdgeInsets.all(6),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 15, color: _kFgMuted),
+                    onPressed: () => _confirmDeleteCommand(index),
+                    tooltip: 'Delete',
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: const EdgeInsets.all(6),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Future<void> _addCommand() async {
+    final result = await _showCommandDialog();
+    if (result == null) return;
+    setState(() => _commands = [..._commands, result]);
+    await _saveCommands();
+  }
+
+  Future<void> _editCommand(int index) async {
+    final result = await _showCommandDialog(existing: _commands[index]);
+    if (result == null) return;
+    final updated = List<Command>.from(_commands);
+    updated[index] = result;
+    setState(() => _commands = updated);
+    await _saveCommands();
+  }
+
+  Future<void> _confirmDeleteCommand(int index) async {
+    final cmd = _commands[index];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _kSheetBg,
+        title: const Text('Delete Command', style: TextStyle(color: _kFg, fontSize: 15)),
+        content: Text(
+          'Delete "${cmd.name}"?',
+          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final updated = List<Command>.from(_commands)..removeAt(index);
+    setState(() => _commands = updated);
+    await _saveCommands();
+  }
+
+  Future<Command?> _showCommandDialog({Command? existing}) {
+    return showDialog<Command>(
+      context: context,
+      builder: (ctx) => _CommandDialog(existing: existing),
+    );
+  }
 
   // ── About tab ─────────────────────────────────────────────────────────────
 
@@ -926,6 +1105,126 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
         TextButton(
           onPressed: () => Navigator.pop(context, _color),
           child: const Text('Apply', style: TextStyle(color: _kAccent)),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Command edit dialog ──────────────────────────────────────────────────────
+
+class _CommandDialog extends StatefulWidget {
+  const _CommandDialog({this.existing});
+
+  final Command? existing;
+
+  @override
+  State<_CommandDialog> createState() => _CommandDialogState();
+}
+
+class _CommandDialogState extends State<_CommandDialog> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _cmdCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _nameCtrl = TextEditingController(text: e?.name ?? '');
+    _descCtrl = TextEditingController(text: e?.description ?? '');
+    _cmdCtrl = TextEditingController(text: e?.command ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    _cmdCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameCtrl.text.trim();
+    final cmd = _cmdCtrl.text.trim();
+    if (name.isEmpty || cmd.isEmpty) return;
+    Navigator.pop(
+      context,
+      Command(
+        name: name,
+        description: _descCtrl.text.trim(),
+        command: cmd,
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration(String label) => InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+        enabledBorder:
+            const UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
+        focusedBorder:
+            const UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.existing != null;
+    return AlertDialog(
+      backgroundColor: _kSheetBg,
+      title: Text(
+        isEdit ? 'Edit Command' : 'New Command',
+        style: const TextStyle(color: _kFg, fontSize: 15),
+      ),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: _kFg, fontSize: 13),
+              decoration: _fieldDecoration('Name *'),
+              textInputAction: TextInputAction.next,
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _descCtrl,
+              style: const TextStyle(color: _kFg, fontSize: 13),
+              decoration: _fieldDecoration('Description'),
+              textInputAction: TextInputAction.next,
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _cmdCtrl,
+              style: const TextStyle(
+                color: _kFg,
+                fontSize: 12,
+                fontFamily: 'JetBrainsMono',
+              ),
+              decoration: _fieldDecoration('Command *'),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              maxLines: 5,
+              minLines: 1,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+        ),
+        TextButton(
+          onPressed: _submit,
+          child: Text(
+            isEdit ? 'Save' : 'Add',
+            style: const TextStyle(color: _kAccent),
+          ),
         ),
       ],
     );

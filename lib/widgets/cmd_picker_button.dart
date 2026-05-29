@@ -1,10 +1,8 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../models/command.dart';
+import '../models/commands_store.dart';
 import 'frosted_glass.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
@@ -64,18 +62,19 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
   }
 
   Future<void> _preload() async {
-    final raw = await rootBundle.loadString('assets/scripts/cmd.json');
-    final list = jsonDecode(raw) as List<dynamic>;
+    final cmds = await CommandsStore.load();
     if (!mounted) return;
-    _commands =
-        list.map((e) => Command.fromJson(e as Map<String, dynamic>)).toList();
+    _commands = cmds;
   }
 
-  void _showMenu(BuildContext context) {
-    if (_commands.isEmpty) return;
-
+  Future<void> _showMenu(BuildContext context) async {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
+
+    final cmds = await CommandsStore.load();
+    if (!mounted) return;
+    _commands = cmds;
+    if (_commands.isEmpty) return;
 
     final items = <PopupMenuEntry<int>>[
       PopupMenuItem<int>(
@@ -116,7 +115,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
     ];
 
     showFrostedMenu<int>(
-      context: context,
+      context: this.context,
       frostedGlass: widget.frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
