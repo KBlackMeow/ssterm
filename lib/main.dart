@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'dialogs/connect_dialog.dart';
 import 'io/output_pipe.dart';
@@ -42,11 +43,29 @@ part 'main_local.dart';
 part 'main_ssh.dart';
 part 'main_chrome.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   // Must run before the first Pty.start: spawned shells inherit RLIMIT_NOFILE
   // from this process, and macOS's default 256 is too low for plugin-heavy
   // zsh setups.
   raiseFileDescriptorLimit();
+
+  // Custom title bar: hide the OS-drawn caption strip and let the tab bar take
+  // its place (Chrome / Edge / Windows Terminal style). On macOS the native
+  // traffic-light buttons stay visible; on Windows/Linux we draw our own
+  // min/max/close controls inside the tab bar.
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      titleBarStyle: TitleBarStyle.hidden,
+      backgroundColor: Color(0xFF1E1E1E),
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
   runApp(const SsTermApp());
 }
 

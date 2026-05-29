@@ -65,54 +65,72 @@ class _TabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // macOS keeps native traffic-light buttons (handled by TitleBarStyle.hidden),
+    // so reserve the left gutter there so chips don't sit under them. Windows
+    // / Linux draw their own controls on the right via _WindowControls.
+    final leftPadding = Platform.isMacOS ? 78.0 : 8.0;
+    final rightPadding = Platform.isMacOS ? 4.0 : 0.0;
     return Container(
       color: backgroundColor,
-      padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
+      padding: EdgeInsets.fromLTRB(leftPadding, 6, rightPadding, 6),
       child: Row(
         children: [
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                if (tabs.isEmpty) return const SizedBox.shrink();
+            // Inline drag-area: window_manager's DragToMoveArea ships with a
+            // built-in onDoubleTap that sits in the gesture arena and delays
+            // every child onTap by ~300ms (the double-tap timeout). We only
+            // want pan-to-drag, no double-tap-to-maximize — users have the
+            // maximize button in [_WindowControls].
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => windowManager.startDragging(),
+              child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (tabs.isEmpty) return const SizedBox.expand();
 
-                const tabGap = 4.0;
-                final slotWidth =
-                    (constraints.maxWidth - tabGap * (tabs.length - 1)) /
-                    tabs.length;
-                final tabWidth = slotWidth.clamp(_minTabWidth, _preferredTabWidth);
-                final needsScroll =
-                    tabWidth <= _minTabWidth &&
-                    tabs.length * (_minTabWidth + tabGap) > constraints.maxWidth;
+                    const tabGap = 4.0;
+                    final slotWidth =
+                        (constraints.maxWidth - tabGap * (tabs.length - 1)) /
+                        tabs.length;
+                    final tabWidth =
+                        slotWidth.clamp(_minTabWidth, _preferredTabWidth);
+                    final needsScroll = tabWidth <= _minTabWidth &&
+                        tabs.length * (_minTabWidth + tabGap) >
+                            constraints.maxWidth;
 
-                final chips = [
-                  for (var i = 0; i < tabs.length; i++)
-                    Padding(
-                      padding: EdgeInsets.only(
-                        right: i < tabs.length - 1 ? tabGap : 0,
-                      ),
-                      child: SizedBox(
-                        width: needsScroll ? _minTabWidth : tabWidth,
-                        child: _TabChip(
-                          tab: tabs[i],
-                          isActive: i == active,
-                          tabSelectedColor: tabSelectedColor,
-                          tabUnselectedColor: tabUnselectedColor,
-                          showClose: true,
-                          expand: true,
-                          onTap: () => onSelect(i),
-                          onClose: () => onClose(i),
+                    final chips = [
+                      for (var i = 0; i < tabs.length; i++)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            right: i < tabs.length - 1 ? tabGap : 0,
+                          ),
+                          child: SizedBox(
+                            width: needsScroll ? _minTabWidth : tabWidth,
+                            child: _TabChip(
+                              tab: tabs[i],
+                              isActive: i == active,
+                              tabSelectedColor: tabSelectedColor,
+                              tabUnselectedColor: tabUnselectedColor,
+                              showClose: true,
+                              expand: true,
+                              onTap: () => onSelect(i),
+                              onClose: () => onClose(i),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                ];
+                    ];
 
-                return needsScroll
-                    ? SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(children: chips),
-                      )
-                    : Row(children: chips);
-              },
+                    return needsScroll
+                        ? SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(children: chips),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: chips,
+                          );
+                  },
+              ),
             ),
           ),
           _PlusMenu(
@@ -164,8 +182,133 @@ class _TabBar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 2),
+          if (!Platform.isMacOS) ...[
+            const SizedBox(width: 6),
+            const _WindowControls(),
+          ] else
+            const SizedBox(width: 2),
         ],
+      ),
+    );
+  }
+}
+
+// ── Window controls (Windows/Linux only) ──────────────────────────────────────
+/// Custom min / max-restore / close buttons that replace the OS-drawn caption
+/// controls. Sits at the right end of the tab bar so the tab bar reads as the
+/// window's title bar.
+class _WindowControls extends StatefulWidget {
+  const _WindowControls();
+
+  @override
+  State<_WindowControls> createState() => _WindowControlsState();
+}
+
+class _WindowControlsState extends State<_WindowControls>
+    with WindowListener {
+  bool _isMaximized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    windowManager.isMaximized().then((v) {
+      if (mounted) setState(() => _isMaximized = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMaximize() {
+    if (mounted) setState(() => _isMaximized = true);
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    if (mounted) setState(() => _isMaximized = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WindowButton(
+          icon: Icons.remove,
+          tooltip: 'Minimize',
+          onTap: windowManager.minimize,
+        ),
+        _WindowButton(
+          icon: _isMaximized
+              ? Icons.filter_none_outlined
+              : Icons.crop_square_outlined,
+          tooltip: _isMaximized ? 'Restore' : 'Maximize',
+          onTap: () async {
+            if (_isMaximized) {
+              await windowManager.unmaximize();
+            } else {
+              await windowManager.maximize();
+            }
+          },
+        ),
+        _WindowButton(
+          icon: Icons.close,
+          tooltip: 'Close',
+          hoverColor: const Color(0xFFE81123),
+          onTap: windowManager.close,
+        ),
+      ],
+    );
+  }
+}
+
+class _WindowButton extends StatefulWidget {
+  const _WindowButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.hoverColor,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? hoverColor;
+
+  @override
+  State<_WindowButton> createState() => _WindowButtonState();
+}
+
+class _WindowButtonState extends State<_WindowButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hoverBg = widget.hoverColor ?? const Color(0x33FFFFFF);
+    final iconColor = _hover && widget.hoverColor != null
+        ? Colors.white
+        : _kFgInactive;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: Container(
+            width: 46,
+            height: 32,
+            color: _hover ? hoverBg : Colors.transparent,
+            alignment: Alignment.center,
+            child: Icon(widget.icon, size: 14, color: iconColor),
+          ),
+        ),
       ),
     );
   }
