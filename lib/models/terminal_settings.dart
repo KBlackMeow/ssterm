@@ -34,11 +34,10 @@ class TerminalSettings {
   ///   Linux   → 14
   static double get defaultFontSize => Platform.isLinux ? 14.0 : 12.0;
 
-  /// Windows tightens by 0.2px — Consolas reads loose in Skia (no ClearType)
-  /// at small sizes. The painter's per-glyph adaptive clip (see
-  /// packages/xterm/lib/src/ui/painter.dart) handles fallback glyphs wider
-  /// than the cell, so this tracking adjustment no longer risks clipping.
-  static double get defaultLetterSpacing => Platform.isWindows ? -0.2 : 0;
+  /// No tracking adjustment. Cascadia Mono / Monaco / JetBrains Mono are all
+  /// used at their designed advance — matches each platform's native terminal
+  /// (Windows Terminal, Terminal.app, etc.).
+  static const double defaultLetterSpacing = 0;
 
   TerminalSettings({
     this.themePresetId = 'iterm2',
