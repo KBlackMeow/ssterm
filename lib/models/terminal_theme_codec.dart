@@ -49,7 +49,7 @@ abstract final class TerminalThemeCodec {
     Color c(String key, Color fallback) =>
         json[key] is String ? colorFromJson(json[key] as String) : fallback;
 
-    final base = TerminalThemePresets.iterm2;
+    final base = TerminalThemePresets.defaultTheme;
     return TerminalTheme(
       cursor: c('cursor', base.cursor),
       selection: c('selection', base.selection),

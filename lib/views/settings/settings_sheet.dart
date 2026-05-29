@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
@@ -182,17 +180,12 @@ class _SettingsPageState extends State<SettingsPage>
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       children: [
         _sectionTitle('Family'),
-        _controlLabel(
-          _s.fontFamily == 'JetBrainsMono'
-              ? 'JetBrains Mono (bundled)'
-              : '${_s.fontFamily} (system)',
-          hint: Platform.isWindows
-              ? 'Matches Windows Terminal\'s default. Native ➜/Powerline '
-                  'glyphs, no fallback needed.'
-              : Platform.isMacOS
-                  ? 'Classic macOS terminal face. Menlo / SF Mono / bundled '
-                      'JetBrains Mono fall back for symbols Monaco lacks.'
-                  : 'Ships with the app — same look on every machine.',
+        _fontDropdown(),
+        const SizedBox(height: 4),
+        Text(
+          'Bundled fonts ship with the app and render the same on every '
+              'machine; system fonts depend on your OS having them installed.',
+          style: const TextStyle(color: _kFgMuted, fontSize: 11),
         ),
         const SizedBox(height: 12),
         _sectionTitle('CJK / 中文'),
@@ -669,6 +662,36 @@ class _SettingsPageState extends State<SettingsPage>
           ),
         ],
       ],
+    );
+  }
+
+  Widget _fontDropdown() {
+    final options = TerminalSettings.fontOptions;
+    final value = options.contains(_s.fontFamily)
+        ? _s.fontFamily
+        : TerminalSettings.defaultFontFamily;
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      dropdownColor: const Color(0xFF1C1C1C),
+      style: const TextStyle(color: _kFg, fontSize: 13),
+      decoration: const InputDecoration(
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+        enabledBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
+        focusedBorder:
+            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+      ),
+      items: [
+        for (final f in options)
+          DropdownMenuItem(
+            value: f,
+            child: Text(TerminalSettings.fontFamilyLabel(f)),
+          ),
+      ],
+      onChanged: (v) {
+        if (v != null) _apply(_s.copyWith(fontFamily: v));
+      },
     );
   }
 

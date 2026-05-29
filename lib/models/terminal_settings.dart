@@ -9,17 +9,24 @@ import 'terminal_theme_presets.dart';
 /// User preferences for terminal appearance and cursor behavior.
 class TerminalSettings {
   /// Defaults match each platform's native terminal conventions:
-  ///   Windows → Cascadia Mono  (Windows Terminal default, ships with Win10
-  ///                             1809+/Win11, native ➜/Powerline glyphs)
-  ///   macOS   → Monaco          (classic Mac terminal face, system font)
-  ///   Linux   → JetBrainsMono   (bundled — distros vary too much to rely on)
+  ///   Windows → SFMonoPowerline (bundled — Apple's SF Mono + Powerline
+  ///                              patches; native ➜/Powerline glyphs)
+  ///   macOS   → Monaco           (classic Mac terminal face, system font)
+  ///   Linux   → JetBrainsMono    (bundled — distros vary too much to rely on)
   /// Family names must match the font's actual registered family
-  /// (e.g. pubspec's `family:` for JetBrainsMono).
+  /// (e.g. pubspec's `family:` for bundled faces).
   static String get defaultFontFamily {
-    if (Platform.isWindows) return 'Cascadia Mono';
+    if (Platform.isWindows) return 'SFMonoPowerline';
     if (Platform.isMacOS) return 'Monaco';
     return 'JetBrainsMono';
   }
+
+  /// Default body weight. Windows uses Medium (500) — the SF Mono Powerline
+  /// Regular cut reads a touch thin under Skia's grayscale AA, so Medium
+  /// matches the visual density of native Windows terminals more closely.
+  /// Other platforms use Regular (400).
+  static FontWeight get defaultFontWeight =>
+      Platform.isWindows ? FontWeight.w500 : FontWeight.w400;
 
   /// Fallback face for CJK and other non-Latin glyphs in the terminal.
   static String get defaultCjkFontFamily {
@@ -40,13 +47,13 @@ class TerminalSettings {
   static const double defaultLetterSpacing = 0;
 
   TerminalSettings({
-    this.themePresetId = 'iterm2',
+    String? themePresetId,
     TerminalTheme? customTheme,
     String? fontFamily,
     String? cjkFontFamily,
     double? fontSize,
     this.lineHeight = 1.2,
-    this.fontWeight = FontWeight.w400,
+    FontWeight? fontWeight,
     this.cursorType = TerminalCursorType.block,
     this.cursorBlink = true,
     this.cursorBlinkPeriodMs = 530,
@@ -56,10 +63,15 @@ class TerminalSettings {
     this.wallpaperOpacity = 1.0,
     this.wallpaperBlur = 12.0,
     this.backgroundOpacity = 0.88,
-  })  : fontFamily = fontFamily ?? defaultFontFamily,
+  })  : themePresetId = TerminalThemePresets.all.containsKey(themePresetId) ||
+                themePresetId == 'custom'
+            ? themePresetId!
+            : TerminalThemePresets.defaultId,
+        fontFamily = fontFamily ?? defaultFontFamily,
         cjkFontFamily = cjkFontFamily ?? defaultCjkFontFamily,
         fontSize = fontSize ?? defaultFontSize,
-        customTheme = customTheme ?? TerminalThemePresets.iterm2;
+        fontWeight = fontWeight ?? defaultFontWeight,
+        customTheme = customTheme ?? TerminalThemePresets.defaultTheme;
 
   String themePresetId;
   TerminalTheme customTheme;
@@ -131,9 +143,62 @@ class TerminalSettings {
     return Color.lerp(base, toward, amount.clamp(0.0, 1.0))!;
   }
 
-  /// Terminal font is locked to the platform default. Saved values from
-  /// older configs are intentionally ignored — the font picker was removed.
-  static String resolveFontFamily(String? savedFont) => defaultFontFamily;
+  /// Fonts the user can pick in the Family dropdown. Bundled faces come first
+  /// (guaranteed to render), then platform-native system fonts. Family names
+  /// must match either pubspec `family:` (bundled) or the OS-registered name
+  /// (system). Order here drives dropdown order.
+  static List<String> get fontOptions {
+    if (Platform.isWindows) {
+      return const [
+        'SFMonoPowerline',   // bundled — default
+        'JetBrainsMono',     // bundled
+        'MonacoBundled',     // bundled
+        'Cascadia Mono',     // system (Win10 1809+/Win11)
+        'Cascadia Code',     // system
+        'Consolas',          // system
+        'Courier New',       // system
+      ];
+    }
+    if (Platform.isMacOS) {
+      return const [
+        'Monaco',            // system — default
+        'Menlo',             // system
+        'SF Mono',           // system (recent macOS)
+        'SFMonoPowerline',   // bundled
+        'JetBrainsMono',     // bundled
+        'Courier New',       // system
+      ];
+    }
+    return const [
+      'JetBrainsMono',       // bundled — default
+      'SFMonoPowerline',     // bundled
+      'MonacoBundled',       // bundled
+      'DejaVu Sans Mono',    // common Linux system font
+      'Liberation Mono',
+      'monospace',
+    ];
+  }
+
+  /// Resolves a persisted [savedFont] to a face listed in [fontOptions].
+  /// Unknown values (e.g. from older builds) fall back to the platform default.
+  static String resolveFontFamily(String? savedFont) {
+    if (savedFont == null) return defaultFontFamily;
+    if (fontOptions.contains(savedFont)) return savedFont;
+    return defaultFontFamily;
+  }
+
+  /// User-facing label for a family name. Bundled faces get a "(bundled)"
+  /// suffix so users can see which fonts ship with the app vs. depend on the
+  /// system having them installed.
+  static String fontFamilyLabel(String family) => switch (family) {
+        'SFMonoPowerline' => 'SF Mono Powerline (bundled)',
+        'JetBrainsMono' => 'JetBrains Mono (bundled)',
+        // Distinct family name keeps the bundled Monaco from shadowing
+        // macOS's system Monaco — macOS users still see plain 'Monaco' for
+        // the system face, Windows/Linux users see the bundled one here.
+        'MonacoBundled' => 'Monaco (bundled)',
+        _ => family,
+      };
 
   static List<String> get cjkFontOptions {
     if (Platform.isWindows) {
@@ -173,11 +238,11 @@ class TerminalSettings {
 
     if (Platform.isWindows) {
       return [
-        // Cascadia Code shares Cascadia Mono's metrics (same family designed
-        // together) and adds programming-ligature glyphs as backup. Consolas
-        // is kept as a last resort for any glyph both Cascadia faces lack.
-        if (fontFamily != 'Cascadia Code') 'Cascadia Code',
+        // SF Mono Powerline (primary) already covers ASCII, Powerline, and
+        // common Dingbats like ➜ — these fallbacks only catch outliers and
+        // CJK (SF Mono has no CJK glyphs).
         if (fontFamily != 'Cascadia Mono') 'Cascadia Mono',
+        if (fontFamily != 'Cascadia Code') 'Cascadia Code',
         'Consolas',
         ...bundledSymbols,
         cjkFontFamily,
@@ -219,7 +284,8 @@ class TerminalSettings {
   TerminalTheme resolveTheme() {
     final base = themePresetId == 'custom'
         ? customTheme
-        : TerminalThemePresets.all[themePresetId] ?? TerminalThemePresets.iterm2;
+        : TerminalThemePresets.all[themePresetId] ??
+            TerminalThemePresets.defaultTheme;
     return _brightenText(base);
   }
 
@@ -322,7 +388,8 @@ class TerminalSettings {
   void applyPreset(String id) {
     themePresetId = id;
     if (id != 'custom') {
-      customTheme = TerminalThemePresets.all[id] ?? TerminalThemePresets.iterm2;
+      customTheme = TerminalThemePresets.all[id] ??
+          TerminalThemePresets.defaultTheme;
     }
   }
 
@@ -335,14 +402,15 @@ class TerminalSettings {
 
   static TerminalSettings fromJson(Map<String, dynamic>? json) {
     if (json == null) return TerminalSettings();
-    final preset = json['themePreset'] as String? ?? 'iterm2';
-    TerminalTheme custom = TerminalThemePresets.iterm2;
+    final preset = json['themePreset'] as String? ?? TerminalThemePresets.defaultId;
+    TerminalTheme custom = TerminalThemePresets.defaultTheme;
     if (json['customTheme'] is Map<String, dynamic>) {
       custom = TerminalThemeCodec.themeFromJson(
         json['customTheme'] as Map<String, dynamic>,
       );
     } else if (preset != 'custom') {
-      custom = TerminalThemePresets.all[preset] ?? TerminalThemePresets.iterm2;
+      custom = TerminalThemePresets.all[preset] ??
+          TerminalThemePresets.defaultTheme;
     }
 
     final savedFont = json['fontFamily'] as String?;
