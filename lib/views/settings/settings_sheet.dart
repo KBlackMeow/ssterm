@@ -363,7 +363,7 @@ class _SettingsPageState extends State<SettingsPage>
                   border: Border.all(color: _kAccent.withAlpha(100)),
                 ),
                 child: const Text(
-                  '官方',
+                  'Official',
                   style: TextStyle(
                     color: _kAccent,
                     fontSize: 10,
