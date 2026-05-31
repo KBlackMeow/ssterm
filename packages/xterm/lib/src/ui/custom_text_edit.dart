@@ -104,6 +104,13 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
       _openInputConnection();
     } else {
       widget.focusNode.requestFocus();
+      // After requesting focus, open connection in the next frame so
+      // _onFocusChange has time to fire first.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.focusNode.hasFocus) {
+          _openInputConnection();
+        }
+      });
     }
   }
 
@@ -214,9 +221,12 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   }
 
   void _openOrCloseInputConnectionIfNeeded() {
-    if (widget.focusNode.hasFocus && widget.focusNode.consumeKeyboardToken()) {
+    if (widget.focusNode.hasFocus) {
+      // Skip consumeKeyboardToken() — terminal always wants the keyboard when
+      // focused, regardless of how focus was obtained (autofocus, tap, API call).
+      widget.focusNode.consumeKeyboardToken(); // consume to keep token state clean
       _openInputConnection();
-    } else if (!widget.focusNode.hasFocus) {
+    } else {
       _closeInputConnectionIfNeeded();
     }
   }

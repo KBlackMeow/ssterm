@@ -203,9 +203,14 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
     final Pty pty;
     if (useUnixWrapper) {
+      // On iOS login-shell flag (-l) causes /bin/sh to source system profile
+      // files that don't exist in the iOS sandbox, hanging the shell startup.
+      final shArgs = Platform.isIOS
+          ? ['-c', _interactiveLocalShellWrapperCommand()]
+          : ['-lc', _interactiveLocalShellWrapperCommand()];
       pty = Pty.start(
         '/bin/sh',
-        arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
+        arguments: shArgs,
         columns: columns,
         rows: rows,
         environment: env,

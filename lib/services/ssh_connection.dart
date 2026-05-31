@@ -281,6 +281,7 @@ Future<ConnectResult> connectSshParams({
 }
 
 Future<List<SSHKeyPair>?> _defaultIdentities() async {
+  if (Platform.isIOS) return null;
   final home = Platform.environment['HOME'] ?? '';
   for (final p in [
     '$home/.ssh/id_ed25519',

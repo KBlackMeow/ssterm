@@ -3,13 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../utils/app_dir.dart';
 import 'command.dart';
 
 class CommandsStore {
   static Future<File> _file() async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory('$home/.ssterm');
-    if (!await dir.exists()) await dir.create(recursive: true);
+    final dir = await appDataDir();
     return File('${dir.path}/commands.json');
   }
 

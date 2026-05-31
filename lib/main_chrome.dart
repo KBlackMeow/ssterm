@@ -70,9 +70,12 @@ class _TabBar extends StatelessWidget {
     // / Linux draw their own controls on the right via _WindowControls.
     final leftPadding = Platform.isMacOS ? 78.0 : 8.0;
     final rightPadding = Platform.isMacOS ? 4.0 : 0.0;
+    final topSafeArea = (Platform.isIOS || Platform.isAndroid)
+        ? MediaQuery.of(context).viewPadding.top
+        : 0.0;
     return Container(
       color: backgroundColor,
-      padding: EdgeInsets.fromLTRB(leftPadding, 6, rightPadding, 6),
+      padding: EdgeInsets.fromLTRB(leftPadding, 6 + topSafeArea, rightPadding, 6),
       child: Row(
         children: [
           Expanded(
@@ -83,10 +86,12 @@ class _TabBar extends StatelessWidget {
             // maximize button in [_WindowControls].
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onPanStart: (_) => windowManager.startDragging(),
+              onPanStart: (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
+                  ? (_) => windowManager.startDragging()
+                  : null,
               child: LayoutBuilder(
                   builder: (context, constraints) {
-                    if (tabs.isEmpty) return const SizedBox.expand();
+                    if (tabs.isEmpty) return const SizedBox();
 
                     const tabGap = 4.0;
                     final slotWidth =
@@ -182,7 +187,7 @@ class _TabBar extends StatelessWidget {
               ),
             ),
           ),
-          if (!Platform.isMacOS) ...[
+          if (Platform.isWindows || Platform.isLinux) ...[
             const SizedBox(width: 6),
             const _WindowControls(),
           ] else
@@ -784,24 +789,25 @@ class _PlusMenu extends StatelessWidget {
         minWidth: 220,
       ),
       items: [
-        if (shells.isNotEmpty) ...[
+        if (!Platform.isIOS && shells.isNotEmpty) ...[
           _sectionHeader('Shells'),
           for (final shell in shells) _shellItem(shell),
         ],
-        PopupMenuItem<String>(
-          value: _refreshShellsValue,
-          height: 32,
-          child: Row(
-            children: const [
-              Icon(Icons.refresh, size: 13, color: _kFgInactive),
-              SizedBox(width: 8),
-              Text(
-                'Refresh shells',
-                style: TextStyle(color: _kFgInactive, fontSize: 12),
-              ),
-            ],
+        if (!Platform.isIOS)
+          PopupMenuItem<String>(
+            value: _refreshShellsValue,
+            height: 32,
+            child: Row(
+              children: const [
+                Icon(Icons.refresh, size: 13, color: _kFgInactive),
+                SizedBox(width: 8),
+                Text(
+                  'Refresh shells',
+                  style: TextStyle(color: _kFgInactive, fontSize: 12),
+                ),
+              ],
+            ),
           ),
-        ),
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
           _sectionHeader('Saved'),

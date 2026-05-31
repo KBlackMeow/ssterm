@@ -39,7 +39,12 @@ class TerminalSettings {
   ///   Windows → 12  (Windows Terminal default)
   ///   macOS   → 12  (matches VS Code on macOS; Terminal.app uses 11)
   ///   Linux   → 14
-  static double get defaultFontSize => Platform.isLinux ? 14.0 : 12.0;
+  ///   iOS/Android → 13  (slightly larger for phone readability)
+  static double get defaultFontSize {
+    if (Platform.isLinux) return 14.0;
+    if (Platform.isIOS || Platform.isAndroid) return 13.0;
+    return 12.0;
+  }
 
   /// No tracking adjustment. Cascadia Mono / Monaco / JetBrains Mono are all
   /// used at their designed advance — matches each platform's native terminal

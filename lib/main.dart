@@ -42,6 +42,7 @@ import 'widgets/wallpaper_background.dart';
 part 'main_local.dart';
 part 'main_ssh.dart';
 part 'main_chrome.dart';
+part 'main_mobile.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -107,7 +108,11 @@ class _TerminalHomeState extends _TerminalHomeSshMethods {
   @override
   void initState() {
     super.initState();
-    _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
+    // iOS sandbox forbids forkpty(); local shell is unavailable on iOS/iPadOS.
+    // Start with an SSH connect dialog instead of a doomed local tab.
+    if (!Platform.isIOS) {
+      _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
+    }
     _loadSshHosts();
     AppConfig.load().then((c) {
       if (!mounted) return;
@@ -235,7 +240,12 @@ class _TerminalHomeState extends _TerminalHomeSshMethods {
             _config.save();
           },
         ),
-        Expanded(child: _buildBody()),
+        Expanded(
+          child: SafeArea(
+            top: false,
+            child: _buildBody(),
+          ),
+        ),
       ],
     );
 
@@ -284,7 +294,68 @@ class _TerminalHomeState extends _TerminalHomeSshMethods {
             },
           ),
         },
-        child: _buildChrome(),
+        child: (Platform.isIOS || Platform.isAndroid)
+            ? _buildMobileChrome()
+            : _buildChrome(),
+      ),
+    );
+  }
+
+  Widget _buildMobileChrome() {
+    final ts = _config.terminal;
+    return Scaffold(
+      backgroundColor: ts.chromeBackground,
+      drawer: _MobileDrawer(
+        tabs: _tabs,
+        active: _active,
+        savedHosts: _savedHosts,
+        configHosts: _configHosts,
+        backgroundColor: ts.chromeBackground,
+        onSelect: _selectTab,
+        onClose: _closeTab,
+        onNewSsh: () => unawaited(_showConnectDialog()),
+        onConnectHost: _connectSavedHost,
+        onSettings: _openSettings,
+      ),
+      body: Builder(
+        builder: (ctx) {
+          final vp = MediaQuery.of(ctx).viewPadding;
+          return Column(
+            children: [
+              SizedBox(height: vp.top),
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: _tabs.isEmpty
+                      ? _MobileEmptyState(
+                          savedHosts: _savedHosts,
+                          configHosts: _configHosts,
+                          onConnectHost: _connectSavedHost,
+                          onNewSsh: () => unawaited(_showConnectDialog()),
+                        )
+                      : GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: () {
+                            if (_active < _tabs.length) {
+                              _tabs[_active].terminalViewKey.currentState
+                                  ?.requestKeyboard();
+                            }
+                          },
+                          child: _buildBody(),
+                        ),
+                ),
+              ),
+              _MobileBottomBar(
+                tabs: _tabs,
+                active: _active,
+                chromeBackground: ts.chromeBackground,
+                bottomInset: vp.bottom,
+                onMenu: () => Scaffold.of(ctx).openDrawer(),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -478,7 +549,7 @@ class _TerminalHomeState extends _TerminalHomeSshMethods {
   }
 
   Widget _buildBody() {
-    if (_tabs.isEmpty) return const SizedBox.shrink();
+    if (_tabs.isEmpty) return const SizedBox.expand();
     return IndexedStack(
       index: _active,
       sizing: StackFit.expand,

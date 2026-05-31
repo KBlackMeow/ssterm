@@ -27,6 +27,7 @@ class OpenSshKnownHosts {
   }
 
   static Future<List<_OpenSshKeyLine>> _loadLines() async {
+    if (Platform.isIOS) return [];
     final f = await file();
     if (!await f.exists()) return [];
     final lines = await f.readAsLines();

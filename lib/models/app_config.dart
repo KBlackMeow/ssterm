@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../utils/app_dir.dart';
+
 import '../services/local_shell_discovery.dart';
 import '../views/ssh_session_view.dart';
 import 'terminal_settings.dart';
@@ -30,9 +32,7 @@ class AppConfig {
   List<LocalShellOption> cachedShells;
 
   static Future<File> _file() async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory('$home/.ssterm');
-    if (!await dir.exists()) await dir.create(recursive: true);
+    final dir = await appDataDir();
     return File('${dir.path}/config.json');
   }
 
