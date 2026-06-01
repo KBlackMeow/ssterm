@@ -1,6 +1,30 @@
 part of 'main.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SSH business logic — connection lifecycle, SFTP, split-pane SSH sessions,
+// reconnect, keepalive, port forwarding, and saved-host management.
+// ─────────────────────────────────────────────────────────────────────────────
+
 abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
+
+  // ── Host list ──────────────────────────────────────────────────────────────
+
+  Future<void> _loadSshHosts() async {
+    final saved = await SavedHostsStore.load();
+    final config = await parseSshConfig();
+    if (!mounted) return;
+    setState(() {
+      _savedHosts = saved
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
+      _configHosts = config
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
+    });
+  }
+
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
   Future<void> _showConnectDialog({SshHost? initialHost}) async {
@@ -315,7 +339,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     });
   }
 
-  // ── Feature 4: reconnect ───────────────────────────────────────────────────
+  // ── Reconnect ──────────────────────────────────────────────────────────────
 
   @override
   Future<void> _reconnectTab(_Tab tab) async {
@@ -433,14 +457,15 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
   void _closeTab(int i) {
     _tabs[i].dispose();
-    if (_tabs.length == 1) {
-      exit(0);
-    }
     setState(() {
       _tabs.removeAt(i);
-      _active = _active.clamp(0, _tabs.length - 1);
+      if (_tabs.isNotEmpty) {
+        _active = _active.clamp(0, _tabs.length - 1);
+      } else {
+        _active = 0;
+      }
     });
-    _activateTab(_active);
+    if (_tabs.isNotEmpty) _activateTab(_active);
   }
 
   void _selectTab(int i) {
@@ -483,34 +508,5 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       _tabs.add(_Tab.settings());
       _active = _tabs.length - 1;
     });
-  }
-
-  Widget _buildTerminalView(
-    Terminal terminal,
-    GlobalKey<TerminalViewState> viewKey, {
-    required _Tab tab,
-    int sshPane = 0,
-    TerminalContextMenuConfig? contextMenu,
-  }) {
-    Widget surface = TerminalSurface(
-      key: ValueKey(terminal),
-      terminal: terminal,
-      settings: _config.terminal,
-      viewKey: viewKey,
-      contextMenu: contextMenu,
-      frostedGlass: _config.sftpFrostedGlass,
-      includeWallpaper: false,
-      autofocus: sshPane == 0,
-    );
-
-    if (tab.kind == _TabKind.ssh && tab.sftp != null) {
-      surface = Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _activateSshPaneForSftp(tab, sshPane),
-        child: surface,
-      );
-    }
-
-    return surface;
   }
 }

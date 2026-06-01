@@ -122,7 +122,7 @@ class TransferManager extends ChangeNotifier {
   /// Stat the remote file and enqueue a download task.
   /// The actual transfer runs in a background [Isolate] so the main isolate
   /// (and Flutter's rendering) is unaffected by SSH crypto overhead.
-  Future<void> startDownload({
+  Future<TransferTask> startDownload({
     required SftpClient sftp,
     required String remotePath,
     required String localPath,
@@ -141,6 +141,7 @@ class TransferManager extends ChangeNotifier {
     notifyListeners();
 
     unawaited(_runIsolatedDownload(task, profile, remotePath, localPath));
+    return task;
   }
 
   void remove(TransferTask task) {

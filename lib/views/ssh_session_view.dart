@@ -64,7 +64,7 @@ class _SshSessionViewState extends State<SshSessionView> {
     final total = _position == SftpPanelPosition.right
         ? constraints.maxWidth
         : constraints.maxHeight;
-    final maxSide = total * _kMaxFraction;
+    final maxSide = (total * _kMaxFraction).clamp(_kMinSide, double.infinity);
     if (_customPanelSize != null) {
       return _customPanelSize!.clamp(_kMinSide, maxSide);
     }

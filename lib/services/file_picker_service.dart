@@ -1,13 +1,21 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 
-/// Cross-platform file picker using native OS dialogs without Flutter plugins.
-/// macOS: osascript, Windows: PowerShell, Linux: zenity/kdialog.
+/// Cross-platform file picker.
+/// Mobile (iOS/Android): native Files/Storage picker via file_picker.
+/// Desktop: native OS dialogs without Flutter plugins.
 class FilePickerService {
   static Future<String?> pickFile() async {
+    if (Platform.isIOS || Platform.isAndroid) return _pickMobile();
     if (Platform.isMacOS) return _pickMacOS();
     if (Platform.isWindows) return _pickWindows();
     if (Platform.isLinux) return _pickLinux();
     return null;
+  }
+
+  static Future<String?> _pickMobile() async {
+    final result = await FilePicker.pickFiles(type: FileType.any);
+    return result?.files.single.path;
   }
 
   static Future<String?> _pickMacOS() async {

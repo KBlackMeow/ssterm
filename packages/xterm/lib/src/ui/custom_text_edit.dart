@@ -286,7 +286,9 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     // Use a non-empty sentinel so the channel stays active after each reset.
     final usesSentinel = widget.deleteDetection ||
         defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.linux;
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
     return usesSentinel
         ? const TextEditingValue(
             text: '  ',

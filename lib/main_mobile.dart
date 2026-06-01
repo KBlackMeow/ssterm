@@ -267,6 +267,9 @@ class _MobileBottomBar extends StatelessWidget {
     required this.chromeBackground,
     required this.bottomInset,
     required this.onMenu,
+    this.hasSftp = false,
+    this.sftpVisible = false,
+    this.onToggleSftp,
   });
 
   final List<_Tab> tabs;
@@ -274,6 +277,9 @@ class _MobileBottomBar extends StatelessWidget {
   final Color chromeBackground;
   final double bottomInset;
   final VoidCallback onMenu;
+  final bool hasSftp;
+  final bool sftpVisible;
+  final VoidCallback? onToggleSftp;
 
   static const _barHeight = 50.0;
 
@@ -343,6 +349,18 @@ class _MobileBottomBar extends StatelessWidget {
             ),
           ),
 
+          if (hasSftp)
+            GestureDetector(
+              onTap: onToggleSftp,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Icon(
+                  Icons.folder_open_rounded,
+                  size: 22,
+                  color: sftpVisible ? const Color(0xFF2472C8) : _kFgInactive,
+                ),
+              ),
+            ),
           const SizedBox(width: 4),
         ],
       ),
@@ -482,6 +500,155 @@ class _HostList extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-screen SFTP page (mobile)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SftpPage extends StatefulWidget {
+  const _SftpPage({
+    required this.sftp,
+    required this.host,
+    required this.remotePath,
+    required this.transferManager,
+  });
+
+  final SftpClient sftp;
+  final String host;
+  final ValueNotifier<String>? remotePath;
+  final TransferManager transferManager;
+
+  @override
+  State<_SftpPage> createState() => _SftpPageState();
+}
+
+class _SftpPageState extends State<_SftpPage> {
+  final _sftpKey = GlobalKey<SftpViewState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF141414),
+      body: Column(
+        children: [
+          // Header with notch/Dynamic Island safe area
+          Container(
+            color: const Color(0xFF1C1C1C),
+            child: SafeArea(
+              bottom: false,
+              child: SizedBox(
+                height: 50,
+                child: Row(
+                  children: [
+                    // Back
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.pop(context),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14),
+                        child: Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: Color(0xFF2472C8),
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                    // Title
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Files',
+                            style: TextStyle(
+                              color: _kFgActive,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          Text(
+                            widget.host,
+                            style: const TextStyle(
+                              color: _kFgInactive,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Actions: up, refresh, new folder, upload
+                    _SftpHeaderBtn(
+                      icon: Icons.arrow_upward_rounded,
+                      onTap: () => _sftpKey.currentState?.goUp(),
+                    ),
+                    _SftpHeaderBtn(
+                      icon: Icons.refresh_rounded,
+                      onTap: () => _sftpKey.currentState?.refresh(),
+                    ),
+                    _SftpHeaderBtn(
+                      icon: Icons.create_new_folder_outlined,
+                      onTap: () => _sftpKey.currentState?.createFolder(),
+                    ),
+                    _SftpHeaderBtn(
+                      icon: Icons.upload_rounded,
+                      onTap: () => _sftpKey.currentState?.uploadFile(),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF2A2A2A)),
+          // File list — MediaQuery.removePadding prevents ListView from
+          // adding a top inset equal to the status bar height (which is
+          // already consumed by the header's SafeArea above).
+          Expanded(
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: SafeArea(
+                top: false,
+                child: SftpView(
+                  key: _sftpKey,
+                  sftp: widget.sftp,
+                  host: widget.host,
+                  remotePath: widget.remotePath,
+                  transferManager: widget.transferManager,
+                  frostedGlass: false,
+                  showToolbar: false,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SftpHeaderBtn extends StatelessWidget {
+  const _SftpHeaderBtn({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 40,
+        height: 50,
+        child: Icon(icon, size: 20, color: const Color(0xFF8E8E8E)),
       ),
     );
   }

@@ -1,5 +1,10 @@
 part of 'main.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Local shell business logic — PTY spawning, session wiring, split-pane
+// management for local (non-SSH) terminals.
+// ─────────────────────────────────────────────────────────────────────────────
+
 abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   // ── State fields ───────────────────────────────────────────────────────────
   final List<_Tab> _tabs = [];
@@ -11,6 +16,23 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
   // ── Abstract stubs (implemented in _TerminalHomeSshMethods) ───────────────
   void _activateTab(int i);
+  Future<void> _reconnectTab(_Tab tab);
+
+  // ── Shell-list refresh ─────────────────────────────────────────────────────
+
+  /// Re-runs discovery in the background. Only mutates state when the result
+  /// differs from the current [_localShells]; the persisted cache in
+  /// [_config.cachedShells] is updated in the same step.
+  Future<void> _refreshLocalShellsIfChanged() async {
+    final shells = await LocalShellDiscovery.discover(refresh: true);
+    if (!mounted) return;
+    if (LocalShellDiscovery.listsStructurallyEqual(shells, _localShells)) {
+      return;
+    }
+    setState(() => _localShells = shells);
+    _config.cachedShells = shells;
+    unawaited(_config.save());
+  }
 
   // ── Local terminal ─────────────────────────────────────────────────────────
 
@@ -508,8 +530,4 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     });
     _activateTab(_active);
   }
-
-  // ── Abstract stubs (implemented in _TerminalHomeSshMethods / _TerminalHomeState) ─
-  Future<void> _reconnectTab(_Tab tab);
-  Future<void> _loadSshHosts();
 }
