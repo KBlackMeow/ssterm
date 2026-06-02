@@ -105,7 +105,7 @@ class AppTab {
   }
 
   void syncRemotePathToActivePane() {
-    if (remotePath == null) return;
+    if (remotePath == null || manuallyDisconnected) return;
     final cwd = activeSshPane == 1 && isSplit
         ? (remoteCwdPane1 ?? remoteCwdPane0)
         : remoteCwdPane0;

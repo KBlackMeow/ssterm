@@ -13,6 +13,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<SshHost> _configHosts = [];
   List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
   AppConfig _config = AppConfig();
+  int _mobileTabIndex = 0; // 0=terminal 1=files 2=commands 3=settings
 
   // ── Abstract stubs (implemented in _TerminalHomeSshMethods) ───────────────
   void _activateTab(int i);
@@ -82,6 +83,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   }
 
   void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
+    if (tab.manuallyDisconnected) return;
     // After retainPane1 the surviving shell still reports as pane 1 in its pipe
     // transform; map to pane 0 storage while no longer split.
     final storagePane = !tab.isSplit && pane == 1 ? 0 : pane;
@@ -262,7 +264,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal,
       transform: (bytes) {
         final parsed = cwdParser.process(bytes);
-        if (parsed.cwd != null && tab.localPath != null) {
+        if (parsed.cwd != null &&
+            tab.localPath != null &&
+            !tab.manuallyDisconnected) {
           tab.localPath!.value = parsed.cwd!;
         }
         return parsed.cleaned;
@@ -284,6 +288,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     );
 
     pty.exitCode.then((code) {
+      if (!mounted) return;
       _handlePaneExited(
         tab,
         terminal: terminal,

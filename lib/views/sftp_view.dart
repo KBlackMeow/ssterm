@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'package:dartssh2/dartssh2.dart';
 import 'package:path/path.dart' as p;
 import 'package:desktop_drop/desktop_drop.dart';
@@ -30,6 +31,28 @@ int sftpEntryRank({required bool isDirectory, required bool isSymbolicLink}) {
   return 2;
 }
 
+String _sftpFmtSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} M';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} G';
+}
+
+String _sftpFmtDate(int? ts) {
+  if (ts == null) return '';
+  final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  final now = DateTime.now();
+  final today =
+      dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  final hm =
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  if (today) return hm;
+  return '${dt.month.toString().padLeft(2, '0')}-'
+      '${dt.day.toString().padLeft(2, '0')} $hm';
+}
+
 const _kSizeColWidth = 44.0;
 const _kDateColWidth = 72.0;
 const _kMetaFontSize = 9.0;
@@ -58,6 +81,7 @@ class SftpView extends StatefulWidget {
     this.onClose,
     this.frostedGlass = true,
     this.showToolbar = true,
+    this.chromeBackground = const Color(0xFF1E1E2A),
   });
 
   final SftpClient sftp;
@@ -74,6 +98,9 @@ class SftpView extends StatefulWidget {
 
   /// Set to false to hide the compact toolbar (use in full-screen page mode).
   final bool showToolbar;
+
+  /// Solid background for action sheets / non-frosted panels.
+  final Color chromeBackground;
 
   @override
   State<SftpView> createState() => SftpViewState();
@@ -198,9 +225,24 @@ class SftpViewState extends State<SftpView> {
         task.removeListener(listener);
         if (mounted) {
           setState(() => _status = 'Downloaded: $fileName');
+          // iPad requires a non-zero sharePositionOrigin for the popover anchor.
+          // Use the centre of this view as a stable fallback.
+          final box = context.findRenderObject() as RenderBox?;
+          Rect? origin;
+          if (box != null) {
+            final topLeft = box.localToGlobal(Offset.zero);
+            final size = box.size;
+            origin = Rect.fromCenter(
+              center: Offset(topLeft.dx + size.width / 2,
+                             topLeft.dy + size.height / 2),
+              width: 1,
+              height: 1,
+            );
+          }
           SharePlus.instance.share(ShareParams(
             files: [XFile(localPath)],
             subject: fileName,
+            sharePositionOrigin: origin,
           ));
         }
       } else if (task.status == TransferStatus.error) {
@@ -349,6 +391,8 @@ class SftpViewState extends State<SftpView> {
       builder: (ctx) => _MobileActionSheet(
         entry: entry,
         canDownload: isFile,
+        frostedGlass: widget.frostedGlass,
+        chromeBackground: widget.chromeBackground,
       ),
     );
 
@@ -370,6 +414,9 @@ class SftpViewState extends State<SftpView> {
 
   @override
   Widget build(BuildContext context) {
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      return _buildStandardLayout();
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _kCompactWidth;
@@ -396,11 +443,13 @@ class SftpViewState extends State<SftpView> {
   }
 
   Widget _buildCompactToolbar() {
-    return Container(
+    Widget bar = Container(
       height: 50,
-      decoration: const BoxDecoration(
-        color: Color(0xDD1E1E1E),
-        border: Border(
+      decoration: BoxDecoration(
+        color: widget.frostedGlass
+            ? const Color(0xA5141620)
+            : const Color(0xDD1E1E1E),
+        border: const Border(
           bottom: BorderSide(color: Color(0xFF2A2A2A), width: 0.5),
         ),
       ),
@@ -468,6 +517,17 @@ class SftpViewState extends State<SftpView> {
         ],
       ),
     );
+
+    if (widget.frostedGlass) {
+      bar = ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: bar,
+        ),
+      );
+    }
+
+    return bar;
   }
 
   Widget _buildCompactBody() {
@@ -509,9 +569,8 @@ class SftpViewState extends State<SftpView> {
               _navigateEntry(e);
             } else if (e.attr.isSymbolicLink) {
               _tapMobileSymlink(e);
-            } else {
-              _showMobileActionSheet(e);
             }
+            // Files: single tap does nothing — long press for actions
           },
           onLongPress: () => _showMobileActionSheet(e),
         );
@@ -522,52 +581,73 @@ class SftpViewState extends State<SftpView> {
   void _showPathBreadcrumb() {
     // Split path into segments and let the user jump to any ancestor.
     final segments = _path.split('/').where((s) => s.isNotEmpty).toList();
+    final frosted = widget.frostedGlass;
     showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF1E1E1E),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const _SheetHandle(),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Text(
-                'Go to folder',
-                style: TextStyle(
-                  color: _kFgActive,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
+      builder: (ctx) {
+        const radius = BorderRadius.vertical(top: Radius.circular(16));
+        Widget sheet = Container(
+          decoration: BoxDecoration(
+            color: frosted
+                ? FrostedGlassStyle.menuFillFrosted
+                : const Color(0xFF1E1E2A),
+            borderRadius: radius,
+            border: const Border(
+              top: BorderSide(color: Color(0x30FFFFFF), width: 0.5),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _SheetHandle(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Text(
+                  'Go to folder',
+                  style: TextStyle(
+                    color: _kFgActive,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            _SheetItem(
-              icon: Icons.folder_rounded,
-              label: '/',
-              iconColor: const Color(0xFFFFD166),
-              onTap: () {
-                Navigator.pop(ctx);
-                _listDir('/');
-              },
-            ),
-            for (var i = 0; i < segments.length; i++)
               _SheetItem(
                 icon: Icons.folder_rounded,
-                label: '/${segments.sublist(0, i + 1).join('/')}',
+                label: '/',
                 iconColor: const Color(0xFFFFD166),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _listDir('/${segments.sublist(0, i + 1).join('/')}');
+                  _listDir('/');
                 },
               ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+              for (var i = 0; i < segments.length; i++)
+                _SheetItem(
+                  icon: Icons.folder_rounded,
+                  label: '/${segments.sublist(0, i + 1).join('/')}',
+                  iconColor: const Color(0xFFFFD166),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _listDir('/${segments.sublist(0, i + 1).join('/')}');
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+
+        if (frosted) {
+          sheet = ClipRRect(
+            borderRadius: radius,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+              child: sheet,
+            ),
+          );
+        }
+
+        return sheet;
+      },
     );
   }
 
@@ -580,7 +660,7 @@ class SftpViewState extends State<SftpView> {
       color: Colors.transparent,
       child: Column(
         children: [
-          _buildToolbar(),
+          if (widget.showToolbar) _buildToolbar(),
           _buildColumnHeader(),
           Expanded(
             child: DropTarget(
@@ -799,6 +879,8 @@ class SftpViewState extends State<SftpView> {
         return GestureDetector(
           onSecondaryTapDown: (d) =>
               _showDesktopContextMenu(e, d.globalPosition),
+          onLongPressStart: (d) =>
+              _showDesktopContextMenu(e, d.globalPosition),
           child: InkWell(
             onTap: () => _navigateEntry(e),
             child: Container(
@@ -845,7 +927,7 @@ class SftpViewState extends State<SftpView> {
                   SizedBox(
                     width: _kSizeColWidth,
                     child: Text(
-                      isDir ? '' : _fmtSize(e.attr.size ?? 0),
+                      isDir ? '' : _sftpFmtSize(e.attr.size ?? 0),
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -860,7 +942,7 @@ class SftpViewState extends State<SftpView> {
                   SizedBox(
                     width: _kDateColWidth,
                     child: Text(
-                      _fmtDate(e.attr.modifyTime),
+                      _sftpFmtDate(e.attr.modifyTime),
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -954,6 +1036,7 @@ class SftpViewState extends State<SftpView> {
   }
 
   IconData _fileIcon(String name) {
+
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return switch (ext) {
       'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' ||
@@ -970,27 +1053,6 @@ class SftpViewState extends State<SftpView> {
     };
   }
 
-  String _fmtSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} M';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} G';
-  }
-
-  String _fmtDate(int? ts) {
-    if (ts == null) return '';
-    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-    final now = DateTime.now();
-    final today =
-        dt.year == now.year && dt.month == now.month && dt.day == now.day;
-    final hm =
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    if (today) return hm;
-    return '${dt.month.toString().padLeft(2, '0')}-'
-        '${dt.day.toString().padLeft(2, '0')} $hm';
-  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1069,6 +1131,7 @@ class _ConfirmDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: const Color(0xFF2B2B2B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: Text(
         title,
         style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
@@ -1112,6 +1175,7 @@ class _InputDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: const Color(0xFF2B2B2B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: Text(
         title,
         style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
@@ -1148,10 +1212,4 @@ class _InputDialog extends StatelessWidget {
       ],
     );
   }
-}
-
-// Wrapper kept for API compatibility (rename dialog previously used this)
-class SshFtpEntry {
-  final SftpName name;
-  SshFtpEntry(this.name);
 }

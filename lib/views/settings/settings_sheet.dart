@@ -13,8 +13,9 @@ import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
 import '../../widgets/wallpaper_background.dart';
 
-const _kSheetBg = Color(0xFF2B2B2B);
-const _kDivider = Color(0xFF3A3A3A);
+const _kSheetBg = Color(0xFF111113);
+const _kDivider = Color(0xFF252525);
+const _kSurface = Color(0xFF1C1C20);  // dropdown / button backgrounds
 const _kFg = Color(0xFFD4D4D4);
 const _kFgMuted = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
@@ -113,6 +114,8 @@ class _SettingsPageState extends State<SettingsPage>
           const SizedBox(height: 8),
           TabBar(
             controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: _kFg,
             unselectedLabelColor: _kFgMuted,
             indicatorColor: _kAccent,
@@ -336,7 +339,7 @@ class _SettingsPageState extends State<SettingsPage>
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1C),
+        color: _kSurface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _kDivider),
       ),
@@ -548,7 +551,7 @@ class _SettingsPageState extends State<SettingsPage>
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1C),
+        color: _kSurface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _kDivider),
       ),
@@ -657,7 +660,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             selected: _s.themePresetId == id,
             selectedColor: _kAccent,
-            backgroundColor: const Color(0xFF1C1C1C),
+            backgroundColor: _kSurface,
             side: const BorderSide(color: _kDivider),
             onSelected: (_) {
               final next = _s.copyWith();
@@ -851,7 +854,7 @@ class _SettingsPageState extends State<SettingsPage>
         : TerminalSettings.defaultFontFamily;
     return DropdownButtonFormField<String>(
       initialValue: value,
-      dropdownColor: const Color(0xFF1C1C1C),
+      dropdownColor: _kSurface,
       style: const TextStyle(color: _kFg, fontSize: 13),
       decoration: const InputDecoration(
         isDense: true,
@@ -881,7 +884,7 @@ class _SettingsPageState extends State<SettingsPage>
         : options.first;
     return DropdownButtonFormField<String>(
       initialValue: value,
-      dropdownColor: const Color(0xFF1C1C1C),
+      dropdownColor: _kSurface,
       style: const TextStyle(color: _kFg, fontSize: 13),
       decoration: const InputDecoration(
         isDense: true,
@@ -945,7 +948,7 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
                 selected: _s.fontWeight == w,
                 selectedColor: _kAccent,
-                backgroundColor: const Color(0xFF1C1C1C),
+                backgroundColor: _kSurface,
                 side: const BorderSide(color: _kDivider),
                 onSelected: (_) => _apply(_s.copyWith(fontWeight: w)),
               ),
@@ -975,7 +978,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             selected: _s.cursorType == type,
             selectedColor: _kAccent,
-            backgroundColor: const Color(0xFF1C1C1C),
+            backgroundColor: _kSurface,
             side: const BorderSide(color: _kDivider),
             onSelected: (_) => _apply(_s.copyWith(cursorType: type)),
           ),

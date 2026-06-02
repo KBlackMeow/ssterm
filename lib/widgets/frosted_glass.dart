@@ -2,21 +2,58 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
-/// Shared frosted-glass styling for SFTP panel and popup menus.
+/// Shared Liquid Glass styling — gradient borders, specular highlights,
+/// blue-ambient shadows. All effects are static GPU paint; zero CPU overhead.
 abstract final class FrostedGlassStyle {
   static const panelRadius = 12.0;
-  static const menuRadius = 8.0;
-  static const blurSigma = 18.0;
+  static const menuRadius  = 10.0;
+  static const blurSigma   = 26.0;
 
-  static const panelFillFrosted = Color(0x991C1C1C);
-  static const panelFillSolid = Color(0xD91C1C1C);
-  static const menuFillFrosted = Color(0x992B2B2B);
-  static const menuFillSolid = Color(0xFF2B2B2B);
-  static const border = Color(0x1FFFFFFF);
-  static const divider = Color(0xFF3A3A3A);
+  // Neutral-dark fills — no blue tint so they sit naturally on any dark
+  // terminal background (black, near-black, dark grey).
+  static const panelFillFrosted = Color(0xA0141416);
+  static const panelFillSolid   = Color(0xEE161618);
+  static const menuFillFrosted  = Color(0xAA181820);
+  static const menuFillSolid    = Color(0xF8181820);
+
+  // Divider between menu items — slightly blue-dark
+  static const divider = Color(0xFF252525);
+
+  // Gradient border: bright top-left → dim bottom-right (simulates glass edge)
+  static const _borderBright = Color(0x50FFFFFF);
+  static const _borderDim    = Color(0x0CFFFFFF);
+
+  // Shadows: ambient blue glow + depth black
+  static const _shadowBlue = BoxShadow(
+    color: Color(0x1E2472C8),
+    blurRadius: 32,
+    spreadRadius: -4,
+  );
+  static const _shadowDepth = BoxShadow(
+    color: Color(0x45000000),
+    blurRadius: 20,
+    offset: Offset(0, 6),
+  );
+  static const _shadowInner = BoxShadow(
+    color: Color(0x18000000),
+    blurRadius: 8,
+    offset: Offset(0, 2),
+    spreadRadius: -2,
+  );
+
+  static BoxDecoration borderDecoration(double radius) => BoxDecoration(
+    gradient: const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [_borderBright, _borderDim],
+    ),
+    borderRadius: BorderRadius.circular(radius),
+    boxShadow: const [_shadowBlue, _shadowDepth, _shadowInner],
+  );
 }
 
-/// Rounded surface with optional [BackdropFilter] blur.
+/// Liquid-Glass surface: gradient border, specular top-edge highlight,
+/// bottom refraction shadow, optional [BackdropFilter] blur.
 class FrostedGlassSurface extends StatelessWidget {
   const FrostedGlassSurface({
     super.key,
@@ -38,40 +75,74 @@ class FrostedGlassSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(borderRadius);
+    final innerR = (borderRadius - 1.0).clamp(0.0, double.infinity);
+    final innerRadius = BorderRadius.circular(innerR);
+
     final fill = fillColor ??
         (frosted
             ? FrostedGlassStyle.menuFillFrosted
             : FrostedGlassStyle.menuFillSolid);
 
-    final decorated = DecoratedBox(
-      decoration: BoxDecoration(
-        color: fill,
-        border: Border.all(color: FrostedGlassStyle.border),
-        borderRadius: radius,
+    // Three foreground paint layers stacked via DecorationPosition.foreground
+    // (zero layout cost — all GPU paint, no extra RenderObject):
+    //   1. Top specular strip  — white glow fading from top edge
+    //   2. Bottom refraction   — dark absorption at bottom edge
+    //   3. Fill color          — base glass tint
+    Widget core = DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end:   Alignment.bottomCenter,
+          colors: [Color(0x1AFFFFFF), Color(0x00FFFFFF)],
+          stops:  [0.0, 0.30],
+        ),
       ),
-      child: child,
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end:   Alignment.topCenter,
+            colors: [Color(0x14000000), Color(0x00000000)],
+            stops:  [0.0, 0.20],
+          ),
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: fill),
+          child: child,
+        ),
+      ),
     );
 
     final useBlur = blur ?? frosted;
+    if (useBlur) {
+      core = BackdropFilter(
+        filter: ImageFilter.blur(
+          sigmaX: FrostedGlassStyle.blurSigma,
+          sigmaY: FrostedGlassStyle.blurSigma,
+        ),
+        child: core,
+      );
+    }
 
-    return ClipRRect(
-      borderRadius: radius,
-      clipBehavior: Clip.antiAlias,
-      child: useBlur
-          ? BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: FrostedGlassStyle.blurSigma,
-                sigmaY: FrostedGlassStyle.blurSigma,
-              ),
-              child: decorated,
-            )
-          : decorated,
+    // Outer ring = gradient painted as 1 px border via Padding trick.
+    // BoxShadow lives here so it sits outside the clip.
+    return DecoratedBox(
+      decoration: FrostedGlassStyle.borderDecoration(borderRadius),
+      child: Padding(
+        padding: const EdgeInsets.all(1),
+        child: ClipRRect(
+          borderRadius: innerRadius,
+          clipBehavior: Clip.antiAlias,
+          child: core,
+        ),
+      ),
     );
   }
 }
 
-/// [showMenu] wrapper: frosted blur when [frostedGlass] is true.
+/// [showMenu] wrapper: frosted blur + Liquid Glass chrome when [frostedGlass].
 Future<T?> showFrostedMenu<T>({
   required BuildContext context,
   required RelativeRect position,
@@ -99,10 +170,28 @@ Future<T?> showFrostedMenu<T>({
     );
   }
 
-  final shellHeight = _frostedMenuShellHeight(items, constraints);
-  final fixedHeight = constraints != null &&
-      constraints.hasBoundedHeight &&
-      constraints.minHeight == constraints.maxHeight;
+  // showMenu wraps items in a SingleChildScrollView with 8 px top + 8 px bottom
+  // padding, and FrostedGlassSurface adds a 1 px Padding on every side.
+  // Subtract these from the effective max-height so the glass surface and its
+  // rounded corners are never clipped by the popup route's constraint box.
+  const double kHeightOverhead = 8.0 * 2 + 1.0 * 2; // 18 px
+
+  BoxConstraints? innerConstraints;
+  if (constraints != null && constraints.hasBoundedHeight) {
+    innerConstraints = BoxConstraints(
+      minWidth:  constraints.minWidth,
+      maxWidth:  constraints.maxWidth,
+      minHeight: constraints.minHeight,
+      maxHeight: (constraints.maxHeight - kHeightOverhead)
+          .clamp(0.0, double.infinity),
+    );
+  }
+
+  final effectiveConstraints = innerConstraints ?? constraints;
+  final shellHeight = _frostedMenuShellHeight(items, effectiveConstraints);
+  final fixedHeight = effectiveConstraints != null &&
+      effectiveConstraints.hasBoundedHeight &&
+      effectiveConstraints.minHeight == effectiveConstraints.maxHeight;
 
   return showMenu<T>(
     context: context,
@@ -112,7 +201,7 @@ Future<T?> showFrostedMenu<T>({
     elevation: 0,
     surfaceTintColor: Colors.transparent,
     shadowColor: Colors.transparent,
-    clipBehavior: Clip.antiAlias,
+    clipBehavior: Clip.none,
     shape: menuShape,
     items: [
       PopupMenuItem<T>(
@@ -125,7 +214,7 @@ Future<T?> showFrostedMenu<T>({
           fillColor: FrostedGlassStyle.menuFillFrosted,
           child: _FrostedMenuList<T>(
             entries: items,
-            maxHeight: fixedHeight ? null : constraints?.maxHeight,
+            maxHeight: fixedHeight ? null : effectiveConstraints?.maxHeight,
             onSelected: (value) => Navigator.of(context).pop<T>(value),
           ),
         ),
@@ -134,7 +223,6 @@ Future<T?> showFrostedMenu<T>({
   );
 }
 
-/// Height for the single [showMenu] shell item so the route matches real content.
 double _frostedMenuShellHeight<T>(
   List<PopupMenuEntry<T>> entries,
   BoxConstraints? constraints,
@@ -150,12 +238,8 @@ double _frostedMenuShellHeight<T>(
 
   if (constraints != null && constraints.hasBoundedHeight) {
     final maxH = constraints.maxHeight;
-    if (constraints.minHeight == maxH && maxH.isFinite) {
-      return maxH;
-    }
-    if (maxH.isFinite && total > maxH) {
-      return maxH;
-    }
+    if (constraints.minHeight == maxH && maxH.isFinite) return maxH;
+    if (maxH.isFinite && total > maxH) return maxH;
   }
 
   return total > 0 ? total : kMinInteractiveDimension;
@@ -191,10 +275,10 @@ class _FrostedMenuList<T> extends StatelessWidget {
     for (final entry in entries) {
       if (entry is PopupMenuDivider) {
         rows.add(Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Divider(
             height: entry.height,
-            thickness: 1,
+            thickness: 0.5,
             color: FrostedGlassStyle.divider,
           ),
         ));
@@ -202,10 +286,10 @@ class _FrostedMenuList<T> extends StatelessWidget {
       }
 
       if (entry is! PopupMenuItem<T>) continue;
-      final item = entry;
+      final item   = entry;
       final height = item.height;
       final padding =
-          (item.padding ?? const EdgeInsets.symmetric(horizontal: 12))
+          (item.padding ?? const EdgeInsets.symmetric(horizontal: 14))
               .resolve(Directionality.of(context));
 
       if (!item.enabled) {
@@ -233,6 +317,7 @@ class _FrostedMenuList<T> extends StatelessWidget {
               item.onTap?.call();
               onSelected(item.value);
             },
+            overlayColor: WidgetStateProperty.all(const Color(0x14FFFFFF)),
             child: SizedBox(
               height: height,
               child: Padding(

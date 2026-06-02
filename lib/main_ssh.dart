@@ -28,7 +28,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
   Future<void> _showConnectDialog({SshHost? initialHost}) async {
-    final profile = await showConnectDialog(context, initialHost: initialHost);
+    final profile = await showConnectDialog(
+      context,
+      initialHost: initialHost,
+      backgroundColor: _config.terminal.chromeBackground,
+    );
     if (profile == null || !mounted) return;
     await _rememberHostProfile(profile);
     if (!mounted) return;
@@ -235,7 +239,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   Future<void> _editAndRetryConnectingTab(_Tab tab) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
-    final updated = await showConnectDialog(context, initialHost: profile);
+    final updated = await showConnectDialog(
+      context,
+      initialHost: profile,
+      backgroundColor: _config.terminal.chromeBackground,
+    );
     if (updated == null || !mounted) return;
     await _rememberHostProfile(updated);
     if (!mounted) return;
@@ -456,11 +464,16 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   // ── Tab management ─────────────────────────────────────────────────────────
 
   void _closeTab(int i) {
+    if (i < 0 || i >= _tabs.length) return;
     _tabs[i].dispose();
     setState(() {
       _tabs.removeAt(i);
       if (_tabs.isNotEmpty) {
-        _active = _active.clamp(0, _tabs.length - 1);
+        if (i < _active) {
+          _active--;
+        } else {
+          _active = _active.clamp(0, _tabs.length - 1);
+        }
       } else {
         _active = 0;
       }

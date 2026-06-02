@@ -1,7 +1,7 @@
 part of 'sftp_view.dart';
 
 // ────────────────────────────────────────────────────────────────────────────
-// Compact list row
+// Compact list row — iOS 26 style
 // ────────────────────────────────────────────────────────────────────────────
 
 class _CompactRow extends StatelessWidget {
@@ -17,29 +17,30 @@ class _CompactRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDir = entry.attr.isDirectory;
+    final isDir  = entry.attr.isDirectory;
     final isLink = entry.attr.isSymbolicLink;
 
     final iconColor = isDir
         ? const Color(0xFFFFD166)
         : isLink
             ? const Color(0xFF4EC9B0)
-            : const Color(0xFF8E8E8E);
+            : const Color(0xFF6E6E6E);
 
     final nameColor = isDir
         ? const Color(0xFFD4D4D4)
         : isLink
             ? const Color(0xFF4EC9B0)
-            : const Color(0xFFAAAAAA);
+            : const Color(0xFFB0B0B0);
 
-    final sizeText = isDir ? '' : _fmtSize(entry.attr.size ?? 0);
-    final dateText = _fmtDate(entry.attr.modifyTime);
+    final sizeText = isDir ? '' : _sftpFmtSize(entry.attr.size ?? 0);
+    final dateText = _sftpFmtDate(entry.attr.modifyTime);
 
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
+      overlayColor: WidgetStateProperty.all(const Color(0x0AFFFFFF)),
       child: SizedBox(
-        height: 44,
+        height: 48,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
@@ -78,7 +79,7 @@ class _CompactRow extends StatelessWidget {
                     Text(
                       sizeText,
                       style: const TextStyle(
-                        color: Color(0xFF686868),
+                        color: Color(0xFF5A5A5A),
                         fontSize: 11,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -86,7 +87,7 @@ class _CompactRow extends StatelessWidget {
                   Text(
                     dateText,
                     style: const TextStyle(
-                      color: Color(0xFF686868),
+                      color: Color(0xFF5A5A5A),
                       fontSize: 11,
                       fontFamily: 'JetBrainsMono',
                     ),
@@ -95,7 +96,7 @@ class _CompactRow extends StatelessWidget {
               ),
               if (isDir)
                 const Padding(
-                  padding: EdgeInsets.only(left: 4),
+                  padding: EdgeInsets.only(left: 6),
                   child: Icon(
                     Icons.chevron_right_rounded,
                     size: 18,
@@ -103,12 +104,12 @@ class _CompactRow extends StatelessWidget {
                   ),
                 )
               else
-                const Padding(
-                  padding: EdgeInsets.only(left: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
                   child: Icon(
                     Icons.more_vert_rounded,
-                    size: 16,
-                    color: Color(0xFF3A3A3A),
+                    size: 17,
+                    color: const Color(0xFF3A3A3A).withValues(alpha: 0.7),
                   ),
                 ),
             ],
@@ -124,94 +125,117 @@ class _CompactRow extends StatelessWidget {
       'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' ||
       'c' || 'cpp' || 'java' || 'swift' || 'kt' => Icons.code_rounded,
       'json' || 'yaml' || 'yml' || 'toml' ||
-      'xml' || 'ini' || 'conf' => Icons.data_object_rounded,
-      'md' || 'txt' || 'log' || 'rst' => Icons.description_outlined,
+      'xml' || 'ini' || 'conf'                   => Icons.data_object_rounded,
+      'md' || 'txt' || 'log' || 'rst'            => Icons.description_outlined,
       'png' || 'jpg' || 'jpeg' || 'gif' ||
-      'svg' || 'webp' || 'ico' => Icons.image_outlined,
+      'svg' || 'webp' || 'ico'                   => Icons.image_outlined,
       'zip' || 'tar' || 'gz' || 'bz2' ||
-      'xz' || '7z' || 'rar' => Icons.archive_outlined,
-      'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal_rounded,
-      _ => Icons.insert_drive_file_outlined,
+      'xz' || '7z' || 'rar'                      => Icons.archive_outlined,
+      'sh' || 'bash' || 'zsh' || 'fish'          => Icons.terminal_rounded,
+      _                                          => Icons.insert_drive_file_outlined,
     };
   }
 
-  static String _fmtSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} M';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} G';
-  }
-
-  static String _fmtDate(int? ts) {
-    if (ts == null) return '';
-    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-    final now = DateTime.now();
-    final today =
-        dt.year == now.year && dt.month == now.month && dt.day == now.day;
-    final hm =
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    if (today) return hm;
-    return '${dt.month.toString().padLeft(2, '0')}-'
-        '${dt.day.toString().padLeft(2, '0')} $hm';
-  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Mobile action sheet
+// Mobile action sheet — iOS 26 Liquid Glass style
 // ────────────────────────────────────────────────────────────────────────────
 
 class _MobileActionSheet extends StatelessWidget {
   const _MobileActionSheet({
     required this.entry,
     required this.canDownload,
+    this.frostedGlass = false,
+    this.chromeBackground = const Color(0xFF111113),
   });
 
   final SftpName entry;
   final bool canDownload;
+  final bool frostedGlass;
+  final Color chromeBackground;
 
   @override
   Widget build(BuildContext context) {
-    final isDir = entry.attr.isDirectory;
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    final isDir      = entry.attr.isDirectory;
+    final bottomPad  = MediaQuery.of(context).viewPadding.bottom;
+    const radius     = BorderRadius.vertical(top: Radius.circular(20));
+
+    Widget sheet = Container(
+      decoration: BoxDecoration(
+        color: frostedGlass
+            ? FrostedGlassStyle.menuFillFrosted
+            : const Color(0xFF111113),
+        borderRadius: radius,
+        border: const Border(
+          top: BorderSide(color: Color(0x28FFFFFF), width: 0.5),
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const _SheetHandle(),
+
+          // File header
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            padding: const EdgeInsets.fromLTRB(20, 2, 20, 14),
             child: Row(
               children: [
-                Icon(
-                  isDir ? Icons.folder_rounded : Icons.insert_drive_file_outlined,
-                  size: 20,
-                  color: isDir
-                      ? const Color(0xFFFFD166)
-                      : const Color(0xFF8E8E8E),
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isDir
+                        ? const Color(0xFFFFD166).withValues(alpha: 0.12)
+                        : const Color(0x12FFFFFF),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    isDir
+                        ? Icons.folder_rounded
+                        : Icons.insert_drive_file_outlined,
+                    size: 20,
+                    color: isDir
+                        ? const Color(0xFFFFD166)
+                        : const Color(0xFF8E8E8E),
+                  ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    entry.filename,
-                    style: const TextStyle(
-                      color: _kFgActive,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'JetBrainsMono',
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.filename,
+                        style: const TextStyle(
+                          color: _kFgActive,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'JetBrainsMono',
+                          letterSpacing: -0.2,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        isDir ? 'Folder' : _sftpFmtSize(entry.attr.size ?? 0),
+                        style: const TextStyle(
+                          color: _kFgMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFF2A2A2A)),
+
+          // Divider
+          const Divider(height: 1, color: Color(0x14FFFFFF)),
+          const SizedBox(height: 4),
+
+          // Actions
           if (isDir)
             _SheetItem(
               icon: Icons.folder_open_rounded,
@@ -229,6 +253,8 @@ class _MobileActionSheet extends StatelessWidget {
             label: 'Rename',
             onTap: () => Navigator.pop(context, 'rename'),
           ),
+          const SizedBox(height: 4),
+          const Divider(height: 1, color: Color(0x10FFFFFF)),
           _SheetItem(
             icon: Icons.delete_outline_rounded,
             label: 'Delete',
@@ -236,10 +262,23 @@ class _MobileActionSheet extends StatelessWidget {
             iconColor: const Color(0xFFFF6E67),
             onTap: () => Navigator.pop(context, 'delete'),
           ),
-          const SizedBox(height: 8),
+
+          SizedBox(height: bottomPad + 8),
         ],
       ),
     );
+
+    if (frostedGlass) {
+      sheet = ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+          child: sheet,
+        ),
+      );
+    }
+
+    return sheet;
   }
 }
 
@@ -253,7 +292,7 @@ class _SheetHandle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Container(
         width: 36,
         height: 4,
@@ -283,19 +322,30 @@ class _SheetItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: iconColor),
-            const SizedBox(width: 16),
-            Text(
-              label,
-              style: TextStyle(color: labelColor, fontSize: 15),
-            ),
-          ],
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        overlayColor: WidgetStateProperty.all(const Color(0x0AFFFFFF)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 28,
+                child: Icon(icon, size: 20, color: iconColor),
+              ),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  color: labelColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -318,12 +368,14 @@ class _MobileToolBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: 42,
+        width: 44,
         height: 50,
         child: Icon(
           icon,
           size: 20,
-          color: disabled ? const Color(0xFF3A3A3A) : _kFgMuted,
+          color: disabled
+              ? const Color(0xFF2A2A2A)
+              : _kFgMuted.withValues(alpha: 0.85),
         ),
       ),
     );

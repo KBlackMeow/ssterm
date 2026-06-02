@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,10 @@ import 'package:window_manager/window_manager.dart';
 import 'dialogs/connect_dialog.dart';
 import 'io/output_pipe.dart';
 import 'models/app_config.dart';
+import 'models/command.dart';
+import 'models/commands_store.dart';
 import 'models/tab_model.dart';
+import 'models/terminal_settings.dart';
 import 'models/saved_hosts_store.dart';
 import 'models/ssh_config.dart';
 import 'models/ssh_host.dart';

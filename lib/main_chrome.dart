@@ -73,8 +73,15 @@ class _TabBar extends StatelessWidget {
     final topSafeArea = (Platform.isIOS || Platform.isAndroid)
         ? MediaQuery.of(context).viewPadding.top
         : 0.0;
-    return Container(
-      color: backgroundColor,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        border: const Border(
+          top:    BorderSide(color: Color(0x14FFFFFF), width: 1),
+          bottom: BorderSide(color: Color(0x0CFFFFFF), width: 1),
+        ),
+      ),
+      child: Padding(
       padding: EdgeInsets.fromLTRB(leftPadding, 6 + topSafeArea, rightPadding, 6),
       child: Row(
         children: [
@@ -193,6 +200,7 @@ class _TabBar extends StatelessWidget {
           ] else
             const SizedBox(width: 2),
         ],
+      ),
       ),
     );
   }
@@ -352,12 +360,14 @@ class _TransferButton extends StatelessWidget {
   const _TransferButton({
     required this.manager,
     required this.frostedGlass,
+    this.chromeBackground = const Color(0xFF161820),
   });
 
   final TransferManager manager;
   final bool frostedGlass;
+  final Color chromeBackground;
 
-  void _showMenu(BuildContext context) {
+  void _showDesktopMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
     final pos = box.localToGlobal(Offset.zero);
 
@@ -374,51 +384,75 @@ class _TransferButton extends StatelessWidget {
     );
   }
 
+  void _showMobileSheet(BuildContext context) {
+    showMobileTransferSheet(
+      context: context,
+      manager: manager,
+      frostedGlass: frostedGlass,
+      chromeBackground: chromeBackground,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isMobile = Platform.isIOS || Platform.isAndroid;
     return ListenableBuilder(
       listenable: manager,
       builder: (ctx, _) {
         final activeCount = manager.activeCount;
+        final icon = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              Icons.swap_vert_rounded,
+              size: isMobile ? 20 : 15,
+              color: _kFgInactive,
+            ),
+            if (activeCount > 0)
+              Positioned(
+                right: isMobile ? -5 : -4,
+                top: isMobile ? -4 : -3,
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 4 : 3,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2472C8),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$activeCount',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: isMobile ? 9 : 8,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+
         return Tooltip(
           message: 'Transfers',
           child: GestureDetector(
-            onTap: () => _showMenu(ctx),
-            child: Container(
-              width: 28,
-              height: 28,
-              alignment: Alignment.center,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(Icons.swap_vert, size: 15, color: _kFgInactive),
-                  if (activeCount > 0)
-                    Positioned(
-                      right: -4,
-                      top: -3,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 3,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2472C8),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '$activeCount',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w700,
-                            height: 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+            onTap: () => isMobile
+                ? _showMobileSheet(ctx)
+                : _showDesktopMenu(ctx),
+            child: isMobile
+                ? SizedBox(
+                    width: 44,
+                    height: double.infinity,
+                    child: Center(child: icon),
+                  )
+                : Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    child: icon,
+                  ),
           ),
         );
       },
@@ -567,16 +601,42 @@ class _TabChipState extends State<_TabChip> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
+          duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           height: 28,
           padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: isActive
-                ? widget.tabSelectedColor
-                : widget.tabUnselectedColor,
-            borderRadius: BorderRadius.circular(_kTabRadius),
-          ),
+          decoration: isActive
+              ? BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color.lerp(widget.tabSelectedColor,
+                          const Color(0xFFFFFFFF), 0.18)!,
+                      widget.tabSelectedColor,
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(_kTabRadius),
+                  border: Border.all(color: const Color(0x28FFFFFF), width: 1),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x222472C8),
+                      blurRadius: 10,
+                      offset: Offset(0, 2),
+                    ),
+                    BoxShadow(
+                      color: Color(0x30000000),
+                      blurRadius: 4,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                )
+              : BoxDecoration(
+                  color: _hover
+                      ? widget.tabUnselectedColor
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(_kTabRadius),
+                ),
           child: Row(
             children: [
               Icon(

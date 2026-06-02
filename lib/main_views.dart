@@ -116,81 +116,129 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
 
   Widget _buildMobileChrome() {
     final ts = _config.terminal;
+    final activeTab =
+        _tabs.isNotEmpty && _active < _tabs.length ? _tabs[_active] : null;
+    final hasSftp =
+        activeTab?.sftp != null && activeTab?.transferManager != null;
+    final hasTerminal = activeTab?.terminal != null;
+
     return Scaffold(
       backgroundColor: ts.chromeBackground,
-      drawer: _MobileDrawer(
-        tabs: _tabs,
-        active: _active,
-        savedHosts: _savedHosts,
-        configHosts: _configHosts,
-        backgroundColor: ts.chromeBackground,
-        onSelect: _selectTab,
-        onClose: _closeTab,
-        onNewSsh: () => unawaited(_showConnectDialog()),
-        onConnectHost: _connectSavedHost,
-        onSettings: _openSettings,
-      ),
       body: Builder(
         builder: (ctx) {
           final vp = MediaQuery.of(ctx).viewPadding;
+
           return Column(
             children: [
               SizedBox(height: vp.top),
               Expanded(
-                child: SafeArea(
-                  top: false,
-                  bottom: false,
-                  child: _tabs.isEmpty
-                      ? _MobileEmptyState(
-                          savedHosts: _savedHosts,
-                          configHosts: _configHosts,
-                          onConnectHost: _connectSavedHost,
-                          onNewSsh: () => unawaited(_showConnectDialog()),
-                        )
-                      : GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onTap: () {
-                            if (_active < _tabs.length) {
-                              _tabs[_active].terminalViewKey.currentState
-                                  ?.requestKeyboard();
-                            }
-                          },
-                          child: _buildBody(),
-                        ),
-                ),
+                child: IndexedStack(
+                  index: _mobileTabIndex,
+                  sizing: StackFit.expand,
+                  children: [
+                    // 0: Connections — primary hub
+                    _ConnectionsPage(
+                      tabs: _tabs,
+                      active: _active,
+                      savedHosts: _savedHosts,
+                      configHosts: _configHosts,
+                      onSelectSession: (i) {
+                        _selectTab(i);
+                        setState(() => _mobileTabIndex = 1);
+                      },
+                      onCloseSession: _closeTab,
+                      onNewSsh: () async {
+                        await _showConnectDialog();
+                        if (mounted && _tabs.isNotEmpty) {
+                          setState(() => _mobileTabIndex = 1);
+                        }
+                      },
+                      onConnectHost: (h) {
+                        _connectSavedHost(h);
+                        setState(() => _mobileTabIndex = 1);
+                      },
+                      chromeBackground: ts.chromeBackground,
+                    ),
+                    // 1: Terminal — session tab strip + full-screen terminal
+                    _TerminalPage(
+                      tabs: _tabs,
+                      active: _active,
+                      onSelectSession: _selectTab,
+                      onCloseSession: _closeTab,
+                      onNewSsh: () async {
+                        await _showConnectDialog();
+                        if (mounted && _tabs.isNotEmpty) {
+                          setState(() => _mobileTabIndex = 1);
+                        }
+                      },
+                      onInsertCommand: hasTerminal ? _insertCommand : null,
+                      terminalBody: _buildTerminalArea(),
+                      chromeBackground: ts.chromeBackground,
+                    ),
+                    // 2: Files (SFTP)
+                    hasSftp
+                        ? _MobileFilesPage(
+                            key: ValueKey(activeTab!.sftp),
+                            sftp: activeTab.sftp!,
+                            host: activeTab.title,
+                            remotePath: activeTab.remotePath,
+                            transferManager: activeTab.transferManager!,
+                            frostedGlass: _config.sftpFrostedGlass,
+                            chromeBackground: ts.chromeBackground,
+                          )
+                        : _MobilePagePlaceholder(
+                            icon: Icons.folder_rounded,
+                            message:
+                                'Connect to an SSH server with SFTP\nto browse files.',
+                            chromeBackground: ts.chromeBackground,
+                          ),
+                    // 3: Settings
+                    _MobileSettingsPage(
+                      settings: _config.terminal,
+                      onChanged: (next) {
+                        setState(() => _config.terminal = next);
+                        _config.save();
+                        _syncAllTerminals();
+                      },
+                      sftpFrostedGlass: _config.sftpFrostedGlass,
+                      onSftpFrostedGlassChanged: (v) {
+                        setState(() => _config.sftpFrostedGlass = v);
+                        _config.save();
+                      },
+                      savedHosts: _savedHosts,
+                      onSaveHost: (original, updated) =>
+                          _saveSavedHost(original, updated),
+                      onDeleteHost: _deleteSavedHost,
+                      chromeBackground: ts.chromeBackground,
+                    ),
+                    ],
+                  ),
               ),
               _MobileBottomBar(
-                tabs: _tabs,
-                active: _active,
-                chromeBackground: ts.chromeBackground,
+                activeTabIndex: _mobileTabIndex,
+                onTabChanged: (i) => setState(() => _mobileTabIndex = i),
                 bottomInset: vp.bottom,
-                onMenu: () => Scaffold.of(ctx).openDrawer(),
-                hasSftp: _tabs.isNotEmpty &&
-                    _active < _tabs.length &&
-                    _tabs[_active].sftp != null,
-                sftpVisible: false,
-                onToggleSftp: () {
-                  if (_tabs.isNotEmpty && _active < _tabs.length) {
-                    final tab = _tabs[_active];
-                    if (tab.sftp == null || tab.transferManager == null) return;
-                    Navigator.push(
-                      ctx,
-                      MaterialPageRoute<void>(
-                        builder: (_) => _SftpPage(
-                          sftp: tab.sftp!,
-                          host: tab.title,
-                          remotePath: tab.remotePath,
-                          transferManager: tab.transferManager!,
-                        ),
-                      ),
-                    );
-                  }
-                },
+                sessionCount: _tabs.length,
+                hasSftp: hasSftp,
               ),
             ],
           );
         },
       ),
+    );
+  }
+
+  // Returns the terminal body widget (used inside _TerminalPage).
+  Widget _buildTerminalArea() {
+    if (_tabs.isEmpty) return const SizedBox.expand();
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () {
+        if (_active < _tabs.length) {
+          _tabs[_active].terminalViewKey.currentState?.requestKeyboard();
+        }
+      },
+      child: _buildBody(),
     );
   }
 
@@ -303,28 +351,47 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     return Container(
       color: _config.terminal.chromeBackground,
       alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(
-              color: Color(0xFF2472C8),
-              strokeWidth: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: _kCardFill,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _kCardBorder, width: 0.5),
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    color: _kAccent,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Connecting to $alias…',
-            style: const TextStyle(color: _kFgInactive, fontSize: 13),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'You can switch to other tabs while waiting.',
-            style: TextStyle(color: Color(0xFF6E6E6E), fontSize: 11),
-          ),
-        ],
+            const SizedBox(height: 18),
+            Text(
+              'Connecting to $alias',
+              style: const TextStyle(
+                color: _kFgActive,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'You can switch tabs while waiting.',
+              style: TextStyle(color: _kFgInactive, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -335,59 +402,64 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       color: _config.terminal.chromeBackground,
       alignment: Alignment.center,
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 36,
-              color: Color(0xFFFF6E67),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              alias,
-              style: const TextStyle(
-                color: _kFgActive,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+        padding: const EdgeInsets.all(32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6E67).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFFFF6E67).withValues(alpha: 0.25),
+                    width: 0.5,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.wifi_off_rounded,
+                  size: 26,
+                  color: Color(0xFFFF6E67),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 360),
-              child: Text(
+              const SizedBox(height: 18),
+              Text(
+                alias,
+                style: const TextStyle(
+                  color: _kFgActive,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
                 tab.connectionError ?? 'Connection failed',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: _kFgInactive, fontSize: 12),
+                style: const TextStyle(color: _kFgInactive, fontSize: 13),
               ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => _retryConnectingTab(tab),
-                  icon: const Icon(Icons.refresh, size: 14),
-                  label: const Text('Retry'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _kFgActive,
-                    side: const BorderSide(color: Color(0xFF3A3A3A)),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _Ios26Button(
+                    label: 'Retry',
+                    icon: Icons.refresh_rounded,
+                    onPressed: () => _retryConnectingTab(tab),
                   ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () => _editAndRetryConnectingTab(tab),
-                  icon: const Icon(Icons.edit, size: 14),
-                  label: const Text('Edit…'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _kFgActive,
-                    side: const BorderSide(color: Color(0xFF3A3A3A)),
+                  const SizedBox(width: 10),
+                  _Ios26Button(
+                    label: 'Edit…',
+                    icon: Icons.edit_outlined,
+                    onPressed: () => _editAndRetryConnectingTab(tab),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

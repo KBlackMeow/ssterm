@@ -33,6 +33,7 @@ class TransferTask extends ChangeNotifier {
   DateTime? _lastProgressNotify;
   static const _progressNotifyInterval = Duration(milliseconds: 100);
 
+  bool _disposed = false;
   bool get isActive =>
       status == TransferStatus.running || status == TransferStatus.paused;
 
@@ -64,6 +65,7 @@ class TransferTask extends ChangeNotifier {
   }
 
   void _onProgress(int b) {
+    if (_disposed) return;
     bytes = b;
     final now = DateTime.now();
     if (_lastProgressNotify != null &&
@@ -75,16 +77,22 @@ class TransferTask extends ChangeNotifier {
   }
 
   void _complete() {
-    if (!isActive) return;
+    if (_disposed || !isActive) return;
     status = TransferStatus.done;
     notifyListeners();
   }
 
   void _fail(dynamic e) {
-    if (!isActive) return;
+    if (_disposed || !isActive) return;
     status = TransferStatus.error;
     error = e.toString();
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
 
