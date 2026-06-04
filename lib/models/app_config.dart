@@ -12,7 +12,6 @@ class AppConfig {
     TerminalSettings? terminal,
     SftpPanelPosition? sftpPosition,
     this.sftpSize,
-    this.sftpFrostedGlass = true,
     List<LocalShellOption>? cachedShells,
   })  : terminal = terminal ?? TerminalSettings(),
         sftpPosition = sftpPosition ?? SftpPanelPosition.bottom,
@@ -22,8 +21,6 @@ class AppConfig {
   SftpPanelPosition sftpPosition;
   /// Custom panel size in logical pixels; `null` uses [SshSessionView.defaultPanelFraction].
   double? sftpSize;
-  /// Blur terminal content behind the SFTP overlay ([BackdropFilter]).
-  bool sftpFrostedGlass;
 
   /// Persisted result of the last local-shell discovery. Restored at startup so
   /// the `+` menu can render synchronously without re-running discovery (which
@@ -49,7 +46,6 @@ class AppConfig {
             ? SftpPanelPosition.bottom
             : SftpPanelPosition.right,
         sftpSize: (json['sftpSize'] as num?)?.toDouble(),
-        sftpFrostedGlass: json['sftpFrostedGlass'] as bool? ?? true,
         cachedShells: _decodeShells(json['cachedShells']),
       );
     } catch (_) {
@@ -64,7 +60,6 @@ class AppConfig {
         'terminal': terminal.toJson(),
         'sftpPosition': sftpPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
         if (sftpSize != null) 'sftpSize': sftpSize,
-        'sftpFrostedGlass': sftpFrostedGlass,
         if (cachedShells.isNotEmpty)
           'cachedShells': cachedShells.map((s) => s.toJson()).toList(),
       }),

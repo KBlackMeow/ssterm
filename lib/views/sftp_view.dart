@@ -80,7 +80,6 @@ class SftpView extends StatefulWidget {
     this.panelPosition,
     this.onPanelPositionChanged,
     this.onClose,
-    this.frostedGlass = true,
     this.showToolbar = true,
     this.chromeBackground = const Color(0xFF1E1E2A),
   });
@@ -95,7 +94,6 @@ class SftpView extends StatefulWidget {
   final SftpPanelPosition? panelPosition;
   final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
   final VoidCallback? onClose;
-  final bool frostedGlass;
 
   /// Set to false to hide the compact toolbar (use in full-screen page mode).
   final bool showToolbar;
@@ -392,7 +390,6 @@ class SftpViewState extends State<SftpView> {
       builder: (ctx) => _MobileActionSheet(
         entry: entry,
         canDownload: isFile,
-        frostedGlass: widget.frostedGlass,
         chromeBackground: widget.chromeBackground,
       ),
     );
@@ -447,9 +444,7 @@ class SftpViewState extends State<SftpView> {
     Widget bar = Container(
       height: 50,
       decoration: BoxDecoration(
-        color: widget.frostedGlass
-            ? const Color(0xA5141620)
-            : const Color(0xDD1E1E1E),
+        color: const Color(0xA5141620),
         border: const Border(
           bottom: BorderSide(color: Color(0xFF2A2A2A), width: 0.5),
         ),
@@ -519,14 +514,12 @@ class SftpViewState extends State<SftpView> {
       ),
     );
 
-    if (widget.frostedGlass) {
-      bar = ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: bar,
-        ),
-      );
-    }
+    bar = ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: bar,
+      ),
+    );
 
     return bar;
   }
@@ -582,7 +575,6 @@ class SftpViewState extends State<SftpView> {
   void _showPathBreadcrumb() {
     // Split path into segments and let the user jump to any ancestor.
     final segments = _path.split('/').where((s) => s.isNotEmpty).toList();
-    final frosted = widget.frostedGlass;
     showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -590,9 +582,7 @@ class SftpViewState extends State<SftpView> {
         const radius = BorderRadius.vertical(top: Radius.circular(16));
         Widget sheet = Container(
           decoration: BoxDecoration(
-            color: frosted
-                ? FrostedGlassStyle.menuFillFrosted
-                : const Color(0xFF1E1E2A),
+            color: FrostedGlassStyle.menuFillFrosted,
             borderRadius: radius,
             border: const Border(
               top: BorderSide(color: Color(0x30FFFFFF), width: 0.5),
@@ -637,15 +627,13 @@ class SftpViewState extends State<SftpView> {
           ),
         );
 
-        if (frosted) {
-          sheet = ClipRRect(
-            borderRadius: radius,
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: sheet,
-            ),
-          );
-        }
+        sheet = ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: sheet,
+          ),
+        );
 
         return sheet;
       },
@@ -974,7 +962,6 @@ class SftpViewState extends State<SftpView> {
 
     final action = await showFrostedMenu<String>(
       context: context,
-      frostedGlass: widget.frostedGlass,
       position: position,
       items: [
         if (!isDir)

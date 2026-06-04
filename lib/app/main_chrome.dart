@@ -27,8 +27,6 @@ class _TabBar extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
-    required this.frostedGlass,
-    this.onFrostedGlassChanged,
     this.onInsertCommand,
   });
 
@@ -57,9 +55,6 @@ class _TabBar extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
-  final bool frostedGlass;
-  final ValueChanged<bool>? onFrostedGlassChanged;
-
   static const _preferredTabWidth = 160.0;
   static const _minTabWidth = 80.0;
 
@@ -153,12 +148,9 @@ class _TabBar extends StatelessWidget {
             savedHosts: savedHosts,
             configHosts: configHosts,
             onConnectHost: onConnectHost,
-            frostedGlass: frostedGlass,
-            onFrostedGlassChanged: onFrostedGlassChanged,
           ),
           CmdPickerButton(
             onInsert: onInsertCommand,
-            frostedGlass: frostedGlass,
           ),
           if (hasSftp) ...[
             _SftpButton(sftpVisible: sftpVisible, onToggle: onToggleSftp),
@@ -166,7 +158,6 @@ class _TabBar extends StatelessWidget {
               RepaintBoundary(
                 child: _TransferButton(
                   manager: transferManager!,
-                  frostedGlass: frostedGlass,
                 ),
               ),
           ],
@@ -176,7 +167,6 @@ class _TabBar extends StatelessWidget {
             splitAxis: splitAxis,
             onSplitHorizontal: onSplitHorizontal,
             onSplitVertical: onSplitVertical,
-            frostedGlass: frostedGlass,
           ),
           GestureDetector(
             onTap: onSettings,
@@ -359,12 +349,10 @@ class _SftpButton extends StatelessWidget {
 class _TransferButton extends StatelessWidget {
   const _TransferButton({
     required this.manager,
-    required this.frostedGlass,
     this.chromeBackground = const Color(0xFF161820),
   });
 
   final TransferManager manager;
-  final bool frostedGlass;
   final Color chromeBackground;
 
   void _showDesktopMenu(BuildContext context) {
@@ -373,7 +361,6 @@ class _TransferButton extends StatelessWidget {
 
     showTransferMenu(
       context: context,
-      frostedGlass: frostedGlass,
       manager: manager,
       position: RelativeRect.fromLTRB(
         pos.dx,
@@ -466,7 +453,6 @@ class _SplitButton extends StatelessWidget {
     this.splitAxis,
     required this.onSplitHorizontal,
     required this.onSplitVertical,
-    required this.frostedGlass,
   });
 
   final bool canSplit;
@@ -474,7 +460,6 @@ class _SplitButton extends StatelessWidget {
   final Axis? splitAxis;
   final VoidCallback onSplitHorizontal;
   final VoidCallback onSplitVertical;
-  final bool frostedGlass;
 
   void _showMenu(BuildContext context) {
     final box = context.findRenderObject()! as RenderBox;
@@ -482,7 +467,6 @@ class _SplitButton extends StatelessWidget {
 
     showFrostedMenu<String>(
       context: context,
-      frostedGlass: frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
@@ -727,11 +711,8 @@ class _PlusMenu extends StatelessWidget {
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
-    required this.frostedGlass,
-    this.onFrostedGlassChanged,
   });
 
-  static const _frostedToggleValue = '__frosted_glass__';
   static const _refreshShellsValue = '__refresh_shells__';
 
   final ValueChanged<LocalShellOption> onNewLocal;
@@ -743,8 +724,6 @@ class _PlusMenu extends StatelessWidget {
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
-  final bool frostedGlass;
-  final ValueChanged<bool>? onFrostedGlassChanged;
 
   static const _headerStyle = TextStyle(
     color: Color(0xFF6E6E6E),
@@ -826,7 +805,6 @@ class _PlusMenu extends StatelessWidget {
 
     showFrostedMenu<String>(
       context: context,
-      frostedGlass: frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
@@ -882,38 +860,9 @@ class _PlusMenu extends StatelessWidget {
             ],
           ),
         ),
-        if (onFrostedGlassChanged != null) ...[
-          const PopupMenuDivider(height: 1),
-          PopupMenuItem(
-            value: _frostedToggleValue,
-            height: 36,
-            child: Row(
-              children: [
-                const Icon(Icons.blur_on, size: 13, color: _kFgInactive),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Frosted glass',
-                    style: TextStyle(color: _kFgActive, fontSize: 13),
-                  ),
-                ),
-                if (frostedGlass)
-                  const Icon(
-                    Icons.check,
-                    size: 14,
-                    color: Color(0xFF2472C8),
-                  ),
-              ],
-            ),
-          ),
-        ],
       ],
     ).then((v) {
       if (v == null) return;
-      if (v == _frostedToggleValue) {
-        onFrostedGlassChanged?.call(!frostedGlass);
-        return;
-      }
       if (v == _refreshShellsValue) {
         unawaited(onRefreshLocalShells());
         return;

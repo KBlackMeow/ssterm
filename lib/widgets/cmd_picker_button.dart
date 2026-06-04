@@ -44,11 +44,9 @@ class CmdPickerButton extends StatefulWidget {
   const CmdPickerButton({
     super.key,
     required this.onInsert,
-    this.frostedGlass = true,
   });
 
   final ValueChanged<String>? onInsert;
-  final bool frostedGlass;
 
   @override
   State<CmdPickerButton> createState() => _CmdPickerButtonState();
@@ -120,7 +118,6 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
 
     showFrostedMenu<int>(
       context: this.context,
-      frostedGlass: widget.frostedGlass,
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + box.size.height,
@@ -159,8 +156,7 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
               ),
               child: _CmdPickerSheet(
                 commands: _commands,
-                frostedGlass: widget.frostedGlass,
-              ),
+                        ),
             ),
           ),
         );
@@ -226,13 +222,9 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
 // ── Mobile centered dialog — matches desktop frosted menu style ───────────────
 
 class _CmdPickerSheet extends StatelessWidget {
-  const _CmdPickerSheet({
-    required this.commands,
-    required this.frostedGlass,
-  });
+  const _CmdPickerSheet({required this.commands});
 
   final List<Command> commands;
-  final bool frostedGlass;
 
   @override
   Widget build(BuildContext context) {

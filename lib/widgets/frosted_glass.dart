@@ -199,35 +199,21 @@ class FrostedGlassSurface extends StatelessWidget {
   }
 }
 
-/// [showMenu] wrapper: frosted blur + Liquid Glass chrome when [frostedGlass].
+/// [showMenu] wrapper: PopupSurface chrome (solid fill, white border, depth shadow).
 Future<T?> showFrostedMenu<T>({
   required BuildContext context,
   required RelativeRect position,
   required List<PopupMenuEntry<T>> items,
-  bool frostedGlass = true,
   BoxConstraints? constraints,
   ShapeBorder? shape,
 }) {
   final menuShape = shape ??
       RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(FrostedGlassStyle.menuRadius),
-        side: frostedGlass
-            ? BorderSide.none
-            : const BorderSide(color: FrostedGlassStyle.divider),
+        side: BorderSide.none,
       );
 
   final themeColor = AppColors.maybeOf(context)?.popup;
-
-  if (!frostedGlass) {
-    return showMenu<T>(
-      context: context,
-      position: position,
-      constraints: constraints,
-      color: themeColor ?? FrostedGlassStyle.menuFillSolid,
-      shape: menuShape,
-      items: items,
-    );
-  }
 
   // showMenu wraps items in a SingleChildScrollView with 8 px top + 8 px bottom
   // padding, and FrostedGlassSurface adds a 1 px Padding on every side.

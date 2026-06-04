@@ -76,11 +76,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
           onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
           onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-          frostedGlass: _config.sftpFrostedGlass,
-          onFrostedGlassChanged: (v) {
-            setState(() => _config.sftpFrostedGlass = v);
-            _config.save();
-          },
         ),
         Expanded(
           child: SafeArea(
@@ -186,7 +181,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                             host: activeTab.title,
                             remotePath: activeTab.remotePath,
                             transferManager: activeTab.transferManager!,
-                            frostedGlass: _config.sftpFrostedGlass,
                             chromeBackground: uiBackground,
                           )
                         : _MobilePagePlaceholder(
@@ -202,11 +196,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                         setState(() => _config.terminal = next);
                         _config.save();
                         _syncAllTerminals();
-                      },
-                      sftpFrostedGlass: _config.sftpFrostedGlass,
-                      onSftpFrostedGlassChanged: (v) {
-                        setState(() => _config.sftpFrostedGlass = v);
-                        _config.save();
                       },
                       savedHosts: _savedHosts,
                       onSaveHost: (original, updated) =>
@@ -305,7 +294,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
             setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
         initialPosition: _config.sftpPosition,
         initialSize: _config.sftpSize,
-        frostedGlass: _config.sftpFrostedGlass,
         onLayoutChanged: (pos, size) {
           _config.sftpPosition = pos;
           _config.sftpSize = size;
@@ -338,11 +326,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           setState(() => _config.terminal = next);
           _config.save();
           _syncAllTerminals();
-        },
-        sftpFrostedGlass: _config.sftpFrostedGlass,
-        onSftpFrostedGlassChanged: (v) {
-          setState(() => _config.sftpFrostedGlass = v);
-          _config.save();
         },
         savedHosts: _savedHosts,
         onSaveHost: (original, updated) => _saveSavedHost(original, updated),
@@ -465,7 +448,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       settings: _config.terminal,
       viewKey: viewKey,
       contextMenu: contextMenu,
-      frostedGlass: _config.sftpFrostedGlass,
       includeWallpaper: false,
       autofocus: sshPane == 0,
     );

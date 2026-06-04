@@ -424,7 +424,6 @@ class _MobileFilesPage extends StatefulWidget {
     required this.host,
     required this.remotePath,
     required this.transferManager,
-    this.frostedGlass = false,
     this.chromeBackground = const Color(0xFF111113),
   });
 
@@ -432,7 +431,6 @@ class _MobileFilesPage extends StatefulWidget {
   final String host;
   final ValueNotifier<String>? remotePath;
   final TransferManager transferManager;
-  final bool frostedGlass;
   final Color chromeBackground;
 
   @override
@@ -469,7 +467,6 @@ class _MobileFilesPageState extends State<_MobileFilesPage> {
             RepaintBoundary(
               child: _TransferButton(
                 manager: widget.transferManager,
-                frostedGlass: widget.frostedGlass,
                 chromeBackground: widget.chromeBackground,
               ),
             ),
@@ -487,7 +484,6 @@ class _MobileFilesPageState extends State<_MobileFilesPage> {
             host: widget.host,
             remotePath: widget.remotePath,
             transferManager: widget.transferManager,
-            frostedGlass: widget.frostedGlass,
             showToolbar: false,
             chromeBackground: widget.chromeBackground,
           ),
@@ -505,8 +501,6 @@ class _MobileSettingsPage extends StatelessWidget {
   const _MobileSettingsPage({
     required this.settings,
     required this.onChanged,
-    required this.sftpFrostedGlass,
-    required this.onSftpFrostedGlassChanged,
     required this.savedHosts,
     required this.onSaveHost,
     required this.onDeleteHost,
@@ -515,8 +509,6 @@ class _MobileSettingsPage extends StatelessWidget {
 
   final TerminalSettings settings;
   final ValueChanged<TerminalSettings> onChanged;
-  final bool sftpFrostedGlass;
-  final ValueChanged<bool> onSftpFrostedGlassChanged;
   final List<SshHost> savedHosts;
   final void Function(SshHost?, SshHost) onSaveHost;
   final ValueChanged<SshHost> onDeleteHost;
@@ -534,8 +526,6 @@ class _MobileSettingsPage extends StatelessWidget {
           child: SettingsPage(
             settings: settings,
             onChanged: onChanged,
-            sftpFrostedGlass: sftpFrostedGlass,
-            onSftpFrostedGlassChanged: onSftpFrostedGlassChanged,
             savedHosts: savedHosts,
             onSaveHost: onSaveHost,
             onDeleteHost: onDeleteHost,
