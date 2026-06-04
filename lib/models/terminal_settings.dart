@@ -39,10 +39,10 @@ class TerminalSettings {
   ///   Windows → 12  (Windows Terminal default)
   ///   macOS   → 12  (matches VS Code on macOS; Terminal.app uses 11)
   ///   Linux   → 14
-  ///   iOS/Android → 13  (slightly larger for phone readability)
+  ///   iOS/Android → 16  (larger default for mobile readability)
   static double get defaultFontSize {
     if (Platform.isLinux) return 14.0;
-    if (Platform.isIOS || Platform.isAndroid) return 13.0;
+    if (Platform.isIOS || Platform.isAndroid) return 16.0;
     return 12.0;
   }
 

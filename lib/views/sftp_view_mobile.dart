@@ -40,7 +40,7 @@ class _CompactRow extends StatelessWidget {
       onLongPress: onLongPress,
       overlayColor: WidgetStateProperty.all(const Color(0x0AFFFFFF)),
       child: SizedBox(
-        height: 48,
+        height: 56,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
@@ -53,7 +53,7 @@ class _CompactRow extends StatelessWidget {
                       : isLink
                           ? Icons.link_rounded
                           : _fileIconForName(entry.filename),
-                  size: 22,
+                  size: 26,
                   color: iconColor,
                 ),
               ),
@@ -63,7 +63,7 @@ class _CompactRow extends StatelessWidget {
                   entry.filename,
                   style: TextStyle(
                     color: nameColor,
-                    fontSize: 14,
+                    fontSize: 16,
                     fontFamily: 'JetBrainsMono',
                   ),
                   maxLines: 1,
@@ -80,7 +80,7 @@ class _CompactRow extends StatelessWidget {
                       sizeText,
                       style: const TextStyle(
                         color: Color(0xFF5A5A5A),
-                        fontSize: 11,
+                        fontSize: 13,
                         fontFamily: 'JetBrainsMono',
                       ),
                     ),
@@ -88,7 +88,7 @@ class _CompactRow extends StatelessWidget {
                     dateText,
                     style: const TextStyle(
                       color: Color(0xFF5A5A5A),
-                      fontSize: 11,
+                      fontSize: 13,
                       fontFamily: 'JetBrainsMono',
                     ),
                   ),

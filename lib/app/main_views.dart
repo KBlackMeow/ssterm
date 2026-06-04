@@ -1,4 +1,4 @@
-part of 'main.dart';
+part of '../main.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // View layer — all Widget-building methods.
@@ -122,8 +122,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         activeTab?.sftp != null && activeTab?.transferManager != null;
     final hasTerminal = activeTab?.terminal != null;
 
+    // Fixed UI chrome color — Connections/Files/Settings never follow terminal theme.
+    const uiBackground = Color(0xFF111113);
+
     return Scaffold(
-      backgroundColor: ts.chromeBackground,
+      backgroundColor: _mobileTabIndex == 1 ? ts.chromeBackground : uiBackground,
       body: Builder(
         builder: (ctx) {
           final vp = MediaQuery.of(ctx).viewPadding;
@@ -157,7 +160,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                         _connectSavedHost(h);
                         setState(() => _mobileTabIndex = 1);
                       },
-                      chromeBackground: ts.chromeBackground,
+                      chromeBackground: uiBackground,
                     ),
                     // 1: Terminal — session tab strip + full-screen terminal
                     _TerminalPage(
@@ -184,13 +187,13 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                             remotePath: activeTab.remotePath,
                             transferManager: activeTab.transferManager!,
                             frostedGlass: _config.sftpFrostedGlass,
-                            chromeBackground: ts.chromeBackground,
+                            chromeBackground: uiBackground,
                           )
                         : _MobilePagePlaceholder(
                             icon: Icons.folder_rounded,
                             message:
                                 'Connect to an SSH server with SFTP\nto browse files.',
-                            chromeBackground: ts.chromeBackground,
+                            chromeBackground: uiBackground,
                           ),
                     // 3: Settings
                     _MobileSettingsPage(
@@ -209,7 +212,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       onSaveHost: (original, updated) =>
                           _saveSavedHost(original, updated),
                       onDeleteHost: _deleteSavedHost,
-                      chromeBackground: ts.chromeBackground,
+                      chromeBackground: uiBackground,
                     ),
                     ],
                   ),
@@ -220,6 +223,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                 bottomInset: vp.bottom,
                 sessionCount: _tabs.length,
                 hasSftp: hasSftp,
+                terminalBackground: ts.chromeBackground,
               ),
             ],
           );
@@ -356,26 +360,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _kCardFill,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _kCardBorder, width: 0.5),
-              ),
-              child: const Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    color: _kAccent,
-                    strokeWidth: 2,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
             Text(
               'Connecting to $alias',
               style: const TextStyle(

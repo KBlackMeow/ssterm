@@ -44,11 +44,13 @@ import 'views/ssh_session_view.dart';
 import 'widgets/transfer_panel.dart';
 import 'widgets/wallpaper_background.dart';
 
-part 'main_local.dart';
-part 'main_ssh.dart';
-part 'main_chrome.dart';
-part 'main_mobile.dart';
-part 'main_views.dart';
+part 'app/main_local.dart';
+part 'app/main_ssh.dart';
+part 'app/main_chrome.dart';
+part 'app/main_mobile.dart';
+part 'app/main_mobile_nav.dart';
+part 'app/main_mobile_connections.dart';
+part 'app/main_views.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

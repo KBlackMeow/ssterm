@@ -1,4 +1,4 @@
-part of 'main.dart';
+part of '../main.dart';
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 class _TabBar extends StatelessWidget {

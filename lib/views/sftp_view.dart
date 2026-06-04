@@ -12,6 +12,7 @@ import '../widgets/frosted_glass.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
 
 part 'sftp_view_mobile.dart';
+part 'sftp_view_widgets.dart';
 
 /// Join a remote directory path with a file/dir name.
 String sftpJoin(String dir, String name) =>
@@ -53,9 +54,9 @@ String _sftpFmtDate(int? ts) {
       '${dt.day.toString().padLeft(2, '0')} $hm';
 }
 
-const _kSizeColWidth = 44.0;
-const _kDateColWidth = 72.0;
-const _kMetaFontSize = 9.0;
+const _kSizeColWidth = 56.0;
+const _kDateColWidth = 88.0;
+const _kMetaFontSize = 11.0;
 
 const _kChromeBar = Color(0x66252525);
 const _kChromeHeader = Color(0x55222222);
@@ -884,7 +885,7 @@ class SftpViewState extends State<SftpView> {
           child: InkWell(
             onTap: () => _navigateEntry(e),
             child: Container(
-              height: 24,
+              height: 26,
               color: isSel ? _kAccent.withAlpha(70) : null,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
@@ -895,7 +896,7 @@ class SftpViewState extends State<SftpView> {
                         : isLink
                             ? Icons.link
                             : _fileIcon(e.filename),
-                    size: 13,
+                    size: 14,
                     color: isDir
                         ? const Color(0xFFFFD166)
                         : isLink
@@ -915,7 +916,7 @@ class SftpViewState extends State<SftpView> {
                               : isLink
                                   ? const Color(0xFF4EC9B0)
                                   : const Color(0xFFAAAAAA),
-                          fontSize: 12,
+                          fontSize: 13,
                           fontFamily: 'JetBrainsMono',
                         ),
                         maxLines: 1,
@@ -1055,161 +1056,3 @@ class SftpViewState extends State<SftpView> {
 
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Desktop toolbar button
-// ────────────────────────────────────────────────────────────────────────────
-
-class _ToolBtn extends StatefulWidget {
-  const _ToolBtn({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.danger = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onTap;
-  final bool danger;
-
-  @override
-  State<_ToolBtn> createState() => _ToolBtnState();
-}
-
-class _ToolBtnState extends State<_ToolBtn> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = widget.onTap == null;
-    final color = disabled
-        ? _kFgDisabled
-        : widget.danger
-            ? const Color(0xFFFF6E67)
-            : _hover
-                ? const Color(0xFFC7C7C7)
-                : _kFgMuted;
-
-    return Tooltip(
-      message: widget.tooltip,
-      waitDuration: const Duration(milliseconds: 600),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Container(
-            width: 26,
-            height: 26,
-            alignment: Alignment.center,
-            child: Icon(widget.icon, size: 14, color: color),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Dialogs
-// ────────────────────────────────────────────────────────────────────────────
-
-class _ConfirmDialog extends StatelessWidget {
-  const _ConfirmDialog({
-    required this.title,
-    required this.body,
-    required this.confirm,
-    this.danger = false,
-  });
-
-  final String title;
-  final String body;
-  final String confirm;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Text(
-        title,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
-      ),
-      content: Text(
-        body,
-        style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel',
-              style: TextStyle(color: Color(0xFF8E8E8E))),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            confirm,
-            style: TextStyle(
-              color: danger ? const Color(0xFFFF6E67) : _kAccent,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InputDialog extends StatelessWidget {
-  const _InputDialog({
-    required this.title,
-    required this.ctrl,
-    required this.confirm,
-  });
-
-  final String title;
-  final TextEditingController ctrl;
-  final String confirm;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Text(
-        title,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
-      ),
-      content: TextField(
-        controller: ctrl,
-        autofocus: true,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
-        decoration: const InputDecoration(
-          filled: true,
-          fillColor: Color(0xFF1C1C1C),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Color(0xFF3A3A3A)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: _kAccent),
-          ),
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        ),
-        onSubmitted: (v) => Navigator.pop(context, v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel',
-              style: TextStyle(color: Color(0xFF8E8E8E))),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, ctrl.text),
-          child: Text(confirm,
-              style: const TextStyle(color: _kAccent)),
-        ),
-      ],
-    );
-  }
-}

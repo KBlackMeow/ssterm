@@ -1,4 +1,4 @@
-part of 'main.dart';
+part of '../main.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SSH business logic — connection lifecycle, SFTP, split-pane SSH sessions,
