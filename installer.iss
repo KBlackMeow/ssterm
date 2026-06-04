@@ -1,6 +1,10 @@
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
+
 [Setup]
 AppName=SSTerm
-AppVersion=1.2.0
+AppVersion={#MyAppVersion}
 DefaultDirName={autopf}\ssterm
 DefaultGroupName=SSTerm
 OutputDir=dist
