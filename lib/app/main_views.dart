@@ -224,6 +224,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                 sessionCount: _tabs.length,
                 hasSftp: hasSftp,
                 terminalBackground: ts.chromeBackground,
+                tabSelectedColor: ts.chromeTabSelected,
               ),
             ],
           );

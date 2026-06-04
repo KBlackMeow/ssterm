@@ -489,34 +489,36 @@ class _NewConnectionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: _kAccent,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: _kAccent.withValues(alpha: 0.35),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
+      child: Builder(
+        builder: (context) {
+          final color = AppColors.maybeOf(context)?.popup ?? _kCardFill;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0x28FFFFFF), width: 1),
+              boxShadow: const [
+                BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
+              ],
             ),
-          ],
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_rounded, size: 16, color: Colors.white),
-            SizedBox(width: 4),
-            Text(
-              'New',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_rounded, size: 16, color: Colors.white),
+                SizedBox(width: 4),
+                Text(
+                  'New',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

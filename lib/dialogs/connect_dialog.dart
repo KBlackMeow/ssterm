@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
 import '../models/port_forward_rule.dart';
 import '../models/ssh_host.dart';
+import '../widgets/frosted_glass.dart';
 import 'ssh_host_builder.dart';
 
 export '../models/connect_result.dart';
@@ -19,31 +19,23 @@ typedef _AuthMode = SshAuthMode;
 Future<SshHost?> showConnectDialog(
   BuildContext context, {
   SshHost? initialHost,
-  Color backgroundColor = _kBg,
 }) {
   if (Platform.isIOS || Platform.isAndroid) {
     return showDialog<SshHost>(
       context: context,
       builder: (_) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 48,
-        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
-          child: _ConnectDialog(
-          initialHost: initialHost,
-          mobileSheet: true,
-          backgroundColor: backgroundColor,
+          child: _ConnectDialog(initialHost: initialHost, mobileSheet: true),
         ),
-      ),
       ),
     );
   }
   return showDialog<SshHost>(
     context: context,
-    barrierColor: Colors.black54,
+    barrierColor: const Color(0x66000000),
     builder: (ctx) => _ConnectDialog(initialHost: initialHost),
   );
 }
@@ -51,38 +43,29 @@ Future<SshHost?> showConnectDialog(
 Future<SshHost?> showEditHostDialog(
   BuildContext context, {
   SshHost? host,
-  Color backgroundColor = _kBg,
 }) {
   if (Platform.isIOS || Platform.isAndroid) {
     return showDialog<SshHost>(
       context: context,
       builder: (_) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 48,
-        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
-          child: _ConnectDialog(
-          initialHost: host,
-          editOnly: true,
-          mobileSheet: true,
-          backgroundColor: backgroundColor,
+          child: _ConnectDialog(initialHost: host, editOnly: true, mobileSheet: true),
         ),
-      ),
       ),
     );
   }
   return showDialog<SshHost>(
     context: context,
-    barrierColor: Colors.black54,
+    barrierColor: const Color(0x66000000),
     builder: (ctx) => _ConnectDialog(initialHost: host, editOnly: true),
   );
 }
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
-const _kBg = Color(0xFF1D1D1F);
+const _kBg = Color(0xFF252525);
 const _kField = Color(0xFF141416);
 const _kBorder = Color(0xFF282828);
 const _kFocus = Color(0xFF2472C8);
@@ -98,17 +81,11 @@ class _ConnectDialog extends StatefulWidget {
     this.initialHost,
     this.editOnly = false,
     this.mobileSheet = false,
-    this.backgroundColor = _kBg,
   });
 
   final SshHost? initialHost;
   final bool editOnly;
-
-  /// When true, renders as a bottom-sheet container instead of a Dialog.
   final bool mobileSheet;
-
-  /// Solid background for the mobile sheet (defaults to [_kBg]).
-  final Color backgroundColor;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -266,58 +243,13 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   Widget _buildDesktopDialog(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      shadowColor: Colors.transparent,
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: SizedBox(
         width: 420,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0x50FFFFFF), Color(0x0CFFFFFF)],
-            ),
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x222472C8),
-                blurRadius: 40,
-                spreadRadius: -4,
-              ),
-              BoxShadow(
-                color: Color(0x55000000),
-                blurRadius: 28,
-                offset: Offset(0, 10),
-              ),
-            ],
-          ),
+        child: PopupSurface(
+          color: _kBg,
           child: Padding(
-            padding: const EdgeInsets.all(1),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(13),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-                child: DecoratedBox(
-                  position: DecorationPosition.foreground,
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x16FFFFFF), Color(0x00FFFFFF)],
-                      stops: [0.0, 0.15],
-                    ),
-                  ),
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(color: _kBg),
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: _buildScrollable(),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            padding: const EdgeInsets.all(24),
+            child: _buildScrollable(),
           ),
         ),
       ),
@@ -343,17 +275,12 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   Widget _buildMobileSheet(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
-    const radius = BorderRadius.all(Radius.circular(16));
-
     final title = widget.editOnly
         ? (widget.initialHost != null ? 'Edit Connection' : 'Add Connection')
         : 'New Connection';
 
-    return Container(
-      decoration: BoxDecoration(
-        color: widget.backgroundColor,
-        borderRadius: radius,
-      ),
+    return PopupSurface(
+      color: _kBg,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

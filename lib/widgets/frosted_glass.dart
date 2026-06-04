@@ -23,12 +23,7 @@ abstract final class FrostedGlassStyle {
   static const _borderBright = Color(0x50FFFFFF);
   static const _borderDim    = Color(0x0CFFFFFF);
 
-  // Shadows: ambient blue glow + depth black
-  static const _shadowBlue = BoxShadow(
-    color: Color(0x1E2472C8),
-    blurRadius: 32,
-    spreadRadius: -4,
-  );
+  // Shadows: depth black
   static const _shadowDepth = BoxShadow(
     color: Color(0x45000000),
     blurRadius: 20,
@@ -48,8 +43,70 @@ abstract final class FrostedGlassStyle {
       colors: [_borderBright, _borderDim],
     ),
     borderRadius: BorderRadius.circular(radius),
-    boxShadow: const [_shadowBlue, _shadowDepth, _shadowInner],
+    boxShadow: const [_shadowDepth, _shadowInner],
   );
+}
+
+/// Theme extension that carries app-wide color tokens.
+/// Inject once near the root; [PopupSurface] and dialogs read from it.
+@immutable
+class AppColors extends ThemeExtension<AppColors> {
+  const AppColors({required this.popup});
+
+  /// Fill color for all [PopupSurface] widgets (dialogs, command sheets, etc.).
+  final Color popup;
+
+  static AppColors? maybeOf(BuildContext context) =>
+      Theme.of(context).extension<AppColors>();
+
+  @override
+  AppColors copyWith({Color? popup}) =>
+      AppColors(popup: popup ?? this.popup);
+
+  @override
+  AppColors lerp(AppColors? other, double t) =>
+      AppColors(popup: Color.lerp(popup, other?.popup, t) ?? popup);
+}
+
+/// Standard popup/dialog surface: solid fill, white border, depth shadow.
+/// Fill color is read from [AppColors] in the widget tree when not supplied.
+class PopupSurface extends StatelessWidget {
+  const PopupSurface({
+    super.key,
+    required this.child,
+    this.color,
+    this.radius = 20.0,
+  });
+
+  final Widget child;
+  /// Explicit fill override. If null, uses [AppColors.popup] from context,
+  /// falling back to [FrostedGlassStyle.menuFillSolid].
+  final Color? color;
+  final double radius;
+
+  static const _border = Color(0x28FFFFFF);
+  static const _shadow = BoxShadow(
+    color: Color(0x30000000),
+    blurRadius: 4,
+    offset: Offset(0, 2),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = color ??
+        AppColors.maybeOf(context)?.popup ??
+        FrostedGlassStyle.menuFillSolid;
+    final br = BorderRadius.circular(radius);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: br,
+        border: Border.all(color: _border, width: 1),
+        boxShadow: const [_shadow],
+      ),
+      child: ClipRRect(borderRadius: br, child: child),
+    );
+  }
 }
 
 /// Liquid-Glass surface: gradient border, specular top-edge highlight,
@@ -159,12 +216,14 @@ Future<T?> showFrostedMenu<T>({
             : const BorderSide(color: FrostedGlassStyle.divider),
       );
 
+  final themeColor = AppColors.maybeOf(context)?.popup;
+
   if (!frostedGlass) {
     return showMenu<T>(
       context: context,
       position: position,
       constraints: constraints,
-      color: FrostedGlassStyle.menuFillSolid,
+      color: themeColor ?? FrostedGlassStyle.menuFillSolid,
       shape: menuShape,
       items: items,
     );
@@ -208,10 +267,9 @@ Future<T?> showFrostedMenu<T>({
         enabled: false,
         padding: EdgeInsets.zero,
         height: shellHeight,
-        child: FrostedGlassSurface(
-          frosted: true,
-          borderRadius: FrostedGlassStyle.menuRadius,
-          fillColor: FrostedGlassStyle.menuFillFrosted,
+        child: PopupSurface(
+          color: themeColor ?? FrostedGlassStyle.menuFillFrosted,
+          radius: FrostedGlassStyle.menuRadius,
           child: _FrostedMenuList<T>(
             entries: items,
             maxHeight: fixedHeight ? null : effectiveConstraints?.maxHeight,

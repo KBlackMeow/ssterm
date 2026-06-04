@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../models/command.dart';
+import '../../widgets/frosted_glass.dart';
 
-const _kSheetBg = Color(0xFF111113);
 const _kDivider = Color(0xFF252525);
 const _kFg = Color(0xFFD4D4D4);
 const _kFgMuted = Color(0xFF8E8E8E);
@@ -49,44 +49,62 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: _kSheetBg,
-      title: const Text('Pick color', style: TextStyle(color: _kFg, fontSize: 15)),
-      content: SizedBox(
-        width: 280,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final c in _swatches)
-              GestureDetector(
-                onTap: () => setState(() => _color = c),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: c,
-                    border: Border.all(
-                      color: _color == c ? _kAccent : _kDivider,
-                      width: _color == c ? 2 : 1,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: SizedBox(
+        width: 320,
+        child: PopupSurface(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Pick color',
+                    style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final c in _swatches)
+                      GestureDetector(
+                        onTap: () => setState(() => _color = c),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: c,
+                            border: Border.all(
+                              color: _color == c ? _kAccent : _kDivider,
+                              width: _color == c ? 2 : 1,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-              ),
-          ],
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, _color),
+                      child: const Text('Apply', style: TextStyle(color: _kAccent)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _color),
-          child: const Text('Apply', style: TextStyle(color: _kAccent)),
-        ),
-      ],
     );
   }
 }
@@ -152,61 +170,72 @@ class _CommandDialogState extends State<CommandDialog> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
-    return AlertDialog(
-      backgroundColor: _kSheetBg,
-      title: Text(
-        isEdit ? 'Edit Command' : 'New Command',
-        style: const TextStyle(color: _kFg, fontSize: 15),
-      ),
-      content: SizedBox(
-        width: 340,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _nameCtrl,
-              style: const TextStyle(color: _kFg, fontSize: 13),
-              decoration: _fieldDecoration('Name *'),
-              textInputAction: TextInputAction.next,
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: SizedBox(
+        width: 360,
+        child: PopupSurface(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  isEdit ? 'Edit Command' : 'New Command',
+                  style: const TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _nameCtrl,
+                  style: const TextStyle(color: _kFg, fontSize: 13),
+                  decoration: _fieldDecoration('Name *'),
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  controller: _descCtrl,
+                  style: const TextStyle(color: _kFg, fontSize: 13),
+                  decoration: _fieldDecoration('Description'),
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  controller: _cmdCtrl,
+                  style: const TextStyle(
+                    color: _kFg,
+                    fontSize: 12,
+                    fontFamily: 'JetBrainsMono',
+                  ),
+                  decoration: _fieldDecoration('Command *'),
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _submit(),
+                  maxLines: 5,
+                  minLines: 1,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: _submit,
+                      child: Text(
+                        isEdit ? 'Save' : 'Add',
+                        style: const TextStyle(color: _kAccent),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: _descCtrl,
-              style: const TextStyle(color: _kFg, fontSize: 13),
-              decoration: _fieldDecoration('Description'),
-              textInputAction: TextInputAction.next,
-            ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: _cmdCtrl,
-              style: const TextStyle(
-                color: _kFg,
-                fontSize: 12,
-                fontFamily: 'JetBrainsMono',
-              ),
-              decoration: _fieldDecoration('Command *'),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
-              maxLines: 5,
-              minLines: 1,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-        ),
-        TextButton(
-          onPressed: _submit,
-          child: Text(
-            isEdit ? 'Save' : 'Add',
-            style: const TextStyle(color: _kAccent),
           ),
         ),
-      ],
+      ),
     );
   }
 }

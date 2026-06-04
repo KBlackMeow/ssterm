@@ -31,8 +31,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final profile = await showConnectDialog(
       context,
       initialHost: initialHost,
-      backgroundColor: _config.terminal.chromeBackground,
-    );
+          );
     if (profile == null || !mounted) return;
     await _rememberHostProfile(profile);
     if (!mounted) return;
@@ -242,8 +241,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final updated = await showConnectDialog(
       context,
       initialHost: profile,
-      backgroundColor: _config.terminal.chromeBackground,
-    );
+          );
     if (updated == null || !mounted) return;
     await _rememberHostProfile(updated);
     if (!mounted) return;

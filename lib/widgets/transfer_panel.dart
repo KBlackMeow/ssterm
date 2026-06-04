@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
@@ -60,6 +59,10 @@ Future<void> showTransferMenu({
       position.left.clamp(8.0, screen.width - _kTransferMenuWidth - 8);
   final top = position.top
       .clamp(8.0, screen.height - kTransferMenuHeight - 8);
+  // Capture theme color before entering the OverlayEntry builder,
+  // which may not inherit the local Theme.
+  final popupColor = AppColors.maybeOf(context)?.popup
+      ?? (frostedGlass ? FrostedGlassStyle.menuFillFrosted : FrostedGlassStyle.menuFillSolid);
 
   final completer = Completer<void>();
 
@@ -88,13 +91,9 @@ Future<void> showTransferMenu({
           height: kTransferMenuHeight,
           child: Material(
             type: MaterialType.transparency,
-            child: FrostedGlassSurface(
-              frosted: frostedGlass,
-              blur: false,
-              borderRadius: FrostedGlassStyle.menuRadius,
-              fillColor: frostedGlass
-                  ? FrostedGlassStyle.menuFillFrosted
-                  : FrostedGlassStyle.menuFillSolid,
+            child: PopupSurface(
+              color: popupColor,
+              radius: FrostedGlassStyle.menuRadius,
               child: TransferMenuContent(manager: manager),
             ),
           ),
@@ -412,87 +411,51 @@ class _Btn extends StatelessWidget {
 Future<void> showMobileTransferSheet({
   required BuildContext context,
   required TransferManager manager,
-  bool frostedGlass = true,
-  Color chromeBackground = const Color(0xFF161820),
 }) {
   return showDialog<void>(
     context: context,
-    builder: (_) => Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 48,
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: _MobileTransferSheet(
-        manager: manager,
-        frostedGlass: frostedGlass,
-        chromeBackground: chromeBackground,
-      ),
-    ),
-    ),
+    barrierColor: const Color(0x66000000),
+    builder: (ctx) {
+      final screenH = MediaQuery.of(ctx).size.height;
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 400, maxHeight: screenH * 0.55),
+            child: _MobileTransferSheet(manager: manager),
+          ),
+        ),
+      );
+    },
   );
 }
 
 class _MobileTransferSheet extends StatelessWidget {
-  const _MobileTransferSheet({
-    required this.manager,
-    this.frostedGlass = true,
-    this.chromeBackground = const Color(0xFF161820),
-  });
+  const _MobileTransferSheet({required this.manager});
 
   final TransferManager manager;
-  final bool frostedGlass;
-  final Color chromeBackground;
 
   @override
   Widget build(BuildContext context) {
-    const radius = BorderRadius.all(Radius.circular(16));
-
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Header
-        ListenableBuilder(
-          listenable: manager,
-          builder: (_, _) => _MobileTransferSheetHeader(manager: manager),
-        ),
-        const Divider(height: 1, thickness: 1, color: _kDivider),
-        // Transfer rows — capped at 5 visible, scrollable beyond that
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: kTransferListHeight),
-          child: ListenableBuilder(
+    return PopupSurface(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListenableBuilder(
             listenable: manager,
-            builder: (_, _) => _MobileTransferList(manager: manager),
+            builder: (_, _) => _MobileTransferSheetHeader(manager: manager),
           ),
-        ),
-        const SizedBox(height: 12),
-      ],
-    );
-
-    if (frostedGlass) {
-      return ClipRRect(
-        borderRadius: radius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xA0141416),
-              borderRadius: radius,
+          const Divider(height: 1, thickness: 1, color: _kDivider),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: kTransferListHeight),
+            child: ListenableBuilder(
+              listenable: manager,
+              builder: (_, _) => _MobileTransferList(manager: manager),
             ),
-            child: content,
           ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: chromeBackground,
-        borderRadius: radius,
+          const SizedBox(height: 12),
+        ],
       ),
-      child: content,
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
+import '../../widgets/frosted_glass.dart';
 import '../../models/command.dart';
 import '../../models/commands_store.dart';
 import '../../models/ssh_host.dart';
@@ -433,23 +434,43 @@ class _SettingsPageState extends State<SettingsPage>
     final cmd = _commands[index];
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _kSheetBg,
-        title: const Text('Delete Command', style: TextStyle(color: _kFg, fontSize: 15)),
-        content: Text(
-          'Delete "${cmd.name}"?',
-          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: SizedBox(
+          width: 320,
+          child: PopupSurface(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Delete Command',
+                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  Text('Delete "${cmd.name}"?',
+                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete',
+                            style: TextStyle(color: Color(0xFFFF6E67))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
-          ),
-        ],
       ),
     );
     if (ok != true) return;
@@ -607,23 +628,43 @@ class _SettingsPageState extends State<SettingsPage>
   Future<void> _confirmDeleteHost(SshHost host) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _kSheetBg,
-        title: const Text('Delete Configuration', style: TextStyle(color: _kFg, fontSize: 15)),
-        content: Text(
-          'Delete "${host.alias}"?',
-          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: SizedBox(
+          width: 320,
+          child: PopupSurface(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Delete Configuration',
+                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  Text('Delete "${host.alias}"?',
+                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete',
+                            style: TextStyle(color: Color(0xFFFF6E67))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
-          ),
-        ],
       ),
     );
     if (ok == true) widget.onDeleteHost?.call(host);

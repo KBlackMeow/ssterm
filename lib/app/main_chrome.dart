@@ -388,8 +388,6 @@ class _TransferButton extends StatelessWidget {
     showMobileTransferSheet(
       context: context,
       manager: manager,
-      frostedGlass: frostedGlass,
-      chromeBackground: chromeBackground,
     );
   }
 
@@ -605,37 +603,28 @@ class _TabChipState extends State<_TabChip> {
           curve: Curves.easeOut,
           height: 28,
           padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: isActive
-              ? BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color.lerp(widget.tabSelectedColor,
-                          const Color(0xFFFFFFFF), 0.18)!,
-                      widget.tabSelectedColor,
-                    ],
-                  ),
+          decoration: BoxDecoration(
+                  color: isActive
+                      ? widget.tabSelectedColor
+                      : _hover
+                          ? widget.tabUnselectedColor
+                          : Colors.transparent,
                   borderRadius: BorderRadius.circular(_kTabRadius),
-                  border: Border.all(color: const Color(0x28FFFFFF), width: 1),
-                  boxShadow: const [
+                  border: Border.all(
+                    color: isActive
+                        ? const Color(0x28FFFFFF)
+                        : Colors.transparent,
+                    width: 1,
+                  ),
+                  boxShadow: [
                     BoxShadow(
-                      color: Color(0x222472C8),
-                      blurRadius: 10,
-                      offset: Offset(0, 2),
-                    ),
-                    BoxShadow(
-                      color: Color(0x30000000),
+                      color: isActive
+                          ? const Color(0x30000000)
+                          : Colors.transparent,
                       blurRadius: 4,
-                      offset: Offset(0, 2),
+                      offset: const Offset(0, 2),
                     ),
                   ],
-                )
-              : BoxDecoration(
-                  color: _hover
-                      ? widget.tabUnselectedColor
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(_kTabRadius),
                 ),
           child: Row(
             children: [

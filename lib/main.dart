@@ -154,7 +154,11 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
 
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
+    return Theme(
+      data: Theme.of(context).copyWith(extensions: {
+        AppColors(popup: _config.terminal.chromeTabSelected),
+      }),
+      child: Shortcuts(
       shortcuts: {
         LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.comma):
             const _OpenSettingsIntent(),
@@ -180,6 +184,7 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
             ? _buildMobileChrome()
             : _buildChrome(),
       ),
+    ),   // Theme
     );
   }
 }

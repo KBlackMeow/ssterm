@@ -314,10 +314,10 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: _kBg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 360,
+        child: PopupSurface(
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -425,7 +425,8 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
             ],
           ),
         ),
-      ),
+        ),   // PopupSurface
+      ),     // SizedBox
     );
   }
 }

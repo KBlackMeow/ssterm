@@ -11,6 +11,7 @@ class _MobileBottomBar extends StatelessWidget {
     required this.bottomInset,
     required this.sessionCount,
     required this.terminalBackground,
+    required this.tabSelectedColor,
     this.hasSftp = false,
   });
 
@@ -19,33 +20,34 @@ class _MobileBottomBar extends StatelessWidget {
   final double bottomInset;
   final int sessionCount;
   final Color terminalBackground;
+  final Color tabSelectedColor;
   final bool hasSftp;
 
   @override
   Widget build(BuildContext context) {
     final items = [
       _BarItem(
-        icon: Icons.hub_rounded,
+        icon: Icons.hub,
         label: 'Connections',
         active: activeTabIndex == 0,
         badge: sessionCount > 0 ? '$sessionCount' : null,
         onTap: () => onTabChanged(0),
       ),
       _BarItem(
-        icon: Icons.terminal_rounded,
+        icon: Icons.terminal,
         label: 'Terminal',
         active: activeTabIndex == 1,
         onTap: () => onTabChanged(1),
       ),
       _BarItem(
-        icon: Icons.folder_rounded,
+        icon: Icons.folder_outlined,
         label: 'Files',
         active: activeTabIndex == 2,
         disabled: !hasSftp,
         onTap: hasSftp ? () => onTabChanged(2) : null,
       ),
       _BarItem(
-        icon: Icons.tune_rounded,
+        icon: Icons.settings_outlined,
         label: 'Settings',
         active: activeTabIndex == 3,
         onTap: () => onTabChanged(3),
@@ -71,11 +73,45 @@ class _MobileBottomBar extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
-          child: Row(
-            children: [
-              for (final item in items)
-                Expanded(child: _buildBarItem(item)),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final tabWidth = constraints.maxWidth / items.length;
+              return Stack(
+                children: [
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 240),
+                    curve: Curves.easeOutCubic,
+                    left: activeTabIndex * tabWidth + 2,
+                    top: 0,
+                    bottom: 0,
+                    width: tabWidth - 4,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: tabSelectedColor,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0x28FFFFFF),
+                          width: 1,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x30000000),
+                            blurRadius: 4,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      for (final item in items)
+                        Expanded(child: _buildBarItem(item)),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -102,10 +138,6 @@ class _MobileBottomBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 2),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF2472C8) : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -124,15 +156,13 @@ class _MobileBottomBar extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            color: isActive
-                                ? Colors.white.withValues(alpha: 0.9)
-                                : _kAccent,
+                            color: _kAccent,
                             borderRadius: BorderRadius.circular(7),
                           ),
                           child: Text(
                             item.badge!,
-                            style: TextStyle(
-                              color: isActive ? _kAccent : Colors.white,
+                            style: const TextStyle(
+                              color: Colors.white,
                               fontSize: 8,
                               fontWeight: FontWeight.w800,
                             ),

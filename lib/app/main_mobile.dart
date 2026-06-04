@@ -42,7 +42,6 @@ class _TerminalPage extends StatelessWidget {
 
     return Column(
       children: [
-        // Session tab strip — part of the layout, never overlaid
         _SessionTabStrip(
           tabs: tabs,
           active: active,
@@ -63,11 +62,21 @@ class _TerminalPage extends StatelessWidget {
     BuildContext context,
     ValueChanged<String> onInsert,
   ) async {
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _CommandsSheet(onInsert: onInsert),
+      barrierColor: const Color(0x66000000),
+      builder: (ctx) {
+        final screenH = MediaQuery.of(ctx).size.height;
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 360, maxHeight: screenH * 0.55),
+              child: _CommandsSheet(onInsert: onInsert),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -130,7 +139,7 @@ class _SessionTabStrip extends StatelessWidget {
               if (onCommands != null)
                 Builder(
                   builder: (ctx) => _StripIconBtn(
-                    icon: Icons.menu_book_rounded,
+                    icon: Icons.code,
                     onTap: () => onCommands!(ctx),
                     tooltip: 'Commands',
                   ),
@@ -300,165 +309,106 @@ class _CommandsSheetState extends State<_CommandsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPad = MediaQuery.of(context).viewPadding.bottom;
-    const sheetRadius = BorderRadius.vertical(top: Radius.circular(20));
-
     Widget content;
     if (_loading) {
       content = const Padding(
-        padding: EdgeInsets.all(48),
+        padding: EdgeInsets.all(40),
         child: Center(
           child: CircularProgressIndicator(color: _kAccent, strokeWidth: 2),
         ),
       );
     } else if (_commands.isEmpty) {
       content = Padding(
-        padding: const EdgeInsets.all(48),
+        padding: const EdgeInsets.all(40),
         child: Center(
           child: Text(
             'No commands saved.\nAdd commands in Settings.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _kFgInactive.withValues(alpha: 0.6),
-              fontSize: 14,
+              fontSize: 13,
               height: 1.6,
             ),
           ),
         ),
       );
     } else {
-      content = ListView.builder(
-        shrinkWrap: true,
-        padding: EdgeInsets.fromLTRB(16, 0, 16, bottomPad + 16),
-        itemCount: _commands.length,
-        itemBuilder: (_, i) {
-          final cmd = _commands[i];
-          return Column(
-            children: [
-              if (i > 0)
-                const Divider(height: 1, indent: 60, color: _kDivider),
-              Material(
-                type: MaterialType.transparency,
-                child: InkWell(
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    widget.onInsert(cmd.command);
-                  },
-                  overlayColor:
-                      WidgetStateProperty.all(const Color(0x0AFFFFFF)),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 14),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: _kAccent.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.code_rounded,
-                            size: 16,
-                            color: _kAccent,
-                          ),
+      final rows = <Widget>[
+        for (var i = 0; i < _commands.length; i++) ...[
+          if (i > 0)
+            const Divider(height: 1, color: _kDivider),
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).pop();
+                widget.onInsert(_commands[i].command);
+              },
+              overlayColor:
+                  WidgetStateProperty.all(const Color(0x14FFFFFF)),
+              child: SizedBox(
+                height: 44,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _commands[i].name,
+                        style: const TextStyle(
+                          color: _kFgActive,
+                          fontSize: 13,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                cmd.name,
-                                style: const TextStyle(
-                                  color: _kFgActive,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              if (cmd.description.isNotEmpty)
-                                Text(
-                                  cmd.description,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: _kFgInactive,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                            ],
+                      ),
+                      if (_commands[i].description.isNotEmpty)
+                        Text(
+                          _commands[i].description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _kFgInactive,
+                            fontSize: 11,
                           ),
                         ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 18,
-                          color: const Color(0xFF3A3A3A).withValues(alpha: 0.6),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
+      ];
+      content = SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        ),
       );
     }
 
-    return ClipRRect(
-      borderRadius: sheetRadius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.65,
-          ),
-          decoration: const BoxDecoration(
-            color: _kCardFill,
-            borderRadius: sheetRadius,
-            border: Border(
-              top: BorderSide(color: Color(0x28FFFFFF), width: 0.5),
+    return PopupSurface(
+      child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(14, 10, 14, 8),
+              child: Text(
+                'Insert command',
+                style: TextStyle(
+                  color: Color(0xFF6E6E6E),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: SizedBox(
-                  width: 36,
-                  height: 4,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Color(0xFF3A3A3A),
-                      borderRadius: BorderRadius.all(Radius.circular(2)),
-                    ),
-                  ),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Commands',
-                    style: TextStyle(
-                      color: _kFgActive,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                ),
-              ),
-              const Divider(height: 1, color: _kDivider),
-              Flexible(child: content),
-            ],
-          ),
+            const Divider(height: 1, color: _kDivider),
+            Flexible(child: content),
+          ],
         ),
-      ),
     );
   }
 }

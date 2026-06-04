@@ -193,12 +193,8 @@ class _SftpFloatingChrome extends StatelessWidget {
 
     return Padding(
       padding: margin,
-      child: FrostedGlassSurface(
-        frosted: frostedGlass,
-        borderRadius: FrostedGlassStyle.panelRadius,
-        fillColor: frostedGlass
-            ? FrostedGlassStyle.panelFillFrosted
-            : FrostedGlassStyle.panelFillSolid,
+      child: PopupSurface(
+        radius: FrostedGlassStyle.panelRadius,
         child: child,
       ),
     );
