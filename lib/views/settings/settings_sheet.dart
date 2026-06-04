@@ -520,7 +520,7 @@ class _SettingsPageState extends State<SettingsPage>
       children: [
         Row(
           children: [
-            Expanded(child: _sectionTitle('Saved Connections')),
+            Expanded(child: _sectionTitle('Saved Hosts')),
             TextButton.icon(
               onPressed: _addHost,
               icon: const Icon(Icons.add, size: 14, color: _kAccent),

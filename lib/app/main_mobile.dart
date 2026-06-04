@@ -568,7 +568,7 @@ class _NoSessionsPlaceholder extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Go to Connections to start a session.',
+                'Go to Hosts to start a session.',
                 style: TextStyle(
                   color: _kFgInactive.withValues(alpha: 0.4),
                   fontSize: 13,

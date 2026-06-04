@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
-class _TabBar extends StatelessWidget {
+class _TabBar extends StatefulWidget {
   const _TabBar({
     required this.tabs,
     required this.active,
@@ -59,18 +59,53 @@ class _TabBar extends StatelessWidget {
   static const _minTabWidth = 80.0;
 
   @override
+  State<_TabBar> createState() => _TabBarState();
+}
+
+class _TabBarState extends State<_TabBar> with WindowListener {
+  bool _isFullScreen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isMacOS) {
+      windowManager.addListener(this);
+      windowManager.isFullScreen().then((v) {
+        if (mounted) setState(() => _isFullScreen = v);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    if (Platform.isMacOS) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowEnterFullScreen() {
+    if (mounted) setState(() => _isFullScreen = true);
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    if (mounted) setState(() => _isFullScreen = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
     // macOS keeps native traffic-light buttons (handled by TitleBarStyle.hidden),
-    // so reserve the left gutter there so chips don't sit under them. Windows
-    // / Linux draw their own controls on the right via _WindowControls.
-    final leftPadding = Platform.isMacOS ? 78.0 : 8.0;
+    // so reserve the left gutter there so chips don't sit under them. In
+    // fullscreen the traffic lights disappear, so no gutter is needed.
+    // Windows / Linux draw their own controls on the right via _WindowControls.
+    final leftPadding = Platform.isMacOS && !_isFullScreen ? 78.0 : 8.0;
     final rightPadding = Platform.isMacOS ? 4.0 : 0.0;
     final topSafeArea = (Platform.isIOS || Platform.isAndroid)
         ? MediaQuery.of(context).viewPadding.top
         : 0.0;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: widget.backgroundColor,
         border: const Border(
           top:    BorderSide(color: Color(0x14FFFFFF), width: 1),
           bottom: BorderSide(color: Color(0x0CFFFFFF), width: 1),
@@ -93,35 +128,35 @@ class _TabBar extends StatelessWidget {
                   : null,
               child: LayoutBuilder(
                   builder: (context, constraints) {
-                    if (tabs.isEmpty) return const SizedBox();
+                    if (widget.tabs.isEmpty) return const SizedBox();
 
                     const tabGap = 4.0;
                     final slotWidth =
-                        (constraints.maxWidth - tabGap * (tabs.length - 1)) /
-                        tabs.length;
+                        (constraints.maxWidth - tabGap * (widget.tabs.length - 1)) /
+                        widget.tabs.length;
                     final tabWidth =
-                        slotWidth.clamp(_minTabWidth, _preferredTabWidth);
-                    final needsScroll = tabWidth <= _minTabWidth &&
-                        tabs.length * (_minTabWidth + tabGap) >
+                        slotWidth.clamp(_TabBar._minTabWidth, _TabBar._preferredTabWidth);
+                    final needsScroll = tabWidth <= _TabBar._minTabWidth &&
+                        widget.tabs.length * (_TabBar._minTabWidth + tabGap) >
                             constraints.maxWidth;
 
                     final chips = [
-                      for (var i = 0; i < tabs.length; i++)
+                      for (var i = 0; i < widget.tabs.length; i++)
                         Padding(
                           padding: EdgeInsets.only(
-                            right: i < tabs.length - 1 ? tabGap : 0,
+                            right: i < widget.tabs.length - 1 ? tabGap : 0,
                           ),
                           child: SizedBox(
-                            width: needsScroll ? _minTabWidth : tabWidth,
+                            width: needsScroll ? _TabBar._minTabWidth : tabWidth,
                             child: _TabChip(
-                              tab: tabs[i],
-                              isActive: i == active,
-                              tabSelectedColor: tabSelectedColor,
-                              tabUnselectedColor: tabUnselectedColor,
+                              tab: widget.tabs[i],
+                              isActive: i == widget.active,
+                              tabSelectedColor: widget.tabSelectedColor,
+                              tabUnselectedColor: widget.tabUnselectedColor,
                               showClose: true,
                               expand: true,
-                              onTap: () => onSelect(i),
-                              onClose: () => onClose(i),
+                              onTap: () => widget.onSelect(i),
+                              onClose: () => widget.onClose(i),
                             ),
                           ),
                         ),
@@ -141,35 +176,35 @@ class _TabBar extends StatelessWidget {
             ),
           ),
           _PlusMenu(
-            onNewLocal: onNewLocal,
-            shells: localShells,
-            onRefreshLocalShells: onRefreshLocalShells,
-            onNewSsh: onNewSsh,
-            savedHosts: savedHosts,
-            configHosts: configHosts,
-            onConnectHost: onConnectHost,
+            onNewLocal: widget.onNewLocal,
+            shells: widget.localShells,
+            onRefreshLocalShells: widget.onRefreshLocalShells,
+            onNewSsh: widget.onNewSsh,
+            savedHosts: widget.savedHosts,
+            configHosts: widget.configHosts,
+            onConnectHost: widget.onConnectHost,
           ),
           CmdPickerButton(
-            onInsert: onInsertCommand,
+            onInsert: widget.onInsertCommand,
           ),
-          if (hasSftp) ...[
-            _SftpButton(sftpVisible: sftpVisible, onToggle: onToggleSftp),
-            if (transferManager != null)
+          if (widget.hasSftp) ...[
+            _SftpButton(sftpVisible: widget.sftpVisible, onToggle: widget.onToggleSftp),
+            if (widget.transferManager != null)
               RepaintBoundary(
                 child: _TransferButton(
-                  manager: transferManager!,
+                  manager: widget.transferManager!,
                 ),
               ),
           ],
           _SplitButton(
-            canSplit: canSplit,
-            isSplit: isSplit,
-            splitAxis: splitAxis,
-            onSplitHorizontal: onSplitHorizontal,
-            onSplitVertical: onSplitVertical,
+            canSplit: widget.canSplit,
+            isSplit: widget.isSplit,
+            splitAxis: widget.splitAxis,
+            onSplitHorizontal: widget.onSplitHorizontal,
+            onSplitVertical: widget.onSplitVertical,
           ),
           GestureDetector(
-            onTap: onSettings,
+            onTap: widget.onSettings,
             child: Tooltip(
               message: 'Settings (⌘,)',
               child: Container(

@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Connections page  (tab 0 — the app's home screen)
+// Hosts page  (tab 0 — the app's home screen)
 // Lists active sessions + saved hosts; primary entry point for connecting.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ class _ConnectionsPage extends StatelessWidget {
                 children: [
                   const Expanded(
                     child: Text(
-                      'Connections',
+                      'Hosts',
                       style: TextStyle(
                         color: _kFgActive,
                         fontSize: 28,

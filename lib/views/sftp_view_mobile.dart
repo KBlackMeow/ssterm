@@ -40,7 +40,7 @@ class _CompactRow extends StatelessWidget {
       onLongPress: onLongPress,
       overlayColor: WidgetStateProperty.all(const Color(0x0AFFFFFF)),
       child: SizedBox(
-        height: 56,
+        height: 44,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
@@ -175,6 +175,11 @@ class _MobileActionSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const _SheetHandle(),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
 
           // File header
           Padding(
@@ -264,6 +269,10 @@ class _MobileActionSheet extends StatelessWidget {
           ),
 
           SizedBox(height: bottomPad + 8),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

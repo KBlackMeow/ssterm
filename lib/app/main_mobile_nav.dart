@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bottom tab bar — 4 tabs (Connections, Terminal, Files, Settings)
+// Bottom tab bar — 4 tabs (Hosts, Terminal, Files, Settings)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MobileBottomBar extends StatelessWidget {
@@ -27,8 +27,8 @@ class _MobileBottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       _BarItem(
-        icon: Icons.hub,
-        label: 'Connections',
+        icon: Icons.computer,
+        label: 'Hosts',
         active: activeTabIndex == 0,
         badge: sessionCount > 0 ? '$sessionCount' : null,
         onTap: () => onTabChanged(0),

@@ -412,8 +412,8 @@ class SftpViewState extends State<SftpView> {
 
   @override
   Widget build(BuildContext context) {
-    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-      return _buildStandardLayout();
+    if (Platform.isIOS || Platform.isAndroid) {
+      return _buildCompactLayout();
     }
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -551,6 +551,7 @@ class SftpViewState extends State<SftpView> {
       );
     }
     return ListView.separated(
+      padding: EdgeInsets.zero,
       itemCount: _entries.length,
       separatorBuilder: (_, _) =>
           const Divider(height: 1, color: Color(0xFF262626), indent: 52),
