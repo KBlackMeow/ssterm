@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/known_hosts_store.dart';
 import '../utils/ssh_fingerprint.dart';
+import '../widgets/frosted_glass.dart';
 
 Future<bool> showHostKeyConfirmDialog(
   BuildContext context, {
@@ -20,11 +21,10 @@ Future<bool> showHostKeyConfirmDialog(
     useRootNavigator: true,
     barrierDismissible: false,
     builder: (ctx) => Dialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: Padding(
+        child: PopupSurface(color: FrostedGlassStyle.dialogFill,          child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -80,8 +80,9 @@ Future<bool> showHostKeyConfirmDialog(
             ],
           ),
         ),
-      ),
-    ),
+        ),   // PopupSurface
+      ),     // SizedBox
+    ),       // Dialog
   ).then((v) => v ?? false);
 }
 
@@ -102,11 +103,10 @@ Future<void> showHostKeyChangedDialog(
     useRootNavigator: true,
     barrierDismissible: false,
     builder: (ctx) => Dialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: Padding(
+        child: PopupSurface(color: FrostedGlassStyle.dialogFill, child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -159,9 +159,9 @@ Future<void> showHostKeyChangedDialog(
               ),
             ],
           ),
-        ),
-      ),
-    ),
+        )),    // PopupSurface + Padding
+      ),       // SizedBox
+    ),         // Dialog
   );
 }
 

@@ -1,0 +1,48 @@
+PODS:
+  - file_picker (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - Flutter (1.0.0)
+  - flutter_pty (0.0.1):
+    - Flutter
+  - flutter_secure_storage_darwin (10.0.0):
+    - Flutter
+    - FlutterMacOS
+  - package_info_plus (0.4.5):
+    - Flutter
+  - share_plus (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - file_picker (from `.symlinks/plugins/file_picker/darwin`)
+  - Flutter (from `Flutter`)
+  - flutter_pty (from `.symlinks/plugins/flutter_pty/ios`)
+  - flutter_secure_storage_darwin (from `.symlinks/plugins/flutter_secure_storage_darwin/darwin`)
+  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
+  - share_plus (from `.symlinks/plugins/share_plus/ios`)
+
+EXTERNAL SOURCES:
+  file_picker:
+    :path: ".symlinks/plugins/file_picker/darwin"
+  Flutter:
+    :path: Flutter
+  flutter_pty:
+    :path: ".symlinks/plugins/flutter_pty/ios"
+  flutter_secure_storage_darwin:
+    :path: ".symlinks/plugins/flutter_secure_storage_darwin/darwin"
+  package_info_plus:
+    :path: ".symlinks/plugins/package_info_plus/ios"
+  share_plus:
+    :path: ".symlinks/plugins/share_plus/ios"
+
+SPEC CHECKSUMS:
+  file_picker: 70164d9778c42c47218d6cd79ce435de0856b11a
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_pty: 206742da6092b413cb683de17436c16d1f3c7997
+  flutter_secure_storage_darwin: acdb3f316ed05a3e68f856e0353b133eec373a23
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
+  share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
+
+PODFILE CHECKSUM: e30f02f9d1c72c47bb6344a0a748c9d268180865
+
+COCOAPODS: 1.16.2

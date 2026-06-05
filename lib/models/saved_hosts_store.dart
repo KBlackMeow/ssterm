@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../utils/app_dir.dart';
 import '../services/credential_crypto.dart';
 import '../services/credential_storage.dart';
 import 'port_forward_rule.dart';
@@ -8,9 +9,7 @@ import 'ssh_host.dart';
 
 class SavedHostsStore {
   static Future<File> _file() async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory('$home/.ssterm');
-    if (!await dir.exists()) await dir.create(recursive: true);
+    final dir = await appDataDir();
     return File('${dir.path}/hosts.json');
   }
 
@@ -48,7 +47,8 @@ class SavedHostsStore {
     }
     await f.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
     // Restrict access so other local users cannot read the file (POSIX only).
-    if (!Platform.isWindows) {
+    // iOS sandbox already isolates the file; chmod is desktop-only.
+    if (!Platform.isWindows && !Platform.isIOS && !Platform.isAndroid) {
       await Process.run('chmod', ['600', f.path]);
     }
   }

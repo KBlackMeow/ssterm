@@ -1,4 +1,9 @@
-part of 'main.dart';
+part of '../main.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local shell business logic — PTY spawning, session wiring, split-pane
+// management for local (non-SSH) terminals.
+// ─────────────────────────────────────────────────────────────────────────────
 
 abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   // ── State fields ───────────────────────────────────────────────────────────
@@ -8,9 +13,27 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<SshHost> _configHosts = [];
   List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
   AppConfig _config = AppConfig();
+  int _mobileTabIndex = 0; // 0=terminal 1=files 2=commands 3=settings
 
   // ── Abstract stubs (implemented in _TerminalHomeSshMethods) ───────────────
   void _activateTab(int i);
+  Future<void> _reconnectTab(_Tab tab);
+
+  // ── Shell-list refresh ─────────────────────────────────────────────────────
+
+  /// Re-runs discovery in the background. Only mutates state when the result
+  /// differs from the current [_localShells]; the persisted cache in
+  /// [_config.cachedShells] is updated in the same step.
+  Future<void> _refreshLocalShellsIfChanged() async {
+    final shells = await LocalShellDiscovery.discover(refresh: true);
+    if (!mounted) return;
+    if (LocalShellDiscovery.listsStructurallyEqual(shells, _localShells)) {
+      return;
+    }
+    setState(() => _localShells = shells);
+    _config.cachedShells = shells;
+    unawaited(_config.save());
+  }
 
   // ── Local terminal ─────────────────────────────────────────────────────────
 
@@ -60,6 +83,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   }
 
   void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
+    if (tab.manuallyDisconnected) return;
     // After retainPane1 the surviving shell still reports as pane 1 in its pipe
     // transform; map to pane 0 storage while no longer split.
     final storagePane = !tab.isSplit && pane == 1 ? 0 : pane;
@@ -203,9 +227,14 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
     final Pty pty;
     if (useUnixWrapper) {
+      // On iOS login-shell flag (-l) causes /bin/sh to source system profile
+      // files that don't exist in the iOS sandbox, hanging the shell startup.
+      final shArgs = Platform.isIOS
+          ? ['-c', _interactiveLocalShellWrapperCommand()]
+          : ['-lc', _interactiveLocalShellWrapperCommand()];
       pty = Pty.start(
         '/bin/sh',
-        arguments: ['-lc', _interactiveLocalShellWrapperCommand()],
+        arguments: shArgs,
         columns: columns,
         rows: rows,
         environment: env,
@@ -235,7 +264,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal,
       transform: (bytes) {
         final parsed = cwdParser.process(bytes);
-        if (parsed.cwd != null && tab.localPath != null) {
+        if (parsed.cwd != null &&
+            tab.localPath != null &&
+            !tab.manuallyDisconnected) {
           tab.localPath!.value = parsed.cwd!;
         }
         return parsed.cleaned;
@@ -257,6 +288,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     );
 
     pty.exitCode.then((code) {
+      if (!mounted) return;
       _handlePaneExited(
         tab,
         terminal: terminal,
@@ -503,8 +535,4 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     });
     _activateTab(_active);
   }
-
-  // ── Abstract stubs (implemented in _TerminalHomeSshMethods / _TerminalHomeState) ─
-  Future<void> _reconnectTab(_Tab tab);
-  Future<void> _loadSshHosts();
 }

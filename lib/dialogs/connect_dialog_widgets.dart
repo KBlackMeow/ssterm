@@ -314,11 +314,12 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: _kBg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 360,
-        child: Padding(
+        child: PopupSurface(
+          color: FrostedGlassStyle.dialogFill,
+          child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -332,7 +333,7 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
               DropdownButtonFormField<ForwardType>(
                 // ignore: deprecated_member_use
                 value: _type,
-                dropdownColor: _kBg,
+                dropdownColor: FrostedGlassStyle.panelFillSolid,
                 style: const TextStyle(color: _kFg, fontSize: 13),
                 decoration: _inputDecoration('Type'),
                 items: const [
@@ -425,7 +426,8 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
             ],
           ),
         ),
-      ),
+        ),   // PopupSurface
+      ),     // SizedBox
     );
   }
 }
@@ -505,7 +507,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                       ),
                       DropdownButton<int>(
                         value: widget.keepaliveInterval,
-                        dropdownColor: _kBg,
+                        dropdownColor: FrostedGlassStyle.panelFillSolid,
                         style: const TextStyle(color: _kFg, fontSize: 12),
                         underline: const SizedBox.shrink(),
                         items: const [
@@ -602,6 +604,7 @@ class _Field extends StatelessWidget {
     this.hint,
     this.obscure = false,
     this.inputType,
+    this.onBrowse,
   });
 
   final String label;
@@ -609,6 +612,7 @@ class _Field extends StatelessWidget {
   final String? hint;
   final bool obscure;
   final TextInputType? inputType;
+  final VoidCallback? onBrowse;
 
   @override
   Widget build(BuildContext context) {
@@ -617,32 +621,60 @@ class _Field extends StatelessWidget {
       children: [
         Text(label, style: const TextStyle(color: _kLabel, fontSize: 11)),
         const SizedBox(height: 4),
-        TextField(
-          controller: ctrl,
-          obscureText: obscure,
-          keyboardType: inputType,
-          style: const TextStyle(color: _kFg, fontSize: 13),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Color(0xFF4A4A4A), fontSize: 12),
-            filled: true,
-            fillColor: _kField,
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
-              borderSide: const BorderSide(color: _kBorder),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: ctrl,
+                obscureText: obscure,
+                keyboardType: inputType,
+                style: const TextStyle(color: _kFg, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: hint,
+                  hintStyle:
+                      const TextStyle(color: Color(0xFF4A4A4A), fontSize: 12),
+                  filled: true,
+                  fillColor: _kField,
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(color: _kBorder),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(color: _kBorder),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(color: _kFocus),
+                  ),
+                ),
+              ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
-              borderSide: const BorderSide(color: _kBorder),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
-              borderSide: const BorderSide(color: _kFocus),
-            ),
-          ),
+            if (onBrowse != null) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: onBrowse,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _kField,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: _kBorder),
+                  ),
+                  child: const Icon(
+                    Icons.folder_open_rounded,
+                    size: 17,
+                    color: _kLabel,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ],
     );

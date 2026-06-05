@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
+import '../../widgets/frosted_glass.dart';
 import '../../models/command.dart';
 import '../../models/commands_store.dart';
 import '../../models/ssh_host.dart';
@@ -12,9 +13,11 @@ import '../../services/image_file_picker.dart';
 import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
 import '../../widgets/wallpaper_background.dart';
+import 'settings_dialogs.dart';
 
-const _kSheetBg = Color(0xFF2B2B2B);
-const _kDivider = Color(0xFF3A3A3A);
+const _kSheetBg = Color(0xFF111113);
+const _kDivider = Color(0xFF252525);
+const _kSurface = Color(0xFF1C1C20);  // dropdown / button backgrounds
 const _kFg = Color(0xFFD4D4D4);
 const _kFgMuted = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
@@ -24,8 +27,6 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.settings,
     required this.onChanged,
-    this.sftpFrostedGlass = true,
-    this.onSftpFrostedGlassChanged,
     this.savedHosts = const [],
     this.onSaveHost,
     this.onDeleteHost,
@@ -33,8 +34,6 @@ class SettingsPage extends StatefulWidget {
 
   final TerminalSettings settings;
   final ValueChanged<TerminalSettings> onChanged;
-  final bool sftpFrostedGlass;
-  final ValueChanged<bool>? onSftpFrostedGlassChanged;
   final List<SshHost> savedHosts;
   final void Function(SshHost? original, SshHost updated)? onSaveHost;
   final ValueChanged<SshHost>? onDeleteHost;
@@ -113,6 +112,8 @@ class _SettingsPageState extends State<SettingsPage>
           const SizedBox(height: 8),
           TabBar(
             controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: _kFg,
             unselectedLabelColor: _kFgMuted,
             indicatorColor: _kAccent,
@@ -164,28 +165,7 @@ class _SettingsPageState extends State<SettingsPage>
         const SizedBox(height: 12),
         _sectionTitle('Wallpaper'),
         _wallpaperSection(),
-        const SizedBox(height: 12),
-        _sectionTitle('SFTP panel'),
-        _sftpPanelSection(),
       ],
-    );
-  }
-
-  Widget _sftpPanelSection() {
-    final onChanged = widget.onSftpFrostedGlassChanged;
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: const Text(
-        'Frosted glass',
-        style: TextStyle(color: _kFg, fontSize: 13),
-      ),
-      subtitle: const Text(
-        'SFTP, tab bar menus, and right-click context menus',
-        style: TextStyle(color: _kFgMuted, fontSize: 11),
-      ),
-      value: widget.sftpFrostedGlass,
-      activeTrackColor: _kAccent,
-      onChanged: onChanged == null ? null : (v) => onChanged(v),
     );
   }
 
@@ -336,7 +316,7 @@ class _SettingsPageState extends State<SettingsPage>
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1C),
+        color: _kSurface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _kDivider),
       ),
@@ -429,23 +409,43 @@ class _SettingsPageState extends State<SettingsPage>
     final cmd = _commands[index];
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _kSheetBg,
-        title: const Text('Delete Command', style: TextStyle(color: _kFg, fontSize: 15)),
-        content: Text(
-          'Delete "${cmd.name}"?',
-          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: SizedBox(
+          width: 320,
+          child: PopupSurface(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Delete Command',
+                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  Text('Delete "${cmd.name}"?',
+                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete',
+                            style: TextStyle(color: Color(0xFFFF6E67))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
-          ),
-        ],
       ),
     );
     if (ok != true) return;
@@ -457,7 +457,7 @@ class _SettingsPageState extends State<SettingsPage>
   Future<Command?> _showCommandDialog({Command? existing}) {
     return showDialog<Command>(
       context: context,
-      builder: (ctx) => _CommandDialog(existing: existing),
+      builder: (ctx) => CommandDialog(existing: existing),
     );
   }
 
@@ -520,7 +520,7 @@ class _SettingsPageState extends State<SettingsPage>
       children: [
         Row(
           children: [
-            Expanded(child: _sectionTitle('Saved Connections')),
+            Expanded(child: _sectionTitle('Saved Hosts')),
             TextButton.icon(
               onPressed: _addHost,
               icon: const Icon(Icons.add, size: 14, color: _kAccent),
@@ -548,7 +548,7 @@ class _SettingsPageState extends State<SettingsPage>
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1C),
+        color: _kSurface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _kDivider),
       ),
@@ -603,23 +603,43 @@ class _SettingsPageState extends State<SettingsPage>
   Future<void> _confirmDeleteHost(SshHost host) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _kSheetBg,
-        title: const Text('Delete Configuration', style: TextStyle(color: _kFg, fontSize: 15)),
-        content: Text(
-          'Delete "${host.alias}"?',
-          style: const TextStyle(color: _kFgMuted, fontSize: 13),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: SizedBox(
+          width: 320,
+          child: PopupSurface(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Delete Configuration',
+                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+                  Text('Delete "${host.alias}"?',
+                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Delete',
+                            style: TextStyle(color: Color(0xFFFF6E67))),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6E67))),
-          ),
-        ],
       ),
     );
     if (ok == true) widget.onDeleteHost?.call(host);
@@ -657,7 +677,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             selected: _s.themePresetId == id,
             selectedColor: _kAccent,
-            backgroundColor: const Color(0xFF1C1C1C),
+            backgroundColor: _kSurface,
             side: const BorderSide(color: _kDivider),
             onSelected: (_) {
               final next = _s.copyWith();
@@ -686,7 +706,7 @@ class _SettingsPageState extends State<SettingsPage>
       onTap: () async {
         final picked = await showDialog<Color>(
           context: context,
-          builder: (ctx) => _ColorPickerDialog(initial: color),
+          builder: (ctx) => ColorPickerDialog(initial: color),
         );
         if (picked != null) {
           final next = _s.copyWith();
@@ -851,7 +871,7 @@ class _SettingsPageState extends State<SettingsPage>
         : TerminalSettings.defaultFontFamily;
     return DropdownButtonFormField<String>(
       initialValue: value,
-      dropdownColor: const Color(0xFF1C1C1C),
+      dropdownColor: _kSurface,
       style: const TextStyle(color: _kFg, fontSize: 13),
       decoration: const InputDecoration(
         isDense: true,
@@ -881,7 +901,7 @@ class _SettingsPageState extends State<SettingsPage>
         : options.first;
     return DropdownButtonFormField<String>(
       initialValue: value,
-      dropdownColor: const Color(0xFF1C1C1C),
+      dropdownColor: _kSurface,
       style: const TextStyle(color: _kFg, fontSize: 13),
       decoration: const InputDecoration(
         isDense: true,
@@ -945,7 +965,7 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
                 selected: _s.fontWeight == w,
                 selectedColor: _kAccent,
-                backgroundColor: const Color(0xFF1C1C1C),
+                backgroundColor: _kSurface,
                 side: const BorderSide(color: _kDivider),
                 onSelected: (_) => _apply(_s.copyWith(fontWeight: w)),
               ),
@@ -975,7 +995,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             selected: _s.cursorType == type,
             selectedColor: _kAccent,
-            backgroundColor: const Color(0xFF1C1C1C),
+            backgroundColor: _kSurface,
             side: const BorderSide(color: _kDivider),
             onSelected: (_) => _apply(_s.copyWith(cursorType: type)),
           ),
@@ -1028,205 +1048,3 @@ class _SettingsPageState extends State<SettingsPage>
   }
 }
 
-// ── Color picker dialog ──────────────────────────────────────────────────────
-
-class _ColorPickerDialog extends StatefulWidget {
-  const _ColorPickerDialog({required this.initial});
-
-  final Color initial;
-
-  @override
-  State<_ColorPickerDialog> createState() => _ColorPickerDialogState();
-}
-
-class _ColorPickerDialogState extends State<_ColorPickerDialog> {
-  late Color _color;
-
-  static const _swatches = [
-    Color(0xFF1C1C1C),
-    Color(0xFF282C34),
-    Color(0xFF282A36),
-    Color(0xFF000000),
-    Color(0xFFC7C7C7),
-    Color(0xFFFFFFFF),
-    Color(0xFFD4D4D4),
-    Color(0xFF2472C8),
-    Color(0xFF00C200),
-    Color(0xFFC91B00),
-    Color(0xFFC7C400),
-    Color(0xFFC930C7),
-    Color(0xFF00C5C7),
-    Color(0xFF4E6F91),
-    Color(0xFFFF6E67),
-    Color(0xFF5FFA68),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _color = widget.initial;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: _kSheetBg,
-      title: const Text('Pick color', style: TextStyle(color: _kFg, fontSize: 15)),
-      content: SizedBox(
-        width: 280,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final c in _swatches)
-              GestureDetector(
-                onTap: () => setState(() => _color = c),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: c,
-                    border: Border.all(
-                      color: _color == c ? _kAccent : _kDivider,
-                      width: _color == c ? 2 : 1,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _color),
-          child: const Text('Apply', style: TextStyle(color: _kAccent)),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Command edit dialog ──────────────────────────────────────────────────────
-
-class _CommandDialog extends StatefulWidget {
-  const _CommandDialog({this.existing});
-
-  final Command? existing;
-
-  @override
-  State<_CommandDialog> createState() => _CommandDialogState();
-}
-
-class _CommandDialogState extends State<_CommandDialog> {
-  late final TextEditingController _nameCtrl;
-  late final TextEditingController _descCtrl;
-  late final TextEditingController _cmdCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.existing;
-    _nameCtrl = TextEditingController(text: e?.name ?? '');
-    _descCtrl = TextEditingController(text: e?.description ?? '');
-    _cmdCtrl = TextEditingController(text: e?.command ?? '');
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    _descCtrl.dispose();
-    _cmdCtrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final name = _nameCtrl.text.trim();
-    final cmd = _cmdCtrl.text.trim();
-    if (name.isEmpty || cmd.isEmpty) return;
-    Navigator.pop(
-      context,
-      Command(
-        name: name,
-        description: _descCtrl.text.trim(),
-        command: cmd,
-      ),
-    );
-  }
-
-  InputDecoration _fieldDecoration(String label) => InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final isEdit = widget.existing != null;
-    return AlertDialog(
-      backgroundColor: _kSheetBg,
-      title: Text(
-        isEdit ? 'Edit Command' : 'New Command',
-        style: const TextStyle(color: _kFg, fontSize: 15),
-      ),
-      content: SizedBox(
-        width: 340,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _nameCtrl,
-              style: const TextStyle(color: _kFg, fontSize: 13),
-              decoration: _fieldDecoration('Name *'),
-              textInputAction: TextInputAction.next,
-            ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: _descCtrl,
-              style: const TextStyle(color: _kFg, fontSize: 13),
-              decoration: _fieldDecoration('Description'),
-              textInputAction: TextInputAction.next,
-            ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: _cmdCtrl,
-              style: const TextStyle(
-                color: _kFg,
-                fontSize: 12,
-                fontFamily: 'JetBrainsMono',
-              ),
-              decoration: _fieldDecoration('Command *'),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
-              maxLines: 5,
-              minLines: 1,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
-        ),
-        TextButton(
-          onPressed: _submit,
-          child: Text(
-            isEdit ? 'Save' : 'Add',
-            style: const TextStyle(color: _kAccent),
-          ),
-        ),
-      ],
-    );
-  }
-}

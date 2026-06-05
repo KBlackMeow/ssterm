@@ -13,6 +13,7 @@ Future<ConnectResult> connectSshHost(
   ConnectMode mode = ConnectMode.terminal,
   required SshHostKeyVerifier verifyHostKey,
   SshHostKeyVerifier? jumpVerifyHostKey,
+  Future<String?> Function()? onPasswordNeeded,
 }) async {
   final user = host.user?.trim() ?? '';
   if (user.isEmpty) {
@@ -67,12 +68,9 @@ Future<ConnectResult> connectSshHost(
     });
   }
 
+  // ── 公钥通道：与密码通道独立 ──────────────────────────────
   List<SSHKeyPair>? identities;
-  String? Function()? onPassword;
-
-  if (host.password != null && host.password!.isNotEmpty) {
-    onPassword = () => host.password!;
-  } else if (host.identityFile != null && host.identityFile!.isNotEmpty) {
+  if (host.identityFile != null && host.identityFile!.isNotEmpty) {
     final path = expandHomePath(host.identityFile!);
     final f = File(path);
     if (!await f.exists()) {
@@ -86,6 +84,14 @@ Future<ConnectResult> connectSshHost(
     }
   } else {
     identities = await _defaultIdentities();
+  }
+
+  // ── 密码通道：与公钥通道独立 ──────────────────────────────
+  FutureOr<String?> Function()? onPassword;
+  if (host.password != null && host.password!.isNotEmpty) {
+    onPassword = () => host.password!;
+  } else if (onPasswordNeeded != null) {
+    onPassword = onPasswordNeeded;
   }
 
   // Use tunnel socket when jump host is present, otherwise direct TCP
@@ -281,6 +287,7 @@ Future<ConnectResult> connectSshParams({
 }
 
 Future<List<SSHKeyPair>?> _defaultIdentities() async {
+  if (Platform.isIOS) return null;
   final home = Platform.environment['HOME'] ?? '';
   for (final p in [
     '$home/.ssh/id_ed25519',

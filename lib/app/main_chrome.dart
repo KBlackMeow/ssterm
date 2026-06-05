@@ -1,0 +1,1181 @@
+part of '../main.dart';
+
+// ── Tab bar ───────────────────────────────────────────────────────────────────
+class _TabBar extends StatefulWidget {
+  const _TabBar({
+    required this.tabs,
+    required this.active,
+    required this.backgroundColor,
+    required this.tabSelectedColor,
+    required this.tabUnselectedColor,
+    required this.onSelect,
+    required this.onClose,
+    required this.onNewLocal,
+    required this.localShells,
+    required this.onRefreshLocalShells,
+    required this.onNewSsh,
+    required this.onSettings,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onConnectHost,
+    required this.hasSftp,
+    required this.sftpVisible,
+    required this.onToggleSftp,
+    this.transferManager,
+    required this.canSplit,
+    required this.isSplit,
+    this.splitAxis,
+    required this.onSplitHorizontal,
+    required this.onSplitVertical,
+    this.onInsertCommand,
+  });
+
+  final List<_Tab> tabs;
+  final int active;
+  final Color backgroundColor;
+  final Color tabSelectedColor;
+  final Color tabUnselectedColor;
+  final ValueChanged<int> onSelect;
+  final ValueChanged<int> onClose;
+  final ValueChanged<LocalShellOption> onNewLocal;
+  final List<LocalShellOption> localShells;
+  final Future<void> Function() onRefreshLocalShells;
+  final VoidCallback onNewSsh;
+  final VoidCallback onSettings;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<SshHost> onConnectHost;
+  final ValueChanged<String>? onInsertCommand;
+  final bool hasSftp;
+  final bool sftpVisible;
+  final VoidCallback onToggleSftp;
+  final TransferManager? transferManager;
+  final bool canSplit;
+  final bool isSplit;
+  final Axis? splitAxis;
+  final VoidCallback onSplitHorizontal;
+  final VoidCallback onSplitVertical;
+  static const _preferredTabWidth = 160.0;
+  static const _minTabWidth = 80.0;
+
+  @override
+  State<_TabBar> createState() => _TabBarState();
+}
+
+class _TabBarState extends State<_TabBar> with WindowListener {
+  bool _isFullScreen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isMacOS) {
+      windowManager.addListener(this);
+      windowManager.isFullScreen().then((v) {
+        if (mounted) setState(() => _isFullScreen = v);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    if (Platform.isMacOS) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowEnterFullScreen() {
+    if (mounted) setState(() => _isFullScreen = true);
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    if (mounted) setState(() => _isFullScreen = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // macOS keeps native traffic-light buttons (handled by TitleBarStyle.hidden),
+    // so reserve the left gutter there so chips don't sit under them. In
+    // fullscreen the traffic lights disappear, so no gutter is needed.
+    // Windows / Linux draw their own controls on the right via _WindowControls.
+    final leftPadding = Platform.isMacOS && !_isFullScreen ? 78.0 : 8.0;
+    final rightPadding = Platform.isMacOS ? 4.0 : 0.0;
+    final topSafeArea = (Platform.isIOS || Platform.isAndroid)
+        ? MediaQuery.of(context).viewPadding.top
+        : 0.0;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: widget.backgroundColor,
+        border: const Border(
+          top:    BorderSide(color: Color(0x14FFFFFF), width: 1),
+          bottom: BorderSide(color: Color(0x0CFFFFFF), width: 1),
+        ),
+      ),
+      child: Padding(
+      padding: EdgeInsets.fromLTRB(leftPadding, 6 + topSafeArea, rightPadding, 6),
+      child: Row(
+        children: [
+          Expanded(
+            // Inline drag-area: window_manager's DragToMoveArea ships with a
+            // built-in onDoubleTap that sits in the gesture arena and delays
+            // every child onTap by ~300ms (the double-tap timeout). We only
+            // want pan-to-drag, no double-tap-to-maximize — users have the
+            // maximize button in [_WindowControls].
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
+                  ? (_) => windowManager.startDragging()
+                  : null,
+              child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (widget.tabs.isEmpty) return const SizedBox();
+
+                    const tabGap = 4.0;
+                    final slotWidth =
+                        (constraints.maxWidth - tabGap * (widget.tabs.length - 1)) /
+                        widget.tabs.length;
+                    final tabWidth =
+                        slotWidth.clamp(_TabBar._minTabWidth, _TabBar._preferredTabWidth);
+                    final needsScroll = tabWidth <= _TabBar._minTabWidth &&
+                        widget.tabs.length * (_TabBar._minTabWidth + tabGap) >
+                            constraints.maxWidth;
+
+                    final chips = [
+                      for (var i = 0; i < widget.tabs.length; i++)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            right: i < widget.tabs.length - 1 ? tabGap : 0,
+                          ),
+                          child: SizedBox(
+                            width: needsScroll ? _TabBar._minTabWidth : tabWidth,
+                            child: _TabChip(
+                              tab: widget.tabs[i],
+                              isActive: i == widget.active,
+                              tabSelectedColor: widget.tabSelectedColor,
+                              tabUnselectedColor: widget.tabUnselectedColor,
+                              showClose: true,
+                              expand: true,
+                              onTap: () => widget.onSelect(i),
+                              onClose: () => widget.onClose(i),
+                            ),
+                          ),
+                        ),
+                    ];
+
+                    return needsScroll
+                        ? SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(children: chips),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: chips,
+                          );
+                  },
+              ),
+            ),
+          ),
+          _PlusMenu(
+            onNewLocal: widget.onNewLocal,
+            shells: widget.localShells,
+            onRefreshLocalShells: widget.onRefreshLocalShells,
+            onNewSsh: widget.onNewSsh,
+            savedHosts: widget.savedHosts,
+            configHosts: widget.configHosts,
+            onConnectHost: widget.onConnectHost,
+          ),
+          CmdPickerButton(
+            onInsert: widget.onInsertCommand,
+          ),
+          if (widget.hasSftp) ...[
+            _SftpButton(sftpVisible: widget.sftpVisible, onToggle: widget.onToggleSftp),
+            if (widget.transferManager != null)
+              RepaintBoundary(
+                child: _TransferButton(
+                  manager: widget.transferManager!,
+                ),
+              ),
+          ],
+          _SplitButton(
+            canSplit: widget.canSplit,
+            isSplit: widget.isSplit,
+            splitAxis: widget.splitAxis,
+            onSplitHorizontal: widget.onSplitHorizontal,
+            onSplitVertical: widget.onSplitVertical,
+          ),
+          GestureDetector(
+            onTap: widget.onSettings,
+            child: Tooltip(
+              message: 'Settings (⌘,)',
+              child: Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.settings_outlined,
+                  size: 15,
+                  color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                ),
+              ),
+            ),
+          ),
+          if (Platform.isWindows || Platform.isLinux) ...[
+            const SizedBox(width: 6),
+            const _WindowControls(),
+          ] else
+            const SizedBox(width: 2),
+        ],
+      ),
+      ),
+    );
+  }
+}
+
+// ── Window controls (Windows/Linux only) ──────────────────────────────────────
+/// Custom min / max-restore / close buttons that replace the OS-drawn caption
+/// controls. Sits at the right end of the tab bar so the tab bar reads as the
+/// window's title bar.
+class _WindowControls extends StatefulWidget {
+  const _WindowControls();
+
+  @override
+  State<_WindowControls> createState() => _WindowControlsState();
+}
+
+class _WindowControlsState extends State<_WindowControls>
+    with WindowListener {
+  bool _isMaximized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    windowManager.isMaximized().then((v) {
+      if (mounted) setState(() => _isMaximized = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMaximize() {
+    if (mounted) setState(() => _isMaximized = true);
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    if (mounted) setState(() => _isMaximized = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WindowButton(
+          icon: Icons.remove,
+          tooltip: 'Minimize',
+          onTap: windowManager.minimize,
+        ),
+        _WindowButton(
+          icon: _isMaximized
+              ? Icons.filter_none_outlined
+              : Icons.crop_square_outlined,
+          tooltip: _isMaximized ? 'Restore' : 'Maximize',
+          onTap: () async {
+            if (_isMaximized) {
+              await windowManager.unmaximize();
+            } else {
+              await windowManager.maximize();
+            }
+          },
+        ),
+        _WindowButton(
+          icon: Icons.close,
+          tooltip: 'Close',
+          hoverColor: const Color(0xFFE81123),
+          onTap: windowManager.close,
+        ),
+      ],
+    );
+  }
+}
+
+class _WindowButton extends StatefulWidget {
+  const _WindowButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.hoverColor,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color? hoverColor;
+
+  @override
+  State<_WindowButton> createState() => _WindowButtonState();
+}
+
+class _WindowButtonState extends State<_WindowButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hoverBg = widget.hoverColor ?? const Color(0x33FFFFFF);
+    final iconColor = _hover && widget.hoverColor != null
+        ? Colors.white
+        : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: Container(
+            width: 46,
+            height: 32,
+            color: _hover ? hoverBg : Colors.transparent,
+            alignment: Alignment.center,
+            child: Icon(widget.icon, size: 14, color: iconColor),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── SFTP toggle button ────────────────────────────────────────────────────────
+class _SftpButton extends StatelessWidget {
+  const _SftpButton({required this.sftpVisible, required this.onToggle});
+
+  final bool sftpVisible;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: sftpVisible ? 'Hide SFTP' : 'Show SFTP',
+      child: GestureDetector(
+        onTap: onToggle,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.folder_outlined,
+            size: 15,
+            color: sftpVisible ? const Color(0xFF2472C8) : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Transfer menu button ──────────────────────────────────────────────────────
+class _TransferButton extends StatelessWidget {
+  const _TransferButton({
+    required this.manager,
+    this.chromeBackground = const Color(0xFF161820),
+  });
+
+  final TransferManager manager;
+  final Color chromeBackground;
+
+  void _showDesktopMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showTransferMenu(
+      context: context,
+      manager: manager,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
+    );
+  }
+
+  void _showMobileSheet(BuildContext context) {
+    showMobileTransferSheet(
+      context: context,
+      manager: manager,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = Platform.isIOS || Platform.isAndroid;
+    return ListenableBuilder(
+      listenable: manager,
+      builder: (ctx, _) {
+        final activeCount = manager.activeCount;
+        final icon = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Icon(
+              Icons.swap_vert_rounded,
+              size: isMobile ? 20 : 15,
+              color: AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive,
+            ),
+            if (activeCount > 0)
+              Positioned(
+                right: isMobile ? -5 : -4,
+                top: isMobile ? -4 : -3,
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 4 : 3,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2472C8),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$activeCount',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: isMobile ? 9 : 8,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+
+        return Tooltip(
+          message: 'Transfers',
+          child: GestureDetector(
+            onTap: () => isMobile
+                ? _showMobileSheet(ctx)
+                : _showDesktopMenu(ctx),
+            child: isMobile
+                ? SizedBox(
+                    width: 44,
+                    height: double.infinity,
+                    child: Center(child: icon),
+                  )
+                : Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    child: icon,
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Split button ──────────────────────────────────────────────────────────────
+class _SplitButton extends StatelessWidget {
+  const _SplitButton({
+    required this.canSplit,
+    required this.isSplit,
+    this.splitAxis,
+    required this.onSplitHorizontal,
+    required this.onSplitVertical,
+  });
+
+  final bool canSplit;
+  final bool isSplit;
+  final Axis? splitAxis;
+  final VoidCallback onSplitHorizontal;
+  final VoidCallback onSplitVertical;
+
+  void _showMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showFrostedMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'h',
+          height: 36,
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.vertical_split, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('Split horizontal', style: TextStyle(
+                  color: splitAxis == Axis.horizontal ? const Color(0xFF2472C8) : fg,
+                  fontSize: 13,
+                )),
+              ]);
+            },
+          ),
+        ),
+        PopupMenuItem(
+          value: 'v',
+          height: 36,
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.splitscreen, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('Split vertical', style: TextStyle(
+                  color: splitAxis == Axis.vertical ? const Color(0xFF2472C8) : fg,
+                  fontSize: 13,
+                )),
+              ]);
+            },
+          ),
+        ),
+      ],
+    ).then((v) {
+      if (v == 'h') onSplitHorizontal();
+      if (v == 'v') onSplitVertical();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Split',
+      child: GestureDetector(
+        onTap: canSplit ? () => _showMenu(context) : null,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.splitscreen,
+            size: 15,
+            color: isSplit
+                ? const Color(0xFF2472C8)
+                : canSplit
+                ? AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive
+                : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withAlpha(80),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Tab chip ──────────────────────────────────────────────────────────────────
+class _TabChip extends StatefulWidget {
+  const _TabChip({
+    required this.tab,
+    required this.isActive,
+    required this.tabSelectedColor,
+    required this.tabUnselectedColor,
+    required this.showClose,
+    required this.expand,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  final _Tab tab;
+  final bool isActive;
+  final Color tabSelectedColor;
+  final Color tabUnselectedColor;
+  final bool showClose;
+  final bool expand;
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  @override
+  State<_TabChip> createState() => _TabChipState();
+}
+
+class _TabChipState extends State<_TabChip> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = widget.isActive;
+    final colors = AppColors.maybeOf(context);
+    final fgActive = colors?.foreground ?? _kFgActive;
+    final fgInactive = colors?.foregroundDim ?? _kFgInactive;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+                  color: isActive
+                      ? widget.tabSelectedColor
+                      : _hover
+                          ? widget.tabUnselectedColor
+                          : Colors.transparent,
+                  borderRadius: BorderRadius.circular(_kTabRadius),
+                  border: Border.all(
+                    color: isActive
+                        ? fgActive.withValues(alpha: 0.20)
+                        : Colors.transparent,
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isActive
+                          ? const Color(0x30000000)
+                          : Colors.transparent,
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+          child: Row(
+            children: [
+              Icon(
+                widget.tab.icon,
+                size: 12,
+                color: isActive ? fgActive : fgInactive,
+              ),
+              const SizedBox(width: 6),
+              if (widget.expand)
+                Expanded(
+                  child: Text(
+                    widget.tab.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive ? fgActive : fgInactive,
+                      fontSize: 12,
+                      fontWeight:
+                          isActive ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                )
+              else
+                Flexible(
+                  child: Text(
+                    widget.tab.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive ? fgActive : fgInactive,
+                      fontSize: 12,
+                      fontWeight:
+                          isActive ? FontWeight.w500 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              if (widget.showClose) ...[
+                const SizedBox(width: 4),
+                _CloseBtn(
+                  onTap: widget.onClose,
+                  visible: isActive || _hover,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CloseBtn extends StatefulWidget {
+  const _CloseBtn({required this.onTap, required this.visible});
+
+  final VoidCallback onTap;
+  final bool visible;
+
+  @override
+  State<_CloseBtn> createState() => _CloseBtnState();
+}
+
+class _CloseBtnState extends State<_CloseBtn> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: _hover ? const Color(0xFF4A4A4A) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.close,
+            size: 11,
+            color: widget.visible
+                ? (_hover
+                    ? AppColors.maybeOf(context)?.foreground ?? _kFgActive
+                    : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                : Colors.transparent,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Plus menu ─────────────────────────────────────────────────────────────────
+class _PlusMenu extends StatelessWidget {
+  const _PlusMenu({
+    required this.onNewLocal,
+    required this.shells,
+    required this.onRefreshLocalShells,
+    required this.onNewSsh,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onConnectHost,
+  });
+
+  static const _refreshShellsValue = '__refresh_shells__';
+
+  final ValueChanged<LocalShellOption> onNewLocal;
+  /// Cached list rendered synchronously. Updated by the host via
+  /// [onRefreshLocalShells] (background diff; no per-open work).
+  final List<LocalShellOption> shells;
+  final Future<void> Function() onRefreshLocalShells;
+  final VoidCallback onNewSsh;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<SshHost> onConnectHost;
+
+  PopupMenuItem<String> _sectionHeader(String label) => PopupMenuItem<String>(
+    enabled: false,
+    height: 28,
+    child: Builder(
+      builder: (ctx) => Text(
+        label,
+        style: TextStyle(
+          color: AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
+      ),
+    ),
+  );
+
+  PopupMenuItem<String> _hostItem(SshHost h, String prefix) =>
+      PopupMenuItem<String>(
+        value: '$prefix:${h.profileKey}',
+        height: 36,
+        child: Builder(
+          builder: (ctx) {
+            final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+            final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+            return Row(
+              children: [
+                Icon(
+                  prefix == 'saved'
+                      ? Icons.bookmark_outline
+                      : Icons.description_outlined,
+                  size: 13,
+                  color: dim,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(h.alias,   maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fg,  fontSize: 13)),
+                      Text(h.displayInfo, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: dim, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+  PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
+    value: 'shell:${shell.id}',
+    height: 36,
+    child: Builder(
+      builder: (ctx) {
+        final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+        final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+        return Row(
+          children: [
+            Icon(shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+                size: 13, color: dim),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(shell.displayName, maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: fg, fontSize: 13)),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  void _showMenu(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    final pos = box.localToGlobal(Offset.zero);
+
+    showFrostedMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy + box.size.height,
+        pos.dx + box.size.width,
+        pos.dy,
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+        minWidth: 220,
+      ),
+      items: [
+        if (!Platform.isIOS && shells.isNotEmpty) ...[
+          _sectionHeader('Shells'),
+          for (final shell in shells) _shellItem(shell),
+        ],
+        if (!Platform.isIOS)
+          PopupMenuItem<String>(
+            value: _refreshShellsValue,
+            height: 32,
+            child: Builder(
+              builder: (ctx) {
+                final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+                return Row(children: [
+                  Icon(Icons.refresh, size: 13, color: dim),
+                  const SizedBox(width: 8),
+                  Text('Refresh shells', style: TextStyle(color: dim, fontSize: 12)),
+                ]);
+              },
+            ),
+          ),
+        if (savedHosts.isNotEmpty) ...[
+          const PopupMenuDivider(height: 1),
+          _sectionHeader('Saved'),
+          for (final h in savedHosts) _hostItem(h, 'saved'),
+        ],
+        if (configHosts.isNotEmpty) ...[
+          const PopupMenuDivider(height: 1),
+          _sectionHeader('~/.ssh/config'),
+          for (final h in configHosts) _hostItem(h, 'config'),
+        ],
+        const PopupMenuDivider(height: 1),
+        PopupMenuItem(
+          value: 'new',
+          height: 36,
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.add, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('New SSH…', style: TextStyle(color: fg, fontSize: 13)),
+              ]);
+            },
+          ),
+        ),
+      ],
+    ).then((v) {
+      if (v == null) return;
+      if (v == _refreshShellsValue) {
+        unawaited(onRefreshLocalShells());
+        return;
+      }
+      if (v.startsWith('shell:')) {
+        final id = v.substring('shell:'.length);
+        for (final shell in shells) {
+          if (shell.id == id) {
+            onNewLocal(shell);
+            return;
+          }
+        }
+        return;
+      }
+      if (v == 'new') {
+        onNewSsh();
+        return;
+      }
+      if (v.startsWith('saved:') || v.startsWith('config:')) {
+        final sep = v.indexOf(':');
+        final prefix = v.substring(0, sep);
+        final key = v.substring(sep + 1);
+        final list = prefix == 'saved' ? savedHosts : configHosts;
+        for (final h in list) {
+          if (h.profileKey == key) {
+            onConnectHost(h);
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showMenu(context),
+      child: Tooltip(
+        message: 'New tab',
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          child: Icon(Icons.add, size: 15, color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive),
+        ),
+      ),
+    );
+  }
+}
+
+class _OpenSettingsIntent extends Intent {
+  const _OpenSettingsIntent();
+}
+
+class _CloseTabIntent extends Intent {
+  const _CloseTabIntent();
+}
+
+// ── Desktop home page (shown when all tabs are closed) ────────────────────────
+class _DesktopHomePage extends StatelessWidget {
+  const _DesktopHomePage({
+    required this.localShells,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onNewLocal,
+    required this.onNewSsh,
+    required this.onConnectHost,
+    required this.chromeBackground,
+  });
+
+  final List<LocalShellOption> localShells;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<LocalShellOption> onNewLocal;
+  final VoidCallback onNewSsh;
+  final ValueChanged<SshHost> onConnectHost;
+  final Color chromeBackground;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAnything =
+        localShells.isNotEmpty || savedHosts.isNotEmpty || configHosts.isNotEmpty;
+
+    return Container(
+      color: chromeBackground,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'New Session',
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.4,
+                            ),
+                          ),
+                        ),
+                        _NewConnectionButton(onTap: onNewSsh),
+                      ],
+                    ),
+                  ),
+
+                  if (!Platform.isIOS && localShells.isNotEmpty) ...[
+                    _SectionLabel('Local'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < localShells.length; i++)
+                            _ShellRow(
+                              shell: localShells[i],
+                              isLast: i == localShells.length - 1,
+                              onTap: () => onNewLocal(localShells[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (savedHosts.isNotEmpty) ...[
+                    _SectionLabel('Saved'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < savedHosts.length; i++)
+                            _HostRow(
+                              host: savedHosts[i],
+                              isLast: i == savedHosts.length - 1,
+                              onTap: () => onConnectHost(savedHosts[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (configHosts.isNotEmpty) ...[
+                    _SectionLabel('SSH Config'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < configHosts.length; i++)
+                            _HostRow(
+                              host: configHosts[i],
+                              isLast: i == configHosts.length - 1,
+                              onTap: () => onConnectHost(configHosts[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (!hasAnything) _EmptyConnections(onNewSsh: onNewSsh),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Local shell row used in _DesktopHomePage
+class _ShellRow extends StatelessWidget {
+  const _ShellRow({
+    required this.shell,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  final LocalShellOption shell;
+  final bool isLast;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            overlayColor: WidgetStateProperty.all(const Color(0x0CFFFFFF)),
+            child: SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+                        size: 17,
+                        color: AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF6E6E6E),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            shell.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              fontSize: 15,
+                            ),
+                          ),
+                          Text(
+                            shell.executable,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.45),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (!isLast) const Divider(height: 1, indent: 64, color: _kDivider),
+      ],
+    );
+  }
+}

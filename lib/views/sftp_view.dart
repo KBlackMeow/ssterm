@@ -1,13 +1,18 @@
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'package:dartssh2/dartssh2.dart';
 import 'package:path/path.dart' as p;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
 import '../widgets/frosted_glass.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
+
+part 'sftp_view_mobile.dart';
+part 'sftp_view_widgets.dart';
 
 /// Join a remote directory path with a file/dir name.
 String sftpJoin(String dir, String name) =>
@@ -27,12 +32,42 @@ int sftpEntryRank({required bool isDirectory, required bool isSymbolicLink}) {
   return 2;
 }
 
-const _kSizeColWidth = 44.0;
-const _kDateColWidth = 72.0;
-const _kMetaFontSize = 9.0;
+String _sftpFmtSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} M';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} G';
+}
+
+String _sftpFmtDate(int? ts) {
+  if (ts == null) return '';
+  final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  final now = DateTime.now();
+  final today =
+      dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  final hm =
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  if (today) return hm;
+  return '${dt.month.toString().padLeft(2, '0')}-'
+      '${dt.day.toString().padLeft(2, '0')} $hm';
+}
+
+const _kSizeColWidth = 56.0;
+const _kDateColWidth = 88.0;
+const _kMetaFontSize = 11.0;
 
 const _kChromeBar = Color(0x66252525);
 const _kChromeHeader = Color(0x55222222);
+
+/// Below this width the compact (mobile-style) layout is used.
+
+const _kFgActive = Color(0xFFD4D4D4);
+const _kFgMuted = Color(0xFF8E8E8E);
+const _kFgDim = Color(0xFF686868);
+const _kFgDisabled = Color(0xFF3A3A3A);
+const _kAccent = Color(0xFF2472C8);
 
 class SftpView extends StatefulWidget {
   const SftpView({
@@ -44,7 +79,8 @@ class SftpView extends StatefulWidget {
     this.panelPosition,
     this.onPanelPositionChanged,
     this.onClose,
-    this.frostedGlass = true,
+    this.showToolbar = true,
+    this.chromeBackground = const Color(0xFF1E1E2A),
   });
 
   final SftpClient sftp;
@@ -57,13 +93,18 @@ class SftpView extends StatefulWidget {
   final SftpPanelPosition? panelPosition;
   final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
   final VoidCallback? onClose;
-  final bool frostedGlass;
+
+  /// Set to false to hide the compact toolbar (use in full-screen page mode).
+  final bool showToolbar;
+
+  /// Solid background for action sheets / non-frosted panels.
+  final Color chromeBackground;
 
   @override
-  State<SftpView> createState() => _SftpViewState();
+  State<SftpView> createState() => SftpViewState();
 }
 
-class _SftpViewState extends State<SftpView> {
+class SftpViewState extends State<SftpView> {
   String _path = '/';
   List<SftpName> _entries = [];
   bool _loading = true;
@@ -71,6 +112,13 @@ class _SftpViewState extends State<SftpView> {
   SftpName? _selected;
   String? _status;
   bool _isDragOver = false;
+
+  String get currentPath => _path;
+
+  Future<void> goUp() => _listDir(sftpParent(_path));
+  Future<void> refresh() => _listDir(_path);
+  Future<void> createFolder() => _mkdir();
+  Future<void> uploadFile() => _upload();
 
   @override
   void initState() {
@@ -95,9 +143,9 @@ class _SftpViewState extends State<SftpView> {
   }
 
   void _onRemotePathChanged() {
-    final p = widget.remotePath?.value;
-    if (p == null || p.isEmpty || p == _path) return;
-    _listDir(p);
+    final newPath = widget.remotePath?.value;
+    if (newPath == null || newPath.isEmpty || newPath == _path) return;
+    _listDir(newPath);
   }
 
   Future<void> _listDir(String path) async {
@@ -135,19 +183,72 @@ class _SftpViewState extends State<SftpView> {
     }
   }
 
+  Future<String> _localDownloadDir() async {
+    if (Platform.isIOS) {
+      final tmp = Directory.systemTemp.path;
+      final container = tmp.endsWith('/tmp')
+          ? tmp.substring(0, tmp.length - 4)
+          : Directory.systemTemp.parent.path;
+      return '$container/Documents';
+    }
+    return '${Platform.environment['HOME'] ?? ''}/Downloads';
+  }
+
   Future<void> _download(SftpName entry) async {
-    final home = Platform.environment['HOME'] ?? '';
     final safeName = p.posix.basename(entry.filename);
-    final dest = '$home/Downloads/$safeName';
+    final destDir = await _localDownloadDir();
+    final dest = '$destDir/$safeName';
     try {
-      await widget.transferManager.startDownload(
+      final task = await widget.transferManager.startDownload(
         sftp: widget.sftp,
         remotePath: sftpJoin(_path, entry.filename),
         localPath: dest,
       );
+      if (mounted) {
+        setState(() => _status = (Platform.isIOS || Platform.isAndroid)
+            ? 'Downloading…'
+            : 'Downloading to ~/Downloads/$safeName');
+      }
+      if (Platform.isIOS || Platform.isAndroid) {
+        _shareOnComplete(task, dest, safeName);
+      }
     } catch (e) {
       if (mounted) setState(() => _status = 'Download error: $e');
     }
+  }
+
+  void _shareOnComplete(TransferTask task, String localPath, String fileName) {
+    void listener() {
+      if (task.status == TransferStatus.done) {
+        task.removeListener(listener);
+        if (mounted) {
+          setState(() => _status = 'Downloaded: $fileName');
+          // iPad requires a non-zero sharePositionOrigin for the popover anchor.
+          // Use the centre of this view as a stable fallback.
+          final box = context.findRenderObject() as RenderBox?;
+          Rect? origin;
+          if (box != null) {
+            final topLeft = box.localToGlobal(Offset.zero);
+            final size = box.size;
+            origin = Rect.fromCenter(
+              center: Offset(topLeft.dx + size.width / 2,
+                             topLeft.dy + size.height / 2),
+              width: 1,
+              height: 1,
+            );
+          }
+          SharePlus.instance.share(ShareParams(
+            files: [XFile(localPath)],
+            subject: fileName,
+            sharePositionOrigin: origin,
+          ));
+        }
+      } else if (task.status == TransferStatus.error) {
+        task.removeListener(listener);
+        if (mounted) setState(() => _status = 'Download error: ${task.error}');
+      }
+    }
+    task.addListener(listener);
   }
 
   Future<void> _upload() async {
@@ -180,23 +281,28 @@ class _SftpViewState extends State<SftpView> {
   }
 
   Future<void> _delete(SftpName entry) async {
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => _ConfirmDialog(
-        title: 'Delete',
-        body: 'Delete "${entry.filename}"?',
-        confirm: 'Delete',
-        danger: true,
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _ConfirmDialog(
+          title: 'Delete',
+          body: 'Delete "${entry.filename}"?',
+          confirm: 'Delete',
+          danger: true,
+        ),
       ),
     );
     if (ok != true) return;
 
     try {
-      final p = sftpJoin(_path, entry.filename);
+      final remotePath = sftpJoin(_path, entry.filename);
       if (entry.attr.isDirectory) {
-        await widget.sftp.rmdir(p);
+        await widget.sftp.rmdir(remotePath);
       } else {
-        await widget.sftp.remove(p);
+        await widget.sftp.remove(remotePath);
       }
       _listDir(_path);
     } catch (e) {
@@ -204,18 +310,22 @@ class _SftpViewState extends State<SftpView> {
     }
   }
 
-  Future<void> _rename(SshFtpEntry entry) async {
-    final ctrl = TextEditingController(text: entry.name.filename);
+  Future<void> _rename(SftpName entry) async {
+    final ctrl        = TextEditingController(text: entry.filename);
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) =>
-          _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
+      ),
     );
-    if (name == null || name.isEmpty || name == entry.name.filename) return;
+    if (name == null || name.isEmpty || name == entry.filename) return;
 
     try {
       await widget.sftp.rename(
-        sftpJoin(_path, entry.name.filename),
+        sftpJoin(_path, entry.filename),
         sftpJoin(_path, name),
       );
       _listDir(_path);
@@ -225,11 +335,15 @@ class _SftpViewState extends State<SftpView> {
   }
 
   Future<void> _mkdir() async {
-    final ctrl = TextEditingController();
+    final ctrl        = TextEditingController();
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) =>
-          _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
+      ),
     );
     if (name == null || name.isEmpty) return;
 
@@ -241,8 +355,6 @@ class _SftpViewState extends State<SftpView> {
     }
   }
 
-  /// Handle a tap on an entry. Directories and symlinks-to-dirs navigate;
-  /// everything else toggles selection.
   Future<void> _navigateEntry(SftpName e) async {
     if (e.attr.isDirectory) {
       await _listDir(e.filename == '..'
@@ -264,13 +376,290 @@ class _SftpViewState extends State<SftpView> {
     setState(() => _selected = isSel ? null : e);
   }
 
+  Future<void> _tapMobileSymlink(SftpName e) async {
+    try {
+      final targetPath = sftpJoin(_path, e.filename);
+      final stat = await widget.sftp.stat(targetPath);
+      if (stat.isDirectory) {
+        await _listDir(targetPath);
+        return;
+      }
+    } catch (_) {}
+    await _showMobileActionSheet(e);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Mobile action sheet
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Future<void> _showMobileActionSheet(SftpName entry) async {
+    final isDir = entry.attr.isDirectory;
+    final isFile = !isDir;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _MobileActionSheet(
+        entry: entry,
+        canDownload: isFile,
+        chromeBackground: widget.chromeBackground,
+      ),
+    );
+
+    switch (action) {
+      case 'download':
+        await _download(entry);
+      case 'rename':
+        await _rename(entry);
+      case 'delete':
+        await _delete(entry);
+      case 'navigate':
+        await _navigateEntry(entry);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Layout root
+  // ──────────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    if (Platform.isIOS || Platform.isAndroid) {
+      return _buildCompactLayout();
+    }
+    return _buildStandardLayout();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Compact (mobile/phone) layout
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildCompactLayout() {
+    final bg = widget.chromeBackground;
     return ColoredBox(
-      color: Colors.transparent,
+      color: bg,
       child: Column(
         children: [
-          _buildToolbar(),
+          if (widget.showToolbar) _buildCompactToolbar(),
+          Expanded(child: _buildCompactBody()),
+          if (_status != null) _buildStatusBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactToolbar() {
+    final colors    = AppColors.maybeOf(context);
+    final fgDim     = colors?.foregroundDim ?? _kFgMuted;
+    final toolbarBg = (colors?.popup ?? const Color(0xFF141620)).withValues(alpha: 0.65);
+    final border    = (colors?.foreground ?? Colors.white).withValues(alpha: 0.10);
+    Widget bar = Container(
+      height: 50,
+      decoration: BoxDecoration(
+        color: toolbarBg,
+        border: Border(bottom: BorderSide(color: border, width: 0.5)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          _MobileToolBtn(
+            icon: Icons.arrow_upward_rounded,
+            onTap: _path == '/' ? null : () => _listDir(sftpParent(_path)),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _showPathBreadcrumb(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  _path,
+                  style: TextStyle(color: fgDim, fontSize: 12, fontFamily: 'JetBrainsMono'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textDirection: TextDirection.rtl,
+                ),
+              ),
+            ),
+          ),
+          // Refresh
+          _MobileToolBtn(
+            icon: Icons.refresh_rounded,
+            onTap: () => _listDir(_path),
+          ),
+          // New folder
+          _MobileToolBtn(
+            icon: Icons.create_new_folder_outlined,
+            onTap: _mkdir,
+          ),
+          _MobileToolBtn(
+            icon: Icons.upload_rounded,
+            onTap: _upload,
+          ),
+          // Position toggle
+          if (widget.panelPosition != null &&
+              widget.onPanelPositionChanged != null)
+            _MobileToolBtn(
+              icon: widget.panelPosition == SftpPanelPosition.right
+                  ? Icons.view_agenda_outlined
+                  : Icons.view_sidebar_outlined,
+              onTap: () => widget.onPanelPositionChanged!(
+                widget.panelPosition == SftpPanelPosition.right
+                    ? SftpPanelPosition.bottom
+                    : SftpPanelPosition.right,
+              ),
+            ),
+          // Close
+          if (widget.onClose != null)
+            _MobileToolBtn(
+              icon: Icons.close_rounded,
+              onTap: widget.onClose,
+            ),
+        ],
+      ),
+    );
+
+    bar = ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: bar,
+      ),
+    );
+
+    return bar;
+  }
+
+  Widget _buildCompactBody() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: _kAccent, strokeWidth: 2),
+      );
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _error!,
+            style: const TextStyle(color: Color(0xFFFF6E67), fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    if (_entries.isEmpty) {
+      return Center(
+        child: Text(
+          'Empty folder',
+          style: TextStyle(
+            color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgDim,
+            fontSize: 14,
+          ),
+        ),
+      );
+    }
+    final divColor = (AppColors.maybeOf(context)?.foreground ?? Colors.white).withValues(alpha: 0.08);
+    return ListView.separated(
+      padding: EdgeInsets.zero,
+      itemCount: _entries.length,
+      separatorBuilder: (_, _) => Divider(height: 1, color: divColor, indent: 52),
+      itemBuilder: (_, i) {
+        final e = _entries[i];
+        return _CompactRow(
+          entry: e,
+          onTap: () {
+            if (e.attr.isDirectory) {
+              _navigateEntry(e);
+            } else if (e.attr.isSymbolicLink) {
+              _tapMobileSymlink(e);
+            }
+            // Files: single tap does nothing — long press for actions
+          },
+          onLongPress: () => _showMobileActionSheet(e),
+        );
+      },
+    );
+  }
+
+  void _showPathBreadcrumb() {
+    // Split path into segments and let the user jump to any ancestor.
+    final segments = _path.split('/').where((s) => s.isNotEmpty).toList();
+    showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        // Inject AppColors captured from state context into the sheet context.
+        final colors      = AppColors.maybeOf(context);
+        final sheetBg     = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+        final fg          = colors?.foreground ?? _kFgActive;
+        final topBorder   = (colors?.foreground ?? Colors.white).withValues(alpha: 0.16);
+        const radius = BorderRadius.vertical(top: Radius.circular(16));
+        Widget sheet = Theme(
+          data: Theme.of(context).copyWith(extensions: colors != null ? {colors} : null),
+          child: Container(
+            decoration: BoxDecoration(
+              color: sheetBg,
+              borderRadius: radius,
+              border: Border(top: BorderSide(color: topBorder, width: 0.5)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _SheetHandle(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Text(
+                    'Go to folder',
+                    style: TextStyle(color: fg, fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                _SheetItem(
+                  icon: Icons.folder_rounded,
+                  label: '/',
+                  iconColor: const Color(0xFFFFD166),
+                  onTap: () { Navigator.pop(ctx); _listDir('/'); },
+                ),
+                for (var i = 0; i < segments.length; i++)
+                  _SheetItem(
+                    icon: Icons.folder_rounded,
+                    label: '/${segments.sublist(0, i + 1).join('/')}',
+                    iconColor: const Color(0xFFFFD166),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _listDir('/${segments.sublist(0, i + 1).join('/')}');
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+
+        sheet = ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: sheet,
+          ),
+        );
+
+        return sheet;
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Standard (tablet/desktop) layout
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildStandardLayout() {
+    // Background is provided by _SftpFloatingChrome's PopupSurface wrapper;
+    // this layout must stay transparent so it doesn't paint over the panel fill.
+    const bg = Colors.transparent;
+    return ColoredBox(
+      color: bg,
+      child: Column(
+        children: [
+          if (widget.showToolbar) _buildToolbar(),
           _buildColumnHeader(),
           Expanded(
             child: DropTarget(
@@ -284,16 +673,16 @@ class _SftpViewState extends State<SftpView> {
               },
               child: Stack(
                 children: [
-                  _buildBody(),
+                  _buildStandardBody(),
                   if (_isDragOver)
                     Container(
-                      color: const Color(0xFF2472C8).withAlpha(40),
+                      color: _kAccent.withAlpha(40),
                       alignment: Alignment.center,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 20, vertical: 12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF2472C8).withAlpha(200),
+                          color: _kAccent.withAlpha(200),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Row(
@@ -303,8 +692,7 @@ class _SftpViewState extends State<SftpView> {
                             SizedBox(width: 8),
                             Text(
                               'Drop to upload',
-                              style:
-                                  TextStyle(color: Colors.white, fontSize: 13),
+                              style: TextStyle(color: Colors.white, fontSize: 13),
                             ),
                           ],
                         ),
@@ -323,9 +711,13 @@ class _SftpViewState extends State<SftpView> {
   Widget _buildToolbar() {
     final canDown = _selected != null && !_selected!.attr.isDirectory;
     final canDel = _selected != null;
+    final colors  = AppColors.maybeOf(context);
+    final fgDim   = colors?.foregroundDim ?? _kFgMuted;
+    final divider = colors?.foreground.withValues(alpha: 0.12) ?? const Color(0xFF3A3A3A);
+    final toolbarBg = colors?.foreground.withValues(alpha: 0.06) ?? _kChromeBar;
     return Container(
       height: 34,
-      color: _kChromeBar,
+      color: toolbarBg,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(
         children: [
@@ -340,16 +732,16 @@ class _SftpViewState extends State<SftpView> {
             onTap: () => _listDir(_path),
           ),
           const SizedBox(width: 4),
-          const SizedBox(
+          SizedBox(
             height: 16,
-            child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+            child: VerticalDivider(color: divider, width: 1),
           ),
           const SizedBox(width: 4),
           Expanded(
             child: Text(
               _path,
-              style: const TextStyle(
-                color: Color(0xFF8E8E8E),
+              style: TextStyle(
+                color: fgDim,
                 fontSize: 11,
                 fontFamily: 'JetBrainsMono',
               ),
@@ -357,9 +749,9 @@ class _SftpViewState extends State<SftpView> {
             ),
           ),
           const SizedBox(width: 4),
-          const SizedBox(
+          SizedBox(
             height: 16,
-            child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+            child: VerticalDivider(color: divider, width: 1),
           ),
           const SizedBox(width: 4),
           if (widget.panelPosition != null &&
@@ -400,9 +792,9 @@ class _SftpViewState extends State<SftpView> {
           ),
           if (widget.onClose != null) ...[
             const SizedBox(width: 4),
-            const SizedBox(
+            SizedBox(
               height: 16,
-              child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+              child: VerticalDivider(color: divider, width: 1),
             ),
             _ToolBtn(
               icon: Icons.close,
@@ -416,63 +808,45 @@ class _SftpViewState extends State<SftpView> {
   }
 
   Widget _buildColumnHeader() {
+    final colors   = AppColors.maybeOf(context);
+    final fgDim    = colors?.foregroundDim ?? _kFgDim;
+    final headerBg = colors?.foreground.withValues(alpha: 0.04) ?? _kChromeHeader;
     return Container(
       height: 24,
-      color: _kChromeHeader,
+      color: headerBg,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
           const SizedBox(width: 18),
           const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Name',
-              style: TextStyle(
-                color: Color(0xFF686868),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          Expanded(
+            child: Text('Name',
+              style: TextStyle(color: fgDim, fontSize: 11, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 6),
-          const SizedBox(
+          SizedBox(
             width: _kSizeColWidth,
-            child: Text(
-              'Size',
+            child: Text('Size',
               textAlign: TextAlign.right,
-              style: TextStyle(
-                color: Color(0xFF686868),
-                fontSize: _kMetaFontSize,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 4),
-          const SizedBox(
+          SizedBox(
             width: _kDateColWidth,
-            child: Text(
-              'Modified',
+            child: Text('Modified',
               textAlign: TextAlign.right,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Color(0xFF686868),
-                fontSize: _kMetaFontSize,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildStandardBody() {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: Color(0xFF2472C8),
-          strokeWidth: 2,
-        ),
+        child: CircularProgressIndicator(color: _kAccent, strokeWidth: 2),
       );
     }
     if (_error != null) {
@@ -483,6 +857,12 @@ class _SftpViewState extends State<SftpView> {
         ),
       );
     }
+    final colors  = AppColors.maybeOf(context);
+    final fg      = colors?.foreground    ?? const Color(0xFFC7C7C7);
+    final fgFile  = colors?.foreground.withValues(alpha: 0.67) ?? const Color(0xFFAAAAAA);
+    final fgDim   = colors?.foregroundDim ?? _kFgDim;
+    final fgIcon  = colors?.foregroundDim ?? _kFgDim;
+
     return ListView.builder(
       itemCount: _entries.length,
       itemBuilder: (_, i) {
@@ -491,12 +871,15 @@ class _SftpViewState extends State<SftpView> {
         final isLink = e.attr.isSymbolicLink;
         final isSel = _selected?.filename == e.filename;
         return GestureDetector(
-          onSecondaryTapDown: (d) => _showContextMenu(e, d.globalPosition),
+          onSecondaryTapDown: (d) =>
+              _showDesktopContextMenu(e, d.globalPosition),
+          onLongPressStart: (d) =>
+              _showDesktopContextMenu(e, d.globalPosition),
           child: InkWell(
             onTap: () => _navigateEntry(e),
             child: Container(
-              height: 24,
-              color: isSel ? const Color(0xFF2472C8).withAlpha(70) : null,
+              height: 26,
+              color: isSel ? _kAccent.withAlpha(70) : null,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: [
@@ -506,12 +889,12 @@ class _SftpViewState extends State<SftpView> {
                         : isLink
                             ? Icons.link
                             : _fileIcon(e.filename),
-                    size: 13,
+                    size: 14,
                     color: isDir
                         ? const Color(0xFFFFD166)
                         : isLink
                             ? const Color(0xFF4EC9B0)
-                            : const Color(0xFF686868),
+                            : fgIcon,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -521,12 +904,8 @@ class _SftpViewState extends State<SftpView> {
                       child: Text(
                         e.filename,
                         style: TextStyle(
-                          color: isDir
-                              ? const Color(0xFFC7C7C7)
-                              : isLink
-                                  ? const Color(0xFF4EC9B0)
-                                  : const Color(0xFFAAAAAA),
-                          fontSize: 12,
+                          color: isDir ? fg : isLink ? const Color(0xFF4EC9B0) : fgFile,
+                          fontSize: 13,
                           fontFamily: 'JetBrainsMono',
                         ),
                         maxLines: 1,
@@ -538,12 +917,12 @@ class _SftpViewState extends State<SftpView> {
                   SizedBox(
                     width: _kSizeColWidth,
                     child: Text(
-                      isDir ? '' : _fmtSize(e.attr.size ?? 0),
+                      isDir ? '' : _sftpFmtSize(e.attr.size ?? 0),
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF686868),
+                      style: TextStyle(
+                        color: fgDim,
                         fontSize: _kMetaFontSize,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -553,12 +932,12 @@ class _SftpViewState extends State<SftpView> {
                   SizedBox(
                     width: _kDateColWidth,
                     child: Text(
-                      _fmtDate(e.attr.modifyTime),
+                      _sftpFmtDate(e.attr.modifyTime),
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF686868),
+                      style: TextStyle(
+                        color: fgDim,
                         fontSize: _kMetaFontSize,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -573,9 +952,10 @@ class _SftpViewState extends State<SftpView> {
     );
   }
 
-  void _showContextMenu(SftpName e, Offset globalPosition) async {
+  void _showDesktopContextMenu(SftpName e, Offset globalPosition) async {
     final isDir = e.attr.isDirectory;
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final position = RelativeRect.fromRect(
       globalPosition & Size.zero,
       Offset.zero & overlay.size,
@@ -583,33 +963,36 @@ class _SftpViewState extends State<SftpView> {
 
     final action = await showFrostedMenu<String>(
       context: context,
-      frostedGlass: widget.frostedGlass,
       position: position,
       items: [
         if (!isDir)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'download',
             height: 36,
-            child: Text(
-              'Download',
-              style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
+            child: Builder(
+              builder: (ctx) => Text('Download',
+                  style: TextStyle(
+                    color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
+                    fontSize: 13,
+                  )),
             ),
           ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'rename',
           height: 36,
-          child: Text(
-            'Rename',
-            style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
+          child: Builder(
+            builder: (ctx) => Text('Rename',
+                style: TextStyle(
+                  color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
+                  fontSize: 13,
+                )),
           ),
         ),
         const PopupMenuItem(
           value: 'delete',
           height: 36,
-          child: Text(
-            'Delete',
-            style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13),
-          ),
+          child: Text('Delete',
+              style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13)),
         ),
       ],
     );
@@ -618,11 +1001,15 @@ class _SftpViewState extends State<SftpView> {
       case 'download':
         await _download(e);
       case 'rename':
-        await _rename(SshFtpEntry(e));
+        await _rename(e);
       case 'delete':
         await _delete(e);
     }
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Shared widgets
+  // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildStatusBar() {
     return Container(
@@ -634,13 +1021,13 @@ class _SftpViewState extends State<SftpView> {
           Expanded(
             child: Text(
               _status ?? '',
-              style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 11),
+              style: const TextStyle(color: _kFgMuted, fontSize: 11),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
             '${_entries.length} items',
-            style: const TextStyle(color: Color(0xFF686868), fontSize: 11),
+            style: const TextStyle(color: _kFgDim, fontSize: 11),
           ),
         ],
       ),
@@ -648,226 +1035,22 @@ class _SftpViewState extends State<SftpView> {
   }
 
   IconData _fileIcon(String name) {
+
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return switch (ext) {
-      'dart' ||
-      'py' ||
-      'js' ||
-      'ts' ||
-      'go' ||
-      'rs' ||
-      'c' ||
-      'cpp' ||
-      'java' ||
-      'swift' ||
-      'kt' => Icons.code,
-      'json' ||
-      'yaml' ||
-      'yml' ||
-      'toml' ||
-      'xml' ||
-      'ini' ||
-      'conf' => Icons.data_object,
+      'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' ||
+      'c' || 'cpp' || 'java' || 'swift' || 'kt' => Icons.code,
+      'json' || 'yaml' || 'yml' || 'toml' ||
+      'xml' || 'ini' || 'conf' => Icons.data_object,
       'md' || 'txt' || 'log' || 'rst' => Icons.description_outlined,
-      'png' ||
-      'jpg' ||
-      'jpeg' ||
-      'gif' ||
-      'svg' ||
-      'webp' ||
-      'ico' => Icons.image_outlined,
-      'zip' ||
-      'tar' ||
-      'gz' ||
-      'bz2' ||
-      'xz' ||
-      '7z' ||
-      'rar' => Icons.archive_outlined,
+      'png' || 'jpg' || 'jpeg' || 'gif' ||
+      'svg' || 'webp' || 'ico' => Icons.image_outlined,
+      'zip' || 'tar' || 'gz' || 'bz2' ||
+      'xz' || '7z' || 'rar' => Icons.archive_outlined,
       'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal,
       _ => Icons.insert_drive_file_outlined,
     };
   }
 
-  String _fmtSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} M';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} G';
-  }
-
-  String _fmtDate(int? ts) {
-    if (ts == null) return '';
-    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-    final now = DateTime.now();
-    final today =
-        dt.year == now.year && dt.month == now.month && dt.day == now.day;
-    final hm =
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    if (today) return hm;
-    return '${dt.month.toString().padLeft(2, '0')}-'
-        '${dt.day.toString().padLeft(2, '0')} $hm';
-  }
 }
 
-// Wrapper to pass SftpName into rename dialog
-class SshFtpEntry {
-  final SftpName name;
-  SshFtpEntry(this.name);
-}
-
-class _ToolBtn extends StatefulWidget {
-  const _ToolBtn({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.danger = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onTap;
-  final bool danger;
-
-  @override
-  State<_ToolBtn> createState() => _ToolBtnState();
-}
-
-class _ToolBtnState extends State<_ToolBtn> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = widget.onTap == null;
-    final color = disabled
-        ? const Color(0xFF3A3A3A)
-        : widget.danger
-        ? const Color(0xFFFF6E67)
-        : _hover
-        ? const Color(0xFFC7C7C7)
-        : const Color(0xFF8E8E8E);
-
-    return Tooltip(
-      message: widget.tooltip,
-      waitDuration: const Duration(milliseconds: 600),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Container(
-            width: 26,
-            height: 26,
-            alignment: Alignment.center,
-            child: Icon(widget.icon, size: 14, color: color),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ConfirmDialog extends StatelessWidget {
-  const _ConfirmDialog({
-    required this.title,
-    required this.body,
-    required this.confirm,
-    this.danger = false,
-  });
-
-  final String title;
-  final String body;
-  final String confirm;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      title: Text(
-        title,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
-      ),
-      content: Text(
-        body,
-        style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 13),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(color: Color(0xFF8E8E8E)),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            confirm,
-            style: TextStyle(
-              color: danger ? const Color(0xFFFF6E67) : const Color(0xFF2472C8),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InputDialog extends StatelessWidget {
-  const _InputDialog({
-    required this.title,
-    required this.ctrl,
-    required this.confirm,
-  });
-
-  final String title;
-  final TextEditingController ctrl;
-  final String confirm;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: const Color(0xFF2B2B2B),
-      title: Text(
-        title,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 14),
-      ),
-      content: TextField(
-        controller: ctrl,
-        autofocus: true,
-        style: const TextStyle(color: Color(0xFFC7C7C7), fontSize: 13),
-        decoration: const InputDecoration(
-          filled: true,
-          fillColor: Color(0xFF1C1C1C),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Color(0xFF3A3A3A)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Color(0xFF2472C8)),
-          ),
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        ),
-        onSubmitted: (v) => Navigator.pop(context, v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(color: Color(0xFF8E8E8E)),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, ctrl.text),
-          child: Text(
-            confirm,
-            style: const TextStyle(color: Color(0xFF2472C8)),
-          ),
-        ),
-      ],
-    );
-  }
-}

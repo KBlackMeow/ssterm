@@ -22,7 +22,6 @@ class SshSessionView extends StatefulWidget {
     required this.child,
     this.initialPosition = SftpPanelPosition.bottom,
     this.initialSize,
-    this.frostedGlass = true,
     this.onLayoutChanged,
   });
 
@@ -38,7 +37,6 @@ class SshSessionView extends StatefulWidget {
   final Widget child;
   final SftpPanelPosition initialPosition;
   final double? initialSize;
-  final bool frostedGlass;
   final void Function(SftpPanelPosition position, double? size)? onLayoutChanged;
 
   @override
@@ -64,7 +62,7 @@ class _SshSessionViewState extends State<SshSessionView> {
     final total = _position == SftpPanelPosition.right
         ? constraints.maxWidth
         : constraints.maxHeight;
-    final maxSide = total * _kMaxFraction;
+    final maxSide = (total * _kMaxFraction).clamp(_kMinSide, double.infinity);
     if (_customPanelSize != null) {
       return _customPanelSize!.clamp(_kMinSide, maxSide);
     }
@@ -91,7 +89,6 @@ class _SshSessionViewState extends State<SshSessionView> {
             widget.onLayoutChanged?.call(_position, null);
           }),
           onClose: widget.onToggleSftp,
-          frostedGlass: widget.frostedGlass,
         );
 
         final panel = _position == SftpPanelPosition.right
@@ -117,8 +114,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                       Expanded(
                         child: _SftpFloatingChrome(
                           dockRight: true,
-                          frostedGlass: widget.frostedGlass,
-                          child: sftp,
+                                          child: sftp,
                         ),
                       ),
                     ],
@@ -148,8 +144,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                       Expanded(
                         child: _SftpFloatingChrome(
                           dockRight: false,
-                          frostedGlass: widget.frostedGlass,
-                          child: sftp,
+                                          child: sftp,
                         ),
                       ),
                     ],
@@ -172,12 +167,10 @@ class _SshSessionViewState extends State<SshSessionView> {
 class _SftpFloatingChrome extends StatelessWidget {
   const _SftpFloatingChrome({
     required this.dockRight,
-    required this.frostedGlass,
     required this.child,
   });
 
   final bool dockRight;
-  final bool frostedGlass;
   final Widget child;
 
   @override
@@ -191,14 +184,13 @@ class _SftpFloatingChrome extends StatelessWidget {
             _kSftpPanelMargin,
           );
 
+    final panelColor = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.panelFillFrosted;
     return Padding(
       padding: margin,
-      child: FrostedGlassSurface(
-        frosted: frostedGlass,
-        borderRadius: FrostedGlassStyle.panelRadius,
-        fillColor: frostedGlass
-            ? FrostedGlassStyle.panelFillFrosted
-            : FrostedGlassStyle.panelFillSolid,
+      child: PopupSurface(
+        color: panelColor,
+        radius: FrostedGlassStyle.panelRadius,
+        backdropBlur: 20,
         child: child,
       ),
     );

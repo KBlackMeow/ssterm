@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../utils/app_dir.dart';
 import '../utils/ssh_fingerprint.dart';
 
 class KnownHostEntry {
@@ -36,9 +37,7 @@ class KnownHostEntry {
 /// Trusted SSH server host keys (~/.ssterm/known_hosts.json).
 class KnownHostsStore {
   static Future<File> _file() async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory('$home/.ssterm');
-    if (!await dir.exists()) await dir.create(recursive: true);
+    final dir = await appDataDir();
     return File('${dir.path}/known_hosts.json');
   }
 

@@ -40,7 +40,7 @@ if [ -f "$HOME/.zlogin" ]; then
 fi
 zshexit() { rm -rf "$ZDOTDIR"; }
 EOF
-    exec env ZDOTDIR="$tmpdir" "$shell" -il
+    exec env ZDOTDIR="$tmpdir" "$shell" -i
     ;;
   bash)
     ENV=/dev/fd/3 exec "$shell" --posix --noprofile -i 3<<'RCEOF'

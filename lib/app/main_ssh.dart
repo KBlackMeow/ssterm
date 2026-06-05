@@ -1,10 +1,37 @@
-part of 'main.dart';
+part of '../main.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SSH business logic — connection lifecycle, SFTP, split-pane SSH sessions,
+// reconnect, keepalive, port forwarding, and saved-host management.
+// ─────────────────────────────────────────────────────────────────────────────
 
 abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
+
+  // ── Host list ──────────────────────────────────────────────────────────────
+
+  Future<void> _loadSshHosts() async {
+    final saved = await SavedHostsStore.load();
+    final config = await parseSshConfig();
+    if (!mounted) return;
+    setState(() {
+      _savedHosts = saved
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
+      _configHosts = config
+        ..sort(
+          (a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()),
+        );
+    });
+  }
+
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
-  Future<void> _showConnectDialog({SshHost? initialHost}) async {
-    final profile = await showConnectDialog(context, initialHost: initialHost);
+  Future<void> _showConnectDialog({SshHost? initialHost, required BuildContext ctx}) async {
+    final profile = await showConnectDialog(
+      ctx,
+      initialHost: initialHost,
+    );
     if (profile == null || !mounted) return;
     await _rememberHostProfile(profile);
     if (!mounted) return;
@@ -52,6 +79,18 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     unawaited(_runConnectionForTab(tab));
   }
 
+  /// 弹出密码输入框；勾选记住时存入 Keychain 并更新 tab profile。
+  Future<String?> _askPassword(_Tab tab, SshHost profile) async {
+    if (!mounted) return null;
+    final r = await showPasswordPromptDialog(context, profile);
+    if (r == null) return null;
+    if (r.save) {
+      await CredentialStorage.store(profile.profileKey, r.password);
+      tab.sshProfile = profile.copyWith(password: r.password);
+    }
+    return r.password;
+  }
+
   Future<void> _runConnectionForTab(_Tab tab) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
@@ -71,6 +110,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
                 port: profile.jumpHost!.port,
               )
             : null,
+        onPasswordNeeded: () => _askPassword(tab, profile),
       );
 
       if (!mounted || tab.manuallyDisconnected || !_tabs.contains(tab)) {
@@ -208,10 +248,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     unawaited(_runConnectionForTab(tab));
   }
 
-  Future<void> _editAndRetryConnectingTab(_Tab tab) async {
+  Future<void> _editAndRetryConnectingTab(_Tab tab, {required BuildContext ctx}) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
-    final updated = await showConnectDialog(context, initialHost: profile);
+    final updated = await showConnectDialog(
+      ctx,
+      initialHost: profile,
+    );
     if (updated == null || !mounted) return;
     await _rememberHostProfile(updated);
     if (!mounted) return;
@@ -315,7 +358,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     });
   }
 
-  // ── Feature 4: reconnect ───────────────────────────────────────────────────
+  // ── Reconnect ──────────────────────────────────────────────────────────────
 
   @override
   Future<void> _reconnectTab(_Tab tab) async {
@@ -339,6 +382,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
                 port: profile.jumpHost!.port,
               )
             : null,
+        onPasswordNeeded: () => _askPassword(tab, profile),
       );
       if (!mounted || tab.manuallyDisconnected) {
         result.client.close();
@@ -432,15 +476,21 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   // ── Tab management ─────────────────────────────────────────────────────────
 
   void _closeTab(int i) {
+    if (i < 0 || i >= _tabs.length) return;
     _tabs[i].dispose();
-    if (_tabs.length == 1) {
-      exit(0);
-    }
     setState(() {
       _tabs.removeAt(i);
-      _active = _active.clamp(0, _tabs.length - 1);
+      if (_tabs.isNotEmpty) {
+        if (i < _active) {
+          _active--;
+        } else {
+          _active = _active.clamp(0, _tabs.length - 1);
+        }
+      } else {
+        _active = 0;
+      }
     });
-    _activateTab(_active);
+    if (_tabs.isNotEmpty) _activateTab(_active);
   }
 
   void _selectTab(int i) {
@@ -483,34 +533,5 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       _tabs.add(_Tab.settings());
       _active = _tabs.length - 1;
     });
-  }
-
-  Widget _buildTerminalView(
-    Terminal terminal,
-    GlobalKey<TerminalViewState> viewKey, {
-    required _Tab tab,
-    int sshPane = 0,
-    TerminalContextMenuConfig? contextMenu,
-  }) {
-    Widget surface = TerminalSurface(
-      key: ValueKey(terminal),
-      terminal: terminal,
-      settings: _config.terminal,
-      viewKey: viewKey,
-      contextMenu: contextMenu,
-      frostedGlass: _config.sftpFrostedGlass,
-      includeWallpaper: false,
-      autofocus: sshPane == 0,
-    );
-
-    if (tab.kind == _TabKind.ssh && tab.sftp != null) {
-      surface = Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _activateSshPaneForSftp(tab, sshPane),
-        child: surface,
-      );
-    }
-
-    return surface;
   }
 }
