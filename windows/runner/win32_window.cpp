@@ -95,8 +95,11 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.cbClsExtra = 0;
     window_class.cbWndExtra = 0;
     window_class.hInstance = GetModuleHandle(nullptr);
-    window_class.hIcon =
-        LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
+    // LoadImage (vs. the legacy LoadIcon) lets Windows pick the frame that
+    // matches the requested size from the multi-resolution app_icon.ico.
+    window_class.hIcon = static_cast<HICON>(
+        LoadImage(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON),
+                  IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED));
     window_class.hbrBackground = 0;
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
@@ -142,6 +145,25 @@ bool Win32Window::Create(const std::wstring& title,
 
   if (!window) {
     return false;
+  }
+
+  // Give the taskbar (big) and title bar (small) DPI-correct icons drawn from
+  // the native frames of the multi-resolution app_icon.ico, rather than letting
+  // Windows stretch a single frame (which looks blurry on high-DPI displays).
+  HMODULE module = GetModuleHandle(nullptr);
+  int big_size = GetSystemMetricsForDpi(SM_CXICON, dpi);
+  int small_size = GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+  HICON big_icon = static_cast<HICON>(LoadImage(
+      module, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, big_size, big_size,
+      LR_DEFAULTCOLOR));
+  HICON small_icon = static_cast<HICON>(LoadImage(
+      module, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, small_size, small_size,
+      LR_DEFAULTCOLOR));
+  if (big_icon) {
+    SendMessage(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_icon));
+  }
+  if (small_icon) {
+    SendMessage(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon));
   }
 
   UpdateTheme(window);
