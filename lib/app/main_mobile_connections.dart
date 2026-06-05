@@ -207,15 +207,16 @@ class _ListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Always dark background — inject matching dark AppColors so children
-    // (e.g. _HostRow) produce readable text regardless of the terminal theme.
+    // Card bg = AppColors.popup (chromeTabSelected) — same tint used for
+    // desktop active tab chips, gives a subtle lift above the page bg so
+    // the card is visually distinct from the Scaffold background.
+    final fill   = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final colors = AppColors.fromBackground(fill);
     return Theme(
-      data: Theme.of(context).copyWith(extensions: {
-        AppColors.fromBackground(FrostedGlassStyle.menuFillFrosted),
-      }),
+      data: Theme.of(context).copyWith(extensions: {colors}),
       child: PopupSurface(
         radius: _kCardRadius,
-        color: FrostedGlassStyle.menuFillFrosted,
+        color: fill,
         backdropBlur: 20,
         child: Column(mainAxisSize: MainAxisSize.min, children: children),
       ),
@@ -310,7 +311,7 @@ class _ActiveSessionRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: _kFgActive,
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
                               fontSize: 15,
                               fontWeight: isActive
                                   ? FontWeight.w600
@@ -322,7 +323,7 @@ class _ActiveSessionRow extends StatelessWidget {
                             style: TextStyle(
                               color: error
                                   ? const Color(0xFFFF6E67)
-                                  : _kFgInactive,
+                                  : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
                               fontSize: 12,
                             ),
                           ),
@@ -344,7 +345,7 @@ class _ActiveSessionRow extends StatelessWidget {
                         child: Icon(
                           Icons.close_rounded,
                           size: 16,
-                          color: _kFgInactive.withValues(alpha: 0.5),
+                          color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.5),
                         ),
                       ),
                     ),
@@ -355,7 +356,8 @@ class _ActiveSessionRow extends StatelessWidget {
           ),
         ),
         if (!isLast)
-          const Divider(height: 1, indent: 64, color: _kDivider),
+          Divider(height: 1, indent: 64,
+              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18)),
       ],
     );
   }
@@ -395,13 +397,13 @@ class _HostRow extends StatelessWidget {
                       height: 36,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: const Color(0x12FFFFFF),
+                        color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.dns_rounded,
                         size: 17,
-                        color: Color(0xFF6E6E6E),
+                        color: AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF6E6E6E),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -431,10 +433,10 @@ class _HostRow extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const Icon(
+                    Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color: Color(0xFF3A3A3A),
+                      color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.45),
                     ),
                   ],
                 ),
@@ -443,7 +445,8 @@ class _HostRow extends StatelessWidget {
           ),
         ),
         if (!isLast)
-          const Divider(height: 1, indent: 64, color: _kDivider),
+          Divider(height: 1, indent: 64,
+              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18)),
       ],
     );
   }
@@ -491,31 +494,29 @@ class _NewConnectionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final bg     = colors?.popup    ?? _kCardFill;
+    final fg     = colors?.foreground ?? Colors.white;
+    final border = fg.withValues(alpha: 0.16);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: _kCardFill,
+          color: bg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0x28FFFFFF), width: 1),
+          border: Border.all(color: border, width: 1),
           boxShadow: const [
             BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
           ],
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.add_rounded, size: 16, color: Colors.white),
-            SizedBox(width: 4),
-            Text(
-              'New',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Icon(Icons.add_rounded, size: 16, color: fg),
+            const SizedBox(width: 4),
+            Text('New',
+                style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
           ],
         ),
       ),

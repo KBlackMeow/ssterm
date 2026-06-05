@@ -27,11 +27,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
-  Future<void> _showConnectDialog({SshHost? initialHost}) async {
+  Future<void> _showConnectDialog({SshHost? initialHost, required BuildContext ctx}) async {
     final profile = await showConnectDialog(
-      context,
+      ctx,
       initialHost: initialHost,
-          );
+    );
     if (profile == null || !mounted) return;
     await _rememberHostProfile(profile);
     if (!mounted) return;
@@ -79,6 +79,18 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     unawaited(_runConnectionForTab(tab));
   }
 
+  /// 弹出密码输入框；勾选记住时存入 Keychain 并更新 tab profile。
+  Future<String?> _askPassword(_Tab tab, SshHost profile) async {
+    if (!mounted) return null;
+    final r = await showPasswordPromptDialog(context, profile);
+    if (r == null) return null;
+    if (r.save) {
+      await CredentialStorage.store(profile.profileKey, r.password);
+      tab.sshProfile = profile.copyWith(password: r.password);
+    }
+    return r.password;
+  }
+
   Future<void> _runConnectionForTab(_Tab tab) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
@@ -98,6 +110,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
                 port: profile.jumpHost!.port,
               )
             : null,
+        onPasswordNeeded: () => _askPassword(tab, profile),
       );
 
       if (!mounted || tab.manuallyDisconnected || !_tabs.contains(tab)) {
@@ -235,13 +248,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     unawaited(_runConnectionForTab(tab));
   }
 
-  Future<void> _editAndRetryConnectingTab(_Tab tab) async {
+  Future<void> _editAndRetryConnectingTab(_Tab tab, {required BuildContext ctx}) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
     final updated = await showConnectDialog(
-      context,
+      ctx,
       initialHost: profile,
-          );
+    );
     if (updated == null || !mounted) return;
     await _rememberHostProfile(updated);
     if (!mounted) return;
@@ -369,6 +382,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
                 port: profile.jumpHost!.port,
               )
             : null,
+        onPasswordNeeded: () => _askPassword(tab, profile),
       );
       if (!mounted || tab.manuallyDisconnected) {
         result.client.close();

@@ -281,13 +281,18 @@ class SftpViewState extends State<SftpView> {
   }
 
   Future<void> _delete(SftpName entry) async {
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => _ConfirmDialog(
-        title: 'Delete',
-        body: 'Delete "${entry.filename}"?',
-        confirm: 'Delete',
-        danger: true,
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _ConfirmDialog(
+          title: 'Delete',
+          body: 'Delete "${entry.filename}"?',
+          confirm: 'Delete',
+          danger: true,
+        ),
       ),
     );
     if (ok != true) return;
@@ -306,11 +311,15 @@ class SftpViewState extends State<SftpView> {
   }
 
   Future<void> _rename(SftpName entry) async {
-    final ctrl = TextEditingController(text: entry.filename);
+    final ctrl        = TextEditingController(text: entry.filename);
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) =>
-          _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
+      ),
     );
     if (name == null || name.isEmpty || name == entry.filename) return;
 
@@ -326,11 +335,15 @@ class SftpViewState extends State<SftpView> {
   }
 
   Future<void> _mkdir() async {
-    final ctrl = TextEditingController();
+    final ctrl        = TextEditingController();
+    final colors      = AppColors.maybeOf(context);
+    final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) =>
-          _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
+      builder: (ctx) => Theme(
+        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        child: _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
+      ),
     );
     if (name == null || name.isEmpty) return;
 
@@ -422,8 +435,9 @@ class SftpViewState extends State<SftpView> {
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildCompactLayout() {
+    final bg = widget.chromeBackground;
     return ColoredBox(
-      color: Colors.transparent,
+      color: bg,
       child: Column(
         children: [
           if (widget.showToolbar) _buildCompactToolbar(),
@@ -435,23 +449,23 @@ class SftpViewState extends State<SftpView> {
   }
 
   Widget _buildCompactToolbar() {
+    final colors    = AppColors.maybeOf(context);
+    final fgDim     = colors?.foregroundDim ?? _kFgMuted;
+    final toolbarBg = (colors?.popup ?? const Color(0xFF141620)).withValues(alpha: 0.65);
+    final border    = (colors?.foreground ?? Colors.white).withValues(alpha: 0.10);
     Widget bar = Container(
       height: 50,
       decoration: BoxDecoration(
-        color: const Color(0xA5141620),
-        border: const Border(
-          bottom: BorderSide(color: Color(0xFF2A2A2A), width: 0.5),
-        ),
+        color: toolbarBg,
+        border: Border(bottom: BorderSide(color: border, width: 0.5)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
-          // Up
           _MobileToolBtn(
             icon: Icons.arrow_upward_rounded,
             onTap: _path == '/' ? null : () => _listDir(sftpParent(_path)),
           ),
-          // Path breadcrumb
           Expanded(
             child: GestureDetector(
               onTap: () => _showPathBreadcrumb(),
@@ -459,11 +473,7 @@ class SftpViewState extends State<SftpView> {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
                   _path,
-                  style: const TextStyle(
-                    color: _kFgMuted,
-                    fontSize: 12,
-                    fontFamily: 'JetBrainsMono',
-                  ),
+                  style: TextStyle(color: fgDim, fontSize: 12, fontFamily: 'JetBrainsMono'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textDirection: TextDirection.rtl,
@@ -537,18 +547,21 @@ class SftpViewState extends State<SftpView> {
       );
     }
     if (_entries.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Empty folder',
-          style: TextStyle(color: _kFgDim, fontSize: 14),
+          style: TextStyle(
+            color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgDim,
+            fontSize: 14,
+          ),
         ),
       );
     }
+    final divColor = (AppColors.maybeOf(context)?.foreground ?? Colors.white).withValues(alpha: 0.08);
     return ListView.separated(
       padding: EdgeInsets.zero,
       itemCount: _entries.length,
-      separatorBuilder: (_, _) =>
-          const Divider(height: 1, color: Color(0xFF262626), indent: 52),
+      separatorBuilder: (_, _) => Divider(height: 1, color: divColor, indent: 52),
       itemBuilder: (_, i) {
         final e = _entries[i];
         return _CompactRow(
@@ -574,51 +587,50 @@ class SftpViewState extends State<SftpView> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
+        // Inject AppColors captured from state context into the sheet context.
+        final colors      = AppColors.maybeOf(context);
+        final sheetBg     = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+        final fg          = colors?.foreground ?? _kFgActive;
+        final topBorder   = (colors?.foreground ?? Colors.white).withValues(alpha: 0.16);
         const radius = BorderRadius.vertical(top: Radius.circular(16));
-        Widget sheet = Container(
-          decoration: BoxDecoration(
-            color: FrostedGlassStyle.menuFillFrosted,
-            borderRadius: radius,
-            border: const Border(
-              top: BorderSide(color: Color(0x30FFFFFF), width: 0.5),
+        Widget sheet = Theme(
+          data: Theme.of(context).copyWith(extensions: colors != null ? {colors} : null),
+          child: Container(
+            decoration: BoxDecoration(
+              color: sheetBg,
+              borderRadius: radius,
+              border: Border(top: BorderSide(color: topBorder, width: 0.5)),
             ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _SheetHandle(),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: Text(
-                  'Go to folder',
-                  style: TextStyle(
-                    color: _kFgActive,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _SheetHandle(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Text(
+                    'Go to folder',
+                    style: TextStyle(color: fg, fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                 ),
-              ),
-              _SheetItem(
-                icon: Icons.folder_rounded,
-                label: '/',
-                iconColor: const Color(0xFFFFD166),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _listDir('/');
-                },
-              ),
-              for (var i = 0; i < segments.length; i++)
                 _SheetItem(
                   icon: Icons.folder_rounded,
-                  label: '/${segments.sublist(0, i + 1).join('/')}',
+                  label: '/',
                   iconColor: const Color(0xFFFFD166),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _listDir('/${segments.sublist(0, i + 1).join('/')}');
-                  },
+                  onTap: () { Navigator.pop(ctx); _listDir('/'); },
                 ),
-              const SizedBox(height: 8),
-            ],
+                for (var i = 0; i < segments.length; i++)
+                  _SheetItem(
+                    icon: Icons.folder_rounded,
+                    label: '/${segments.sublist(0, i + 1).join('/')}',
+                    iconColor: const Color(0xFFFFD166),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _listDir('/${segments.sublist(0, i + 1).join('/')}');
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
 
@@ -640,8 +652,11 @@ class SftpViewState extends State<SftpView> {
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildStandardLayout() {
+    // Background is provided by _SftpFloatingChrome's PopupSurface wrapper;
+    // this layout must stay transparent so it doesn't paint over the panel fill.
+    const bg = Colors.transparent;
     return ColoredBox(
-      color: Colors.transparent,
+      color: bg,
       child: Column(
         children: [
           if (widget.showToolbar) _buildToolbar(),

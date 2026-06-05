@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/port_forward_rule.dart';
 import '../models/ssh_host.dart';
+import '../services/file_picker_service.dart';
 import '../widgets/frosted_glass.dart';
 import 'ssh_host_builder.dart';
 
@@ -20,23 +21,17 @@ Future<SshHost?> showConnectDialog(
   BuildContext context, {
   SshHost? initialHost,
 }) {
+  final popupColor = AppColors.maybeOf(context)?.popup;
   if (Platform.isIOS || Platform.isAndroid) {
-    return showDialog<SshHost>(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: _ConnectDialog(initialHost: initialHost, mobileSheet: true),
-        ),
-      ),
+    return _showMobileConnectDialog(
+      context,
+      child: _ConnectDialog(initialHost: initialHost, mobileSheet: true, popupColor: popupColor),
     );
   }
   return showDialog<SshHost>(
     context: context,
     barrierColor: const Color(0x66000000),
-    builder: (ctx) => _ConnectDialog(initialHost: initialHost),
+    builder: (_) => _ConnectDialog(initialHost: initialHost, popupColor: popupColor),
   );
 }
 
@@ -44,28 +39,49 @@ Future<SshHost?> showEditHostDialog(
   BuildContext context, {
   SshHost? host,
 }) {
+  final popupColor = AppColors.maybeOf(context)?.popup;
   if (Platform.isIOS || Platform.isAndroid) {
-    return showDialog<SshHost>(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 48),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: _ConnectDialog(initialHost: host, editOnly: true, mobileSheet: true),
-        ),
-      ),
+    return _showMobileConnectDialog(
+      context,
+      child: _ConnectDialog(initialHost: host, editOnly: true, mobileSheet: true, popupColor: popupColor),
     );
   }
   return showDialog<SshHost>(
     context: context,
     barrierColor: const Color(0x66000000),
-    builder: (ctx) => _ConnectDialog(initialHost: host, editOnly: true),
+    builder: (_) => _ConnectDialog(initialHost: host, editOnly: true, popupColor: popupColor),
+  );
+}
+
+/// Mobile dialog via [showGeneralDialog] without a FadeTransition, so that
+/// [BackdropFilter] inside [PopupSurface] blurs the actual screen content
+/// instead of the route's own compositing layer.
+Future<T?> _showMobileConnectDialog<T>(
+  BuildContext context, {
+  required Widget child,
+}) {
+  return showGeneralDialog<T>(
+    context: context,
+    useRootNavigator: false,
+    barrierColor: const Color(0x66000000),
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    transitionDuration: Duration.zero,
+    pageBuilder: (ctx, _, _) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 460),
+            child: child,
+          ),
+        ),
+      );
+    },
   );
 }
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
-const _kBg = Color(0xFF252525);
 const _kField = Color(0xFF141416);
 const _kBorder = Color(0xFF282828);
 const _kFocus = Color(0xFF2472C8);
@@ -81,11 +97,13 @@ class _ConnectDialog extends StatefulWidget {
     this.initialHost,
     this.editOnly = false,
     this.mobileSheet = false,
+    this.popupColor,
   });
 
   final SshHost? initialHost;
   final bool editOnly;
   final bool mobileSheet;
+  final Color? popupColor;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -207,6 +225,11 @@ class _ConnectDialogState extends State<_ConnectDialog> {
     );
   }
 
+  Future<void> _pickKey(TextEditingController ctrl) async {
+    final path = await FilePickerService.pickFile();
+    if (path != null) setState(() => ctrl.text = path);
+  }
+
   void _submit() {
     final result = buildSshHostResult(
       hostText: _hostCtrl.text,
@@ -240,13 +263,22 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   // ── Desktop: glass dialog ──────────────────────────────────────────────────
 
+  // Only apply popup colour when it is dark enough that the form's internal
+  // dark-coloured elements (_kField, _kBorder, etc.) remain readable.
+  Color get _dialogFill {
+    final p = widget.popupColor;
+    if (p != null && p.computeLuminance() < 0.5) return p;
+    return FrostedGlassStyle.menuFillFrosted;
+  }
+
   Widget _buildDesktopDialog(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
         child: PopupSurface(
-          color: _kBg,
+          color: _dialogFill,
+          backdropBlur: 20,
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: _buildScrollable(),
@@ -261,11 +293,14 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: _buildFormFields(titleFontSize: 15),
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _buildFormFields(titleFontSize: 15),
+          ),
         ),
       ),
     );
@@ -279,8 +314,10 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         ? (widget.initialHost != null ? 'Edit Connection' : 'Add Connection')
         : 'New Connection';
 
+    final screenH = MediaQuery.of(context).size.height;
     return PopupSurface(
-      color: _kBg,
+      color: _dialogFill,
+      backdropBlur: 24,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -319,21 +356,25 @@ class _ConnectDialogState extends State<_ConnectDialog> {
             ),
           ),
           const Divider(height: 1, color: Color(0xFF252525)),
-          // Scrollable form
-          Flexible(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(
-                20,
-                16,
-                20,
-                viewInsets.bottom + 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _buildFormFields(titleFontSize: 0),
+          // Scrollable form — explicit max height so dialog sizes to content
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: screenH * 0.74),
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  viewInsets.bottom + 24,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _buildFormFields(titleFontSize: 0),
+                ),
               ),
             ),
           ),
@@ -402,6 +443,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
           label: 'Identity file',
           ctrl: _keyCtrl,
           hint: 'e.g. ~/.ssh/id_ed25519',
+          onBrowse: widget.mobileSheet ? () => _pickKey(_keyCtrl) : null,
         ),
 
       const SizedBox(height: 16),
@@ -486,7 +528,11 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         if (_jumpAuthMode == _AuthMode.password)
           _Field(label: 'Password', ctrl: _jumpPasswordCtrl, obscure: true)
         else
-          _Field(label: 'Identity file', ctrl: _jumpKeyCtrl),
+          _Field(
+            label: 'Identity file',
+            ctrl: _jumpKeyCtrl,
+            onBrowse: widget.mobileSheet ? () => _pickKey(_jumpKeyCtrl) : null,
+          ),
       ],
     );
   }

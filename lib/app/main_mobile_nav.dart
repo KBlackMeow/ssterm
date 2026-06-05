@@ -25,6 +25,15 @@ class _MobileBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors     = AppColors.maybeOf(context);
+    final fg         = colors?.foreground    ?? Colors.white;
+    final fgDim      = colors?.foregroundDim ?? _kFgInactive;
+    // Mirror desktop tab-bar hierarchy: bar = page bg, pill = chromeTabSelected.
+    final barBg      = terminalBackground;
+    final pillBg     = tabSelectedColor;
+    final barBorder  = fg.withValues(alpha: 0.12);
+    final pillBorder = fg.withValues(alpha: 0.22);
+
     final items = [
       _BarItem(
         icon: Icons.computer,
@@ -58,11 +67,9 @@ class _MobileBottomBar extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(14, 8, 14, bottomInset + 8),
       child: Container(
         decoration: BoxDecoration(
-          color: activeTabIndex == 1
-              ? Color.alphaBlend(const Color(0x99000000), terminalBackground)
-              : const Color(0xF0111113),
+          color: barBg,
           borderRadius: BorderRadius.circular(_kBarRadius),
-          border: Border.all(color: const Color(0x20FFFFFF), width: 0.5),
+          border: Border.all(color: barBorder, width: 0.5),
           boxShadow: const [
             BoxShadow(
               color: Color(0x38000000),
@@ -87,12 +94,9 @@ class _MobileBottomBar extends StatelessWidget {
                     width: tabWidth - 4,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: tabSelectedColor,
+                        color: pillBg,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: const Color(0x28FFFFFF),
-                          width: 1,
-                        ),
+                        border: Border.all(color: pillBorder, width: 1),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x30000000),
@@ -106,7 +110,7 @@ class _MobileBottomBar extends StatelessWidget {
                   Row(
                     children: [
                       for (final item in items)
-                        Expanded(child: _buildBarItem(item)),
+                        Expanded(child: _buildBarItem(item, fg: fg, fgDim: fgDim)),
                     ],
                   ),
                 ],
@@ -118,18 +122,18 @@ class _MobileBottomBar extends StatelessWidget {
     );
   }
 
-  static Widget _buildBarItem(_BarItem item) {
+  static Widget _buildBarItem(_BarItem item, {required Color fg, required Color fgDim}) {
     final isActive = item.active && !item.disabled;
     final iconColor = item.disabled
-        ? _kFgInactive.withValues(alpha: 0.22)
+        ? fgDim.withValues(alpha: 0.22)
         : isActive
-            ? Colors.white
-            : _kFgInactive.withValues(alpha: 0.75);
+            ? fg
+            : fgDim.withValues(alpha: 0.75);
     final textColor = item.disabled
-        ? _kFgInactive.withValues(alpha: 0.18)
+        ? fgDim.withValues(alpha: 0.18)
         : isActive
-            ? Colors.white
-            : _kFgInactive.withValues(alpha: 0.65);
+            ? fg
+            : fgDim.withValues(alpha: 0.65);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -210,12 +214,14 @@ class _GlassNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final fg     = colors?.foreground    ?? _kFgActive;
+    final fgDim  = colors?.foregroundDim ?? _kFgInactive;
+    final border = (colors?.foreground ?? Colors.white).withValues(alpha: 0.10);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: chromeBackground,
-        border: const Border(
-          bottom: BorderSide(color: Color(0x18FFFFFF), width: 0.5),
-        ),
+        border: Border(bottom: BorderSide(color: border, width: 0.5)),
       ),
       child: SafeArea(
         bottom: false,
@@ -233,8 +239,8 @@ class _GlassNavBar extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
-                          color: _kFgActive,
+                        style: TextStyle(
+                          color: fg,
                           fontSize: 17,
                           fontWeight: FontWeight.w600,
                           letterSpacing: -0.3,
@@ -243,10 +249,7 @@ class _GlassNavBar extends StatelessWidget {
                       if (subtitle != null)
                         Text(
                           subtitle!,
-                          style: const TextStyle(
-                            color: _kFgInactive,
-                            fontSize: 11,
-                          ),
+                          style: TextStyle(color: fgDim, fontSize: 11),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -278,6 +281,9 @@ class _NavBarBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onTap != null;
+    final colors  = AppColors.maybeOf(context);
+    final fg      = colors?.foreground    ?? Colors.white;
+    final fgDim   = colors?.foregroundDim ?? _kFgInactive;
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -288,7 +294,7 @@ class _NavBarBtn extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
           decoration: enabled
               ? BoxDecoration(
-                  color: const Color(0x10FFFFFF),
+                  color: fg.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
                 )
               : null,
@@ -296,8 +302,8 @@ class _NavBarBtn extends StatelessWidget {
             icon,
             size: 18,
             color: enabled
-                ? _kFgInactive.withValues(alpha: 0.85)
-                : const Color(0xFF2A2A2A),
+                ? fgDim.withValues(alpha: 0.85)
+                : fg.withValues(alpha: 0.15),
           ),
         ),
       ),
@@ -322,27 +328,27 @@ class _Ios26Button extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final fg     = colors?.foreground ?? _kFgActive;
+    final bgTint = fg.withValues(alpha: 0.08);
+    final border = fg.withValues(alpha: 0.10);
     return GestureDetector(
       onTap: onPressed,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
         decoration: BoxDecoration(
-          color: const Color(0x12FFFFFF),
+          color: bgTint,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0x18FFFFFF), width: 0.5),
+          border: Border.all(color: border, width: 0.5),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 15, color: _kFgActive),
+            Icon(icon, size: 15, color: fg),
             const SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(
-                color: _kFgActive,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w500),
             ),
           ],
         ),

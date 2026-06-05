@@ -428,6 +428,9 @@ Future<void> showMobileTransferSheet({
   required BuildContext context,
   required TransferManager manager,
 }) {
+  final popupColor  = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+  final menuColors  = AppColors.fromBackground(popupColor);
+  final parentTheme = Theme.of(context);
   return showGeneralDialog<void>(
     context: context,
     useRootNavigator: false,
@@ -437,12 +440,15 @@ Future<void> showMobileTransferSheet({
     transitionDuration: Duration.zero,
     pageBuilder: (ctx, _, _) {
       final screenH = MediaQuery.of(ctx).size.height;
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 400, maxHeight: screenH * 0.55),
-            child: _MobileTransferSheet(manager: manager),
+      return Theme(
+        data: parentTheme.copyWith(extensions: {menuColors}),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 400, maxHeight: screenH * 0.55),
+              child: _MobileTransferSheet(manager: manager, popupColor: popupColor),
+            ),
           ),
         ),
       );
@@ -451,14 +457,16 @@ Future<void> showMobileTransferSheet({
 }
 
 class _MobileTransferSheet extends StatelessWidget {
-  const _MobileTransferSheet({required this.manager});
+  const _MobileTransferSheet({required this.manager, this.popupColor});
 
   final TransferManager manager;
+  final Color? popupColor;
 
   @override
   Widget build(BuildContext context) {
+    final fill = popupColor ?? AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
     return PopupSurface(
-      color: FrostedGlassStyle.menuFillFrosted,
+      color: fill,
       backdropBlur: 24,
       child: Column(
         mainAxisSize: MainAxisSize.min,

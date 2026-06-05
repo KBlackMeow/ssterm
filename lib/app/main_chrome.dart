@@ -632,7 +632,7 @@ class _TabChipState extends State<_TabChip> {
                   borderRadius: BorderRadius.circular(_kTabRadius),
                   border: Border.all(
                     color: isActive
-                        ? const Color(0x28FFFFFF)
+                        ? fgActive.withValues(alpha: 0.20)
                         : Colors.transparent,
                     width: 1,
                   ),
@@ -1127,13 +1127,13 @@ class _ShellRow extends StatelessWidget {
                       height: 36,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: const Color(0x12FFFFFF),
+                        color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         shell.isWsl ? Icons.laptop_windows : Icons.terminal,
                         size: 17,
-                        color: const Color(0xFF6E6E6E),
+                        color: AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF6E6E6E),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1163,10 +1163,10 @@ class _ShellRow extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const Icon(
+                    Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color: Color(0xFF3A3A3A),
+                      color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.45),
                     ),
                   ],
                 ),

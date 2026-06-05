@@ -24,8 +24,7 @@ Future<bool> showHostKeyConfirmDialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: PopupSurface(
-          child: Padding(
+        child: PopupSurface(color: FrostedGlassStyle.dialogFill,          child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -107,7 +106,7 @@ Future<void> showHostKeyChangedDialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: PopupSurface(child: Padding(
+        child: PopupSurface(color: FrostedGlassStyle.dialogFill, child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,

@@ -131,11 +131,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         activeTab?.sftp != null && activeTab?.transferManager != null;
     final hasTerminal = activeTab?.terminal != null;
 
-    // Fixed UI chrome color — Connections/Files/Settings never follow terminal theme.
-    const uiBackground = Color(0xFF111113);
+    // All tabs follow the terminal theme background.
+    final uiBackground = ts.chromeBackground;
 
     return Scaffold(
-      backgroundColor: _mobileTabIndex == 1 ? ts.chromeBackground : uiBackground,
+      backgroundColor: uiBackground,
       body: Builder(
         builder: (ctx) {
           final vp = MediaQuery.of(ctx).viewPadding;
