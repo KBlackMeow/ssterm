@@ -211,10 +211,10 @@ class _TabBarState extends State<_TabBar> with WindowListener {
                 width: 28,
                 height: 28,
                 alignment: Alignment.center,
-                child: const Icon(
+                child: Icon(
                   Icons.settings_outlined,
                   size: 15,
-                  color: _kFgInactive,
+                  color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
                 ),
               ),
             ),
@@ -330,7 +330,7 @@ class _WindowButtonState extends State<_WindowButton> {
     final hoverBg = widget.hoverColor ?? const Color(0x33FFFFFF);
     final iconColor = _hover && widget.hoverColor != null
         ? Colors.white
-        : _kFgInactive;
+        : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -372,7 +372,7 @@ class _SftpButton extends StatelessWidget {
           child: Icon(
             Icons.folder_outlined,
             size: 15,
-            color: sftpVisible ? const Color(0xFF2472C8) : _kFgInactive,
+            color: sftpVisible ? const Color(0xFF2472C8) : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
           ),
         ),
       ),
@@ -426,7 +426,7 @@ class _TransferButton extends StatelessWidget {
             Icon(
               Icons.swap_vert_rounded,
               size: isMobile ? 20 : 15,
-              color: _kFgInactive,
+              color: AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive,
             ),
             if (activeCount > 0)
               Positioned(
@@ -512,39 +512,37 @@ class _SplitButton extends StatelessWidget {
         PopupMenuItem(
           value: 'h',
           height: 36,
-          child: Row(
-            children: [
-              const Icon(Icons.vertical_split, size: 13, color: _kFgInactive),
-              const SizedBox(width: 8),
-              Text(
-                'Split horizontal',
-                style: TextStyle(
-                  color: splitAxis == Axis.horizontal
-                      ? const Color(0xFF2472C8)
-                      : _kFgActive,
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.vertical_split, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('Split horizontal', style: TextStyle(
+                  color: splitAxis == Axis.horizontal ? const Color(0xFF2472C8) : fg,
                   fontSize: 13,
-                ),
-              ),
-            ],
+                )),
+              ]);
+            },
           ),
         ),
         PopupMenuItem(
           value: 'v',
           height: 36,
-          child: Row(
-            children: [
-              const Icon(Icons.splitscreen, size: 13, color: _kFgInactive),
-              const SizedBox(width: 8),
-              Text(
-                'Split vertical',
-                style: TextStyle(
-                  color: splitAxis == Axis.vertical
-                      ? const Color(0xFF2472C8)
-                      : _kFgActive,
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.splitscreen, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('Split vertical', style: TextStyle(
+                  color: splitAxis == Axis.vertical ? const Color(0xFF2472C8) : fg,
                   fontSize: 13,
-                ),
-              ),
-            ],
+                )),
+              ]);
+            },
           ),
         ),
       ],
@@ -570,8 +568,8 @@ class _SplitButton extends StatelessWidget {
             color: isSplit
                 ? const Color(0xFF2472C8)
                 : canSplit
-                ? _kFgInactive
-                : _kFgInactive.withAlpha(80),
+                ? AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive
+                : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withAlpha(80),
           ),
         ),
       ),
@@ -611,6 +609,9 @@ class _TabChipState extends State<_TabChip> {
   @override
   Widget build(BuildContext context) {
     final isActive = widget.isActive;
+    final colors = AppColors.maybeOf(context);
+    final fgActive = colors?.foreground ?? _kFgActive;
+    final fgInactive = colors?.foregroundDim ?? _kFgInactive;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -650,7 +651,7 @@ class _TabChipState extends State<_TabChip> {
               Icon(
                 widget.tab.icon,
                 size: 12,
-                color: isActive ? _kFgActive : _kFgInactive,
+                color: isActive ? fgActive : fgInactive,
               ),
               const SizedBox(width: 6),
               if (widget.expand)
@@ -660,7 +661,7 @@ class _TabChipState extends State<_TabChip> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isActive ? _kFgActive : _kFgInactive,
+                      color: isActive ? fgActive : fgInactive,
                       fontSize: 12,
                       fontWeight:
                           isActive ? FontWeight.w500 : FontWeight.normal,
@@ -674,7 +675,7 @@ class _TabChipState extends State<_TabChip> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isActive ? _kFgActive : _kFgInactive,
+                      color: isActive ? fgActive : fgInactive,
                       fontSize: 12,
                       fontWeight:
                           isActive ? FontWeight.w500 : FontWeight.normal,
@@ -727,7 +728,9 @@ class _CloseBtnState extends State<_CloseBtn> {
             Icons.close,
             size: 11,
             color: widget.visible
-                ? (_hover ? _kFgActive : _kFgInactive)
+                ? (_hover
+                    ? AppColors.maybeOf(context)?.foreground ?? _kFgActive
+                    : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
                 : Colors.transparent,
           ),
         ),
@@ -760,77 +763,78 @@ class _PlusMenu extends StatelessWidget {
   final List<SshHost> configHosts;
   final ValueChanged<SshHost> onConnectHost;
 
-  static const _headerStyle = TextStyle(
-    color: Color(0xFF6E6E6E),
-    fontSize: 10,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.3,
-  );
-
   PopupMenuItem<String> _sectionHeader(String label) => PopupMenuItem<String>(
     enabled: false,
     height: 28,
-    child: Text(label, style: _headerStyle),
+    child: Builder(
+      builder: (ctx) => Text(
+        label,
+        style: TextStyle(
+          color: AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
+      ),
+    ),
   );
 
   PopupMenuItem<String> _hostItem(SshHost h, String prefix) =>
       PopupMenuItem<String>(
         value: '$prefix:${h.profileKey}',
         height: 36,
-        child: Row(
-          children: [
-            Icon(
-              prefix == 'saved'
-                  ? Icons.bookmark_outline
-                  : Icons.description_outlined,
-              size: 13,
-              color: _kFgInactive,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    h.alias,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _kFgActive, fontSize: 13),
+        child: Builder(
+          builder: (ctx) {
+            final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+            final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+            return Row(
+              children: [
+                Icon(
+                  prefix == 'saved'
+                      ? Icons.bookmark_outline
+                      : Icons.description_outlined,
+                  size: 13,
+                  color: dim,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(h.alias,   maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fg,  fontSize: 13)),
+                      Text(h.displayInfo, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: dim, fontSize: 11)),
+                    ],
                   ),
-                  Text(
-                    h.displayInfo,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _kFgInactive, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       );
 
   PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
     value: 'shell:${shell.id}',
     height: 36,
-    child: Row(
-      children: [
-        Icon(
-          shell.isWsl ? Icons.laptop_windows : Icons.terminal,
-          size: 13,
-          color: _kFgInactive,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            shell.displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _kFgActive, fontSize: 13),
-          ),
-        ),
-      ],
+    child: Builder(
+      builder: (ctx) {
+        final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+        final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+        return Row(
+          children: [
+            Icon(shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+                size: 13, color: dim),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(shell.displayName, maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: fg, fontSize: 13)),
+            ),
+          ],
+        );
+      },
     ),
   );
 
@@ -859,15 +863,15 @@ class _PlusMenu extends StatelessWidget {
           PopupMenuItem<String>(
             value: _refreshShellsValue,
             height: 32,
-            child: Row(
-              children: const [
-                Icon(Icons.refresh, size: 13, color: _kFgInactive),
-                SizedBox(width: 8),
-                Text(
-                  'Refresh shells',
-                  style: TextStyle(color: _kFgInactive, fontSize: 12),
-                ),
-              ],
+            child: Builder(
+              builder: (ctx) {
+                final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+                return Row(children: [
+                  Icon(Icons.refresh, size: 13, color: dim),
+                  const SizedBox(width: 8),
+                  Text('Refresh shells', style: TextStyle(color: dim, fontSize: 12)),
+                ]);
+              },
             ),
           ),
         if (savedHosts.isNotEmpty) ...[
@@ -881,18 +885,19 @@ class _PlusMenu extends StatelessWidget {
           for (final h in configHosts) _hostItem(h, 'config'),
         ],
         const PopupMenuDivider(height: 1),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'new',
           height: 36,
-          child: Row(
-            children: [
-              Icon(Icons.add, size: 13, color: _kFgInactive),
-              SizedBox(width: 8),
-              Text(
-                'New SSH…',
-                style: TextStyle(color: _kFgActive, fontSize: 13),
-              ),
-            ],
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Row(children: [
+                Icon(Icons.add, size: 13, color: dim),
+                const SizedBox(width: 8),
+                Text('New SSH…', style: TextStyle(color: fg, fontSize: 13)),
+              ]);
+            },
           ),
         ),
       ],
@@ -941,7 +946,7 @@ class _PlusMenu extends StatelessWidget {
           width: 28,
           height: 28,
           alignment: Alignment.center,
-          child: const Icon(Icons.add, size: 15, color: _kFgInactive),
+          child: Icon(Icons.add, size: 15, color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive),
         ),
       ),
     );
@@ -954,4 +959,223 @@ class _OpenSettingsIntent extends Intent {
 
 class _CloseTabIntent extends Intent {
   const _CloseTabIntent();
+}
+
+// ── Desktop home page (shown when all tabs are closed) ────────────────────────
+class _DesktopHomePage extends StatelessWidget {
+  const _DesktopHomePage({
+    required this.localShells,
+    required this.savedHosts,
+    required this.configHosts,
+    required this.onNewLocal,
+    required this.onNewSsh,
+    required this.onConnectHost,
+    required this.chromeBackground,
+  });
+
+  final List<LocalShellOption> localShells;
+  final List<SshHost> savedHosts;
+  final List<SshHost> configHosts;
+  final ValueChanged<LocalShellOption> onNewLocal;
+  final VoidCallback onNewSsh;
+  final ValueChanged<SshHost> onConnectHost;
+  final Color chromeBackground;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAnything =
+        localShells.isNotEmpty || savedHosts.isNotEmpty || configHosts.isNotEmpty;
+
+    return Container(
+      color: chromeBackground,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'New Session',
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.4,
+                            ),
+                          ),
+                        ),
+                        _NewConnectionButton(onTap: onNewSsh),
+                      ],
+                    ),
+                  ),
+
+                  if (!Platform.isIOS && localShells.isNotEmpty) ...[
+                    _SectionLabel('Local'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < localShells.length; i++)
+                            _ShellRow(
+                              shell: localShells[i],
+                              isLast: i == localShells.length - 1,
+                              onTap: () => onNewLocal(localShells[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (savedHosts.isNotEmpty) ...[
+                    _SectionLabel('Saved'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < savedHosts.length; i++)
+                            _HostRow(
+                              host: savedHosts[i],
+                              isLast: i == savedHosts.length - 1,
+                              onTap: () => onConnectHost(savedHosts[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (configHosts.isNotEmpty) ...[
+                    _SectionLabel('SSH Config'),
+                    const SizedBox(height: 6),
+                    PopupSurface(
+                      radius: _kCardRadius,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < configHosts.length; i++)
+                            _HostRow(
+                              host: configHosts[i],
+                              isLast: i == configHosts.length - 1,
+                              onTap: () => onConnectHost(configHosts[i]),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  if (!hasAnything) _EmptyConnections(onNewSsh: onNewSsh),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Local shell row used in _DesktopHomePage
+class _ShellRow extends StatelessWidget {
+  const _ShellRow({
+    required this.shell,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  final LocalShellOption shell;
+  final bool isLast;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            overlayColor: WidgetStateProperty.all(const Color(0x0CFFFFFF)),
+            child: SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0x12FFFFFF),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+                        size: 17,
+                        color: const Color(0xFF6E6E6E),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            shell.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              fontSize: 15,
+                            ),
+                          ),
+                          Text(
+                            shell.executable,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: Color(0xFF3A3A3A),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (!isLast) const Divider(height: 1, indent: 64, color: _kDivider),
+      ],
+    );
+  }
 }

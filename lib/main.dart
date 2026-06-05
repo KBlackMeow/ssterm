@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
-
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +9,9 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'dialogs/connect_dialog.dart';
+import 'dialogs/password_prompt_dialog.dart';
 import 'io/output_pipe.dart';
+import 'services/credential_storage.dart';
 import 'models/app_config.dart';
 import 'models/command.dart';
 import 'models/commands_store.dart';
@@ -156,7 +156,7 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
   Widget build(BuildContext context) {
     return Theme(
       data: Theme.of(context).copyWith(extensions: {
-        AppColors(popup: _config.terminal.chromeTabSelected),
+        AppColors.fromBackground(_config.terminal.chromeTabSelected),
       }),
       child: Shortcuts(
       shortcuts: {

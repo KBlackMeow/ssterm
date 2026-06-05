@@ -46,11 +46,11 @@ class _ConnectionsPage extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Hosts',
                       style: TextStyle(
-                        color: _kFgActive,
+                        color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
                         fontSize: 28,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.5,
@@ -189,8 +189,8 @@ class _SectionLabel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
       child: Text(
         label,
-        style: const TextStyle(
-          color: _kFgInactive,
+        style: TextStyle(
+          color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
           fontSize: 13,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.1,
@@ -207,14 +207,18 @@ class _ListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _kCardFill,
-        borderRadius: BorderRadius.circular(_kCardRadius),
-        border: Border.all(color: _kCardBorder, width: 0.5),
+    // Always dark background — inject matching dark AppColors so children
+    // (e.g. _HostRow) produce readable text regardless of the terminal theme.
+    return Theme(
+      data: Theme.of(context).copyWith(extensions: {
+        AppColors.fromBackground(FrostedGlassStyle.menuFillFrosted),
+      }),
+      child: PopupSurface(
+        radius: _kCardRadius,
+        color: FrostedGlassStyle.menuFillFrosted,
+        backdropBlur: 20,
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
 }
@@ -410,8 +414,8 @@ class _HostRow extends StatelessWidget {
                             host.alias,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: _kFgActive,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
                               fontSize: 15,
                             ),
                           ),
@@ -419,8 +423,8 @@ class _HostRow extends StatelessWidget {
                             host.displayInfo,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: _kFgInactive,
+                            style: TextStyle(
+                              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
                               fontSize: 12,
                             ),
                           ),
@@ -489,36 +493,31 @@ class _NewConnectionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Builder(
-        builder: (context) {
-          final color = AppColors.maybeOf(context)?.popup ?? _kCardFill;
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0x28FFFFFF), width: 1),
-              boxShadow: const [
-                BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
-              ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: _kCardFill,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0x28FFFFFF), width: 1),
+          boxShadow: const [
+            BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, size: 16, color: Colors.white),
+            SizedBox(width: 4),
+            Text(
+              'New',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_rounded, size: 16, color: Colors.white),
-                SizedBox(width: 4),
-                Text(
-                  'New',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -558,10 +557,10 @@ class _EmptyConnections extends StatelessWidget {
             child: const Icon(Icons.terminal_rounded, size: 32, color: _kAccent),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'No connections yet',
             style: TextStyle(
-              color: _kFgActive,
+              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
               fontSize: 18,
               fontWeight: FontWeight.w600,
               letterSpacing: -0.3,
@@ -572,7 +571,7 @@ class _EmptyConnections extends StatelessWidget {
             'Tap New to connect to your first server.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: _kFgInactive.withValues(alpha: 0.7),
+              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.7),
               fontSize: 14,
               height: 1.5,
             ),

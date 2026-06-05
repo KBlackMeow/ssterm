@@ -82,13 +82,15 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
       PopupMenuItem<int>(
         enabled: false,
         height: 28,
-        child: Text(
-          'Insert command',
-          style: _menuTextStyle(
-            color: const Color(0xFF6E6E6E),
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
+        child: Builder(
+          builder: (ctx) => Text(
+            'Insert command',
+            style: _menuTextStyle(
+              color: AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
           ),
         ),
       ),
@@ -97,21 +99,22 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
         PopupMenuItem<int>(
           value: i,
           height: 44,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _commands[i].name,
-                style: _menuTextStyle(color: _kFgActive, fontSize: 13),
-              ),
-              Text(
-                _commands[i].description,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: _menuTextStyle(color: _kFgInactive, fontSize: 11),
-              ),
-            ],
+          child: Builder(
+            builder: (ctx) {
+              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(_commands[i].name,
+                      style: _menuTextStyle(color: fg, fontSize: 13)),
+                  Text(_commands[i].description,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: _menuTextStyle(color: dim, fontSize: 11)),
+                ],
+              );
+            },
           ),
         ),
     ];
@@ -141,22 +144,32 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
     if (_commands.isEmpty) return;
     if (!context.mounted) return;
 
-    final idx = await showDialog<int>(
+    // Capture theme before entering the dialog route which loses local Theme.
+    final popupColor  = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final menuColors  = AppColors.fromBackground(popupColor);
+    final parentTheme = Theme.of(context);
+
+    final idx = await showGeneralDialog<int>(
       context: context,
+      useRootNavigator: false,
       barrierColor: const Color(0x66000000),
-      builder: (ctx) {
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      transitionDuration: Duration.zero,
+      pageBuilder: (ctx, _, _) {
         final screenH = MediaQuery.of(ctx).size.height;
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 360,
-                maxHeight: screenH * 0.55,
+        return Theme(
+          data: parentTheme.copyWith(extensions: {menuColors}),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 360,
+                  maxHeight: screenH * 0.55,
+                ),
+                child: _CmdPickerSheet(commands: _commands, popupColor: popupColor),
               ),
-              child: _CmdPickerSheet(
-                commands: _commands,
-                        ),
             ),
           ),
         );
@@ -192,8 +205,8 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
               Icons.code,
               size: 20,
               color: enabled
-                  ? _kFgInactive
-                  : _kFgInactive.withAlpha(60),
+                  ? AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive
+                  : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withAlpha(60),
             ),
           ),
         ),
@@ -211,7 +224,9 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
           child: Icon(
             Icons.code,
             size: 15,
-            color: enabled ? _kFgInactive : _kFgInactive.withAlpha(80),
+            color: enabled
+                ? AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive
+                : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withAlpha(80),
           ),
         ),
       ),
@@ -222,20 +237,26 @@ class _CmdPickerButtonState extends State<CmdPickerButton> {
 // ── Mobile centered dialog — matches desktop frosted menu style ───────────────
 
 class _CmdPickerSheet extends StatelessWidget {
-  const _CmdPickerSheet({required this.commands});
+  const _CmdPickerSheet({required this.commands, this.popupColor});
 
   final List<Command> commands;
+  final Color? popupColor;
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final fg  = colors?.foreground    ?? _kFgActive;
+    final dim = colors?.foregroundDim ?? _kFgInactive;
+    final headerDim = colors?.foregroundDim ?? const Color(0xFF6E6E6E);
+    final fill = popupColor ?? FrostedGlassStyle.menuFillFrosted;
+
     final rows = <Widget>[
-      // Header label — identical to desktop menu header
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
         child: Text(
           'Insert command',
           style: _menuTextStyle(
-            color: const Color(0xFF6E6E6E),
+            color: headerDim,
             fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.3,
@@ -243,7 +264,6 @@ class _CmdPickerSheet extends StatelessWidget {
         ),
       ),
       const Divider(height: 1, color: FrostedGlassStyle.divider),
-      // Command items
       for (var i = 0; i < commands.length; i++) ...[
         if (i > 0)
           const Divider(height: 1, color: FrostedGlassStyle.divider),
@@ -251,8 +271,7 @@ class _CmdPickerSheet extends StatelessWidget {
           type: MaterialType.transparency,
           child: InkWell(
             onTap: () => Navigator.pop(context, i),
-            overlayColor:
-                WidgetStateProperty.all(const Color(0x14FFFFFF)),
+            overlayColor: WidgetStateProperty.all(const Color(0x14FFFFFF)),
             child: SizedBox(
               height: 44,
               child: Padding(
@@ -261,18 +280,12 @@ class _CmdPickerSheet extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      commands[i].name,
-                      style: _menuTextStyle(
-                          color: _kFgActive, fontSize: 13),
-                    ),
-                    Text(
-                      commands[i].description,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _menuTextStyle(
-                          color: _kFgInactive, fontSize: 11),
-                    ),
+                    Text(commands[i].name,
+                        style: _menuTextStyle(color: fg, fontSize: 13)),
+                    Text(commands[i].description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _menuTextStyle(color: dim, fontSize: 11)),
                   ],
                 ),
               ),
@@ -282,14 +295,16 @@ class _CmdPickerSheet extends StatelessWidget {
       ],
     ];
 
-    final list = SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: rows,
+    return PopupSurface(
+      color: fill,
+      backdropBlur: 24,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        ),
       ),
     );
-
-    return PopupSurface(child: list);
   }
 }

@@ -184,10 +184,13 @@ class _SftpFloatingChrome extends StatelessWidget {
             _kSftpPanelMargin,
           );
 
+    final panelColor = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.panelFillFrosted;
     return Padding(
       padding: margin,
       child: PopupSurface(
+        color: panelColor,
         radius: FrostedGlassStyle.panelRadius,
+        backdropBlur: 20,
         child: child,
       ),
     );

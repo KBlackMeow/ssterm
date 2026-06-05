@@ -30,80 +30,94 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     final wallpaperFile =
         hasWallpaper ? WallpaperStorage.resolveFile(ts.wallpaperId) : null;
 
-    Widget chrome = Column(
-      children: [
-        _TabBar(
-          tabs: _tabs,
-          active: _active,
-          backgroundColor: ts.chromeBackground,
-          tabSelectedColor: ts.chromeTabSelected,
-          tabUnselectedColor: ts.chromeTabUnselected,
-          onSelect: _selectTab,
-          onClose: _closeTab,
-          onNewLocal: _newLocalTab,
-          localShells: _localShells,
-          onRefreshLocalShells: _refreshLocalShellsIfChanged,
-          onNewSsh: () => _showConnectDialog(),
-          onSettings: _openSettings,
-          savedHosts: _savedHosts,
-          configHosts: _configHosts,
-          onConnectHost: _connectSavedHost,
-          onInsertCommand:
-              _tabs.isNotEmpty && _tabs[_active].terminal != null
-              ? _insertCommand
-              : null,
-          hasSftp:
-              _tabs.isNotEmpty &&
-              _active < _tabs.length &&
-              _tabs[_active].sftp != null,
-          sftpVisible:
-              _tabs.isNotEmpty &&
-              _active < _tabs.length &&
-              _tabs[_active].sftpPanelVisible,
-          onToggleSftp: () {
-            if (_tabs.isNotEmpty && _active < _tabs.length) {
-              setState(
-                () => _tabs[_active].sftpPanelVisible =
-                    !_tabs[_active].sftpPanelVisible,
-              );
-            }
-          },
-          transferManager: _tabs.isNotEmpty && _active < _tabs.length
-              ? _tabs[_active].transferManager
-              : null,
-          canSplit: _activeTabCanSplit,
-          isSplit: _activeTabIsSplit,
-          splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
-          onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
-          onSplitVertical: () => _splitCurrentTab(Axis.vertical),
-        ),
-        Expanded(
-          child: SafeArea(
-            top: false,
-            child: _buildBody(),
-          ),
-        ),
-      ],
-    );
+    return Builder(
+      builder: (innerCtx) {
+        Widget chrome = Column(
+          children: [
+            _TabBar(
+              tabs: _tabs,
+              active: _active,
+              backgroundColor: ts.chromeBackground,
+              tabSelectedColor: ts.chromeTabSelected,
+              tabUnselectedColor: ts.chromeTabUnselected,
+              onSelect: _selectTab,
+              onClose: _closeTab,
+              onNewLocal: _newLocalTab,
+              localShells: _localShells,
+              onRefreshLocalShells: _refreshLocalShellsIfChanged,
+              onNewSsh: () => _showConnectDialog(ctx: innerCtx),
+              onSettings: _openSettings,
+              savedHosts: _savedHosts,
+              configHosts: _configHosts,
+              onConnectHost: _connectSavedHost,
+              onInsertCommand:
+                  _tabs.isNotEmpty && _tabs[_active].terminal != null
+                  ? _insertCommand
+                  : null,
+              hasSftp:
+                  _tabs.isNotEmpty &&
+                  _active < _tabs.length &&
+                  _tabs[_active].sftp != null,
+              sftpVisible:
+                  _tabs.isNotEmpty &&
+                  _active < _tabs.length &&
+                  _tabs[_active].sftpPanelVisible,
+              onToggleSftp: () {
+                if (_tabs.isNotEmpty && _active < _tabs.length) {
+                  setState(
+                    () => _tabs[_active].sftpPanelVisible =
+                        !_tabs[_active].sftpPanelVisible,
+                  );
+                }
+              },
+              transferManager: _tabs.isNotEmpty && _active < _tabs.length
+                  ? _tabs[_active].transferManager
+                  : null,
+              canSplit: _activeTabCanSplit,
+              isSplit: _activeTabIsSplit,
+              splitAxis: _activeTabIsSplit ? _tabs[_active].splitAxis : null,
+              onSplitHorizontal: () => _splitCurrentTab(Axis.horizontal),
+              onSplitVertical: () => _splitCurrentTab(Axis.vertical),
+            ),
+            Expanded(
+              child: SafeArea(
+                top: false,
+                child: _tabs.isEmpty
+                    ? _DesktopHomePage(
+                        localShells: _localShells,
+                        savedHosts: _savedHosts,
+                        configHosts: _configHosts,
+                        onNewLocal: _newLocalTab,
+                        onNewSsh: () => _showConnectDialog(ctx: innerCtx),
+                        onConnectHost: _connectSavedHost,
+                        chromeBackground: ts.chromeBackground,
+                      )
+                    : _buildBody(),
+              ),
+            ),
+          ],
+        );
 
-    if (wallpaperFile != null) {
-      chrome = Stack(
-        fit: StackFit.expand,
-        children: [
-          WallpaperBackground(
-            file: wallpaperFile,
-            opacity: ts.wallpaperOpacity,
-            blur: ts.wallpaperBlur,
-          ),
-          chrome,
-        ],
-      );
-    }
+        if (wallpaperFile != null) {
+          chrome = Stack(
+            fit: StackFit.expand,
+            children: [
+              WallpaperBackground(
+                file: wallpaperFile,
+                opacity: ts.wallpaperOpacity,
+                blur: ts.wallpaperBlur,
+              ),
+              chrome,
+            ],
+          );
+        }
 
-    return Scaffold(
-      backgroundColor:
-          wallpaperFile != null ? Colors.transparent : ts.chromeBackground,
-      body: chrome,
+        return Scaffold(
+          backgroundColor:
+              wallpaperFile != null ? Colors.transparent : ts.chromeBackground,
+          body: chrome,
+        );
+      },
     );
   }
 
@@ -146,7 +160,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       },
                       onCloseSession: _closeTab,
                       onNewSsh: () async {
-                        await _showConnectDialog();
+                        await _showConnectDialog(ctx: ctx);
                         if (mounted && _tabs.isNotEmpty) {
                           setState(() => _mobileTabIndex = 1);
                         }
@@ -164,7 +178,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       onSelectSession: _selectTab,
                       onCloseSession: _closeTab,
                       onNewSsh: () async {
-                        await _showConnectDialog();
+                        await _showConnectDialog(ctx: ctx);
                         if (mounted && _tabs.isNotEmpty) {
                           setState(() => _mobileTabIndex = 1);
                         }
@@ -346,17 +360,20 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           children: [
             Text(
               'Connecting to $alias',
-              style: const TextStyle(
-                color: _kFgActive,
+              style: TextStyle(
+                color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 letterSpacing: -0.3,
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'You can switch tabs while waiting.',
-              style: TextStyle(color: _kFgInactive, fontSize: 13),
+              style: TextStyle(
+                color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -366,7 +383,8 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
 
   Widget _buildErrorBody(_Tab tab) {
     final alias = tab.sshProfile?.alias ?? tab.title;
-    return Container(
+    return Builder(
+      builder: (innerCtx) => Container(
       color: _config.terminal.chromeBackground,
       alignment: Alignment.center,
       child: Padding(
@@ -396,8 +414,8 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
               const SizedBox(height: 18),
               Text(
                 alias,
-                style: const TextStyle(
-                  color: _kFgActive,
+                style: TextStyle(
+                  color: AppColors.maybeOf(innerCtx)?.foreground ?? _kFgActive,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   letterSpacing: -0.3,
@@ -407,7 +425,10 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
               Text(
                 tab.connectionError ?? 'Connection failed',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: _kFgInactive, fontSize: 13),
+                style: TextStyle(
+                  color: AppColors.maybeOf(innerCtx)?.foregroundDim ?? _kFgInactive,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 24),
               Row(
@@ -422,13 +443,14 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                   _Ios26Button(
                     label: 'Edit…',
                     icon: Icons.edit_outlined,
-                    onPressed: () => _editAndRetryConnectingTab(tab),
+                    onPressed: () => _editAndRetryConnectingTab(tab, ctx: innerCtx),
                   ),
                 ],
               ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

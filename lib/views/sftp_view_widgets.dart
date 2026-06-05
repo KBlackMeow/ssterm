@@ -27,13 +27,16 @@ class _ToolBtnState extends State<_ToolBtn> {
   @override
   Widget build(BuildContext context) {
     final disabled = widget.onTap == null;
+    final fgNormal = AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted;
+    final fgHover  = AppColors.maybeOf(context)?.foreground    ?? const Color(0xFFC7C7C7);
+    final fgDisabled = AppColors.maybeOf(context)?.foreground.withValues(alpha: 0.2) ?? _kFgDisabled;
     final color = disabled
-        ? _kFgDisabled
+        ? fgDisabled
         : widget.danger
             ? const Color(0xFFFF6E67)
             : _hover
-                ? const Color(0xFFC7C7C7)
-                : _kFgMuted;
+                ? fgHover
+                : fgNormal;
 
     return Tooltip(
       message: widget.tooltip,
@@ -74,11 +77,14 @@ class _ConfirmDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const popupColor = FrostedGlassStyle.menuFillFrosted;
     return Dialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 360,
         child: PopupSurface(
+          color: popupColor,
+          backdropBlur: 20,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -133,11 +139,14 @@ class _InputDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const popupColor = FrostedGlassStyle.menuFillFrosted;
     return Dialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 360,
         child: PopupSurface(
+          color: popupColor,
+          backdropBlur: 20,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(

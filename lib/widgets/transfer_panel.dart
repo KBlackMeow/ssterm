@@ -59,10 +59,12 @@ Future<void> showTransferMenu({
       position.left.clamp(8.0, screen.width - _kTransferMenuWidth - 8);
   final top = position.top
       .clamp(8.0, screen.height - kTransferMenuHeight - 8);
-  // Capture theme color before entering the OverlayEntry builder,
+  // Capture theme colors before entering the OverlayEntry builder,
   // which may not inherit the local Theme.
   final popupColor = AppColors.maybeOf(context)?.popup
       ?? (frostedGlass ? FrostedGlassStyle.menuFillFrosted : FrostedGlassStyle.menuFillSolid);
+  final menuColors = AppColors.fromBackground(popupColor);
+  final appTheme = Theme.of(context);
 
   final completer = Completer<void>();
 
@@ -89,12 +91,16 @@ Future<void> showTransferMenu({
           top: top,
           width: _kTransferMenuWidth,
           height: kTransferMenuHeight,
-          child: Material(
-            type: MaterialType.transparency,
-            child: PopupSurface(
-              color: popupColor,
-              radius: FrostedGlassStyle.menuRadius,
-              child: TransferMenuContent(manager: manager),
+          child: Theme(
+            data: appTheme.copyWith(extensions: {menuColors}),
+            child: Material(
+              type: MaterialType.transparency,
+              child: PopupSurface(
+                color: popupColor,
+                radius: FrostedGlassStyle.menuRadius,
+                backdropBlur: frostedGlass ? 20 : 0,
+                child: TransferMenuContent(manager: manager),
+              ),
             ),
           ),
         ),
@@ -184,9 +190,12 @@ class _TransferMenuHeader extends StatelessWidget {
             if (hasDone)
               GestureDetector(
                 onTap: manager.clearDone,
-                child: const Text(
+                child: Text(
                   'Clear done',
-                  style: TextStyle(color: _kFgMuted, fontSize: 10),
+                  style: TextStyle(
+                    color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+                    fontSize: 10,
+                  ),
                 ),
               ),
           ],
@@ -205,10 +214,13 @@ class _TransferMenuListBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final tasks = manager.tasks;
     if (tasks.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'No transfers',
-          style: TextStyle(color: _kFgMuted, fontSize: 12),
+          style: TextStyle(
+            color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+            fontSize: 12,
+          ),
         ),
       );
     }
@@ -282,14 +294,16 @@ class _TransferRowState extends State<_TransferRow> {
               Icon(
                 isUp ? Icons.upload : Icons.download,
                 size: 13,
-                color: isActive ? _kBlue : _kFgMuted,
+                color: isActive ? _kBlue : AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   task.name,
-                  style:
-                      const TextStyle(color: _kFgActive, fontSize: 13),
+                  style: TextStyle(
+                    color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                    fontSize: 13,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -297,8 +311,8 @@ class _TransferRowState extends State<_TransferRow> {
               const SizedBox(width: 6),
               Text(
                 _transferSizeLabel(task),
-                style: const TextStyle(
-                    color: _kFgMuted,
+                style: TextStyle(
+                    color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
                     fontSize: 10,
                     fontFamily: 'JetBrainsMono'),
               ),
@@ -347,8 +361,10 @@ class _TransferRowState extends State<_TransferRow> {
           const SizedBox(width: 6),
           Text(
             '${(task.progress * 100).round()}%',
-            style: const TextStyle(
-                color: _kFgMuted, fontSize: 10, fontFamily: 'JetBrainsMono'),
+            style: TextStyle(
+                color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+                fontSize: 10,
+                fontFamily: 'JetBrainsMono'),
           ),
         ],
       );
@@ -359,11 +375,11 @@ class _TransferRowState extends State<_TransferRow> {
           SizedBox(width: 4),
           Text('Done', style: TextStyle(color: _kGreen, fontSize: 11)),
         ]),
-      TransferStatus.cancelled => const Row(children: [
-          Icon(Icons.cancel_outlined, size: 11, color: _kFgMuted),
-          SizedBox(width: 4),
+      TransferStatus.cancelled => Row(children: [
+          Icon(Icons.cancel_outlined, size: 11, color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted),
+          const SizedBox(width: 4),
           Text('Cancelled',
-              style: TextStyle(color: _kFgMuted, fontSize: 11)),
+              style: TextStyle(color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted, fontSize: 11)),
         ]),
       TransferStatus.error => Row(children: [
           const Icon(Icons.error_outline, size: 11, color: _kRed),
@@ -412,10 +428,14 @@ Future<void> showMobileTransferSheet({
   required BuildContext context,
   required TransferManager manager,
 }) {
-  return showDialog<void>(
+  return showGeneralDialog<void>(
     context: context,
+    useRootNavigator: false,
     barrierColor: const Color(0x66000000),
-    builder: (ctx) {
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    transitionDuration: Duration.zero,
+    pageBuilder: (ctx, _, _) {
       final screenH = MediaQuery.of(ctx).size.height;
       return Center(
         child: Padding(
@@ -438,6 +458,8 @@ class _MobileTransferSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupSurface(
+      color: FrostedGlassStyle.menuFillFrosted,
+      backdropBlur: 24,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

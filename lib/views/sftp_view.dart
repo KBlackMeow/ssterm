@@ -62,7 +62,6 @@ const _kChromeBar = Color(0x66252525);
 const _kChromeHeader = Color(0x55222222);
 
 /// Below this width the compact (mobile-style) layout is used.
-const _kCompactWidth = 500.0;
 
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgMuted = Color(0xFF8E8E8E);
@@ -415,12 +414,7 @@ class SftpViewState extends State<SftpView> {
     if (Platform.isIOS || Platform.isAndroid) {
       return _buildCompactLayout();
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < _kCompactWidth;
-        return compact ? _buildCompactLayout() : _buildStandardLayout();
-      },
-    );
+    return _buildStandardLayout();
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -702,9 +696,13 @@ class SftpViewState extends State<SftpView> {
   Widget _buildToolbar() {
     final canDown = _selected != null && !_selected!.attr.isDirectory;
     final canDel = _selected != null;
+    final colors  = AppColors.maybeOf(context);
+    final fgDim   = colors?.foregroundDim ?? _kFgMuted;
+    final divider = colors?.foreground.withValues(alpha: 0.12) ?? const Color(0xFF3A3A3A);
+    final toolbarBg = colors?.foreground.withValues(alpha: 0.06) ?? _kChromeBar;
     return Container(
       height: 34,
-      color: _kChromeBar,
+      color: toolbarBg,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(
         children: [
@@ -719,16 +717,16 @@ class SftpViewState extends State<SftpView> {
             onTap: () => _listDir(_path),
           ),
           const SizedBox(width: 4),
-          const SizedBox(
+          SizedBox(
             height: 16,
-            child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+            child: VerticalDivider(color: divider, width: 1),
           ),
           const SizedBox(width: 4),
           Expanded(
             child: Text(
               _path,
-              style: const TextStyle(
-                color: _kFgMuted,
+              style: TextStyle(
+                color: fgDim,
                 fontSize: 11,
                 fontFamily: 'JetBrainsMono',
               ),
@@ -736,9 +734,9 @@ class SftpViewState extends State<SftpView> {
             ),
           ),
           const SizedBox(width: 4),
-          const SizedBox(
+          SizedBox(
             height: 16,
-            child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+            child: VerticalDivider(color: divider, width: 1),
           ),
           const SizedBox(width: 4),
           if (widget.panelPosition != null &&
@@ -779,9 +777,9 @@ class SftpViewState extends State<SftpView> {
           ),
           if (widget.onClose != null) ...[
             const SizedBox(width: 4),
-            const SizedBox(
+            SizedBox(
               height: 16,
-              child: VerticalDivider(color: Color(0xFF3A3A3A), width: 1),
+              child: VerticalDivider(color: divider, width: 1),
             ),
             _ToolBtn(
               icon: Icons.close,
@@ -795,50 +793,35 @@ class SftpViewState extends State<SftpView> {
   }
 
   Widget _buildColumnHeader() {
+    final colors   = AppColors.maybeOf(context);
+    final fgDim    = colors?.foregroundDim ?? _kFgDim;
+    final headerBg = colors?.foreground.withValues(alpha: 0.04) ?? _kChromeHeader;
     return Container(
       height: 24,
-      color: _kChromeHeader,
+      color: headerBg,
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(width: 18),
-          SizedBox(width: 8),
+          const SizedBox(width: 18),
+          const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              'Name',
-              style: TextStyle(
-                color: _kFgDim,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text('Name',
+              style: TextStyle(color: fgDim, fontSize: 11, fontWeight: FontWeight.w600)),
           ),
-          SizedBox(width: 6),
+          const SizedBox(width: 6),
           SizedBox(
             width: _kSizeColWidth,
-            child: Text(
-              'Size',
+            child: Text('Size',
               textAlign: TextAlign.right,
-              style: TextStyle(
-                color: _kFgDim,
-                fontSize: _kMetaFontSize,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
           ),
-          SizedBox(width: 4),
+          const SizedBox(width: 4),
           SizedBox(
             width: _kDateColWidth,
-            child: Text(
-              'Modified',
+            child: Text('Modified',
               textAlign: TextAlign.right,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: _kFgDim,
-                fontSize: _kMetaFontSize,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -859,6 +842,12 @@ class SftpViewState extends State<SftpView> {
         ),
       );
     }
+    final colors  = AppColors.maybeOf(context);
+    final fg      = colors?.foreground    ?? const Color(0xFFC7C7C7);
+    final fgFile  = colors?.foreground.withValues(alpha: 0.67) ?? const Color(0xFFAAAAAA);
+    final fgDim   = colors?.foregroundDim ?? _kFgDim;
+    final fgIcon  = colors?.foregroundDim ?? _kFgDim;
+
     return ListView.builder(
       itemCount: _entries.length,
       itemBuilder: (_, i) {
@@ -890,7 +879,7 @@ class SftpViewState extends State<SftpView> {
                         ? const Color(0xFFFFD166)
                         : isLink
                             ? const Color(0xFF4EC9B0)
-                            : _kFgDim,
+                            : fgIcon,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -900,11 +889,7 @@ class SftpViewState extends State<SftpView> {
                       child: Text(
                         e.filename,
                         style: TextStyle(
-                          color: isDir
-                              ? const Color(0xFFC7C7C7)
-                              : isLink
-                                  ? const Color(0xFF4EC9B0)
-                                  : const Color(0xFFAAAAAA),
+                          color: isDir ? fg : isLink ? const Color(0xFF4EC9B0) : fgFile,
                           fontSize: 13,
                           fontFamily: 'JetBrainsMono',
                         ),
@@ -921,8 +906,8 @@ class SftpViewState extends State<SftpView> {
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _kFgDim,
+                      style: TextStyle(
+                        color: fgDim,
                         fontSize: _kMetaFontSize,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -936,8 +921,8 @@ class SftpViewState extends State<SftpView> {
                       textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _kFgDim,
+                      style: TextStyle(
+                        color: fgDim,
                         fontSize: _kMetaFontSize,
                         fontFamily: 'JetBrainsMono',
                       ),
@@ -966,17 +951,27 @@ class SftpViewState extends State<SftpView> {
       position: position,
       items: [
         if (!isDir)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'download',
             height: 36,
-            child: Text('Download',
-                style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13)),
+            child: Builder(
+              builder: (ctx) => Text('Download',
+                  style: TextStyle(
+                    color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
+                    fontSize: 13,
+                  )),
+            ),
           ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'rename',
           height: 36,
-          child: Text('Rename',
-              style: TextStyle(color: Color(0xFFC7C7C7), fontSize: 13)),
+          child: Builder(
+            builder: (ctx) => Text('Rename',
+                style: TextStyle(
+                  color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
+                  fontSize: 13,
+                )),
+          ),
         ),
         const PopupMenuItem(
           value: 'delete',
