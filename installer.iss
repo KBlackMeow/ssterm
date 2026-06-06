@@ -13,7 +13,7 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-SetupIconFile=assets\icon\icon.ico
+SetupIconFile=windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\ssterm.exe
 
 [Files]

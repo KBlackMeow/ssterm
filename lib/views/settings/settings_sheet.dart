@@ -721,7 +721,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (!ImageFilePicker.isSupported) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Image picker is only available on macOS.')),
+        const SnackBar(content: Text('Image picker is not available on this platform.')),
       );
       return;
     }

@@ -2,11 +2,12 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-/// Stores wallpaper images under `~/.ssterm/wallpapers/`.
+import '../utils/app_dir.dart';
+
+/// Stores wallpaper images under `<app data>/.ssterm/wallpapers/`.
 class WallpaperStorage {
   static Future<Directory> directory() async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory(p.join(home, '.ssterm', 'wallpapers'));
+    final dir = Directory(p.join(appBasePath(), '.ssterm', 'wallpapers'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -15,8 +16,7 @@ class WallpaperStorage {
 
   static File? resolveFile(String? wallpaperId) {
     if (wallpaperId == null || wallpaperId.isEmpty) return null;
-    final home = Platform.environment['HOME'] ?? '';
-    final file = File(p.join(home, '.ssterm', 'wallpapers', wallpaperId));
+    final file = File(p.join(appBasePath(), '.ssterm', 'wallpapers', wallpaperId));
     return file.existsSync() ? file : null;
   }
 

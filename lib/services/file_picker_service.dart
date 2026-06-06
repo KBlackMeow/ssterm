@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 
+import '../utils/windows_powershell.dart';
+
 /// Cross-platform file picker.
 /// Mobile (iOS/Android): native Files/Storage picker via file_picker.
 /// Desktop: native OS dialogs without Flutter plugins.
@@ -27,11 +29,14 @@ class FilePickerService {
   }
 
   static Future<String?> _pickWindows() async {
-    const ps = '[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null; '
-        r'$d = New-Object System.Windows.Forms.OpenFileDialog; '
-        r'$d.Title = "Select file to upload"; '
-        r'if ($d.ShowDialog() -eq "OK") { $d.FileName }';
-    final result = await Process.run('powershell', ['-Command', ps]);
+    final script = windowsDpiAwarePrelude +
+        r'''
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = "Select file to upload"
+if ($d.ShowDialog() -eq "OK") { [Console]::Out.Write($d.FileName) }
+''';
+    final result = await runPowerShellEncoded(script);
     if (result.exitCode != 0) return null;
     final path = (result.stdout as String).trim();
     return path.isEmpty ? null : path;
