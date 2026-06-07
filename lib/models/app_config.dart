@@ -5,6 +5,7 @@ import '../utils/app_dir.dart';
 
 import '../services/local_shell_discovery.dart';
 import '../views/ssh_session_view.dart';
+import 'agent_config.dart';
 import 'terminal_settings.dart';
 
 class AppConfig {
@@ -13,20 +14,16 @@ class AppConfig {
     SftpPanelPosition? sftpPosition,
     this.sftpSize,
     List<LocalShellOption>? cachedShells,
+    this.agent,
   })  : terminal = terminal ?? TerminalSettings(),
         sftpPosition = sftpPosition ?? SftpPanelPosition.bottom,
         cachedShells = cachedShells ?? const <LocalShellOption>[];
 
   TerminalSettings terminal;
   SftpPanelPosition sftpPosition;
-  /// Custom panel size in logical pixels; `null` uses [SshSessionView.defaultPanelFraction].
   double? sftpSize;
-
-  /// Persisted result of the last local-shell discovery. Restored at startup so
-  /// the `+` menu can render synchronously without re-running discovery (which
-  /// on Windows involves `wsl --list --quiet` and is the only slow path that
-  /// would otherwise delay menu appearance).
   List<LocalShellOption> cachedShells;
+  AgentConfig? agent;
 
   static Future<File> _file() async {
     final dir = await appDataDir();
@@ -47,6 +44,7 @@ class AppConfig {
             : SftpPanelPosition.right,
         sftpSize: (json['sftpSize'] as num?)?.toDouble(),
         cachedShells: _decodeShells(json['cachedShells']),
+        agent: AgentConfig.fromJson(json['agent'] as Map<String, dynamic>?),
       );
     } catch (_) {
       return AppConfig();
@@ -62,6 +60,7 @@ class AppConfig {
         if (sftpSize != null) 'sftpSize': sftpSize,
         if (cachedShells.isNotEmpty)
           'cachedShells': cachedShells.map((s) => s.toJson()).toList(),
+        if (agent != null) 'agent': agent!.toJson(),
       }),
     );
   }

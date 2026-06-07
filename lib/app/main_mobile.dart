@@ -22,6 +22,8 @@ class _TerminalPage extends StatelessWidget {
     required this.onNewSsh,
     required this.onInsertCommand,
     required this.terminalBody,
+    this.aiPanelVisible = false,
+    this.onToggleAiPanel,
     this.chromeBackground = const Color(0xFF111113),
   });
 
@@ -32,6 +34,11 @@ class _TerminalPage extends StatelessWidget {
   final VoidCallback onNewSsh;
   final ValueChanged<String>? onInsertCommand;
   final Widget terminalBody;
+  final bool aiPanelVisible;
+
+  /// Toggles the AI assistant panel for the active tab.  Null on tabs that
+  /// have no terminal yet (connecting / error state) so the icon is hidden.
+  final VoidCallback? onToggleAiPanel;
   final Color chromeBackground;
 
   @override
@@ -51,6 +58,8 @@ class _TerminalPage extends StatelessWidget {
           onCommands: onInsertCommand != null
               ? (ctx) => _showCommandsSheet(ctx, onInsertCommand!)
               : null,
+          aiPanelVisible: aiPanelVisible,
+          onToggleAiPanel: onToggleAiPanel,
           chromeBackground: chromeBackground,
         ),
         Expanded(child: terminalBody),
@@ -100,6 +109,8 @@ class _SessionTabStrip extends StatelessWidget {
     required this.onAdd,
     required this.chromeBackground,
     this.onCommands,
+    this.aiPanelVisible = false,
+    this.onToggleAiPanel,
   });
 
   final List<_Tab> tabs;
@@ -108,6 +119,8 @@ class _SessionTabStrip extends StatelessWidget {
   final ValueChanged<int> onClose;
   final VoidCallback onAdd;
   final void Function(BuildContext)? onCommands;
+  final bool aiPanelVisible;
+  final VoidCallback? onToggleAiPanel;
   final Color chromeBackground;
 
   @override
@@ -148,6 +161,14 @@ class _SessionTabStrip extends StatelessWidget {
                     onTap: () => onCommands!(ctx),
                     tooltip: 'Commands',
                   ),
+                ),
+              // AI assistant — same affordance as desktop _TabBar's AiAssistantButton.
+              if (onToggleAiPanel != null)
+                _StripIconBtn(
+                  icon: Icons.auto_awesome,
+                  onTap: onToggleAiPanel!,
+                  tooltip: aiPanelVisible ? 'Hide AI Assistant' : 'Show AI Assistant',
+                  activeColor: aiPanelVisible ? _kAccent : null,
                 ),
               const SizedBox(width: 4),
             ],
@@ -252,14 +273,21 @@ class _StripIconBtn extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.tooltip = '',
+    this.activeColor,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String tooltip;
 
+  /// When non-null, overrides the default dimmed colour — used to mark the
+  /// AI-panel toggle as "currently active" (matches desktop AiAssistantButton).
+  final Color? activeColor;
+
   @override
   Widget build(BuildContext context) {
+    final color = activeColor ??
+        (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.8);
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -268,11 +296,7 @@ class _StripIconBtn extends StatelessWidget {
         child: SizedBox(
           width: 36,
           height: 44,
-          child: Icon(
-            icon,
-            size: 18,
-            color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.8),
-          ),
+          child: Icon(icon, size: 18, color: color),
         ),
       ),
     );
@@ -501,6 +525,8 @@ class _MobileSettingsPage extends StatelessWidget {
     required this.savedHosts,
     required this.onSaveHost,
     required this.onDeleteHost,
+    this.agent,
+    this.onAgentChanged,
     this.chromeBackground = const Color(0xFF111113),
   });
 
@@ -509,6 +535,8 @@ class _MobileSettingsPage extends StatelessWidget {
   final List<SshHost> savedHosts;
   final void Function(SshHost?, SshHost) onSaveHost;
   final ValueChanged<SshHost> onDeleteHost;
+  final AgentConfig? agent;
+  final ValueChanged<AgentConfig>? onAgentChanged;
   final Color chromeBackground;
 
   @override
@@ -526,6 +554,8 @@ class _MobileSettingsPage extends StatelessWidget {
             savedHosts: savedHosts,
             onSaveHost: onSaveHost,
             onDeleteHost: onDeleteHost,
+            agent: agent,
+            onAgentChanged: onAgentChanged,
           ),
         ),
       ],

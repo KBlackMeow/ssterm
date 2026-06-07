@@ -22,6 +22,8 @@ class _TabBar extends StatefulWidget {
     required this.sftpVisible,
     required this.onToggleSftp,
     this.transferManager,
+    required this.aiPanelVisible,
+    required this.onToggleAiPanel,
     required this.canSplit,
     required this.isSplit,
     this.splitAxis,
@@ -50,6 +52,8 @@ class _TabBar extends StatefulWidget {
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
   final TransferManager? transferManager;
+  final bool aiPanelVisible;
+  final VoidCallback onToggleAiPanel;
   final bool canSplit;
   final bool isSplit;
   final Axis? splitAxis;
@@ -187,6 +191,7 @@ class _TabBarState extends State<_TabBar> with WindowListener {
           CmdPickerButton(
             onInsert: widget.onInsertCommand,
           ),
+          AiAssistantButton(visible: widget.aiPanelVisible, onToggle: widget.onToggleAiPanel),
           if (widget.hasSftp) ...[
             _SftpButton(sftpVisible: widget.sftpVisible, onToggle: widget.onToggleSftp),
             if (widget.transferManager != null)

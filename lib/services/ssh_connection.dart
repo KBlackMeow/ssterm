@@ -177,13 +177,51 @@ __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
 HISTFILE="$HOME/.zsh_history"
+# Tell the agent which shell binary to use when it needs to wrap a
+# multi-line command in `<shell> -c '…'` (so the user shell sees it as a
+# single command, emitting one OSC 133 C/D pair).  Without this hint the
+# agent would default to `bash`, which is missing on Alpine / Termux /
+# zsh-only systems.
+export SSTM_SHELL_BIN=zsh
 if [ -f "$HOME/.zshrc" ]; then
   . "$HOME/.zshrc"
 fi
-case " ${precmd_functions[*]} " in
-  *" __ssterm_cwd "*) : ;;
-  *) precmd_functions+=(__ssterm_cwd) ;;
-esac
+__ssterm_osc133_preexec() {
+  printf '\033]133;C\007'
+}
+# CRITICAL: must run FIRST in precmd_functions so $? still carries the
+# user command's exit code.  Subsequent hooks (case statements, printf)
+# overwrite $?, which is why iTerm2 / VS Code shell-integration also
+# install their precmd at index 0.  We re-assert the position on every
+# call from __ssterm_heal_hooks below.
+__ssterm_osc133_precmd() {
+  local _ssterm_ec=$?
+  printf '\033]133;D;%s\007' "$_ssterm_ec"
+  return $_ssterm_ec
+}
+# Install hooks.  __ssterm_heal_hooks runs on every precmd and restores
+# our hooks if a framework (oh-my-zsh) removed them — and forces
+# __ssterm_osc133_precmd to be at index 0 of precmd_functions.
+__ssterm_heal_hooks() {
+  # Force osc133_precmd to be the FIRST precmd hook.  If it is missing
+  # OR not at index 1 (zsh arrays are 1-indexed), rebuild the array.
+  if [[ "${precmd_functions[1]}" != "__ssterm_osc133_precmd" ]]; then
+    precmd_functions=(__ssterm_osc133_precmd ${precmd_functions:#__ssterm_osc133_precmd})
+  fi
+  case " ${precmd_functions[*]} " in
+    *" __ssterm_cwd "*) : ;;
+    *) precmd_functions+=(__ssterm_cwd) ;;
+  esac
+  case " ${preexec_functions[*]} " in
+    *" __ssterm_osc133_preexec "*) : ;;
+    *) preexec_functions+=(__ssterm_osc133_preexec) ;;
+  esac
+}
+# Run heal_hooks AFTER osc133_precmd so the index-0 invariant is
+# established before the first command.  add-zsh-hook isn't used here
+# because we want explicit control over ordering.
+precmd_functions=(__ssterm_osc133_precmd __ssterm_heal_hooks "${precmd_functions[@]}")
+__ssterm_heal_hooks
 __ssterm_cwd
 EOF
     cat >"$tmpdir/.zlogin" <<'EOF'
@@ -199,6 +237,17 @@ EOF
 set +o posix
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
+}
+# Tell the agent's wrapper to use bash when packaging multi-line cmds.
+export SSTM_SHELL_BIN=bash
+__ssterm_osc133_preexec() {
+  printf '\033]133;C\007'
+}
+# Save $? on entry so any later command in PROMPT_COMMAND can't clobber it.
+__ssterm_osc133_precmd() {
+  local _ssterm_ec=$?
+  printf '\033]133;D;%s\007' "$_ssterm_ec"
+  return $_ssterm_ec
 }
 if [ -f /etc/profile ]; then
   . /etc/profile
@@ -216,6 +265,12 @@ case ";${PROMPT_COMMAND:-};" in
   *";__ssterm_cwd;"*) : ;;
   *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
 esac
+if [[ ${BASH_VERSINFO[0]} -gt 4 || ( ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -ge 4 ) ]]; then
+  PS0='$(__ssterm_osc133_preexec)'
+  if ! [[ "$PROMPT_COMMAND" == *__ssterm_osc133_precmd* ]]; then
+    PROMPT_COMMAND="__ssterm_osc133_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+  fi
+fi
 __ssterm_cwd
 # Workaround for Tencent Cloud's custom bash (mupan build): it miscounts the
 # visible width of \u/\h/\w when they appear inside the \[\e]0;...\a\] window

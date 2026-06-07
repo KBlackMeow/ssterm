@@ -41,6 +41,7 @@ class AppTab {
   bool manuallyDisconnected = false;
   Timer? keepaliveTimer;
   bool sftpPanelVisible = false;
+  bool aiPanelVisible = false;
   TransferManager? transferManager;
 
   // ── Pane 1 ──────────────────────────────────────────────────────────────────

@@ -54,6 +54,18 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                   _tabs.isNotEmpty && _tabs[_active].terminal != null
                   ? _insertCommand
                   : null,
+              aiPanelVisible:
+                  _tabs.isNotEmpty &&
+                  _active < _tabs.length &&
+                  _tabs[_active].aiPanelVisible,
+              onToggleAiPanel: () {
+                if (_tabs.isNotEmpty && _active < _tabs.length) {
+                  setState(
+                    () => _tabs[_active].aiPanelVisible =
+                        !_tabs[_active].aiPanelVisible,
+                  );
+                }
+              },
               hasSftp:
                   _tabs.isNotEmpty &&
                   _active < _tabs.length &&
@@ -184,6 +196,17 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                         }
                       },
                       onInsertCommand: hasTerminal ? _insertCommand : null,
+                      // Mirror the desktop _TabBar wiring so mobile and
+                      // chrome stay in sync — without this the AI panel
+                      // could be opened only on desktop.
+                      aiPanelVisible: hasTerminal &&
+                          _tabs[_active].aiPanelVisible,
+                      onToggleAiPanel: hasTerminal
+                          ? () => setState(
+                                () => _tabs[_active].aiPanelVisible =
+                                    !_tabs[_active].aiPanelVisible,
+                              )
+                          : null,
                       terminalBody: _buildTerminalArea(),
                       chromeBackground: ts.chromeBackground,
                     ),
@@ -215,6 +238,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       onSaveHost: (original, updated) =>
                           _saveSavedHost(original, updated),
                       onDeleteHost: _deleteSavedHost,
+                      agent: _config.agent,
+                      onAgentChanged: (next) {
+                        setState(() => _config.agent = next);
+                        _config.save();
+                      },
                       chromeBackground: uiBackground,
                     ),
                     ],
@@ -317,6 +345,28 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       );
     }
 
+    body = AiAssistantOverlay(
+      visible: tab.aiPanelVisible,
+      onInsert: tab.terminal != null ? (cmd) => tab.terminal!.paste(cmd) : null,
+      onExecute: tab.terminal != null ? _executeOnTab(tab) : null,
+      onExecuteAsync: tab.terminal != null
+          ? (String cmd, {isCancelled}) => _executeAndCapture(tab, cmd, isCancelled: isCancelled)
+          : null,
+      agentConfig: _config.agent,
+      onGetShellIntegrationActive:
+          tab.terminal != null ? () => _activePaneHasShellIntegration(tab) : null,
+      // Pass the terminal pane's background through so AI-reply code
+      // blocks render on the SAME color as the terminal next to them
+      // (via a Theme override that swaps `colorScheme.onInverseSurface`
+      // — see `_buildMarkdown` in ai_assistant_panel.dart).
+      terminalBackground: _config.terminal.chromeBackground,
+      // ...and the line-height too, so the AI chat reads at the same
+      // density as the terminal — defaults to 1.2 but the user can tune
+      // it from Settings → Terminal → Line height.
+      terminalLineHeight: _config.terminal.lineHeight,
+      child: body,
+    );
+
     return body;
   }
 
@@ -344,6 +394,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         savedHosts: _savedHosts,
         onSaveHost: (original, updated) => _saveSavedHost(original, updated),
         onDeleteHost: (host) => _deleteSavedHost(host),
+        agent: _config.agent,
+        onAgentChanged: (next) {
+          setState(() => _config.agent = next);
+          _config.save();
+        },
       ),
     };
   }
@@ -474,10 +529,15 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       autofocus: sshPane == 0,
     );
 
-    if (tab.kind == _TabKind.ssh && tab.sftp != null) {
+    if (tab.isSplit) {
       surface = Listener(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _activateSshPaneForSftp(tab, sshPane),
+        onPointerDown: (_) {
+          if (tab.activeSshPane != sshPane) {
+            tab.activeSshPane = sshPane;
+            if (tab.sftp != null) tab.syncRemotePathToActivePane();
+          }
+        },
         child: surface,
       );
     }

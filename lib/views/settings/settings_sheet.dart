@@ -3,7 +3,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
+import '../../services/api_key_storage.dart';
 import '../../widgets/frosted_glass.dart';
+import '../../models/agent_config.dart';
 import '../../models/command.dart';
 import '../../models/commands_store.dart';
 import '../../models/ssh_host.dart';
@@ -30,6 +32,8 @@ class SettingsPage extends StatefulWidget {
     this.savedHosts = const [],
     this.onSaveHost,
     this.onDeleteHost,
+    this.agent,
+    this.onAgentChanged,
   });
 
   final TerminalSettings settings;
@@ -37,6 +41,8 @@ class SettingsPage extends StatefulWidget {
   final List<SshHost> savedHosts;
   final void Function(SshHost? original, SshHost updated)? onSaveHost;
   final ValueChanged<SshHost>? onDeleteHost;
+  final AgentConfig? agent;
+  final ValueChanged<AgentConfig>? onAgentChanged;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -45,17 +51,45 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   late TerminalSettings _s;
+  late AgentConfig _agentConfig;
   late TabController _tabController;
   PackageInfo? _packageInfo;
   List<Command> _commands = const [];
+
+  final _apiKeyControllers = <String, TextEditingController>{};
+  final _apiKeyVisible = <String, bool>{};
+  final _baseUrlControllers = <String, TextEditingController>{};
+  final _modelAddController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
-    _tabController = TabController(length: 6, vsync: this);
+    _agentConfig = widget.agent ?? AgentConfig();
+    _tabController = TabController(length: 7, vsync: this);
     _loadPackageInfo();
     _loadCommands();
+    _initAgentControllers();
+  }
+
+  void _initAgentControllers() {
+    for (final p in _agentConfig.providers) {
+      _apiKeyControllers[p.id] = TextEditingController();
+      _baseUrlControllers[p.id] = TextEditingController(text: p.baseUrl ?? '');
+      _apiKeyVisible[p.id] = false;
+      _loadApiKey(p.id);
+    }
+  }
+
+  Future<void> _loadApiKey(String id) async {
+    final key = await ApiKeyStorage.load(id);
+    if (!mounted) return;
+    _apiKeyControllers[id]?.text = key ?? '';
+  }
+
+  void _agentApply(AgentConfig next) {
+    setState(() => _agentConfig = next);
+    widget.onAgentChanged?.call(next);
   }
 
   Future<void> _loadCommands() async {
@@ -77,6 +111,13 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void dispose() {
     _tabController.dispose();
+    for (final c in _apiKeyControllers.values) {
+      c.dispose();
+    }
+    for (final c in _baseUrlControllers.values) {
+      c.dispose();
+    }
+    _modelAddController.dispose();
     super.dispose();
   }
 
@@ -127,6 +168,7 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'Cursor'),
               Tab(text: 'SSH'),
               Tab(text: 'Commands'),
+              Tab(text: 'Agent'),
               Tab(text: 'About'),
             ],
           ),
@@ -139,6 +181,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildCursorTab(),
                 _buildSshTab(),
                 _buildCommandsTab(),
+                _buildAgentTab(),
                 _buildAboutTab(),
               ],
             ),
@@ -459,6 +502,401 @@ class _SettingsPageState extends State<SettingsPage>
       context: context,
       builder: (ctx) => CommandDialog(existing: existing),
     );
+  }
+
+  // ── Agent tab ────────────────────────────────────────────────────────────
+
+  Widget _buildAgentTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [
+        _sectionTitle('Default Provider'),
+        _buildDefaultProviderSection(),
+        const SizedBox(height: 16),
+        _sectionTitle('Display'),
+        _buildAgentDisplaySection(),
+        const SizedBox(height: 16),
+        _sectionTitle('Providers'),
+        for (final p in _agentConfig.providers) _buildProviderCard(p),
+      ],
+    );
+  }
+
+  Widget _buildAgentDisplaySection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _kDivider),
+      ),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        dense: true,
+        title: const Text(
+          'Render replies as Markdown',
+          style: TextStyle(color: _kFg, fontSize: 13),
+        ),
+        subtitle: const Text(
+          'Bold, lists, headings, and code blocks. Re-parses on every streamed '
+          'token, so very long replies (20 KB+) may briefly drop frames.',
+          style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+        ),
+        value: _agentConfig.markdownEnabled,
+        activeThumbColor: _kAccent,
+        onChanged: (v) {
+          _agentApply(_agentConfig.copyWith(markdownEnabled: v));
+        },
+      ),
+    );
+  }
+
+  Widget _buildDefaultProviderSection() {
+    final enabledProviders =
+        _agentConfig.providers.where((p) => p.enabled).toList();
+    final currentProvider = _agentConfig.current;
+    final allModels = currentProvider?.models ?? <String>[];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _kDivider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _agentConfig.defaultProvider ??
+                (enabledProviders.isNotEmpty ? enabledProviders.first.id : null),
+            decoration: const InputDecoration(
+              labelText: 'Provider',
+              labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              border: OutlineInputBorder(),
+            ),
+            style: const TextStyle(color: _kFg, fontSize: 13),
+            dropdownColor: _kSurface,
+            items: _agentConfig.providers.map((p) {
+              return DropdownMenuItem(value: p.id, child: Text(p.displayName));
+            }).toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              _agentApply(_agentConfig.copyWith(defaultProvider: v));
+            },
+          ),
+          if (currentProvider != null) ...[
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _agentConfig.defaultModel != null &&
+                      allModels.contains(_agentConfig.defaultModel)
+                  ? _agentConfig.defaultModel
+                  : null,
+              decoration: const InputDecoration(
+                labelText: 'Default Model',
+                labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(),
+              ),
+              style: const TextStyle(color: _kFg, fontSize: 13),
+              dropdownColor: _kSurface,
+              hint: Text(
+                allModels.isNotEmpty ? allModels.first : 'No models',
+                style: const TextStyle(color: _kFgMuted, fontSize: 13),
+              ),
+              items: allModels.map((m) {
+                return DropdownMenuItem(value: m, child: Text(m));
+              }).toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                _agentApply(_agentConfig.copyWith(defaultModel: v));
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProviderCard(ProviderConfig provider) {
+    final idx = _agentConfig.providers.indexOf(provider);
+    final fgColor = provider.enabled ? _kFg : _kFgMuted;
+    final apiKeyCtrl = _apiKeyControllers[provider.id]!;
+    final baseUrlCtrl = _baseUrlControllers[provider.id]!;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: provider.enabled ? _kAccent.withValues(alpha: 0.3) : _kDivider,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: icon + name + toggle
+          Row(
+            children: [
+              Icon(_providerIcon(provider.id), size: 16, color: _kAccent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  provider.displayName,
+                  style: TextStyle(
+                    color: fgColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Switch(
+                value: provider.enabled,
+                onChanged: (v) {
+                  final next = _agentConfig.copyWith(
+                    providers: List.of(_agentConfig.providers)
+                      ..[idx] = provider.copyWith(enabled: v),
+                  );
+                  _agentApply(next);
+                },
+                activeThumbColor: _kAccent,
+              ),
+            ],
+          ),
+          if (provider.enabled) ...[
+            const SizedBox(height: 10),
+            // API Key
+            _agentTextFieldRow(
+              label: 'API Key',
+              controller: apiKeyCtrl,
+              obscure: !(_apiKeyVisible[provider.id] ?? false),
+              suffix: IconButton(
+                icon: Icon(
+                  (_apiKeyVisible[provider.id] ?? false)
+                      ? Icons.visibility_off
+                      : Icons.visibility,
+                  size: 16,
+                  color: _kFgMuted,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _apiKeyVisible[provider.id] =
+                        !(_apiKeyVisible[provider.id] ?? false);
+                  });
+                },
+              ),
+              onChanged: (v) => ApiKeyStorage.store(provider.id, v),
+            ),
+            const SizedBox(height: 8),
+            // Base URL
+            _agentTextFieldRow(
+              label: 'Base URL',
+              controller: baseUrlCtrl,
+              onChanged: (v) {
+                final next = _agentConfig.copyWith(
+                  providers: List.of(_agentConfig.providers)
+                    ..[idx] = provider.copyWith(baseUrl: v),
+                );
+                _agentApply(next);
+              },
+            ),
+            const SizedBox(height: 8),
+            // Models
+            _buildModelSection(provider, idx),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _agentTextFieldRow({
+    required String label,
+    required TextEditingController controller,
+    bool obscure = false,
+    Widget? suffix,
+    ValueChanged<String>? onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: const TextStyle(color: _kFgMuted, fontSize: 12),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            obscureText: obscure,
+            style: const TextStyle(color: _kFg, fontSize: 13),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: const Color(0xFF161820),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(4),
+                borderSide: const BorderSide(color: _kDivider),
+              ),
+              suffixIcon: suffix,
+              isDense: true,
+            ),
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModelSection(ProviderConfig provider, int idx) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(
+          width: 80,
+          child: Text(
+            'Models',
+            style: TextStyle(color: _kFgMuted, fontSize: 12),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (final m in provider.models)
+                _modelChip(m, provider, idx),
+              _addModelChip(provider, idx),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _modelChip(String model, ProviderConfig provider, int idx) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161820),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: _kDivider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            model,
+            style: const TextStyle(color: _kFg, fontSize: 11),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: () {
+              final nextModels = List<String>.of(provider.models)..remove(model);
+              // If the removed model was the global default, clear it.
+              final nextDefault = _agentConfig.defaultModel == model
+                  ? null
+                  : _agentConfig.defaultModel;
+              final next = _agentConfig.copyWith(
+                defaultModel: nextDefault,
+                providers: List.of(_agentConfig.providers)
+                  ..[idx] = provider.copyWith(models: nextModels),
+              );
+              _agentApply(next);
+            },
+            child: Icon(Icons.close, size: 12, color: _kFgMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addModelChip(ProviderConfig provider, int idx) {
+    return GestureDetector(
+      onTap: () => _showAddModelDialog(provider, idx),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: _kAccent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: _kAccent.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add, size: 11, color: _kAccent),
+            const SizedBox(width: 2),
+            Text(
+              'Add',
+              style: TextStyle(color: _kAccent, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAddModelDialog(ProviderConfig provider, int idx) async {
+    _modelAddController.clear();
+    final name = await showDialog<String>(
+      context: context,
+      barrierColor: const Color(0x66000000),
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: _kSurface,
+          title: const Text('Add Model', style: TextStyle(color: _kFg, fontSize: 14)),
+          content: TextField(
+            controller: _modelAddController,
+            autofocus: true,
+            style: const TextStyle(color: _kFg, fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'e.g. gpt-4-turbo',
+              hintStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, _modelAddController.text.trim()),
+              child: const Text('Add', style: TextStyle(color: _kAccent)),
+            ),
+          ],
+        );
+      },
+    );
+    if (name == null || name.isEmpty) return;
+
+    final nextModels = List<String>.of(provider.models)..add(name);
+    final next = _agentConfig.copyWith(
+      providers: List.of(_agentConfig.providers)
+        ..[idx] = provider.copyWith(models: nextModels),
+    );
+    _agentApply(next);
+  }
+
+  static IconData _providerIcon(String id) {
+    switch (id) {
+      case 'chatgpt':
+        return Icons.psychology;
+      case 'claude':
+        return Icons.auto_awesome;
+      case 'gemini':
+        return Icons.flutter_dash;
+      case 'deepseek':
+        return Icons.explore;
+      default:
+        return Icons.smart_toy;
+    }
   }
 
   // ── About tab ─────────────────────────────────────────────────────────────

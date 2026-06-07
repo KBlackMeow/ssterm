@@ -97,13 +97,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     }
   }
 
-  /// Point SFTP at the cwd for the pane the user clicked (see [_buildTerminalView]).
-  void _activateSshPaneForSftp(_Tab tab, int pane) {
-    if (tab.kind != _TabKind.ssh || tab.sftp == null) return;
-    tab.activeSshPane = pane;
-    tab.syncRemotePathToActivePane();
-  }
-
   /// Which pane owns [terminal] right now (0 or 1). Resolves after split collapse.
   int? _paneIndexOf(_Tab tab, Terminal terminal) {
     if (tab.terminal == terminal) return 0;

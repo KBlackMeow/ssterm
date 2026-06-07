@@ -523,6 +523,212 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     _tabs[_active].terminal?.paste(cmd);
   }
 
+  /// Returns whether the active pane currently has OSC 133 shell integration
+  /// active.  Used by the AI panel to surface the capture-path indicator.
+  bool? _activePaneHasShellIntegration(_Tab tab) {
+    final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
+    final pipe = isSplitPane ? tab.splitPipe : tab.pipe;
+    if (pipe == null) return null;
+    return pipe.hasOsc133;
+  }
+
+  /// Returns a closure that executes [cmd] on the given [tab].
+  /// Honors split panes — sends to the active pane's session/pty.
+  void Function(String) _executeOnTab(_Tab tab) {
+    return (String cmd) {
+      // Strip a trailing newline so we never send `\n\n` (which would run
+      // the command and then submit an empty line, polluting prompt /
+      // OSC 133 boundaries).  The command always needs ONE trailing
+      // newline to actually execute; we add it ourselves below.
+      while (cmd.endsWith('\n')) {
+        cmd = cmd.substring(0, cmd.length - 1);
+      }
+      final data = utf8.encode('$cmd\n');
+      final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
+      if (isSplitPane && tab.splitSshSession != null) {
+        tab.splitSshSession!.stdin.add(data);
+      } else if (isSplitPane && tab.splitPty != null) {
+        tab.splitPty!.write(data);
+      } else if (tab.sshSession != null) {
+        tab.sshSession!.stdin.add(data);
+      } else if (tab.pty != null) {
+        tab.pty!.write(data);
+      } else {
+        final targetTerm = isSplitPane ? tab.splitTerminal : tab.terminal;
+        targetTerm?.paste('$cmd\n');
+      }
+    };
+  }
+
+  /// Wraps a multi-line command in `<shell> -c '<cmd>'` so the user shell
+  /// sees EXACTLY ONE command — and therefore emits exactly one OSC 133
+  /// C/D pair.  Without this, each line of [cmd] would trigger its own
+  /// preexec/precmd cycle and the outputs would interleave, corrupting
+  /// capture.
+  ///
+  /// `<shell>` is `\${SSTM_SHELL_BIN:-sh}` — the user's real shell when
+  /// the wrapper exported it (bash / zsh), and POSIX `sh` as the universal
+  /// fallback (Alpine, Termux, zsh-only systems where `bash` may be
+  /// absent).  The lookup happens INSIDE the user shell at the moment we
+  /// send the bytes, so we pick up whatever value is currently in scope.
+  ///
+  /// Single-line commands pass through unchanged so user aliases and
+  /// shell-rc state remain available (which `<shell> -c` would NOT see).
+  String _toSingleShellLine(String cmd) {
+    if (!cmd.contains('\n')) return cmd;
+    // POSIX-safe: close the single-quoted region, escape one `'`, reopen.
+    final escaped = cmd.replaceAll("'", "'\\''");
+    return r"${SSTM_SHELL_BIN:-sh} -c '" "$escaped" "'";
+  }
+
+  /// Executes [cmd] on [tab]'s active pane, waits for it to finish, and
+  /// returns the captured stdout/stderr along with the exit code.
+  ///
+  /// Capture strategy (industry-standard, in order):
+  ///   1. Shell integration via OSC 133 (preferred): ssterm's wrapper installs
+  ///      `OSC 133;C` (preexec) and `OSC 133;D;<exit_code>` (precmd) hooks for
+  ///      both bash and zsh.  [OutputPipe] buffers the bytes between C and D,
+  ///      strips ANSI, and exposes the result via [OutputPipe.awaitNextCommand].
+  ///      This gives the agent clean stdout PLUS the exact exit code — same
+  ///      protocol used by iTerm2, VS Code, Warp, and Zed.
+  ///   2. Echo-sentinel fallback: for shells where the hooks aren't installed
+  ///      (dash, fish, login banners that don't run our rc), append
+  ///      `; echo __SSTM_<id>__` to the command and poll the rendered terminal
+  ///      buffer until the sentinel appears.  Less precise (no exit code, ANSI
+  ///      noise) but works on any POSIX shell.
+  ///
+  /// [isCancelled] is polled each iteration for responsive cancellation.
+  Future<CommandResult?> _executeAndCapture(
+    _Tab tab,
+    String cmd, {
+    bool Function()? isCancelled,
+  }) async {
+    final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
+    final term = isSplitPane ? tab.splitTerminal : tab.terminal;
+    final pipe = isSplitPane ? tab.splitPipe : tab.pipe;
+    if (term == null) return null;
+
+    // Pre-flight: refuse commands that would hang the agent or leak output.
+    // Returning a synthetic CommandResult (instead of throwing) keeps the
+    // agent loop deterministic — the LLM gets standard `[Command executed]`
+    // feedback and can self-correct on the next turn.
+    final safetyReason = CommandSafety.reason(cmd);
+    if (safetyReason != null) {
+      stdout.writeln(
+        '[capture] blocked cmd=${_logQuote(cmd)} reason=${_logQuote(safetyReason)}',
+      );
+      return CommandResult(
+        output: '[ssterm safety check] $safetyReason',
+        exitCode: null,
+      );
+    }
+
+    final wrapped = _toSingleShellLine(cmd);
+
+    // ── 1. Shell-integration capture (OSC 133) ────────────────────────────
+    if (pipe != null && pipe.hasOsc133) {
+      stdout.writeln('[capture] osc133 start cmd=${_logQuote(cmd)}');
+      // Subscribe BEFORE sending so we don't race the next D marker.
+      final pending = pipe.awaitNextCommand(isCancelled: isCancelled);
+      _executeOnTab(tab)(wrapped);
+      final result = await pending;
+      if (result == null) {
+        stdout.writeln('[capture] osc133 cancelled');
+        return null;
+      }
+      stdout.writeln(
+        '[capture] osc133 done exit=${result.exitCode} bytes=${result.output.length}',
+      );
+      return result;
+    }
+
+    // ── 2. Echo-sentinel fallback ────────────────────────────────────────
+    final beforeLen = term.buffer.lines.length;
+    final marker = '__SSTM_${DateTime.now().microsecondsSinceEpoch}__';
+    stdout.writeln(
+      '[capture] echo start cmd=${_logQuote(cmd)} marker=$marker',
+    );
+
+    // Use a parenthesised group + `printf` so the marker is emitted whether the
+    // command exits 0 or non-zero; `; echo` would lose the original $? without
+    // saving it first.
+    _executeOnTab(tab)('$wrapped; __ssterm_ec=\$?; printf "$marker:%s\\n" "\$__ssterm_ec"');
+
+    final stopwatch = Stopwatch()..start();
+    const pollInterval = Duration(milliseconds: 200);
+    const maxWait = Duration(seconds: 120);
+    var pollCount = 0;
+
+    int? extractExit() {
+      final lines = term.buffer.lines;
+      for (var i = lines.length - 1; i >= 0 && i >= lines.length - 8; i--) {
+        final s = lines[i].toString();
+        final idx = s.indexOf('$marker:');
+        if (idx >= 0) {
+          final tail = s.substring(idx + marker.length + 1);
+          final m = RegExp(r'^(\d+)').firstMatch(tail);
+          if (m != null) return int.tryParse(m.group(1)!);
+          return 0;
+        }
+      }
+      return null;
+    }
+
+    int? exitCode;
+    while (stopwatch.elapsed < maxWait) {
+      if (isCancelled != null && isCancelled()) {
+        stdout.writeln('[capture] echo cancelled poll=$pollCount');
+        return null;
+      }
+      await Future<void>.delayed(pollInterval);
+      pollCount++;
+      exitCode = extractExit();
+      if (exitCode != null) break;
+    }
+
+    final len = term.buffer.lines.length;
+    final totalLines = len - beforeLen;
+    // Echo-fallback path: cap at the last 2000 lines of the captured region.
+    // If the command produced more, the head is dropped — flag it so the
+    // formatter can warn the LLM (mirrors the OSC 133 byte-cap behaviour).
+    final cap = beforeLen + 2000;
+    final start = len > cap ? len - 2000 : beforeLen;
+    final actualStart = start < len ? start : (len > 2000 ? len - 2000 : 0);
+    final wasTruncated = totalLines > 2000;
+    final buf = <String>[];
+    for (var i = actualStart; i < len; i++) {
+      final line = term.buffer.lines[i].toString();
+      if (line.contains(marker)) continue;
+      if (line.contains('__ssterm_ec=')) continue;
+      buf.add(line);
+    }
+    final raw = buf.join('\n');
+    final cleaned = stripAnsi(raw).trim();
+    // Single done-line that combines both old prints
+    // (`echo-marker done` + `returning N lines`) — cuts noise in half.
+    stdout.writeln(
+      '[capture] echo done exit=$exitCode bytes=${cleaned.length} '
+      'lines=${buf.length} polls=$pollCount '
+      'elapsed=${stopwatch.elapsedMilliseconds}ms truncated=$wasTruncated',
+    );
+    return CommandResult(output: cleaned, exitCode: exitCode, truncated: wasTruncated);
+  }
+
+  /// Quote a value for safe inclusion in a structured log record — the
+  /// counterpart of `_logQuote` in `lib/widgets/ai_assistant_panel.dart`.
+  /// Inlined here to avoid pulling a UI-layer file into the SSH widget.
+  static String _logQuote(String s) {
+    const cap = 120;
+    var v = s
+        .replaceAll('\\', r'\\')
+        .replaceAll('"', r'\"')
+        .replaceAll('\n', r'\n')
+        .replaceAll('\r', r'\r')
+        .replaceAll('\t', r'\t');
+    if (v.length > cap) v = '${v.substring(0, cap)}…';
+    return '"$v"';
+  }
+
   void _openSettings() {
     final idx = _tabs.indexWhere((t) => t.kind == _TabKind.settings);
     if (idx != -1) {
