@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../models/agent_config.dart';
 import 'api_key_storage.dart';
+import 'skill_service.dart';
 
 /// Response from an LLM call.
 class LlmResponse {
@@ -42,6 +43,15 @@ class LlmService {
     r'\[\s*ASK[_ ]?USER\s*\]',
     caseSensitive: false,
   );
+  // [USE_SKILL: <id>] — emitted by the model to pull in a skill playbook.
+  // The id charset is intentionally narrow (slug-safe) so we don't accidentally
+  // match prose like `[USE_SKILL: the one we discussed yesterday]`.  Matches
+  // `USE_SKILL`, `USE SKILL`, `USESKILL`; `:` and `=` are both accepted as the
+  // separator since smaller models sometimes invent their own punctuation.
+  static final RegExp _useSkillRe = RegExp(
+    r'\[\s*USE[_ ]?SKILL\s*[:=]\s*([a-zA-Z0-9._-]+)\s*\]',
+    caseSensitive: false,
+  );
   // Strip variant: also eats surrounding markdown emphasis (`*`, `**`)
   // so we don't leave dangling asterisks in the rendered bubble.
   static final RegExp _taskCompleteStripRe = RegExp(
@@ -50,6 +60,10 @@ class LlmService {
   );
   static final RegExp _askUserStripRe = RegExp(
     r'\*{0,2}\[\s*ASK[_ ]?USER\s*\]\*{0,2}',
+    caseSensitive: false,
+  );
+  static final RegExp _useSkillStripRe = RegExp(
+    r'\*{0,2}\[\s*USE[_ ]?SKILL\s*[:=]\s*[a-zA-Z0-9._-]+\s*\]\*{0,2}',
     caseSensitive: false,
   );
   static final RegExp _collapseBlankLinesRe = RegExp(r'\n{3,}');
@@ -62,13 +76,23 @@ class LlmService {
   /// True if the model's reply asks the user to step in.
   static bool hasAskUserMarker(String text) => _askUserRe.hasMatch(text);
 
-  /// Remove every TASK_COMPLETE / ASK_USER marker (and any markdown
-  /// emphasis wrapped around it) from [text], then collapse the
-  /// inevitable runs of blank lines so the chat bubble looks clean.
+  /// Extract the skill id from a `[USE_SKILL: <id>]` marker, or null when
+  /// the reply doesn't request a skill.  Lower-cased so callers can use
+  /// the id as a stable key into [SkillService] regardless of how the
+  /// model capitalised it.
+  static String? extractUseSkillMarker(String text) {
+    final m = _useSkillRe.firstMatch(text);
+    return m?.group(1)?.toLowerCase();
+  }
+
+  /// Remove every TASK_COMPLETE / ASK_USER / USE_SKILL marker (and any
+  /// markdown emphasis wrapped around them) from [text], then collapse
+  /// the inevitable runs of blank lines so the chat bubble looks clean.
   static String stripCompletionMarkers(String text) {
     var out = text
         .replaceAll(_taskCompleteStripRe, '')
-        .replaceAll(_askUserStripRe, '');
+        .replaceAll(_askUserStripRe, '')
+        .replaceAll(_useSkillStripRe, '');
     out = out.replaceAll(_collapseBlankLinesRe, '\n\n');
     return out.trim();
   }
@@ -93,12 +117,26 @@ class LlmService {
     '**[ASK USER]**',
   ];
 
-  // Match the unfinished-marker tail.  We allow a generous `[^\]\n]{0,30}`
-  // body so a partially-streamed marker like `[TASK_COMP` is detected even
-  // before the closing `]` arrives.  Anchored to end-of-string so we never
-  // hide a `[bracket]` earlier in the message that the model already closed.
+  // Match the unfinished-marker tail.  We allow a generous `[^\]\n]{0,40}`
+  // body so a partially-streamed marker like `[TASK_COMP` or `[USE_SKILL: my-`
+  // is detected even before the closing `]` arrives.  Anchored to end-of-string
+  // so we never hide a `[bracket]` earlier in the message that the model
+  // already closed.  Bumped from 30 → 40 to fit `[USE_SKILL: <id>` for ids up
+  // to ~25 chars without breaking out into the visible bubble.
   static final RegExp _trailingPartialMarkerRe =
-      RegExp(r'\*{0,2}\[[^\]\n]{0,30}$');
+      RegExp(r'\*{0,2}\[[^\]\n]{0,40}$');
+
+  // USE_SKILL has a variable-length `<id>` portion, so the `startsWith`
+  // prefix trick that handles TASK_COMPLETE / ASK_USER doesn't fit it.
+  // We instead check whether the unfinished tail's BODY (after the `[` and
+  // optional `*` emphasis) starts with one of these prefixes — covering
+  // `[USE_SKILL`, `[USESKILL`, `[USE SKILL`, etc.  Once these match we
+  // hide the tail outright until the closing `]` arrives.
+  static const List<String> _useSkillBodyPrefixes = [
+    'USE_SKILL',
+    'USE SKILL',
+    'USESKILL',
+  ];
 
   /// Streaming-safe variant of [stripCompletionMarkers].
   ///
@@ -124,16 +162,33 @@ class LlmService {
   static String stripStreamingMarkers(String text) {
     var out = text
         .replaceAll(_taskCompleteStripRe, '')
-        .replaceAll(_askUserStripRe, '');
+        .replaceAll(_askUserStripRe, '')
+        .replaceAll(_useSkillStripRe, '');
     final m = _trailingPartialMarkerRe.firstMatch(out);
     if (m != null) {
       final tail = m.group(0)!.toUpperCase();
+      var hide = false;
+      // First: TASK_COMPLETE / ASK_USER fixed-form prefix check.
       for (final candidate in _streamingMarkerPrefixes) {
         if (candidate.startsWith(tail)) {
-          out = out.substring(0, m.start);
+          hide = true;
           break;
         }
       }
+      // Then: USE_SKILL with its variable-length id.  Strip leading
+      // emphasis + `[` from the tail and compare the body — if it starts
+      // with (or IS a prefix of) one of our marker names, hide the tail.
+      if (!hide) {
+        final body =
+            tail.replaceFirst(RegExp(r'^\*{0,2}\['), '');
+        for (final p in _useSkillBodyPrefixes) {
+          if (body.startsWith(p) || p.startsWith(body)) {
+            hide = true;
+            break;
+          }
+        }
+      }
+      if (hide) out = out.substring(0, m.start);
     }
     return out;
   }
@@ -145,14 +200,130 @@ class LlmService {
   // (`set -o pipefail` works in bash/zsh but not POSIX sh).  We sniff the
   // host once and append it to the system prompt so the model can tailor
   // its output without us having to re-tokenise on every call.
+  //
+  // The prompt is also skill-aware: a `<available_skills>` block is
+  // appended whenever SkillService has loaded one or more skills.  The
+  // block is rebuilt lazily — the first chat call after [SkillService.init]
+  // sees the freshly-populated catalogue, and subsequent calls hit the
+  // cache.  Test code can force a rebuild via [refreshSystemPrompt].
+  //
+  // We cache the LAST-USED variant only.  Most sessions use one
+  // enabled-set the entire time, so a single-slot cache hits ~100% in
+  // practice.  When the user toggles a skill the cache rebuilds once —
+  // still much cheaper than rebuilding every turn.
   static String? _cachedSystemPrompt;
+  static Set<String>? _cachedSystemPromptKey;
+  // Sentinel that survives a null vs not-set distinction.  A nullable
+  // Set<String>? on its own can't tell "I haven't cached anything yet"
+  // from "I cached the all-enabled (null whitelist) variant".
+  static bool _cachedSystemPromptHasKey = false;
 
-  static String get _systemPrompt {
-    return _cachedSystemPrompt ??= _buildSystemPrompt();
+  /// Build the active system prompt for the given enabled-skill whitelist.
+  ///
+  /// [enabledSkillIds] follows the same semantics as
+  /// `AgentConfig.enabledSkills`: null → all skills, non-null → only ids
+  /// in the set.  The skills_protocol block is omitted entirely when
+  /// no skills end up enabled (saves ~100 tokens AND avoids confusing
+  /// the model with a protocol for a feature it can't reach).
+  static String systemPromptFor({Set<String>? enabledSkillIds}) {
+    if (_cachedSystemPromptHasKey &&
+        _setEquals(_cachedSystemPromptKey, enabledSkillIds)) {
+      return _cachedSystemPrompt!;
+    }
+    final built = _buildSystemPrompt(enabledSkillIds: enabledSkillIds);
+    _cachedSystemPrompt = built;
+    _cachedSystemPromptKey =
+        enabledSkillIds == null ? null : Set.of(enabledSkillIds);
+    _cachedSystemPromptHasKey = true;
+    return built;
   }
 
-  static String _buildSystemPrompt() {
-    return '$_systemPromptBase\n\n${_buildHostBlock()}';
+  static bool _setEquals(Set<String>? a, Set<String>? b) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    return a.containsAll(b);
+  }
+
+  /// Force the next [systemPromptFor] read to re-evaluate skills / host
+  /// info.  Useful for tests, and for any future "reload skills" debug
+  /// action.
+  static void refreshSystemPrompt() {
+    _cachedSystemPrompt = null;
+    _cachedSystemPromptKey = null;
+    _cachedSystemPromptHasKey = false;
+  }
+
+  static String _buildSystemPrompt({Set<String>? enabledSkillIds}) {
+    final parts = <String>[_systemPromptBase];
+    final enabled = SkillService.filterEnabled(enabledSkillIds);
+    if (enabled.isNotEmpty) parts.add(_buildSkillsBlock());
+    parts.add(_buildHostBlock());
+    return parts.join('\n\n');
+  }
+
+  /// Returns the `<skills_protocol>` block for the system prompt, or an
+  /// empty string when no skills are installed.
+  ///
+  /// IMPORTANT — what we DON'T put here (anymore):
+  /// the per-skill catalogue (id + description).  That table moved to a
+  /// `<system-reminder>` user-role attachment injected by the agent loop
+  /// at conversation start (and only re-injected when a NEW skill shows
+  /// up later — see [SkillService.buildPromptCatalogue] and the loop's
+  /// `_announcedSkillIds` tracker).
+  ///
+  /// Why split:
+  ///   • Prompt caching: the system prompt stays IDENTICAL across boots
+  ///     as long as the skill PROTOCOL is unchanged, so providers' prompt
+  ///     caches stay warm even when the user installs new skills.
+  ///   • Delta announcements: long conversations don't pay the catalogue
+  ///     cost every turn — the listing lives ONCE in the transcript.
+  ///   • Inspectability: the listing shows up in conversation history, so
+  ///     it's grep-able / debuggable like any other message.
+  /// Same architecture Claude Code uses (see
+  /// `claude-code-source-code/src/utils/attachments.ts` →
+  /// `getSkillListingAttachments` + `<system-reminder>` wrapping).
+  static String _buildSkillsBlock() {
+    // Whether ANY skill is enabled is decided by the caller (see
+    // [_buildSystemPrompt] — it only invokes this when at least one
+    // skill survives the [SkillService.filterEnabled] check).  The
+    // protocol text itself is identical regardless of which skills are
+    // enabled, so it's a static string here.
+    return '''
+<skills_protocol>
+Skills are pre-curated playbooks for common tasks.  The list of currently-available skills is delivered as a user-role `<system-reminder>` message AT CONVERSATION START — re-read it before issuing any commands.
+
+To use a skill, emit `[USE_SKILL: <id>]` on its OWN line and STOP — the full skill body arrives as a user message in your NEXT turn.  Always prefer loading a relevant skill BEFORE issuing investigative commands.
+
+Turn-shape rules for skills:
+- A `[USE_SKILL: <id>]` turn MUST NOT also contain a ```bash block, `[TASK_COMPLETE]`, or `[ASK_USER]` — the agent loop intercepts the marker BEFORE executing anything, so combining them silently drops the command.
+- Loading a skill does NOT count as an investigation step.  Once the body arrives, you resume the normal INVESTIGATE → ANSWER cycle informed by the skill's playbook.
+- If no listed skill matches, do NOT invent an id — just proceed with normal INVESTIGATE turns.
+</skills_protocol>''';
+  }
+
+  /// Build the `<system-reminder>`-wrapped catalogue message that the
+  /// agent loop injects ahead of the user's first turn (and again when
+  /// new skills appear mid-conversation — though that won't happen for
+  /// asset-only installations).
+  ///
+  /// [include] restricts the listing to a specific subset of skill ids —
+  /// used by the agent loop's "delta" injection so only the ids that
+  /// haven't been announced yet show up in subsequent reminders.  Pass
+  /// null to format ALL currently-installed skills.
+  ///
+  /// Returns the empty string when there's nothing to announce; callers
+  /// should treat that as "no injection needed this turn".
+  static String buildSkillListingReminder({Iterable<String>? include}) {
+    final catalogue =
+        SkillService.buildPromptCatalogue(include: include);
+    if (catalogue.isEmpty) return '';
+    return '''
+<system-reminder>
+The following skills are available for use with the `[USE_SKILL: <id>]` marker (see the `<skills_protocol>` section of your system prompt for invocation rules):
+
+$catalogue
+</system-reminder>''';
   }
 
   static String _buildHostBlock() {
@@ -178,6 +349,26 @@ class LlmService {
       osVersion = 'unknown';
       locale = 'unknown';
     }
+    // OS-specific dialect gotchas — only the tips that apply to THIS host
+    // are emitted, so a Linux user doesn't pay tokens for BSD-sed warnings
+    // (and vice-versa). Distilled from what used to live in the
+    // `local-shell-info` bundled skill; folded in here because
+    // (a) host_environment already carries OS/shell, and (b) the bundled
+    // skill couldn't reliably distinguish LOCAL vs SSH tabs and would
+    // leak macOS-only env data into SSH sessions.
+    final dialectTips = switch (os) {
+      'macos' =>
+        '- LOCAL macOS uses BSD coreutils: `sed -i` REQUIRES a backup-suffix arg (`sed -i \'\' …`); `date -d` is GNU-only (use `date -j -f`); `readlink -f` / `realpath` are not installed by default.\n'
+            '- Non-interactive shells (scripts, `sh -c`, `ssh host cmd`) do NOT source `~/.zshrc` / `~/.bashrc` — aliases and functions defined there are unavailable in that context.',
+      'linux' =>
+        '- LOCAL Linux uses GNU coreutils: `sed -i \'s/a/b/\' f` works without the `\'\'` arg BSD requires. `set -o pipefail` works in bash/zsh but NOT in POSIX `sh`.\n'
+            '- Non-interactive shells (scripts, `sh -c`, `ssh host cmd`) do NOT source `~/.bashrc` / `~/.zshrc` — aliases and functions defined there are unavailable in that context.',
+      'windows' =>
+        '- LOCAL Windows shells (PowerShell, cmd.exe) use different quoting, flag, and pipe semantics from POSIX. Don\'t assume `&&` / `||` / heredocs / back-quotes behave the same. `wsl …` gives a Linux subprocess when the user has WSL installed.',
+      _ => '',
+    };
+    final dialectBlock = dialectTips.isEmpty ? '' : '\n\n$dialectTips';
+
     // Host block lives at the END of the system prompt on purpose — Claude
     // (and most LLMs) gives extra weight to the LAST tokens before the
     // conversation, so the runtime environment context dominates over any
@@ -190,9 +381,9 @@ The SSTerm UI is running on:
 - Arch:   $arch
 - Locale: $locale
 
-When the active tab is a LOCAL terminal, commands run on THIS host — pick the right tool family (macOS uses BSD `sed` / `awk` / `find`; Linux uses GNU coreutils; Windows may need PowerShell).
+When the active tab is a LOCAL terminal, commands run on THIS host — pick the right tool family (macOS uses BSD `sed` / `awk` / `find`; Linux uses GNU coreutils; Windows may need PowerShell).$dialectBlock
 
-When the active tab is an SSH session, commands run on the REMOTE — if behaviour is OS-specific, run `uname -srm` (or `cat /etc/os-release`) FIRST to detect the remote platform, THEN issue the OS-appropriate command.
+When the active tab is an SSH session, commands run on the REMOTE — if behaviour is OS-specific, run `uname -srm` (or `cat /etc/os-release`) FIRST to detect the remote platform, THEN issue the OS-appropriate command. Do NOT assume the dialect tips above apply to the remote.
 </host_environment>''';
   }
 
@@ -377,15 +568,19 @@ Blocked classes and their non-interactive equivalents:
       return LlmResponse(text: '', error: 'API key not configured for ${provider.displayName}.');
     }
 
+    final systemPrompt =
+        systemPromptFor(enabledSkillIds: config.enabledSkills);
     try {
       switch (provider.id) {
         case 'claude':
-          return _callAnthropic(provider, model, apiKey, messages);
+          return _callAnthropic(provider, model, apiKey, messages, systemPrompt);
         case 'gemini':
-          return _callGemini(provider, model, apiKey, messages);
+          return _callGemini(provider, model, apiKey, messages, systemPrompt);
         default:
-          // OpenAI-compatible (OpenAI, DeepSeek, etc.)
-          return _callOpenAiCompatible(provider, model, apiKey, messages);
+          // OpenAI-compatible (OpenAI, DeepSeek, etc.) — prefix caching is
+          // automatic on these providers (no `cache_control` to set).
+          return _callOpenAiCompatible(
+              provider, model, apiKey, messages, systemPrompt);
       }
     } catch (e) {
       return LlmResponse(text: '', error: 'Request failed: $e');
@@ -399,6 +594,7 @@ Blocked classes and their non-interactive equivalents:
     String model,
     String apiKey,
     List<Map<String, String>> messages,
+    String systemPrompt,
   ) async {
     final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
     final url = baseUrl.endsWith('/chat/completions')
@@ -408,7 +604,7 @@ Blocked classes and their non-interactive equivalents:
     final body = {
       'model': model,
       'messages': [
-        {'role': 'system', 'content': _systemPrompt},
+        {'role': 'system', 'content': systemPrompt},
         ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
       ],
       'max_tokens': 4096,
@@ -441,11 +637,42 @@ Blocked classes and their non-interactive equivalents:
 
   // ── Anthropic Claude ───────────────────────────────────────────────────
 
+  /// Wrap our system prompt in Anthropic's content-block list form with a
+  /// single `cache_control: {type: ephemeral}` breakpoint at the end.
+  ///
+  /// Why this matters: the system prompt is ~3–4 KB (≈ 1 K tokens), it's
+  /// stable across a session, and EVERY agent loop iteration replays it.
+  /// With the breakpoint, Anthropic caches the prefix for 5 minutes and
+  /// subsequent calls within that window get a ~90% price discount on
+  /// the cached input tokens AND lower TTFT.  Without it, no caching.
+  ///
+  /// Notes / constraints from
+  /// https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching:
+  ///   • Minimum cacheable prefix: 1024 tokens (Sonnet/Opus).  Our prompt
+  ///     is borderline — caches if the active model supports it, falls
+  ///     through silently when below threshold.  Either way, no error.
+  ///   • Cache key includes model, system, tools, and any earlier cached
+  ///     prefix.  Toggling a skill DOES change the key (different prompt)
+  ///     — that's fine; we just pay one cache-write the next turn.
+  ///   • At most 4 breakpoints per request.  We use 1.  Future work could
+  ///     add a second on the long-form skill body once it's loaded — that
+  ///     would cache the skill across follow-up turns within the session.
+  ///   • Anthropic ignores `cache_control` on requests below the size
+  ///     threshold; safe to always include.
+  static List<Map<String, dynamic>> _anthropicSystemBlock(String prompt) => [
+        {
+          'type': 'text',
+          'text': prompt,
+          'cache_control': {'type': 'ephemeral'},
+        },
+      ];
+
   static Future<LlmResponse> _callAnthropic(
     ProviderConfig provider,
     String model,
     String apiKey,
     List<Map<String, String>> messages,
+    String systemPrompt,
   ) async {
     final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
     final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
@@ -458,7 +685,7 @@ Blocked classes and their non-interactive equivalents:
 
     final body = {
       'model': model,
-      'system': _systemPrompt,
+      'system': _anthropicSystemBlock(systemPrompt),
       'messages': apiMessages,
       'max_tokens': 4096,
     };
@@ -502,6 +729,7 @@ Blocked classes and their non-interactive equivalents:
     String model,
     String apiKey,
     List<Map<String, String>> messages,
+    String systemPrompt,
   ) async {
     final baseUrl = provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
     final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/models/$model:generateContent?key=$apiKey';
@@ -518,7 +746,7 @@ Blocked classes and their non-interactive equivalents:
 
     final body = {
       'system_instruction': {
-        'parts': [{'text': _systemPrompt}],
+        'parts': [{'text': systemPrompt}],
       },
       'contents': contents,
       'generationConfig': {
@@ -659,13 +887,18 @@ Blocked classes and their non-interactive equivalents:
       throw Exception('API key not configured for ${provider.displayName}.');
     }
 
+    final systemPrompt =
+        systemPromptFor(enabledSkillIds: config.enabledSkills);
     switch (provider.id) {
       case 'claude':
-        yield* _streamAnthropic(provider, model, apiKey, messages, client);
+        yield* _streamAnthropic(
+            provider, model, apiKey, messages, client, systemPrompt);
       case 'gemini':
-        yield* _streamGemini(provider, model, apiKey, messages, client);
+        yield* _streamGemini(
+            provider, model, apiKey, messages, client, systemPrompt);
       default:
-        yield* _streamOpenAi(provider, model, apiKey, messages, client);
+        yield* _streamOpenAi(
+            provider, model, apiKey, messages, client, systemPrompt);
     }
   }
 
@@ -677,6 +910,7 @@ Blocked classes and their non-interactive equivalents:
     String apiKey,
     List<Map<String, String>> messages,
     HttpClient client,
+    String systemPrompt,
   ) async* {
     final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
     final url = baseUrl.endsWith('/chat/completions')
@@ -687,7 +921,7 @@ Blocked classes and their non-interactive equivalents:
     final body = <String, dynamic>{
       'model': model,
       'messages': [
-        {'role': 'system', 'content': _systemPrompt},
+        {'role': 'system', 'content': systemPrompt},
         ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
       ],
       'max_tokens': 4096,
@@ -740,6 +974,7 @@ Blocked classes and their non-interactive equivalents:
     String apiKey,
     List<Map<String, String>> messages,
     HttpClient client,
+    String systemPrompt,
   ) async* {
     final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
     final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
@@ -751,7 +986,7 @@ Blocked classes and their non-interactive equivalents:
 
     final body = {
       'model': model,
-      'system': _systemPrompt,
+      'system': _anthropicSystemBlock(systemPrompt),
       'messages': apiMessages,
       'max_tokens': 4096,
       'stream': true,
@@ -807,6 +1042,7 @@ Blocked classes and their non-interactive equivalents:
     String apiKey,
     List<Map<String, String>> messages,
     HttpClient client,
+    String systemPrompt,
   ) async* {
     final baseUrl = provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
     final url =
@@ -823,7 +1059,7 @@ Blocked classes and their non-interactive equivalents:
 
     final body = {
       'system_instruction': {
-        'parts': [{'text': _systemPrompt}],
+        'parts': [{'text': systemPrompt}],
       },
       'contents': contents,
       'generationConfig': {

@@ -24,6 +24,7 @@ import 'models/saved_hosts_store.dart';
 import 'models/ssh_config.dart';
 import 'models/ssh_host.dart';
 import 'services/host_key_verifier.dart';
+import 'services/bundled_skills.dart';
 import 'services/local_pty_service.dart';
 import 'services/local_shell_discovery.dart';
 import 'services/local_shell_wrapper.dart';
@@ -31,6 +32,7 @@ import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/session_logger.dart';
+import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
 import 'services/wallpaper_storage.dart';
 import 'utils/fd_limit.dart';
@@ -63,6 +65,20 @@ void main() async {
   // from this process, and macOS's default 256 is too low for plugin-heavy
   // zsh setups.
   raiseFileDescriptorLimit();
+
+  // Register bundled DYNAMIC skills (Dart functions that produce SKILL.md
+  // content with live runtime data — see services/bundled_skills.dart)
+  // BEFORE SkillService.init() so they're merged into the catalogue on
+  // the very first sweep.  Order matters: registration is sync + cheap,
+  // init() is async + reads the asset manifest.
+  registerDefaultBundledSkills();
+
+  // Discover bundled Skills (assets/skills/*/SKILL.md PLUS the dynamic
+  // ones above) BEFORE runApp so the first LLM call already sees the
+  // catalogue when the agent loop announces it.  init() is fast (a few
+  // small text files) and fail-safe: a malformed SKILL.md is logged and
+  // skipped, never throws.
+  await SkillService.init();
 
   // Custom title bar: hide the OS-drawn caption strip and let the tab bar take
   // its place (Chrome / Edge / Windows Terminal style). On macOS the native

@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/models/agent_config.dart';
 import 'package:ssterm/services/llm_service.dart';
+import 'package:ssterm/services/skill_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('LlmService.extractCommands', () {
     test('extracts a single bash block', () {
       const input = '''
@@ -288,6 +291,97 @@ ls /tmp/some-dir
       final once = LlmService.stripStreamingMarkers(input);
       final twice = LlmService.stripStreamingMarkers(once);
       expect(once, equals(twice));
+    });
+  });
+
+  group('LlmService.systemPromptFor', () {
+    // The system prompt is the heaviest reusable thing on every turn.
+    // These tests pin the cache-key shape so we can't accidentally
+    // regress prompt-cache hit rate by introducing a per-call timestamp,
+    // random nonce, or other instability.
+    setUp(() {
+      LlmService.refreshSystemPrompt();
+    });
+
+    test('repeated calls with the same whitelist return the SAME string',
+        () {
+      // Identity check (`identical`) proves the cache is hot — the
+      // builder isn't running on every call.  This is what makes the
+      // Anthropic prefix cache stay warm.
+      final a = LlmService.systemPromptFor(enabledSkillIds: {'x'});
+      final b = LlmService.systemPromptFor(enabledSkillIds: {'x'});
+      expect(identical(a, b), isTrue);
+    });
+
+    test('toggling the whitelist invalidates the cache once', () {
+      final a = LlmService.systemPromptFor(enabledSkillIds: <String>{});
+      final b = LlmService.systemPromptFor(enabledSkillIds: null);
+      // Different shape, so different bytes; but the new value sticks.
+      expect(identical(a, b), isFalse);
+      final c = LlmService.systemPromptFor(enabledSkillIds: null);
+      expect(identical(b, c), isTrue);
+    });
+
+    test('refreshSystemPrompt forces a fresh build', () {
+      final a = LlmService.systemPromptFor(enabledSkillIds: null);
+      LlmService.refreshSystemPrompt();
+      final b = LlmService.systemPromptFor(enabledSkillIds: null);
+      // Content equal but NOT identical — the cache slot was wiped.
+      expect(a, equals(b));
+      expect(identical(a, b), isFalse);
+    });
+
+    test('disabled set never embeds <skills_protocol>', () async {
+      // With NO skills enabled, the `<skills_protocol>` block must be
+      // omitted entirely so the model isn't tempted to emit USE_SKILL
+      // markers for something it can't reach.
+      final prompt =
+          LlmService.systemPromptFor(enabledSkillIds: <String>{});
+      expect(prompt.contains('<skills_protocol>'), isFalse);
+    });
+  });
+
+  group('LlmService skills + AgentConfig wiring', () {
+    test('AgentConfig.enabledSkills round-trips through JSON', () {
+      final cfg = AgentConfig(
+        enabledSkills: {'git-bisect', 'verify-fix'},
+      );
+      final json = cfg.toJson();
+      // Sorted-list serialisation keeps the on-disk diff stable when
+      // unrelated settings change — verify the order here so a future
+      // refactor doesn't drop it.
+      expect(json['enabledSkills'], equals(['git-bisect', 'verify-fix']));
+
+      final decoded = AgentConfig.fromJson(json);
+      expect(decoded.enabledSkills, equals({'git-bisect', 'verify-fix'}));
+    });
+
+    test('AgentConfig with null enabledSkills omits the key', () {
+      final cfg = AgentConfig();
+      expect(cfg.toJson().containsKey('enabledSkills'), isFalse);
+    });
+
+    test('copyWith(resetEnabledSkills: true) restores the null sentinel',
+        () {
+      final cfg = AgentConfig(enabledSkills: {'git-bisect'});
+      final reset = cfg.copyWith(resetEnabledSkills: true);
+      expect(reset.enabledSkills, isNull);
+      // The explicit value should NOT survive when reset is requested,
+      // even if both are passed (reset takes precedence).
+      final both =
+          cfg.copyWith(enabledSkills: {'x'}, resetEnabledSkills: true);
+      expect(both.enabledSkills, isNull);
+    });
+
+    test('SkillService.userSkillsDirPath honours the debug override', () {
+      // The override is what makes the user-dir scan unit-testable —
+      // assert the getter actually exposes it instead of always
+      // computing the real ~/.ssterm/skills path.
+      SkillService.debugUserSkillsDirOverride = '/tmp/my-test-skills';
+      expect(SkillService.userSkillsDirPath, equals('/tmp/my-test-skills'));
+      SkillService.debugUserSkillsDirOverride = null;
+      expect(SkillService.userSkillsDirPath.endsWith('/.ssterm/skills'),
+          isTrue);
     });
   });
 }

@@ -6,7 +6,9 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../io/output_pipe.dart' show CommandResult;
 import '../models/agent_config.dart';
+import '../models/skill.dart';
 import '../services/llm_service.dart';
+import '../services/skill_service.dart';
 import 'frosted_glass.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
@@ -15,6 +17,11 @@ const _kAccent = Color(0xFF2472C8);
 const _kPanelMinHeight = 120.0;
 const _kPanelDefaultFraction = 0.35;
 const _kPanelMaxFraction = 0.6;
+
+/// Outer gap between the AI panel card and the surrounding chrome — matches
+/// `_kSftpPanelMargin` in `ssh_session_view.dart` so the two side-by-side
+/// panels (SFTP card + AI card) share the same floating "card" rhythm.
+const _kAiPanelMargin = 8.0;
 
 enum AiPanelMode { command, agent }
 
@@ -30,6 +37,7 @@ class AiAssistantOverlay extends StatefulWidget {
     this.onGetShellIntegrationActive,
     this.terminalBackground,
     this.terminalLineHeight,
+    this.onTerminalLockChanged,
   });
 
   final Widget child;
@@ -69,6 +77,18 @@ class AiAssistantOverlay extends StatefulWidget {
   /// than the terminal at 1.2.  Null falls back to 1.2.
   final double? terminalLineHeight;
 
+  /// Fires when the agent enters or leaves auto-execute mode and the
+  /// host should lock (or unlock) the terminal pane against user input.
+  ///
+  /// The host is responsible for wrapping JUST the terminal in an
+  /// `AbsorbPointer` — wrapping the whole session view here would also
+  /// swallow clicks for the SFTP floating overlay that sits on top of
+  /// the terminal in `SshSessionView`'s `Stack`, breaking the SFTP
+  /// upload/download/navigate buttons while the agent works (SFTP runs
+  /// on its own SSH channel and is unrelated to the PTY stdin we're
+  /// guarding).
+  final ValueChanged<bool>? onTerminalLockChanged;
+
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
@@ -91,9 +111,39 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = <Map<String, String>>[];
 
+  /// Ids of skills already announced to the LLM via a `<system-reminder>`
+  /// catalogue message earlier in THIS conversation.  Wiped on `/clear`
+  /// alongside the rest of the chat state.
+  ///
+  /// Modelled after Claude Code's `sentSkillNames` map (attachments.ts) —
+  /// in long sessions re-injecting the same 600-token catalogue on every
+  /// user turn is pure waste.  We only ever announce the DELTA.  The
+  /// listing itself is a real user message in the transcript, so the
+  /// model continues to "see" it via context replay; we just don't pay
+  /// the cost a second time.
+  final _announcedSkillIds = <String>{};
+
   /// True while the agent is auto-executing commands — terminal input is
   /// blocked to prevent the user from interfering with the agent's work.
+  ///
+  /// MUST only be mutated through [_setTerminalLocked] so the host overlay
+  /// (which actually applies the `AbsorbPointer` around just the terminal
+  /// pane — see `onTerminalLockChanged`) stays in sync.  Assigning this
+  /// field directly would leave the SFTP overlay incorrectly blocked or
+  /// the terminal incorrectly unlocked.
   var _terminalLocked = false;
+
+  /// Single mutation point for [_terminalLocked].  Updates the local
+  /// flag (so `_unfocusTerminalIfLocked` keeps working) AND notifies the
+  /// host via `widget.onTerminalLockChanged` so it can wrap the terminal
+  /// pane in an `AbsorbPointer`.  Keeping the two in lockstep here is
+  /// what makes the SFTP floating overlay stay interactive while the
+  /// agent is auto-executing.
+  void _setTerminalLocked(bool locked) {
+    if (_terminalLocked == locked) return;
+    _terminalLocked = locked;
+    widget.onTerminalLockChanged?.call(locked);
+  }
 
   // Max conversation turns / loop iterations before we summarise old ones.
   static const _maxHistoryTurns = 10;
@@ -177,8 +227,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     setState(() {
       _agentBusy = false;
       _agentLoopStatus = null;
-      _terminalLocked = false;
     });
+    _setTerminalLocked(false);
   }
 
   void _send() {
@@ -253,6 +303,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       if (_mode == AiPanelMode.agent) {
         _conversationHistory.clear();
         _agentLoopStatus = null;
+        // Re-announce the full skill catalogue on the next user turn,
+        // since /clear semantically starts a brand-new conversation
+        // (the prior `<system-reminder>` listing is no longer in history).
+        _announcedSkillIds.clear();
       }
     });
   }
@@ -398,11 +452,49 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
     _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
 
+    // Delta-announce any skills that haven't been advertised to the
+    // LLM yet in THIS conversation.  Most common path: first user turn —
+    // `_announcedSkillIds` is empty, so the full catalogue is appended.
+    // Subsequent turns: usually a no-op (asset skills are static), but
+    // if the bundled-skill registry ever grows mid-session, newcomers
+    // are announced as a delta.
+    //
+    // The reminder is PREPENDED to the user message text instead of
+    // being added as its own history entry, because Anthropic's
+    // /v1/messages endpoint enforces strict user/assistant alternation
+    // and two consecutive 'user' rows fail validation.  Embedding the
+    // `<system-reminder>` tag inline lets all three providers (OpenAI,
+    // Anthropic, Gemini) see it as a single user turn.  The wrapper
+    // tag itself is enough of a visual / semantic boundary for the
+    // model to treat the reminder as out-of-band meta.
+    var finalUserContent = userText;
+    // Apply the per-session enabled-skill whitelist BEFORE deciding what
+    // to announce.  A disabled skill must never appear in the listing —
+    // otherwise the model would happily try to load it and we'd have to
+    // refuse mid-loop, wasting a round-trip.
+    final enabledFilter = config.enabledSkills;
+    final enabledIds = SkillService.filterEnabled(enabledFilter)
+        .map((s) => s.id)
+        .toSet();
+    final unannounced = enabledIds
+        .where((id) => !_announcedSkillIds.contains(id))
+        .toList(growable: false);
+    if (unannounced.isNotEmpty) {
+      final reminder =
+          LlmService.buildSkillListingReminder(include: unannounced);
+      if (reminder.isNotEmpty) {
+        finalUserContent = '$reminder\n\n$userText';
+        _announcedSkillIds.addAll(unannounced);
+        _logAgent('skill_listing announced=${unannounced.length} '
+            'total=${_announcedSkillIds.length}');
+      }
+    }
+
     // The agent loop relies entirely on OSC 133 shell-integration capture
     // (with an echo-sentinel fallback) to surface terminal state to the LLM —
     // we no longer prepend a raw terminal-buffer snapshot, which used to
     // duplicate the same data in two formats and bloat context.
-    _conversationHistory.add({'role': 'user', 'content': userText});
+    _conversationHistory.add({'role': 'user', 'content': finalUserContent});
 
     await _continueAgentLoop(gen, config);
   }
@@ -489,8 +581,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         setState(() {
           _agentBusy = false;
           _agentLoopStatus = null;
-          _terminalLocked = false;
         });
+        _setTerminalLocked(false);
       }
     }
   }
@@ -500,11 +592,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   void _markAgentBusy({required bool autoExecuteLockTerminal}) {
     setState(() {
       _agentBusy = true;
-      if (autoExecuteLockTerminal) {
-        _terminalLocked = true;
-      }
     });
     if (autoExecuteLockTerminal) {
+      _setTerminalLocked(true);
       // Post-frame so focus settles before we yank it from the terminal.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _unfocusTerminalIfLocked();
@@ -536,8 +626,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         setState(() {
           _agentBusy = false;
           _agentLoopStatus = null;
-          _terminalLocked = false;
         });
+        _setTerminalLocked(false);
       }
     }
   }
@@ -600,9 +690,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
       final taskComplete = LlmService.hasTaskCompleteMarker(fullText);
       final askUser = LlmService.hasAskUserMarker(fullText);
+      final useSkill = LlmService.extractUseSkillMarker(fullText);
       final markerLabel = taskComplete
           ? 'task_complete'
-          : (askUser ? 'ask_user' : 'none');
+          : (askUser
+              ? 'ask_user'
+              : (useSkill != null ? 'use_skill:$useSkill' : 'none'));
       _logAgent(
         'iter=$loopIterations reply chars=${fullText.length} '
         'cmds=${commands.length} marker=$markerLabel',
@@ -613,6 +706,68 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         // (rate limit fallback, content-policy refusal, etc.).  Surface as a
         // warning so users can spot it in `flutter run` output.
         _logAgent('iter=$loopIterations warn empty_reply');
+      }
+
+      // ── Skill activation ─────────────────────────────────────────────
+      // USE_SKILL is intercepted BEFORE the auto-execute checks so it
+      // works in BOTH manual and auto modes — the model can pull in a
+      // playbook even when the user hasn't ticked auto-execute, because
+      // loading a skill doesn't run any shell commands.  When a USE_SKILL
+      // turn also (incorrectly) contained a ```bash block, the marker
+      // wins and the commands are dropped, matching how TASK_COMPLETE /
+      // ASK_USER behave today — and matching what the system prompt
+      // tells the model to expect.
+      if (useSkill != null) {
+        // Defence in depth: even though disabled skills are filtered out
+        // of the announced catalogue, the model might USE_SKILL one
+        // anyway — pulled from training data or from an earlier session
+        // it remembers.  Treat that as a miss so the agent loop gives a
+        // clean "skill not available" notice instead of silently loading
+        // something the user disabled.
+        final enabledWhitelist = config.enabledSkills;
+        final isAllowed = enabledWhitelist == null ||
+            enabledWhitelist.contains(useSkill);
+        // loadBody is async because BUNDLED dynamic skills produce their
+        // body via a Dart function that may embed runtime values (e.g.
+        // feature flags, probe output).  None ship by default today, but
+        // the path stays async so adding one later doesn't require
+        // touching every caller.  Asset-backed skills are pre-cached at
+        // init() so the await is a microtask hop, not real I/O.
+        final body = isAllowed ? await SkillService.loadBody(useSkill) : null;
+        if (!mounted || gen != _generation) return;
+        final String injected;
+        if (body == null) {
+          injected = '[Skill not found: $useSkill]\n\nNo skill with this id is installed. Available ids: '
+              '${SkillService.skills.map((s) => s.id).join(', ')}. '
+              'Proceed without a skill — DO NOT retry [USE_SKILL] with the same id.';
+          _logAgent('iter=$loopIterations skill_miss id=$useSkill');
+        } else {
+          injected = '[Skill loaded: $useSkill]\n\n$body';
+          _logAgent('iter=$loopIterations skill_hit id=$useSkill '
+              'body_chars=${body.length}');
+        }
+        _conversationHistory.add({'role': 'user', 'content': injected});
+        setState(() {
+          // Transient bottom-of-chat status: cleared once the next AI
+          // reply starts streaming.
+          _agentLoopStatus = body == null
+              ? 'Skill not found: $useSkill'
+              : 'Loaded skill: $useSkill';
+          // Persistent transcript notice: stays visible after the loop
+          // moves on so users can see WHICH skill the model consulted.
+          _messages.add(_ChatMessage.notice(
+            body == null
+                ? '**Skill not found**: `$useSkill`'
+                : '**Loaded skill**: `$useSkill` — ${SkillService.skills.firstWhere((s) => s.id == useSkill, orElse: () => Skill(id: useSkill, name: useSkill, description: '', assetPath: '')).description}',
+          ));
+        });
+        _scrollToBottom();
+        // Loop continues so the model immediately gets to read the
+        // playbook on the next turn.  We deliberately do NOT count this
+        // against the iteration budget cap — but it's already incremented
+        // above, which is fine for MVP (a small bias toward shorter runs
+        // when many skills are loaded, prevents runaway skill chains).
+        continue;
       }
 
       if (!_autoExecute) {
@@ -725,29 +880,40 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             Expanded(child: _buildTerminalBody()),
             SizedBox(
               height: panelHeight,
-              child: _AiPanelContent(
-                mode: _mode,
-                busy: _agentBusy,
-                autoExecute: _autoExecute,
-                loopStatus: _agentLoopStatus,
-                messages: _messages,
-                textController: _textController,
-                scrollController: _scrollController,
-                onSend: _send,
-                onCancel: _cancelAgent,
-                onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
-                onInsert: widget.onInsert,
-                onSendToTerminal: widget.onExecute,
-                onRunManualCommand: widget.onExecuteAsync != null
-                    ? _runManualCommand
-                    : null,
-                onModeChanged: (m) => setState(() => _mode = m),
-                shellIntegrationActive:
-                    widget.onGetShellIntegrationActive?.call(),
-                markdownEnabled:
-                    widget.agentConfig?.markdownEnabled ?? false,
-                terminalBackground: widget.terminalBackground,
-                terminalLineHeight: widget.terminalLineHeight,
+              child: Padding(
+                // Same 8px margin SFTP uses (`_kSftpPanelMargin`) so the AI
+                // panel reads as a floating, rounded card consistent with the
+                // SFTP card next door instead of a flat, edge-to-edge strip.
+                padding: const EdgeInsets.fromLTRB(
+                  _kAiPanelMargin,
+                  0,
+                  _kAiPanelMargin,
+                  _kAiPanelMargin,
+                ),
+                child: _AiPanelContent(
+                  mode: _mode,
+                  busy: _agentBusy,
+                  autoExecute: _autoExecute,
+                  loopStatus: _agentLoopStatus,
+                  messages: _messages,
+                  textController: _textController,
+                  scrollController: _scrollController,
+                  onSend: _send,
+                  onCancel: _cancelAgent,
+                  onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
+                  onInsert: widget.onInsert,
+                  onSendToTerminal: widget.onExecute,
+                  onRunManualCommand: widget.onExecuteAsync != null
+                      ? _runManualCommand
+                      : null,
+                  onModeChanged: (m) => setState(() => _mode = m),
+                  shellIntegrationActive:
+                      widget.onGetShellIntegrationActive?.call(),
+                  markdownEnabled:
+                      widget.agentConfig?.markdownEnabled ?? false,
+                  terminalBackground: widget.terminalBackground,
+                  terminalLineHeight: widget.terminalLineHeight,
+                ),
               ),
             ),
           ],
@@ -756,19 +922,20 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     );
   }
 
-  /// Silently blocks pointer & keyboard input to the terminal while the
-  /// agent is auto-executing — without any visible scrim or "locked"
-  /// banner.  We still MUST swallow input here because the agent writes
-  /// raw bytes (commands + OSC 133 markers) into the same PTY/SSH stdin
-  /// stream the user types into; a stray Enter or paste would interleave
-  /// with the agent's command and either skew the OSC 133 capture window
-  /// or corrupt the readline buffer the shell is editing.  The progress
-  /// is already surfaced inside the agent panel (`_agentLoopStatus` row),
-  /// so the terminal-side overlay is pure noise — that's why we hide it.
-  Widget _buildTerminalBody() {
-    if (!_terminalLocked) return widget.child;
-    return AbsorbPointer(absorbing: true, child: widget.child);
-  }
+  /// Returns the host-provided child unchanged.  The actual
+  /// pointer-blocking `AbsorbPointer` that protects the terminal pane
+  /// while the agent auto-executes lives in the HOST (see
+  /// `main_views.dart`), driven by `onTerminalLockChanged`.  Wrapping
+  /// `widget.child` here would also swallow clicks for the SFTP floating
+  /// overlay that `SshSessionView` Stacks on top of the terminal —
+  /// breaking the SFTP upload/download/navigate buttons whenever the
+  /// agent runs a command.  SFTP traffic flows on its own SSH channel
+  /// and has nothing to do with the PTY stdin we're guarding, so it
+  /// must stay interactive.
+  ///
+  /// Progress is already surfaced inside the agent panel
+  /// (`_agentLoopStatus` row), so no terminal-side scrim is needed.
+  Widget _buildTerminalBody() => widget.child;
 }
 
 // ── Logging helpers ─────────────────────────────────────────────────────────
@@ -883,7 +1050,9 @@ class _AiPanelContent extends StatelessWidget {
 
     return PopupSurface(
       color: popupColor,
-      radius: 0,
+      // Match SFTP's rounded, frosted-glass card look — same radius constant
+      // as `_SftpFloatingChrome` so both panels read as siblings.
+      radius: FrostedGlassStyle.panelRadius,
       backdropBlur: 20,
       child: Column(
         children: [

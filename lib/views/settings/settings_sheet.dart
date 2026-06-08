@@ -8,10 +8,12 @@ import '../../widgets/frosted_glass.dart';
 import '../../models/agent_config.dart';
 import '../../models/command.dart';
 import '../../models/commands_store.dart';
+import '../../models/skill.dart';
 import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
 import '../../services/image_file_picker.dart';
+import '../../services/skill_service.dart';
 import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
 import '../../widgets/wallpaper_background.dart';
@@ -516,9 +518,192 @@ class _SettingsPageState extends State<SettingsPage>
         _sectionTitle('Display'),
         _buildAgentDisplaySection(),
         const SizedBox(height: 16),
+        _sectionTitle('Skills'),
+        _buildSkillsSection(),
+        const SizedBox(height: 16),
         _sectionTitle('Providers'),
         for (final p in _agentConfig.providers) _buildProviderCard(p),
       ],
+    );
+  }
+
+  // ── Skills section ─────────────────────────────────────────────────────
+  //
+  // Lists every skill discovered by [SkillService.init] (asset-bundled,
+  // dynamic, AND `~/.ssterm/skills/<id>/SKILL.md`).  Each row toggles
+  // whether the LLM is allowed to use the skill this session.
+  //
+  // The persisted shape is [AgentConfig.enabledSkills] — a whitelist
+  // where null means "all enabled".  The UI normalises back to null
+  // whenever the user re-enables every skill, so freshly-installed
+  // skills auto-show up without an extra click.
+
+  Widget _buildSkillsSection() {
+    final skills = SkillService.skills;
+    if (skills.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _kSurface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _kDivider),
+        ),
+        child: Text(
+          'No skills installed.  Drop a SKILL.md into '
+          '${SkillService.userSkillsDirPath}/<id>/ and restart ssterm '
+          'to add one.',
+          style: const TextStyle(color: _kFgMuted, fontSize: 12, height: 1.4),
+        ),
+      );
+    }
+
+    final whitelist = _agentConfig.enabledSkills;
+    final allIds = skills.map((s) => s.id).toSet();
+    bool isEnabled(String id) => whitelist == null || whitelist.contains(id);
+    final enabledCount = skills.where((s) => isEnabled(s.id)).length;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _kDivider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '$enabledCount of ${skills.length} enabled',
+                    style: const TextStyle(color: _kFgMuted, fontSize: 11),
+                  ),
+                ),
+                TextButton(
+                  onPressed: enabledCount == skills.length
+                      ? null
+                      : () => _agentApply(
+                            _agentConfig.copyWith(resetEnabledSkills: true),
+                          ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                  ),
+                  child: const Text('Enable all',
+                      style: TextStyle(color: _kAccent, fontSize: 11)),
+                ),
+                TextButton(
+                  onPressed: enabledCount == 0
+                      ? null
+                      : () => _agentApply(
+                            _agentConfig.copyWith(enabledSkills: <String>{}),
+                          ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                  ),
+                  child: const Text('Disable all',
+                      style: TextStyle(color: _kFgMuted, fontSize: 11)),
+                ),
+              ],
+            ),
+          ),
+          for (final skill in skills) _buildSkillRow(skill, isEnabled(skill.id), allIds),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+            child: Text(
+              'User skills live in ${SkillService.userSkillsDirPath}/<id>/SKILL.md — '
+              'they are auto-discovered at startup.',
+              style: const TextStyle(color: _kFgMuted, fontSize: 10.5, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkillRow(Skill skill, bool enabled, Set<String> allIds) {
+    final sourceLabel = switch (skill.source) {
+      SkillSource.asset => 'built-in',
+      SkillSource.bundled => 'dynamic',
+      SkillSource.user => 'user',
+    };
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+      dense: true,
+      value: enabled,
+      activeThumbColor: _kAccent,
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              skill.id,
+              style: TextStyle(
+                color: enabled ? _kFg : _kFgMuted,
+                fontSize: 12.5,
+                fontFamily: 'JetBrainsMono',
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: _kSurface,
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(color: _kDivider),
+            ),
+            child: Text(
+              sourceLabel,
+              style: const TextStyle(
+                color: _kFgMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 2, bottom: 4),
+        child: Text(
+          skill.description,
+          style: const TextStyle(color: _kFgMuted, fontSize: 11, height: 1.35),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      onChanged: (v) => _toggleSkill(skill.id, v, allIds),
+    );
+  }
+
+  /// Update [AgentConfig.enabledSkills] after the user toggles a switch.
+  ///
+  /// The trick: maintaining the "null = all enabled" sentinel.  If we
+  /// always wrote the whitelist explicitly, then a SKILL the user
+  /// installs LATER would default to disabled (no automatic visibility).
+  /// So whenever the resulting set covers every installed skill, we
+  /// collapse it back to null via `resetEnabledSkills: true`.
+  void _toggleSkill(String id, bool enabled, Set<String> allIds) {
+    final current =
+        _agentConfig.enabledSkills ?? Set<String>.of(allIds);
+    final next = Set<String>.of(current);
+    if (enabled) {
+      next.add(id);
+    } else {
+      next.remove(id);
+    }
+    final isFullSet = next.length == allIds.length && next.containsAll(allIds);
+    _agentApply(
+      _agentConfig.copyWith(
+        enabledSkills: isFullSet ? null : next,
+        resetEnabledSkills: isFullSet,
+      ),
     );
   }
 

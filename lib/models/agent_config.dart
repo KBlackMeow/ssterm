@@ -191,11 +191,27 @@ class AgentConfig {
   /// scales with reply length and re-parses on every streamed token.
   bool markdownEnabled;
 
+  /// Whitelist of skill ids the agent is allowed to use.  Semantics:
+  ///   • null (the default) → ALL installed skills are enabled.  Newly
+  ///     dropped-in user-dir skills auto-appear without a settings
+  ///     change — matches the principle of least surprise.
+  ///   • non-null set → only ids in this set are enabled.  An empty set
+  ///     means "all skills explicitly disabled" — the LLM won't even
+  ///     see the catalogue.
+  ///
+  /// We picked the whitelist (vs a `disabledSkills` blacklist) so the
+  /// Settings UI can serialise its toggle state directly.  The trade-off:
+  /// if the user once flipped a toggle and then later installs a new
+  /// skill, they'll need to manually enable it — which the UI's "enable
+  /// all" / "disable all" buttons make trivial.
+  Set<String>? enabledSkills;
+
   AgentConfig({
     this.defaultProvider,
     this.defaultModel,
     List<ProviderConfig>? providers,
     this.markdownEnabled = false,
+    this.enabledSkills,
   }) : providers = providers ??
             [
               ProviderConfig.chatgpt(),
@@ -231,6 +247,10 @@ class AgentConfig {
         if (defaultModel != null) 'defaultModel': defaultModel,
         'providers': providers.map((p) => p.toJson()).toList(),
         'markdownEnabled': markdownEnabled,
+        // Serialise as a sorted list so the JSON diff stays stable across
+        // saves (toggling unrelated settings shouldn't reshuffle this).
+        if (enabledSkills != null)
+          'enabledSkills': (enabledSkills!.toList()..sort()),
       };
 
   factory AgentConfig.fromJson(Map<String, dynamic>? json) {
@@ -265,24 +285,39 @@ class AgentConfig {
         // Unknown provider id — leave its model list untouched.
       }
     }
+    Set<String>? parsedEnabledSkills;
+    final rawEnabledSkills = json['enabledSkills'];
+    if (rawEnabledSkills is List) {
+      parsedEnabledSkills = rawEnabledSkills.whereType<String>().toSet();
+    }
     return AgentConfig(
       defaultProvider: json['defaultProvider'] as String?,
       defaultModel: json['defaultModel'] as String?,
       providers: providers,
       markdownEnabled: json['markdownEnabled'] as bool? ?? false,
+      enabledSkills: parsedEnabledSkills,
     );
   }
 
+  /// [resetEnabledSkills], when true, forces [enabledSkills] back to
+  /// null (the "all enabled, including future additions" default).  We
+  /// need this flag because Dart copyWith can't otherwise distinguish
+  /// "caller didn't pass the field" from "caller passed null".
   AgentConfig copyWith({
     String? defaultProvider,
     String? defaultModel,
     List<ProviderConfig>? providers,
     bool? markdownEnabled,
+    Set<String>? enabledSkills,
+    bool resetEnabledSkills = false,
   }) =>
       AgentConfig(
         defaultProvider: defaultProvider ?? this.defaultProvider,
         defaultModel: defaultModel ?? this.defaultModel,
         providers: providers ?? List.of(this.providers),
         markdownEnabled: markdownEnabled ?? this.markdownEnabled,
+        enabledSkills: resetEnabledSkills
+            ? null
+            : (enabledSkills ?? this.enabledSkills),
       );
 }

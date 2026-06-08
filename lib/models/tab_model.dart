@@ -44,6 +44,18 @@ class AppTab {
   bool aiPanelVisible = false;
   TransferManager? transferManager;
 
+  /// `true` while the AI agent is auto-executing commands.  Drives an
+  /// `AbsorbPointer` around the terminal pane so a stray keypress can't
+  /// interleave with the agent's typed-in command (which would corrupt the
+  /// shell's readline buffer or skew the OSC 133 capture window).
+  ///
+  /// IMPORTANT: this MUST wrap only the terminal pane, not the SFTP
+  /// floating overlay sitting on top of it in `SshSessionView`'s Stack —
+  /// SFTP traffic goes through its own SSH channel and stays usable while
+  /// the agent works.  See `main_views.dart` where the wrap is applied
+  /// BEFORE `SshSessionView` is constructed.
+  final ValueNotifier<bool> terminalLocked = ValueNotifier(false);
+
   // ── Pane 1 ──────────────────────────────────────────────────────────────────
   Terminal? splitTerminal;
   SSHSession? splitSshSession;
@@ -159,6 +171,7 @@ class AppTab {
     terminalController.dispose();
     splitTerminalController.dispose();
     transferManager?.dispose();
+    terminalLocked.dispose();
   }
 
   IconData get icon => switch (kind) {

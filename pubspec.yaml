@@ -86,6 +86,15 @@ flutter:
 
   assets:
     - assets/scripts/cmd.json
+    # Skills — one directory per skill, each containing a SKILL.md (required)
+    # plus any reference files the playbook links to.  Add a new entry here
+    # whenever you drop a fresh `assets/skills/<id>/` folder.  Flutter's
+    # asset resolver does NOT recurse into subdirectories with a single
+    # `assets/skills/` line, so each skill must be listed individually.
+    - assets/skills/git-bisect/
+    - assets/skills/verify-fix/
+    - assets/skills/port-conflict/
+    - assets/skills/disk-space/
 
   fonts:
     - family: JetBrainsMono

@@ -323,6 +323,21 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       );
     }
 
+    // Wrap JUST the terminal pane (and any SplitView around it) in an
+    // AbsorbPointer driven by `tab.terminalLocked`.  This MUST happen
+    // BEFORE the SshSessionView wrap below — SshSessionView stacks the
+    // SFTP floating overlay on top of `body`, and the lock should NOT
+    // apply to that overlay (SFTP runs on its own SSH channel and stays
+    // usable while the agent works).  Locking up here, around the
+    // terminal only, was the fix for SFTP buttons going dead whenever
+    // the agent auto-executed a command.
+    body = ValueListenableBuilder<bool>(
+      valueListenable: tab.terminalLocked,
+      builder: (_, locked, child) =>
+          AbsorbPointer(absorbing: locked, child: child),
+      child: body,
+    );
+
     if (tab.kind == _TabKind.ssh &&
         tab.sftp != null &&
         tab.transferManager != null) {
@@ -364,6 +379,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       // density as the terminal — defaults to 1.2 but the user can tune
       // it from Settings → Terminal → Line height.
       terminalLineHeight: _config.terminal.lineHeight,
+      // Route the agent's auto-execute lock through the per-tab notifier
+      // so the AbsorbPointer above wraps only the terminal — leaving the
+      // SFTP overlay buttons (which we Stack on top in SshSessionView)
+      // fully clickable while the agent runs commands.
+      onTerminalLockChanged: (locked) => tab.terminalLocked.value = locked,
       child: body,
     );
 
