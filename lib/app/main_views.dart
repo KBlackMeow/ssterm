@@ -393,10 +393,27 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       //   • SSH still connecting / SSH error / Settings tab → null;
       //     the agent panel surfaces a "filesystem not available"
       //     envelope to the model when it tries to write.
+      // Filesystem adapter for the agent's `[WRITE_FILE_BEGIN]` tool.
+      //
+      // The `cwdProvider:` closure is what makes the adapter aware of
+      // the active terminal pane's working directory at WRITE time
+      // (not at adapter-construction time): the OSC 7 listener on each
+      // pane updates `tab.localPath` / `tab.remoteCwdPane*` continuously
+      // without rebuilding this widget, so a snapshot captured here
+      // would go stale the moment the user `cd`'s.  Reading via a
+      // closure keeps the adapter resolving relative + `~/…` paths
+      // against the SAME directory the user sees in their shell.
       fileSystemAdapter: switch (tab.kind) {
-        _TabKind.local => const LocalFileSystemAdapter(),
-        _TabKind.ssh when tab.sftp != null =>
-          SftpFileSystemAdapter(sftp: tab.sftp, label: 'ssh: ${tab.title}'),
+        _TabKind.local => LocalFileSystemAdapter(
+          cwdProvider: () => tab.localPath?.value,
+        ),
+        _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
+          sftp: tab.sftp,
+          label: 'ssh: ${tab.title}',
+          cwdProvider: () => tab.activeSshPane == 1 && tab.isSplit
+              ? (tab.remoteCwdPane1 ?? tab.remoteCwdPane0)
+              : tab.remoteCwdPane0,
+        ),
         _ => null,
       },
       child: body,

@@ -195,13 +195,12 @@ void main() {
 
   group('SftpFileSystemAdapter availability', () {
     test('isAvailable is false when sftp is null', () {
-      const adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
+      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       expect(adapter.isAvailable, isFalse);
     });
 
     test('preview throws notSupported when sftp is null', () async {
-      const adapter =
-          SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
+      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.preview('/etc/hosts'),
         throwsA(isA<FileWriteException>().having(
@@ -213,8 +212,7 @@ void main() {
     });
 
     test('commit throws notSupported when sftp is null', () async {
-      const adapter =
-          SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
+      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.commit('/etc/hosts', 'x'),
         throwsA(isA<FileWriteException>().having(
@@ -223,6 +221,132 @@ void main() {
           equals(FileWriteErrorKind.notSupported),
         )),
       );
+    });
+
+    test('currentDirectory returns null when no sftp and no cwdProvider', () {
+      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
+      expect(adapter.currentDirectory, isNull);
+    });
+
+    test('currentDirectory reflects cwdProvider snapshot', () {
+      String? pwd = '/home/me/initial';
+      final adapter = SftpFileSystemAdapter(
+        sftp: null,
+        label: 'ssh: live',
+        cwdProvider: () => pwd,
+      );
+      expect(adapter.currentDirectory, equals('/home/me/initial'));
+      // Simulate an OSC 7 `cd` update — the next read should pick up the
+      // new value without rebuilding the adapter.
+      pwd = '/tmp';
+      expect(adapter.currentDirectory, equals('/tmp'));
+    });
+  });
+
+  group('LocalFileSystemAdapter cwd-aware path resolution', () {
+    late Directory tempRoot;
+
+    setUp(() async {
+      tempRoot = await Directory.systemTemp.createTemp('ssterm-fw-cwd-');
+    });
+
+    tearDown(() async {
+      if (await tempRoot.exists()) {
+        await tempRoot.delete(recursive: true);
+      }
+    });
+
+    test('joins a relative path against the cwdProvider snapshot', () async {
+      // Two-level structure so the join logic is exercised non-trivially
+      // (not just a same-dir filename).
+      Directory('${tempRoot.path}/sub').createSync();
+      final adapter = LocalFileSystemAdapter(
+        cwdProvider: () => tempRoot.path,
+      );
+      final preview = await adapter.preview('sub/new.txt');
+      expect(preview.resolvedPath,
+          equals('${tempRoot.path}/sub/new.txt'));
+      expect(preview.exists, isFalse);
+    });
+
+    test('strips a leading `./` before joining against cwd', () async {
+      // Matches what shell users type by reflex — the adapter must
+      // treat `./foo` and `foo` identically when joining.
+      Directory('${tempRoot.path}/d').createSync();
+      final adapter = LocalFileSystemAdapter(
+        cwdProvider: () => tempRoot.path,
+      );
+      // `./` stripping lives in the SFTP adapter today; the local
+      // adapter just joins.  Document the local behaviour explicitly
+      // here so any future change to add a strip is intentional.
+      final preview = await adapter.preview('d');
+      expect(preview.resolvedPath, equals('${tempRoot.path}/d'));
+    });
+
+    test('still rejects a relative path when cwdProvider returns null',
+        () async {
+      // Important: removing the `cwdProvider` (or having it report null)
+      // must NOT regress to "resolve against `Directory.current`" —
+      // that would land the file in the Flutter process CWD, never the
+      // terminal pane's PWD.
+      final adapter = LocalFileSystemAdapter(cwdProvider: () => null);
+      await expectLater(
+        () => adapter.preview('foo.txt'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))),
+      );
+    });
+
+    test('still rejects a relative path when cwdProvider returns a '
+        'non-absolute string', () async {
+      // Defence: a buggy provider must not bypass the absolute-only
+      // rule — we'd rather refuse than silently resolve into the
+      // wrong tree.
+      final adapter = LocalFileSystemAdapter(cwdProvider: () => 'no-slash');
+      await expectLater(
+        () => adapter.preview('foo.txt'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))),
+      );
+    });
+
+    test('cwdProvider that already ends in `/` does not produce `//`',
+        () async {
+      // Cosmetic but easy to get wrong with a naive `'$cwd/$rel'`.
+      Directory('${tempRoot.path}/end-slash').createSync();
+      final adapter = LocalFileSystemAdapter(
+        cwdProvider: () => '${tempRoot.path}/',
+      );
+      final preview = await adapter.preview('end-slash');
+      expect(preview.resolvedPath,
+          equals('${tempRoot.path}/end-slash'));
+    });
+
+    test('currentDirectory prefers cwdProvider over homeOverride',
+        () async {
+      // The OSC 7 PWD is the "freshest" signal — it should win even
+      // when a HOME override is configured.
+      final adapter = LocalFileSystemAdapter(
+        homeOverride: '/h',
+        cwdProvider: () => '/tmp/pwd',
+      );
+      expect(adapter.currentDirectory, equals('/tmp/pwd'));
+    });
+
+    test('currentDirectory falls back to HOME when cwdProvider is null',
+        () async {
+      // A brand-new tab that hasn't seen its first OSC 7 packet yet —
+      // HOME is still a useful starting hint for the model.
+      final adapter = LocalFileSystemAdapter(
+        homeOverride: '/h',
+        cwdProvider: () => null,
+      );
+      expect(adapter.currentDirectory, equals('/h'));
+    });
+
+    test('homeDirectory returns the configured override', () async {
+      final adapter = LocalFileSystemAdapter(homeOverride: '/h');
+      expect(await adapter.homeDirectory(), equals('/h'));
     });
   });
 

@@ -139,6 +139,30 @@ abstract class FileSystemAdapter {
   /// user clicks Apply.
   bool get isAvailable;
 
+  /// Best-effort current working directory used to resolve relative
+  /// paths AND `~/…` expansions.  Null when unknown; in that case the
+  /// adapter falls back to its "absolute paths only" policy.
+  ///
+  /// LOCAL adapter: the active terminal pane's PWD (via OSC 7) when
+  /// known, else the host process HOME, else null.
+  /// SFTP  adapter: the active SSH pane's PWD (via OSC 7) when known.
+  ///
+  /// Exposed for [AiAssistantOverlay] so it can advertise the working
+  /// directory to the LLM in a `<session_context>` block — telling the
+  /// model the PWD upfront avoids the "I'll just guess `~/foo.sh`"
+  /// failure mode that the SFTP adapter rejected before this hook
+  /// existed.
+  String? get currentDirectory;
+
+  /// Best-effort HOME directory for `~/…` expansion.  Local adapter
+  /// returns the host's HOME; SFTP adapter returns the directory the
+  /// SFTP channel landed in (which is the user's HOME on the vast
+  /// majority of servers — chroot SFTP setups being the exception).
+  ///
+  /// Returns null when no probe has succeeded yet; the model is told
+  /// to use absolute paths in that case.
+  Future<String?> homeDirectory();
+
   /// Inspect the target path WITHOUT modifying anything.  Returns
   /// [FileWritePreview] on success; throws [FileWriteException] for
   /// the validation-class errors ([FileWriteErrorKind.invalidPath],
@@ -171,13 +195,35 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   /// without touching the real one.  Production code leaves null.
   final String? homeOverride;
 
-  const LocalFileSystemAdapter({this.homeOverride});
+  /// Snapshot supplier for the active terminal pane's PWD.  Called on
+  /// every preview / commit so a `cd` issued between operations is
+  /// reflected immediately, without the host needing to rebuild the
+  /// adapter on each OSC 7 update.
+  ///
+  /// Returning null means "PWD unknown" — relative paths then fall
+  /// back to the existing `invalidPath` error.
+  final String? Function()? cwdProvider;
+
+  const LocalFileSystemAdapter({this.homeOverride, this.cwdProvider});
 
   @override
   String get label => 'local';
 
   @override
   bool get isAvailable => true;
+
+  @override
+  String? get currentDirectory =>
+      cwdProvider?.call() ??
+      homeOverride ??
+      Platform.environment['HOME'] ??
+      Platform.environment['USERPROFILE'];
+
+  @override
+  Future<String?> homeDirectory() async =>
+      homeOverride ??
+      Platform.environment['HOME'] ??
+      Platform.environment['USERPROFILE'];
 
   @override
   Future<FileWritePreview> preview(String path) async {
@@ -291,11 +337,17 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
     );
   }
 
-  /// Expand a leading `~` to the user's HOME and reject anything that
-  /// isn't an absolute path after expansion.  Relative paths are
-  /// dangerous in an agent context — the CWD of the Flutter process
-  /// is usually `/` (or the app bundle), NOT the terminal's CWD, so a
-  /// relative path would land somewhere the user doesn't expect.
+  /// Expand a leading `~` to the user's HOME, join relative paths to
+  /// the active terminal pane's PWD (when [cwdProvider] supplies one),
+  /// and reject everything else.
+  ///
+  /// Relative paths used to be a hard error here: the Flutter process
+  /// CWD is usually `/` (or the .app bundle), NOT the terminal's PWD,
+  /// so any resolution against `Directory.current` would land the
+  /// file somewhere the user doesn't expect.  Now we ALSO accept
+  /// relatives WHEN we know the terminal's PWD (OSC 7 reported it),
+  /// because then the resolution matches what the user sees in their
+  /// shell — same semantics as if they'd typed the path into bash.
   String _resolvePath(String input) {
     var p = input.trim();
     if (p.isEmpty) {
@@ -318,12 +370,36 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       p = p == '~' ? home : '$home${p.substring(1)}';
     }
     if (!p.startsWith('/') && !_isWindowsAbsolute(p)) {
-      throw FileWriteException(
-        FileWriteErrorKind.invalidPath,
-        'Path must be absolute (start with `/`, `~`, or a drive letter): $p',
-      );
+      // Try resolving against the terminal pane's PWD.  We only do
+      // this when the host supplied a `cwdProvider` AND it returns a
+      // non-empty value — falling back to `Directory.current` would
+      // resolve to the .app bundle on macOS, which is never what the
+      // user wants.
+      final cwd = cwdProvider?.call();
+      if (cwd != null && cwd.isNotEmpty &&
+          (cwd.startsWith('/') || _isWindowsAbsolute(cwd))) {
+        p = _joinPath(cwd, p);
+      } else {
+        throw FileWriteException(
+          FileWriteErrorKind.invalidPath,
+          cwd == null || cwd.isEmpty
+              ? 'Path must be absolute (start with `/`, `~`, or a '
+                  'drive letter): $p\n'
+                  '(Terminal PWD is not known yet — type a command in '
+                  'the shell so OSC 7 reports it, then retry.)'
+              : 'Path must be absolute (start with `/`, `~`, or a '
+                  'drive letter): $p',
+        );
+      }
     }
     return p;
+  }
+
+  /// Join `base` and `rel` with exactly one separator between them.
+  /// `rel` is assumed already-trimmed and non-absolute.
+  String _joinPath(String base, String rel) {
+    if (base.endsWith('/') || base.endsWith(r'\')) return '$base$rel';
+    return '$base/$rel';
   }
 
   bool _isWindowsAbsolute(String p) {
@@ -367,10 +443,53 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   @override
   final String label;
 
-  const SftpFileSystemAdapter({required this.sftp, required this.label});
+  /// Snapshot supplier for the active SSH pane's PWD (typically
+  /// surfaced via the `__ssterm_cwd` shell hook → OSC 7 → the host's
+  /// `tab.remoteCwdPane*` field).  Called on every preview / commit
+  /// so a `cd` issued mid-conversation is reflected immediately,
+  /// without the host needing to rebuild the adapter on each
+  /// OSC 7 update.
+  ///
+  /// Returning null means "remote PWD unknown" — the model is then
+  /// told to use an absolute path in the error envelope, INCLUDING
+  /// the SFTP HOME we discovered so it has a concrete starting point.
+  final String? Function()? cwdProvider;
+
+  SftpFileSystemAdapter({
+    required this.sftp,
+    required this.label,
+    this.cwdProvider,
+  });
+
+  /// Lazily-discovered HOME on the remote — populated by the first
+  /// call to [homeDirectory] and reused thereafter.  Cached because
+  /// `SSH_FXP_REALPATH` is a network round-trip; we want it once per
+  /// adapter, not once per write.
+  ///
+  /// Why this works: the SFTP server lands the channel in the SSH
+  /// user's HOME by default, so `realpath('.')` returns HOME on the
+  /// vast majority of servers (chroot SFTP setups being the lone
+  /// exception, and they typically use a fixed root anyway).
+  String? _cachedHome;
 
   @override
   bool get isAvailable => sftp != null;
+
+  @override
+  String? get currentDirectory => cwdProvider?.call() ?? _cachedHome;
+
+  @override
+  Future<String?> homeDirectory() async {
+    if (_cachedHome != null) return _cachedHome;
+    final client = sftp;
+    if (client == null) return null;
+    try {
+      _cachedHome = await client.absolute('.');
+    } catch (_) {
+      _cachedHome = null;
+    }
+    return _cachedHome;
+  }
 
   @override
   Future<FileWritePreview> preview(String path) async {
@@ -381,7 +500,7 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
         'SSH session is not connected yet.',
       );
     }
-    final resolved = _validateRemotePath(path);
+    final resolved = await _resolveRemotePath(path);
     SftpFileAttrs? attrs;
     try {
       attrs = await client.stat(resolved);
@@ -457,7 +576,7 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
         'SSH session is not connected yet.',
       );
     }
-    final resolved = _validateRemotePath(path);
+    final resolved = await _resolveRemotePath(path);
 
     // mtime concurrency check — same semantics as the local adapter
     // (1s slop to absorb mtime granularity differences).
@@ -556,7 +675,25 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
     );
   }
 
-  String _validateRemotePath(String path) {
+  /// Resolve a model-emitted path to an absolute POSIX-style path the
+  /// SFTP server will accept.  Handles three input shapes:
+  ///
+  ///   • Absolute (`/etc/hosts`)         → returned as-is.
+  ///   • Tilde   (`~`, `~/foo`)          → expanded via [homeDirectory]
+  ///     (lazily discovered with `SSH_FXP_REALPATH('.')` and cached).
+  ///   • Relative (`foo`, `./foo`, `a/b`) → joined to the SSH pane's
+  ///     PWD when [cwdProvider] supplies one; falls back to HOME if
+  ///     PWD is unknown but HOME was discovered (best-effort — better
+  ///     than refusing).  When neither is available, throws
+  ///     `invalidPath` with a helpful message naming the discovered
+  ///     HOME (if any) so the model has a concrete absolute path to
+  ///     retry with.
+  ///
+  /// We deliberately do NOT delegate to `client.absolute(p)` for
+  /// relative paths — that returns the CHANNEL's CWD which on most
+  /// servers is HOME, not the shell's PWD.  Using the shell's PWD
+  /// matches what `cat > foo` would do in the same terminal pane.
+  Future<String> _resolveRemotePath(String path) async {
     final p = path.trim();
     if (p.isEmpty) {
       throw const FileWriteException(
@@ -564,18 +701,52 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
         'Path is empty.',
       );
     }
-    if (!p.startsWith('/')) {
-      // Remote `~` is the SSH user's home, but SFTP servers don't
-      // universally expand it — `~` resolution is a shell feature, not
-      // an SFTP feature.  Refuse it rather than send a path the server
-      // would treat as the literal string "~".
-      throw FileWriteException(
-        FileWriteErrorKind.invalidPath,
-        'Remote path must be absolute (start with `/`). '
-        'SFTP does not expand `~`; use the full path. Got: $p',
-      );
+    if (p.startsWith('/')) return p;
+
+    if (p == '~' || p.startsWith('~/')) {
+      final home = await homeDirectory();
+      if (home == null || home.isEmpty) {
+        throw const FileWriteException(
+          FileWriteErrorKind.invalidPath,
+          'Remote `~` cannot be expanded — SFTP HOME probe '
+          '(realpath \'.\') failed. Use an absolute path like '
+          '`/home/<user>/<file>` instead.',
+        );
+      }
+      return p == '~' ? home : _joinPath(home, p.substring(2));
     }
-    return p;
+
+    // Strip an optional `./` prefix — `./foo` is the same as `foo`.
+    final rel = p.startsWith('./') ? p.substring(2) : p;
+
+    final cwd = cwdProvider?.call();
+    if (cwd != null && cwd.isNotEmpty && cwd.startsWith('/')) {
+      return _joinPath(cwd, rel);
+    }
+
+    // No cwd reported via OSC 7 yet — fall back to HOME (the
+    // user's working dir at connect time, equivalent to the very
+    // first PWD a fresh shell sees).  Better than refusing AND
+    // accidentally lands close to the right place on a brand-new
+    // session.
+    final home = await homeDirectory();
+    if (home != null && home.isNotEmpty) {
+      return _joinPath(home, rel);
+    }
+
+    throw FileWriteException(
+      FileWriteErrorKind.invalidPath,
+      'Remote path is relative but the SSH PWD is not known yet '
+      '(no OSC 7 update received, and SFTP HOME probe failed). '
+      'Use an absolute path starting with `/`. Got: $p',
+    );
+  }
+
+  /// Join `base` and `rel` with exactly one `/` between them.
+  /// `rel` is assumed already-trimmed and non-absolute.
+  String _joinPath(String base, String rel) {
+    if (base.endsWith('/')) return '$base$rel';
+    return '$base/$rel';
   }
 
   String _dirname(String p) {
@@ -624,7 +795,7 @@ class FileWriteService {
   static String formatErrorForLlm(String path, FileWriteException e) {
     final recovery = switch (e.kind) {
       FileWriteErrorKind.invalidPath =>
-        'Use an ABSOLUTE path (starting with `/` locally, or full path on a remote). For local writes you may also use `~/…` which expands to the user\'s HOME.',
+        'Path resolution failed. Prefer an ABSOLUTE path (starting with `/`). `~/…` works on BOTH local and SSH tabs (ssterm expands it for you over SFTP). Relative paths resolve against the active terminal pane\'s PWD only when OSC 7 has reported one — the upstream `message` above says whether the PWD was known. When unsure, reuse the absolute PWD or HOME shown in the `<session_context>` block from earlier in this conversation.',
       FileWriteErrorKind.parentMissing =>
         'Run `mkdir -p <parent>` via bash FIRST, then retry [WRITE_FILE_BEGIN].',
       FileWriteErrorKind.mtimeMismatch =>

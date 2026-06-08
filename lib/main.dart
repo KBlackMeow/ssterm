@@ -55,6 +55,7 @@ import 'widgets/wallpaper_background.dart';
 part 'app/main_local.dart';
 part 'app/main_ssh.dart';
 part 'app/main_chrome.dart';
+part 'app/main_desktop_home.dart';
 part 'app/main_mobile.dart';
 part 'app/main_mobile_nav.dart';
 part 'app/main_mobile_connections.dart';
@@ -87,7 +88,25 @@ void main() async {
   // min/max/close controls inside the tab bar.
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
+    // Pin a default size and `center: true` here on purpose:
+    //   • macOS's `applicationSupportsSecureRestorableState = true` (see
+    //     AppDelegate.swift) makes the OS restore the previous frame on
+    //     launch, which clobbers the `center()` call we make in
+    //     MainFlutterWindow.swift's awakeFromNib.  Without `size:` +
+    //     `center: true` here, `window_manager`'s ready-to-show hook
+    //     also leaves the OS-restored frame untouched and the window
+    //     ends up wherever it was last closed (commonly the lower-left
+    //     after some accidental resize during dev).
+    //   • Setting both anchors EVERY launch to a known-good frame.  We
+    //     can layer in per-user window-state persistence later via
+    //     `windowManager.getBounds()` + SharedPreferences if needed;
+    //     the predictable default beats inheriting a random frame.
+    //   • Same 960×720 default as `MainFlutterWindow.defaultContentSize`
+    //     so the Swift and Dart hints don't fight each other.
     const windowOptions = WindowOptions(
+      size: Size(960, 720),
+      minimumSize: Size(640, 480),
+      center: true,
       titleBarStyle: TitleBarStyle.hidden,
       backgroundColor: Color(0xFF1E1E1E),
     );
