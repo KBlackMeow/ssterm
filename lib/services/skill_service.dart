@@ -99,18 +99,32 @@ class SkillService {
         .toList(growable: false);
   }
 
-  /// Compact summary table for system-prompt / system-reminder injection.
+  /// Compact summary table for system-prompt injection, in the
+  /// Cursor-inspired format:
   ///
-  /// Layout: `- <id>: <description>` (or `- <id>: <description> — <when_to_use>`
-  /// when the skill defines a separate trigger clause).  Each entry is
-  /// truncated to [_maxListingDescChars]; if the whole table would exceed
-  /// [_listingBudgetChars] the overflow tail is downgraded to name-only
-  /// rows with an `...` ellipsis on the very last entry so the model
-  /// still sees the id (and can ask the user about it) without paying
-  /// full description cost.
+  /// ```
+  /// <agent_skill id="git-bisect" path="assets/skills/git-bisect/SKILL.md">Bisect git history to locate the first bad commit — when the user reports a regression.</agent_skill>
+  /// <agent_skill id="verify-fix" path="…">…</agent_skill>
+  /// ```
+  ///
+  /// Each entry: ONE line, opening tag with `id` (used by the model in
+  /// `[USE_SKILL: <id>]`) and `path` (informational, lets the user grep /
+  /// open the file).  Description goes between the tags; if a separate
+  /// `when_to_use` clause exists it's joined with an em-dash so the model
+  /// sees both the "what" and the "when".
+  ///
+  /// We deliberately mirror Cursor's `<agent_skill fullPath=…>desc</agent_skill>`
+  /// shape because LLMs trained on Anthropic / OpenAI / Google traces have
+  /// seen this format thousands of times and parse it more reliably than
+  /// our previous `- id: desc` bullet list — especially small models.
   ///
   /// Returns the empty string when no skills are installed — callers
   /// should also omit the `<available_skills>` wrapper in that case.
+  ///
+  /// Budget enforcement: each entry costs `~50 chars overhead + desc`;
+  /// once we'd exceed [_listingBudgetChars] the tail is collapsed into
+  /// one `… (N skills omitted)` line so the model still knows there's
+  /// more it can't see right now.
   static String buildPromptCatalogue({Iterable<String>? include}) {
     final pool = include == null
         ? _skills
@@ -134,7 +148,9 @@ class SkillService {
 
     if (truncated) {
       final omitted = pool.length - rows.length;
-      rows.add('- … ($omitted skill${omitted == 1 ? '' : 's'} omitted to fit context budget)');
+      rows.add(
+        '<!-- $omitted skill${omitted == 1 ? '' : 's'} omitted to fit context budget -->',
+      );
     }
     return rows.join('\n');
   }
@@ -142,16 +158,23 @@ class SkillService {
   static String _formatRow(Skill s) {
     final desc = _truncate(s.description, _maxListingDescChars);
     final hint = s.whenToUse;
-    final full = (hint == null || hint.isEmpty)
-        ? '- ${s.id}: $desc'
-        : '- ${s.id}: $desc — ${_truncate(hint, _maxListingDescChars)}';
+    final body = (hint == null || hint.isEmpty)
+        ? desc
+        : '$desc — ${_truncate(hint, _maxListingDescChars)}';
     // Defense in depth: a single deranged row (e.g. user pasted a 10 KB
     // single-line description into frontmatter) must not blow the whole
-    // budget by itself.  Truncate the row body as a last resort.
-    if (full.length > _maxListingDescChars * 2 + 32) {
-      return '${full.substring(0, _maxListingDescChars * 2 + 28)}…';
-    }
-    return full;
+    // budget by itself.  Truncate the inner body as a last resort BEFORE
+    // we wrap it in the XML tag — keeps the tag itself valid.
+    final cappedBody = body.length > _maxListingDescChars * 2 + 32
+        ? '${body.substring(0, _maxListingDescChars * 2 + 28)}…'
+        : body;
+    // Escape `"` so a description containing a literal quote can't break
+    // the path attribute.  `<` / `&` are left as-is — they would only
+    // matter if a SKILL.md author put a literal XML tag in their desc,
+    // which we treat as the author's choice (and is in fact common when
+    // referencing other tag names in prose).
+    final safePath = s.fullPath.replaceAll('"', '&quot;');
+    return '<agent_skill id="${s.id}" path="$safePath">$cappedBody</agent_skill>';
   }
 
   static String _truncate(String s, int cap) {

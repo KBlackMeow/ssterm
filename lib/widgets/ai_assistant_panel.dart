@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io' show stdout;
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,9 @@ import '../io/output_pipe.dart' show CommandResult;
 import '../models/agent_config.dart';
 import '../models/skill.dart';
 import '../services/llm_service.dart';
+import '../services/file_write_service.dart';
 import '../services/skill_service.dart';
+import '../services/web_search_service.dart';
 import 'frosted_glass.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
@@ -38,6 +41,7 @@ class AiAssistantOverlay extends StatefulWidget {
     this.terminalBackground,
     this.terminalLineHeight,
     this.onTerminalLockChanged,
+    this.fileSystemAdapter,
   });
 
   final Widget child;
@@ -89,6 +93,21 @@ class AiAssistantOverlay extends StatefulWidget {
   /// guarding).
   final ValueChanged<bool>? onTerminalLockChanged;
 
+  /// File-system backend used by the agent's `[WRITE_FILE_BEGIN]` /
+  /// `[WRITE_FILE_END]` tool to materialise proposed file writes.
+  ///
+  ///   • LOCAL tabs pass [LocalFileSystemAdapter] — writes land on
+  ///     the host running ssterm via `dart:io` with atomic temp+rename.
+  ///   • SSH tabs pass [SftpFileSystemAdapter] wrapping `tab.sftp` —
+  ///     writes go over the existing SFTP channel.
+  ///   • Tabs without a usable filesystem (Settings, connecting, …)
+  ///     pass null; the panel intercepts the marker and replies with a
+  ///     `[File write failed] reason: notSupported` envelope instead.
+  ///
+  /// Reconstructed by the host on every build so a tab switch
+  /// immediately swaps the adapter the next Apply click will use.
+  final FileSystemAdapter? fileSystemAdapter;
+
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
@@ -110,18 +129,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = <Map<String, String>>[];
-
-  /// Ids of skills already announced to the LLM via a `<system-reminder>`
-  /// catalogue message earlier in THIS conversation.  Wiped on `/clear`
-  /// alongside the rest of the chat state.
-  ///
-  /// Modelled after Claude Code's `sentSkillNames` map (attachments.ts) —
-  /// in long sessions re-injecting the same 600-token catalogue on every
-  /// user turn is pure waste.  We only ever announce the DELTA.  The
-  /// listing itself is a real user message in the transcript, so the
-  /// model continues to "see" it via context replay; we just don't pay
-  /// the cost a second time.
-  final _announcedSkillIds = <String>{};
 
   /// True while the agent is auto-executing commands — terminal input is
   /// blocked to prevent the user from interfering with the agent's work.
@@ -303,10 +310,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       if (_mode == AiPanelMode.agent) {
         _conversationHistory.clear();
         _agentLoopStatus = null;
-        // Re-announce the full skill catalogue on the next user turn,
-        // since /clear semantically starts a brand-new conversation
-        // (the prior `<system-reminder>` listing is no longer in history).
-        _announcedSkillIds.clear();
+        // No per-conversation skill bookkeeping to reset anymore — the
+        // catalogue lives inside the system prompt (see
+        // [LlmService._buildSkillsBlock]) so a wipe of conversation
+        // history doesn't lose any skill visibility.
       }
     });
   }
@@ -434,6 +441,319 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     return fullText;
   }
 
+  /// Execute one `[WEB_SEARCH: <query>]` marker the model emitted.
+  /// Returns the user-role message body to inject into history, or null
+  /// when the loop was cancelled / superseded mid-fetch (caller bails).
+  ///
+  /// Handles three classes of outcome:
+  ///   1. **Disabled at config time.**  The model emitted the marker
+  ///      despite the system prompt omitting `<web_search_tool>` — most
+  ///      likely it remembered the marker from training data.  We tell
+  ///      it the tool is off and to proceed without it.  No HTTP call.
+  ///   2. **Service success.**  Format via [WebSearchService.formatForLlm]
+  ///      and let the agent read it on its next turn.
+  ///   3. **Service failure** (missing key / 401 / 429 / network / 5xx).
+  ///      Format via [WebSearchService.formatErrorForLlm] which includes
+  ///      a `recovery` hint telling the model what to do next.
+  ///
+  /// We deliberately catch EVERYTHING (Exception AND Error subclasses)
+  /// because a stray crash in the search service must NOT take down the
+  /// agent loop — at worst the model gets an "unknown error" envelope
+  /// and proceeds.
+  Future<String?> _runWebSearch({
+    required int gen,
+    required int iter,
+    required String query,
+    required bool enabled,
+  }) async {
+    if (!enabled) {
+      _logAgent(
+          'iter=$iter web_search_skip reason=disabled query=${_logQuote(query)}');
+      // Mirror the "[Web search failed]" envelope shape so the model
+      // applies the same recovery logic regardless of whether the
+      // tool was off at config time vs failed at request time.
+      return '[Web search failed]\n'
+          'query: "${query.replaceAll('"', r'\"')}"\n'
+          'reason: disabled\n'
+          'message: Web search is disabled in Settings.\n\n'
+          'Tell the user to open Settings → Agent → Web search to enable the tool and add a Brave Search API key. Proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker.';
+    }
+
+    setState(() => _agentLoopStatus = 'Searching the web: $query');
+    _scrollToBottom();
+    final t0 = DateTime.now().millisecondsSinceEpoch;
+    try {
+      final results = await WebSearchService.search(query);
+      if (!mounted || gen != _generation) return null;
+      final elapsed = DateTime.now().millisecondsSinceEpoch - t0;
+      _logAgent(
+        'iter=$iter web_search_ok results=${results.length} '
+        'elapsed_ms=$elapsed query=${_logQuote(query)}',
+      );
+      setState(() {
+        _messages.add(_ChatMessage.notice(
+          results.isEmpty
+              ? '**Web search**: `$query` — no results'
+              : '**Web search**: `$query` — ${results.length} result${results.length == 1 ? '' : 's'}',
+        ));
+      });
+      _scrollToBottom();
+      return WebSearchService.formatForLlm(query, results);
+    } on WebSearchException catch (e) {
+      if (!mounted || gen != _generation) return null;
+      _logAgent(
+        'iter=$iter web_search_err kind=${e.kind.name} '
+        'status=${e.statusCode ?? '-'} query=${_logQuote(query)}',
+      );
+      setState(() {
+        _messages.add(_ChatMessage.notice(
+          '**Web search failed**: `$query` — ${e.kind.name}',
+        ));
+      });
+      _scrollToBottom();
+      return WebSearchService.formatErrorForLlm(query, e);
+    } catch (e) {
+      // Catch-all for non-WebSearchException failures (programmer
+      // errors, dart:io quirks, etc.) — keep the agent loop alive.
+      if (!mounted || gen != _generation) return null;
+      _logAgent(
+        'iter=$iter web_search_crash type=${e.runtimeType} '
+        'msg=${_logQuote('$e')}',
+      );
+      return '[Web search failed]\n'
+          'query: "${query.replaceAll('"', r'\"')}"\n'
+          'reason: unknown\n'
+          'message: ${e.toString().replaceAll('\n', ' ')}\n\n'
+          'Proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker for the same query.';
+    }
+  }
+
+  /// Handle a `[WRITE_FILE_BEGIN: …]` proposal the model just emitted.
+  ///
+  /// Returns the disposition the caller (the agent loop) must take:
+  ///   • [_WriteProposalOutcome.injectedAndContinue] — a rejection
+  ///     envelope is already in history; loop should `continue` so the
+  ///     model gets to react on its next turn.  Used for:
+  ///         – the tool is disabled in settings
+  ///         – no adapter (the tab has no usable filesystem)
+  ///         – preview itself failed (parent missing, invalid path, …)
+  ///   • [_WriteProposalOutcome.waitingForUser] — preview succeeded, a
+  ///     chat card is shown, and the loop should `return` so the
+  ///     panel goes back to idle while waiting for Apply / Reject.
+  ///     [_decideWriteProposal] will inject the result envelope and
+  ///     re-invoke `_continueAgentLoop` on click.
+  ///
+  /// Per the user-ratified design: writes ALWAYS require an Apply
+  /// click — even when auto-execute is on.  Bash commands and writes
+  /// have different blast radii (a bash command's exit code surfaces
+  /// failure; an overwrite of `~/.zshrc` is silent until next login).
+  Future<_WriteProposalOutcome> _proposeFileWrite({
+    required int gen,
+    required int iter,
+    required String path,
+    required String content,
+    required bool enabled,
+  }) async {
+    if (!enabled) {
+      _logAgent(
+          'iter=$iter file_write_skip reason=disabled path=${_logQuote(path)}');
+      _conversationHistory.add({
+        'role': 'user',
+        'content': '[File write failed]\n'
+            'path: $path\n'
+            'reason: disabled\n'
+            'message: File write tool is disabled in Settings.\n\n'
+            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed WITHOUT [WRITE_FILE_BEGIN]. Do NOT retry the marker.',
+      });
+      return _WriteProposalOutcome.injectedAndContinue;
+    }
+    final adapter = widget.fileSystemAdapter;
+    if (adapter == null || !adapter.isAvailable) {
+      _logAgent(
+          'iter=$iter file_write_skip reason=no_adapter path=${_logQuote(path)}');
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(
+          path,
+          const FileWriteException(
+            FileWriteErrorKind.notSupported,
+            'No filesystem adapter is available for this tab (likely a non-terminal tab or an SSH session that hasn\'t finished handshaking yet).',
+          ),
+        ),
+      });
+      return _WriteProposalOutcome.injectedAndContinue;
+    }
+
+    setState(() =>
+        _agentLoopStatus = 'Previewing write: $path (${adapter.label})');
+    _scrollToBottom();
+
+    FileWritePreview preview;
+    try {
+      preview = await adapter.preview(path);
+    } on FileWriteException catch (e) {
+      if (!mounted || gen != _generation) {
+        return _WriteProposalOutcome.injectedAndContinue;
+      }
+      _logAgent('iter=$iter file_write_preview_err kind=${e.kind.name} '
+          'path=${_logQuote(path)}');
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(path, e),
+      });
+      return _WriteProposalOutcome.injectedAndContinue;
+    } catch (e) {
+      if (!mounted || gen != _generation) {
+        return _WriteProposalOutcome.injectedAndContinue;
+      }
+      _logAgent('iter=$iter file_write_preview_crash type=${e.runtimeType} '
+          'path=${_logQuote(path)} msg=${_logQuote('$e')}');
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(
+          path,
+          FileWriteException(FileWriteErrorKind.io, '$e'),
+        ),
+      });
+      return _WriteProposalOutcome.injectedAndContinue;
+    }
+
+    final proposal = _WriteProposal(
+      requestedPath: path,
+      resolvedPath: preview.resolvedPath,
+      content: content,
+      preview: preview,
+      agentGeneration: gen,
+    );
+    setState(() {
+      _messages.add(_ChatMessage.writeProposal(proposal));
+      // Status text reflects the wait — the chat card itself carries
+      // the action buttons.
+      _agentLoopStatus = 'Awaiting Apply for ${preview.resolvedPath}';
+    });
+    _scrollToBottom();
+    _logAgent('iter=$iter file_write_proposed exists=${preview.exists} '
+        'bytes=${content.length} path=${_logQuote(preview.resolvedPath)}');
+    return _WriteProposalOutcome.waitingForUser;
+  }
+
+  /// Called by [_WriteProposalCard] when the user clicks Apply or
+  /// Reject.  Applies the write (or skips it), injects the
+  /// corresponding envelope into conversation history, and re-invokes
+  /// [_continueAgentLoop] so the model can react on its next turn.
+  ///
+  /// [apply] is true for Apply, false for Reject.  [reason] is an
+  /// optional free-form note the user typed (rejection path only — we
+  /// don't collect a "why are you applying" string).
+  Future<void> _decideWriteProposal(
+    _WriteProposal proposal, {
+    required bool apply,
+    String? reason,
+  }) async {
+    // Idempotency: double-click on Apply during the in-flight commit
+    // must be a no-op.  Same for clicking Reject after Apply has
+    // already started.
+    if (proposal.state != _WriteProposalState.pending) return;
+
+    // Stale check: if the user fired off a new agent message between
+    // proposal time and click time, [_generation] bumped and this
+    // proposal is no longer part of an active conversation.  Mark
+    // it visually rejected but do NOT touch the new conversation's
+    // history (the new loop is busy and didn't ask for this).
+    if (proposal.agentGeneration != _generation) {
+      setState(() {
+        proposal.state = _WriteProposalState.rejected;
+        proposal.outcomeMessage =
+            'Cancelled — newer conversation started before decision.';
+      });
+      return;
+    }
+
+    final config = widget.agentConfig;
+    if (config == null) {
+      setState(() {
+        proposal.state = _WriteProposalState.failed;
+        proposal.outcomeMessage = 'Agent is not configured.';
+      });
+      return;
+    }
+
+    String envelope;
+    if (!apply) {
+      setState(() {
+        proposal.state = _WriteProposalState.rejected;
+        proposal.outcomeMessage = reason;
+      });
+      envelope = FileWriteService.formatRejectionForLlm(
+        proposal.requestedPath,
+        reason: reason,
+      );
+      _logAgent('file_write_rejected path=${_logQuote(proposal.resolvedPath)}');
+    } else {
+      final adapter = widget.fileSystemAdapter;
+      if (adapter == null || !adapter.isAvailable) {
+        setState(() {
+          proposal.state = _WriteProposalState.failed;
+          proposal.outcomeMessage =
+              'Filesystem adapter is no longer available (tab may have changed).';
+        });
+        envelope = FileWriteService.formatErrorForLlm(
+          proposal.requestedPath,
+          const FileWriteException(
+            FileWriteErrorKind.notSupported,
+            'Filesystem adapter became unavailable between preview and apply.',
+          ),
+        );
+      } else {
+        setState(() => proposal.state = _WriteProposalState.applying);
+        try {
+          final result = await adapter.commit(
+            proposal.requestedPath,
+            proposal.content,
+            expectedMtime: proposal.preview.mtime,
+          );
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _WriteProposalState.applied;
+            proposal.result = result;
+          });
+          envelope = FileWriteService.formatSuccessForLlm(result);
+          _logAgent('file_write_applied bytes=${result.bytesWritten} '
+              'created=${result.created} path=${_logQuote(result.resolvedPath)}');
+        } on FileWriteException catch (e) {
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _WriteProposalState.failed;
+            proposal.outcomeMessage = e.message;
+          });
+          envelope = FileWriteService.formatErrorForLlm(
+              proposal.requestedPath, e);
+          _logAgent('file_write_commit_err kind=${e.kind.name} '
+              'path=${_logQuote(proposal.resolvedPath)}');
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _WriteProposalState.failed;
+            proposal.outcomeMessage = '$e';
+          });
+          envelope = FileWriteService.formatErrorForLlm(
+            proposal.requestedPath,
+            FileWriteException(FileWriteErrorKind.io, '$e'),
+          );
+          _logAgent('file_write_commit_crash type=${e.runtimeType} '
+              'path=${_logQuote(proposal.resolvedPath)}');
+        }
+      }
+    }
+
+    // Inject the envelope and resume the loop where it left off.
+    // The loop's generation hasn't changed (we checked above), so
+    // _continueAgentLoop will pick up from this synthetic user turn.
+    _conversationHistory.add({'role': 'user', 'content': envelope});
+    _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
+    await _continueAgentLoop(_generation, config);
+  }
+
   /// Entry point used when the user types into the agent input.
   /// Adds [userText] to the conversation history and drives the loop.
   Future<void> _agentRespond(String userText) async {
@@ -452,49 +772,16 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
     _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
 
-    // Delta-announce any skills that haven't been advertised to the
-    // LLM yet in THIS conversation.  Most common path: first user turn —
-    // `_announcedSkillIds` is empty, so the full catalogue is appended.
-    // Subsequent turns: usually a no-op (asset skills are static), but
-    // if the bundled-skill registry ever grows mid-session, newcomers
-    // are announced as a delta.
-    //
-    // The reminder is PREPENDED to the user message text instead of
-    // being added as its own history entry, because Anthropic's
-    // /v1/messages endpoint enforces strict user/assistant alternation
-    // and two consecutive 'user' rows fail validation.  Embedding the
-    // `<system-reminder>` tag inline lets all three providers (OpenAI,
-    // Anthropic, Gemini) see it as a single user turn.  The wrapper
-    // tag itself is enough of a visual / semantic boundary for the
-    // model to treat the reminder as out-of-band meta.
-    var finalUserContent = userText;
-    // Apply the per-session enabled-skill whitelist BEFORE deciding what
-    // to announce.  A disabled skill must never appear in the listing —
-    // otherwise the model would happily try to load it and we'd have to
-    // refuse mid-loop, wasting a round-trip.
-    final enabledFilter = config.enabledSkills;
-    final enabledIds = SkillService.filterEnabled(enabledFilter)
-        .map((s) => s.id)
-        .toSet();
-    final unannounced = enabledIds
-        .where((id) => !_announcedSkillIds.contains(id))
-        .toList(growable: false);
-    if (unannounced.isNotEmpty) {
-      final reminder =
-          LlmService.buildSkillListingReminder(include: unannounced);
-      if (reminder.isNotEmpty) {
-        finalUserContent = '$reminder\n\n$userText';
-        _announcedSkillIds.addAll(unannounced);
-        _logAgent('skill_listing announced=${unannounced.length} '
-            'total=${_announcedSkillIds.length}');
-      }
-    }
-
     // The agent loop relies entirely on OSC 133 shell-integration capture
-    // (with an echo-sentinel fallback) to surface terminal state to the LLM —
-    // we no longer prepend a raw terminal-buffer snapshot, which used to
-    // duplicate the same data in two formats and bloat context.
-    _conversationHistory.add({'role': 'user', 'content': finalUserContent});
+    // (with an echo-sentinel fallback) to surface terminal state to the
+    // LLM — we no longer prepend a raw terminal-buffer snapshot, which
+    // used to duplicate the same data in two formats and bloat context.
+    //
+    // Skill catalogue: lives inside the system prompt (see
+    // [LlmService._buildSkillsBlock]) — Cursor-style.  No per-turn
+    // injection needed here, the model already sees every enabled skill
+    // listed in `<available_skills>` at the top of every call.
+    _conversationHistory.add({'role': 'user', 'content': userText});
 
     await _continueAgentLoop(gen, config);
   }
@@ -691,11 +978,17 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       final taskComplete = LlmService.hasTaskCompleteMarker(fullText);
       final askUser = LlmService.hasAskUserMarker(fullText);
       final useSkill = LlmService.extractUseSkillMarker(fullText);
+      final webQuery = LlmService.extractWebSearchQuery(fullText);
+      final writeFile = LlmService.extractWriteFile(fullText);
       final markerLabel = taskComplete
           ? 'task_complete'
           : (askUser
               ? 'ask_user'
-              : (useSkill != null ? 'use_skill:$useSkill' : 'none'));
+              : (useSkill != null
+                  ? 'use_skill:$useSkill'
+                  : (webQuery != null
+                      ? 'web_search'
+                      : (writeFile != null ? 'write_file' : 'none'))));
       _logAgent(
         'iter=$loopIterations reply chars=${fullText.length} '
         'cmds=${commands.length} marker=$markerLabel',
@@ -768,6 +1061,70 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         // above, which is fine for MVP (a small bias toward shorter runs
         // when many skills are loaded, prevents runaway skill chains).
         continue;
+      }
+
+      // ── Web search ──────────────────────────────────────────────────
+      // Same intercept-before-execute pattern as USE_SKILL: when the
+      // model emits `[WEB_SEARCH: <query>]` we call Brave, format the
+      // results, and inject them as the next user message so the model
+      // can read them on its NEXT turn.  Bash blocks in the same turn
+      // are dropped (system prompt warns about this); we match the
+      // marker-wins behaviour of all other meta turns.
+      //
+      // Runs in both MANUAL and AUTO modes — same rationale as
+      // USE_SKILL: fetching information doesn't run any shell commands
+      // on the user's machine, so requiring auto-execute would be
+      // surprising.
+      if (webQuery != null) {
+        final injected = await _runWebSearch(
+          gen: gen,
+          iter: loopIterations,
+          query: webQuery,
+          enabled: config.webSearchEnabled,
+        );
+        if (!mounted || gen != _generation) return;
+        if (injected == null) {
+          // Cancelled or generation flipped during the fetch — bail
+          // without touching history (the cancel path already cleared
+          // the transient status).
+          return;
+        }
+        _conversationHistory.add({'role': 'user', 'content': injected});
+        setState(() => _agentLoopStatus = null);
+        continue;
+      }
+
+      // ── File-write proposal ─────────────────────────────────────────
+      // The marker is intercepted BEFORE we look at ```bash blocks,
+      // [TASK_COMPLETE], or auto-execute — same precedence as
+      // USE_SKILL / WEB_SEARCH.  Unlike those two, the write does NOT
+      // run automatically: per the user-ratified design (always-Apply
+      // policy) we PAUSE the loop, surface a chat card, and resume
+      // only when the user clicks Apply or Reject in
+      // [_decideWriteProposal].
+      if (writeFile != null) {
+        final pauseOutcome = await _proposeFileWrite(
+          gen: gen,
+          iter: loopIterations,
+          path: writeFile.path,
+          content: writeFile.content,
+          enabled: config.fileWriteEnabled,
+        );
+        if (!mounted || gen != _generation) return;
+        switch (pauseOutcome) {
+          case _WriteProposalOutcome.injectedAndContinue:
+            // Disabled / preview-failed / adapter-missing case — we
+            // already pushed a rejection envelope into history; resume
+            // the loop normally on the next iteration.
+            setState(() => _agentLoopStatus = null);
+            continue;
+          case _WriteProposalOutcome.waitingForUser:
+            // Card is shown, loop is paused.  Return so the outer
+            // `_continueAgentLoop`'s finally fires and unlocks the
+            // terminal / clears _agentBusy; the Apply / Reject click
+            // will call _continueAgentLoop again to resume.
+            return;
+        }
       }
 
       if (!_autoExecute) {
@@ -913,6 +1270,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
                       widget.agentConfig?.markdownEnabled ?? false,
                   terminalBackground: widget.terminalBackground,
                   terminalLineHeight: widget.terminalLineHeight,
+                  onWriteProposalDecision: _decideWriteProposal,
                 ),
               ),
             ),
@@ -997,6 +1355,7 @@ class _AiPanelContent extends StatelessWidget {
     required this.markdownEnabled,
     this.terminalBackground,
     this.terminalLineHeight,
+    this.onWriteProposalDecision,
   });
 
   final AiPanelMode mode;
@@ -1042,6 +1401,14 @@ class _AiPanelContent extends StatelessWidget {
   /// and on `bodyMedium` (which `gpt_markdown.CodeField` reads from) so
   /// prose + code lines pack at the same density as the terminal pane.
   final double? terminalLineHeight;
+
+  /// Handler the [_WriteProposalCard] calls when the user clicks Apply
+  /// or Reject.  Wired to [_AiAssistantOverlayState._decideWriteProposal]
+  /// in the state above — kept as a callback (instead of reaching into
+  /// the state directly) so the panel content stays a pure stateless
+  /// view, the same shape every other interactive control here uses.
+  final void Function(_WriteProposal proposal,
+      {required bool apply, String? reason})? onWriteProposalDecision;
 
   @override
   Widget build(BuildContext context) {
@@ -1396,6 +1763,33 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
           command: msg.commandRun ?? '',
           output: msg.text,
           exitCode: msg.commandExitCode,
+        ),
+      );
+    }
+
+    // File-write proposal: distinct Apply/Reject card with diff preview.
+    // Owns its own surface to make it visually unmissable — a write is
+    // an irreversible operation, so it must NOT look like a regular
+    // notice / system result.
+    //
+    // If [onWriteProposalDecision] is null the card still renders, but
+    // the buttons are no-ops — same defensive shape as the rest of the
+    // panel callbacks (the host can always pass null when in a state
+    // where decisions don't make sense, e.g. mid-tear-down).
+    final proposal = msg.writeProposal;
+    if (proposal != null) {
+      final decide = onWriteProposalDecision;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _WriteProposalCard(
+          proposal: proposal,
+          onApply: decide == null
+              ? () {}
+              : () => decide(proposal, apply: true),
+          onReject: decide == null
+              ? ({String? reason}) {}
+              : ({String? reason}) =>
+                  decide(proposal, apply: false, reason: reason),
         ),
       );
     }
@@ -1817,6 +2211,298 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
 /// Inline "command executed" card shown in the agent transcript whenever the
 /// auto-execute loop runs a command.  Mirrors what the LLM saw via OSC 133
 /// shell integration so the user can spot-check the agent's view of reality.
+// ── File-write proposal card ──────────────────────────────────────────────
+
+/// Chat-card UI for an [_WriteProposal].  Shows the proposed file path,
+/// the existing-vs-proposed byte / line summary, an expandable diff
+/// preview, and Apply / Reject buttons.  Re-renders on state changes
+/// because the underlying [_WriteProposal] is mutated in place from
+/// [_AiAssistantOverlayState._decideWriteProposal].
+///
+/// Visual hierarchy is intentionally heavier than the system command
+/// card — file writes are irreversible (no `git restore` for files
+/// the agent created from scratch) so we want the card to read as
+/// "look at this before clicking", not "another tool output".
+class _WriteProposalCard extends StatefulWidget {
+  const _WriteProposalCard({
+    required this.proposal,
+    required this.onApply,
+    required this.onReject,
+  });
+
+  final _WriteProposal proposal;
+  final VoidCallback onApply;
+  // Reject takes an optional reason string the user can type before
+  // clicking — surfaced in the rejection envelope so the model has
+  // context for its next turn ("user said the path was wrong").
+  final void Function({String? reason}) onReject;
+
+  @override
+  State<_WriteProposalCard> createState() => _WriteProposalCardState();
+}
+
+class _WriteProposalCardState extends State<_WriteProposalCard> {
+  bool _previewExpanded = false;
+  bool _rejectFormOpen = false;
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.proposal;
+    final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.7);
+    final surface =
+        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
+
+    // Visual accent colour switches with the lifecycle state so a glance
+    // at the card colour conveys what happened — green = applied,
+    // red = failed, amber = pending decision, grey = rejected.
+    final accent = switch (p.state) {
+      _WriteProposalState.pending => const Color(0xFFE5C07B), // amber
+      _WriteProposalState.applying => const Color(0xFF61AFEF), // blue
+      _WriteProposalState.applied => const Color(0xFF98C379), // green
+      _WriteProposalState.rejected =>
+        dim, // muted — user said no, not an error
+      _WriteProposalState.failed => const Color(0xFFFF6E67), // red
+    };
+
+    final lineCount = const LineSplitter().convert(p.content).length;
+    final byteCount = utf8.encode(p.content).length;
+    final existingLines = p.preview.existingLines;
+    final existingBytes = p.preview.existingSize;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: surface.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withValues(alpha: 0.5), width: 1),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: state badge + path
+          Row(
+            children: [
+              _buildStateBadge(p.state, accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  p.resolvedPath,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 13,
+                    fontFamily: 'JetBrainsMono',
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+
+          // Diff summary line: existing vs proposed bytes / lines.
+          Text(
+            _buildSummaryLine(
+              exists: p.preview.exists,
+              existingBytes: existingBytes,
+              existingLines: existingLines,
+              newBytes: byteCount,
+              newLines: lineCount,
+            ),
+            style: TextStyle(color: dim, fontSize: 12),
+          ),
+
+          // Outcome text once the proposal reaches a terminal state.
+          if (p.outcomeMessage != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              p.outcomeMessage!,
+              style: TextStyle(color: accent, fontSize: 12),
+            ),
+          ],
+          if (p.result != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Wrote ${p.result!.bytesWritten} bytes — '
+              '${p.result!.created ? "created" : "updated"} '
+              '@ ${p.result!.mtime?.toIso8601String() ?? "—"}',
+              style: TextStyle(color: dim, fontSize: 12),
+            ),
+          ],
+
+          // Preview toggle + body (collapsed by default — a 200-line
+          // diff would otherwise dominate the chat scrollback).
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: () => setState(() => _previewExpanded = !_previewExpanded),
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    _previewExpanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    size: 14,
+                    color: dim,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _previewExpanded ? 'Hide content' : 'Show content',
+                    style: TextStyle(color: dim, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_previewExpanded) ...[
+            const SizedBox(height: 4),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 320),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  p.content,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 12,
+                    fontFamily: 'JetBrainsMono',
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          // Action row — only shown while pending.  Once we transition
+          // to a terminal state the buttons disappear; the card stays
+          // as a transcript record of the decision.
+          if (p.state == _WriteProposalState.pending ||
+              p.state == _WriteProposalState.applying) ...[
+            const SizedBox(height: 10),
+            if (_rejectFormOpen) ...[
+              TextField(
+                controller: _reasonController,
+                style: TextStyle(color: fg, fontSize: 12),
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Why? (optional, sent to the model)',
+                  hintStyle: TextStyle(
+                      color: dim.withValues(alpha: 0.6), fontSize: 12),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: dim.withValues(alpha: 0.3)),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 8),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: p.state == _WriteProposalState.applying
+                      ? null
+                      : () {
+                          if (_rejectFormOpen) {
+                            widget.onReject(reason: _reasonController.text);
+                          } else {
+                            setState(() => _rejectFormOpen = true);
+                          }
+                        },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFFF6E67),
+                  ),
+                  child: Text(_rejectFormOpen ? 'Send rejection' : 'Reject'),
+                ),
+                const SizedBox(width: 8),
+                if (p.state == _WriteProposalState.applying)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  ElevatedButton(
+                    onPressed: widget.onApply,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF98C379),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Apply'),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStateBadge(_WriteProposalState state, Color accent) {
+    final label = switch (state) {
+      _WriteProposalState.pending =>
+        widget.proposal.preview.exists ? 'OVERWRITE' : 'CREATE',
+      _WriteProposalState.applying => 'WRITING…',
+      _WriteProposalState.applied => 'APPLIED',
+      _WriteProposalState.rejected => 'REJECTED',
+      _WriteProposalState.failed => 'FAILED',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: accent,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  String _buildSummaryLine({
+    required bool exists,
+    required int existingBytes,
+    required int? existingLines,
+    required int newBytes,
+    required int newLines,
+  }) {
+    if (!exists) {
+      return 'Will create: $newBytes B, $newLines line${newLines == 1 ? '' : 's'}';
+    }
+    final lineDelta = existingLines == null
+        ? ''
+        : ' (Δ ${(newLines - existingLines).abs()} '
+            'line${(newLines - existingLines).abs() == 1 ? '' : 's'} '
+            '${newLines >= existingLines ? 'added' : 'removed'})';
+    return 'Will overwrite: $existingBytes B → $newBytes B, '
+        '${existingLines ?? "—"} → $newLines lines$lineDelta';
+  }
+}
+
 class _CommandResultCard extends StatefulWidget {
   const _CommandResultCard({
     required this.command,
@@ -1985,6 +2671,26 @@ class _ExitBadge extends StatelessWidget {
   }
 }
 
+// ── File-write proposal outcome (agent loop disposition) ──────────────────
+
+/// Disposition the agent loop should take after [_proposeFileWrite]
+/// processes a `[WRITE_FILE_BEGIN]` marker.  See [_proposeFileWrite]
+/// for full semantics — kept in its own enum so the `switch` in the
+/// agent loop is exhaustive and adding a third disposition later (e.g.
+/// "auto-apply because path is in trusted-dirs") is a single point of
+/// extension.
+enum _WriteProposalOutcome {
+  /// A failure / disabled envelope is already in conversation history.
+  /// Loop should keep iterating so the model can react.
+  injectedAndContinue,
+
+  /// Preview succeeded; a chat card is displayed; loop should pause
+  /// (return from the body so the wrapper's finally clears
+  /// `_agentBusy` and unlocks the terminal).  Resume happens on
+  /// Apply / Reject via [_decideWriteProposal].
+  waitingForUser,
+}
+
 // ── Chat message model ─────────────────────────────────────────────────────
 
 class _ChatMessage {
@@ -2020,6 +2726,17 @@ class _ChatMessage {
   /// integration was not available and the code couldn't be captured.
   final int? commandExitCode;
 
+  /// For "file write proposal" messages: the pending write the user
+  /// must Apply or Reject before the agent loop resumes.  Mutable so
+  /// the card UI can re-render through state transitions
+  /// (pending → applying → applied/rejected/failed) without rebuilding
+  /// the whole message list.  Null for every other message kind.
+  ///
+  /// Nullable (vs default null in `_` ctor) for the same hot-reload
+  /// reason as [isNotice]: keeps already-allocated legacy `_ChatMessage`
+  /// objects safe across class shape changes.
+  _WriteProposal? writeProposal;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -2030,6 +2747,7 @@ class _ChatMessage {
     this.error,
     this.commandRun,
     this.commandExitCode,
+    this.writeProposal,
   });
 
   factory _ChatMessage.user(String text) => _ChatMessage._(text: text, isUser: true);
@@ -2061,6 +2779,87 @@ class _ChatMessage {
     isUser: false,
     isNotice: true,
   );
+
+  /// "File write proposal" card.  Rendered as a distinct Apply/Reject
+  /// card by [_buildAgentMessage]; the contained [_WriteProposal] holds
+  /// the mutable state machine driving the card.
+  factory _ChatMessage.writeProposal(_WriteProposal proposal) =>
+      _ChatMessage._(
+        text: '',
+        isUser: false,
+        writeProposal: proposal,
+      );
+}
+
+// ── File-write proposal (Apply/Reject card state machine) ──────────────────
+
+/// Lifecycle states for an [_WriteProposal].
+enum _WriteProposalState {
+  /// Waiting for the user to click Apply or Reject.
+  pending,
+
+  /// Apply was clicked; the adapter's `commit` is in flight.  Card
+  /// shows a spinner; both buttons are disabled to prevent
+  /// double-submission.
+  applying,
+
+  /// The write completed successfully; [_WriteProposal.result] holds
+  /// the post-commit metadata (bytes, mtime).
+  applied,
+
+  /// The user clicked Reject; no bytes hit disk.
+  rejected,
+
+  /// The adapter raised an exception during commit; the proposal is
+  /// terminal (no retry button — the model is expected to react to
+  /// the `[File write failed]` envelope on its next turn).
+  failed,
+}
+
+/// Per-proposal record threaded through the chat-card UI and the
+/// resume-the-loop callbacks.  Mutable on purpose: the card listens
+/// for state changes via plain `setState` calls from the panel.
+class _WriteProposal {
+  /// Path as emitted by the model — preserved verbatim so the chat
+  /// card can show what the LLM actually said even when the adapter
+  /// resolved it to a different canonical form.
+  final String requestedPath;
+
+  /// Adapter-resolved absolute path (`~` expanded, etc.).  This is
+  /// what `commit` will write to.
+  final String resolvedPath;
+
+  /// File body the model proposed — written byte-for-byte on Apply.
+  final String content;
+
+  /// Preview captured at the time the proposal was shown.  Drives the
+  /// diff badge ("Create" vs "Overwrite") AND supplies the mtime used
+  /// as a concurrency token in the commit call.
+  final FileWritePreview preview;
+
+  /// Generation counter snapshot.  If the user fires off a new agent
+  /// request before clicking Apply, [_AiAssistantOverlayState._generation]
+  /// bumps and this proposal becomes stale — clicks are silently
+  /// converted into [rejected] without invoking the adapter.
+  final int agentGeneration;
+
+  _WriteProposalState state = _WriteProposalState.pending;
+
+  /// Free-form short message surfaced in the card after a terminal
+  /// state (typically the exception message or the reject reason).
+  String? outcomeMessage;
+
+  /// Set on successful commit so the card can show byte count + new
+  /// mtime alongside the "Applied" badge.
+  FileWriteResult? result;
+
+  _WriteProposal({
+    required this.requestedPath,
+    required this.resolvedPath,
+    required this.content,
+    required this.preview,
+    required this.agentGeneration,
+  });
 }
 
 /// Custom fenced-code-block renderer for AI replies.

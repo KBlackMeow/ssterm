@@ -52,6 +52,48 @@ class LlmService {
     r'\[\s*USE[_ ]?SKILL\s*[:=]\s*([a-zA-Z0-9._-]+)\s*\]',
     caseSensitive: false,
   );
+  // [WRITE_FILE_BEGIN: <path>] … [WRITE_FILE_END] — file-write tool.
+  // Multiline marker pair: BEGIN line carries the absolute path,
+  // everything between (verbatim, no shell interpretation) is the new
+  // file's contents, END line on its own closes it.
+  //
+  // We use a marker PAIR instead of a single `[WRITE_FILE: path]` +
+  // fenced code block because:
+  //   • Code fences inside file content (e.g. writing a markdown file
+  //     that itself contains ```bash blocks) would otherwise terminate
+  //     the outer fence and leak the rest as agent prose.
+  //   • The agent loop already runs `extractCommands` on every reply
+  //     to harvest ```bash blocks — using a fence here would force a
+  //     second parse pass to distinguish "execute me" from "write me".
+  //
+  // Capture groups:
+  //   1: absolute path (raw — adapter validates)
+  //   2: file body (verbatim, including a leading newline we strip)
+  //
+  // Dot-all so the body can span any number of lines; non-greedy so a
+  // turn with two consecutive write blocks still matches each one
+  // individually instead of swallowing the gap.
+  static final RegExp _writeFileRe = RegExp(
+    r'\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*([^\]\n]+?)\s*\]'
+    r'(.*?)'
+    r'\[\s*WRITE[_ ]?FILE[_ ]?END\s*\]',
+    caseSensitive: false,
+    multiLine: true,
+    dotAll: true,
+  );
+  // [WEB_SEARCH: <query>] — Brave-backed web search tool.  Unlike USE_SKILL
+  // the body is a free-form QUERY (so we MUST allow spaces, punctuation,
+  // accented characters, quote marks, …).  Capture group keeps everything
+  // between `:` and the LAST `]` on the line — the inner pattern is
+  // intentionally non-greedy and rejects newlines, so a stray `]` in prose
+  // earlier in the message cannot close the marker prematurely.
+  //
+  // Accepts `WEB_SEARCH`, `WEB SEARCH`, `WEBSEARCH`; same `:`/`=` separator
+  // tolerance as USE_SKILL.  Case-insensitive.
+  static final RegExp _webSearchRe = RegExp(
+    r'\[\s*WEB[_ ]?SEARCH\s*[:=]\s*([^\]\n]+?)\s*\]',
+    caseSensitive: false,
+  );
   // Strip variant: also eats surrounding markdown emphasis (`*`, `**`)
   // so we don't leave dangling asterisks in the rendered bubble.
   static final RegExp _taskCompleteStripRe = RegExp(
@@ -65,6 +107,22 @@ class LlmService {
   static final RegExp _useSkillStripRe = RegExp(
     r'\*{0,2}\[\s*USE[_ ]?SKILL\s*[:=]\s*[a-zA-Z0-9._-]+\s*\]\*{0,2}',
     caseSensitive: false,
+  );
+  static final RegExp _webSearchStripRe = RegExp(
+    r'\*{0,2}\[\s*WEB[_ ]?SEARCH\s*[:=]\s*[^\]\n]+?\s*\]\*{0,2}',
+    caseSensitive: false,
+  );
+  // Strip variant for WRITE_FILE — eats the whole BEGIN..END region
+  // including the file body, so the rendered chat bubble doesn't show
+  // a giant verbatim paste of the new file contents (the Apply card
+  // surfaces that separately, with a diff preview).
+  static final RegExp _writeFileStripRe = RegExp(
+    r'\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*[^\]\n]+?\s*\]\*{0,2}'
+    r'.*?'
+    r'\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?END\s*\]\*{0,2}',
+    caseSensitive: false,
+    multiLine: true,
+    dotAll: true,
   );
   static final RegExp _collapseBlankLinesRe = RegExp(r'\n{3,}');
 
@@ -85,14 +143,75 @@ class LlmService {
     return m?.group(1)?.toLowerCase();
   }
 
-  /// Remove every TASK_COMPLETE / ASK_USER / USE_SKILL marker (and any
-  /// markdown emphasis wrapped around them) from [text], then collapse
-  /// the inevitable runs of blank lines so the chat bubble looks clean.
+  /// Extract the query from a `[WEB_SEARCH: <query>]` marker, or null
+  /// when the reply doesn't request a search.  Unlike the skill id, the
+  /// query is returned VERBATIM (preserving case, punctuation, accents)
+  /// because Brave is case-sensitive for some queries and lower-casing
+  /// would silently change result ranking.
+  static String? extractWebSearchQuery(String text) {
+    final m = _webSearchRe.firstMatch(text);
+    final q = m?.group(1)?.trim();
+    return (q == null || q.isEmpty) ? null : q;
+  }
+
+  /// Extract the FIRST `[WRITE_FILE_BEGIN: <path>] … [WRITE_FILE_END]`
+  /// block, or null when the reply doesn't propose a write.
+  ///
+  /// Returns `(path, content)`:
+  ///   • path is trimmed but otherwise verbatim — the adapter
+  ///     validates absoluteness, `~` expansion, scheme, etc.
+  ///   • content is the body between the markers.  We strip ONE leading
+  ///     newline (LLMs almost always emit `[WRITE_FILE_BEGIN: …]\n…`
+  ///     and the leading `\n` is decorative, not part of the file) AND
+  ///     one trailing newline (model tends to put the closing marker
+  ///     on its own line, contributing a trailing `\n` that wasn't
+  ///     part of the intended file).  Files that LEGITIMATELY end with
+  ///     `\n` (POSIX text files, which is most of them) get it back
+  ///     when the model includes a blank line before the END marker —
+  ///     same convention as bash heredocs.
+  ///
+  /// We deliberately don't return ALL matches — multi-write proposals
+  /// per turn are explicitly forbidden by the system prompt (one write
+  /// per turn so the user can Apply/Reject individually).  If a future
+  /// version of the prompt allows it, switch to `allMatches`.
+  static ({String path, String content})? extractWriteFile(String text) {
+    final m = _writeFileRe.firstMatch(text);
+    if (m == null) return null;
+    final path = m.group(1)?.trim();
+    if (path == null || path.isEmpty) return null;
+    var body = m.group(2) ?? '';
+    if (body.startsWith('\r\n')) {
+      body = body.substring(2);
+    } else if (body.startsWith('\n')) {
+      body = body.substring(1);
+    }
+    if (body.endsWith('\r\n')) {
+      body = body.substring(0, body.length - 2);
+    } else if (body.endsWith('\n')) {
+      body = body.substring(0, body.length - 1);
+    }
+    return (path: path, content: body);
+  }
+
+  /// Remove every TASK_COMPLETE / ASK_USER / USE_SKILL / WEB_SEARCH /
+  /// WRITE_FILE marker (and any markdown emphasis wrapped around
+  /// them) from [text], then collapse the inevitable runs of blank
+  /// lines so the chat bubble looks clean.
+  ///
+  /// WRITE_FILE is stripped INCLUDING its body — the chat-card UI
+  /// surfaces the proposed file separately with a diff preview, so
+  /// dumping the verbatim body into the rendered bubble too would
+  /// just waste vertical space.
   static String stripCompletionMarkers(String text) {
     var out = text
+        // Strip WRITE_FILE FIRST so we don't accidentally chew on its
+        // body if the body happens to contain something that looks
+        // like a TASK_COMPLETE / ASK_USER marker.
+        .replaceAll(_writeFileStripRe, '')
         .replaceAll(_taskCompleteStripRe, '')
         .replaceAll(_askUserStripRe, '')
-        .replaceAll(_useSkillStripRe, '');
+        .replaceAll(_useSkillStripRe, '')
+        .replaceAll(_webSearchStripRe, '');
     out = out.replaceAll(_collapseBlankLinesRe, '\n\n');
     return out.trim();
   }
@@ -117,25 +236,50 @@ class LlmService {
     '**[ASK USER]**',
   ];
 
-  // Match the unfinished-marker tail.  We allow a generous `[^\]\n]{0,40}`
-  // body so a partially-streamed marker like `[TASK_COMP` or `[USE_SKILL: my-`
-  // is detected even before the closing `]` arrives.  Anchored to end-of-string
-  // so we never hide a `[bracket]` earlier in the message that the model
-  // already closed.  Bumped from 30 → 40 to fit `[USE_SKILL: <id>` for ids up
-  // to ~25 chars without breaking out into the visible bubble.
+  // Match the unfinished-marker tail.  We allow a generous body so a
+  // partially-streamed marker like `[TASK_COMP`, `[USE_SKILL: my-skill-`,
+  // or `[WEB_SEARCH: how to use vim macros in normal mod` is detected
+  // BEFORE the closing `]` arrives.  Anchored to end-of-string so we
+  // never hide a `[bracket]` earlier in the message that the model
+  // already closed.
+  //
+  // Length history: 30 → 40 (USE_SKILL ids up to 25 chars) → 160
+  // (WEB_SEARCH queries can run 100+ chars).  False-positive risk at
+  // 160: a long unclosed markdown reference `[Title of an article that
+  // ran really long…` would be hidden until its `]` arrives — that's
+  // an acceptable trade for never leaking a partial marker into the
+  // visible bubble.  Both cases self-heal: the `]` always arrives in
+  // the next chunk or two.
   static final RegExp _trailingPartialMarkerRe =
-      RegExp(r'\*{0,2}\[[^\]\n]{0,40}$');
+      RegExp(r'\*{0,2}\[[^\]\n]{0,160}$');
 
-  // USE_SKILL has a variable-length `<id>` portion, so the `startsWith`
-  // prefix trick that handles TASK_COMPLETE / ASK_USER doesn't fit it.
-  // We instead check whether the unfinished tail's BODY (after the `[` and
-  // optional `*` emphasis) starts with one of these prefixes — covering
-  // `[USE_SKILL`, `[USESKILL`, `[USE SKILL`, etc.  Once these match we
-  // hide the tail outright until the closing `]` arrives.
-  static const List<String> _useSkillBodyPrefixes = [
+  // USE_SKILL / WEB_SEARCH have a variable-length `<id>` / `<query>`
+  // portion, so the `startsWith` prefix trick that handles
+  // TASK_COMPLETE / ASK_USER doesn't fit them.  We instead check
+  // whether the unfinished tail's BODY (after the `[` and optional `*`
+  // emphasis) starts with one of these prefixes — covering
+  // `[USE_SKILL`, `[USESKILL`, `[USE SKILL`, `[WEB_SEARCH`,
+  // `[WEBSEARCH`, `[WEB SEARCH`, etc.  Once these match we hide the
+  // tail outright until the closing `]` arrives.
+  //
+  // Order doesn't matter (we OR-match), but keep the longer alias
+  // FIRST so the "is the tail itself shorter than a marker prefix"
+  // check fires correctly on early chunks like `[W` or `[U`.
+  static const List<String> _variableMarkerBodyPrefixes = [
     'USE_SKILL',
     'USE SKILL',
     'USESKILL',
+    'WEB_SEARCH',
+    'WEB SEARCH',
+    'WEBSEARCH',
+    // WRITE_FILE_BEGIN / WRITE_FILE_END / WRITEFILE… aliases.  We only
+    // need to register the prefixes the streaming hider checks for —
+    // by the time the END marker arrives, the BEGIN body has long
+    // since been hidden under the strip pass below, so the END line
+    // itself is just visible-noise we tolerate for one chunk.
+    'WRITE_FILE',
+    'WRITE FILE',
+    'WRITEFILE',
   ];
 
   /// Streaming-safe variant of [stripCompletionMarkers].
@@ -161,9 +305,14 @@ class LlmService {
   /// stream completes.
   static String stripStreamingMarkers(String text) {
     var out = text
+        // Same order as the post-stream variant: WRITE_FILE first so
+        // its body is removed before TASK/ASK/USE/WEB strip touches
+        // anything else.
+        .replaceAll(_writeFileStripRe, '')
         .replaceAll(_taskCompleteStripRe, '')
         .replaceAll(_askUserStripRe, '')
-        .replaceAll(_useSkillStripRe, '');
+        .replaceAll(_useSkillStripRe, '')
+        .replaceAll(_webSearchStripRe, '');
     final m = _trailingPartialMarkerRe.firstMatch(out);
     if (m != null) {
       final tail = m.group(0)!.toUpperCase();
@@ -175,13 +324,16 @@ class LlmService {
           break;
         }
       }
-      // Then: USE_SKILL with its variable-length id.  Strip leading
-      // emphasis + `[` from the tail and compare the body — if it starts
-      // with (or IS a prefix of) one of our marker names, hide the tail.
+      // Then: USE_SKILL / WEB_SEARCH with their variable-length bodies.
+      // Strip leading emphasis + `[` from the tail and compare against
+      // each marker name — if the tail body starts with (or IS a prefix
+      // of) one of the names, hide the tail until the closing `]`
+      // arrives.  "Body is a prefix" is what lets us hide `[W` or `[US`
+      // early, before the model has finished typing the marker name.
       if (!hide) {
         final body =
             tail.replaceFirst(RegExp(r'^\*{0,2}\['), '');
-        for (final p in _useSkillBodyPrefixes) {
+        for (final p in _variableMarkerBodyPrefixes) {
           if (body.startsWith(p) || p.startsWith(body)) {
             hide = true;
             break;
@@ -217,23 +369,53 @@ class LlmService {
   // Set<String>? on its own can't tell "I haven't cached anything yet"
   // from "I cached the all-enabled (null whitelist) variant".
   static bool _cachedSystemPromptHasKey = false;
+  // Web-search slice of the cache key.  Captured separately (rather
+  // than folded into the skill set) because toggling web search must
+  // also invalidate, but the two settings are orthogonal — the user
+  // can leave skills alone while flipping web search.
+  static bool _cachedSystemPromptWebSearch = false;
+  // File-write slice of the cache key — same rationale as web search.
+  static bool _cachedSystemPromptFileWrite = false;
 
-  /// Build the active system prompt for the given enabled-skill whitelist.
+  /// Build the active system prompt for the given enabled-skill whitelist
+  /// and web-search toggle.
   ///
   /// [enabledSkillIds] follows the same semantics as
   /// `AgentConfig.enabledSkills`: null → all skills, non-null → only ids
-  /// in the set.  The skills_protocol block is omitted entirely when
-  /// no skills end up enabled (saves ~100 tokens AND avoids confusing
+  /// in the set.  The `<agent_skills>` block is omitted entirely when
+  /// no skills end up enabled (saves ~300 tokens AND avoids confusing
   /// the model with a protocol for a feature it can't reach).
-  static String systemPromptFor({Set<String>? enabledSkillIds}) {
+  ///
+  /// [webSearchEnabled] follows `AgentConfig.webSearchEnabled` —
+  /// when false (the default) the `<web_search_tool>` block is omitted
+  /// so the model never sees a `[WEB_SEARCH]` marker it can't use.
+  /// We do NOT check whether the Brave API key is present here, because
+  /// (a) the system prompt is built synchronously on a hot path and
+  /// reading the keychain is async, and (b) the agent loop catches a
+  /// missing-key error and feeds the model a `[Web search failed]`
+  /// envelope that tells it to ask the user — same recovery path as
+  /// an expired key, so we don't need to double-gate at prompt time.
+  static String systemPromptFor({
+    Set<String>? enabledSkillIds,
+    bool webSearchEnabled = false,
+    bool fileWriteEnabled = false,
+  }) {
     if (_cachedSystemPromptHasKey &&
-        _setEquals(_cachedSystemPromptKey, enabledSkillIds)) {
+        _setEquals(_cachedSystemPromptKey, enabledSkillIds) &&
+        _cachedSystemPromptWebSearch == webSearchEnabled &&
+        _cachedSystemPromptFileWrite == fileWriteEnabled) {
       return _cachedSystemPrompt!;
     }
-    final built = _buildSystemPrompt(enabledSkillIds: enabledSkillIds);
+    final built = _buildSystemPrompt(
+      enabledSkillIds: enabledSkillIds,
+      webSearchEnabled: webSearchEnabled,
+      fileWriteEnabled: fileWriteEnabled,
+    );
     _cachedSystemPrompt = built;
     _cachedSystemPromptKey =
         enabledSkillIds == null ? null : Set.of(enabledSkillIds);
+    _cachedSystemPromptWebSearch = webSearchEnabled;
+    _cachedSystemPromptFileWrite = fileWriteEnabled;
     _cachedSystemPromptHasKey = true;
     return built;
   }
@@ -251,79 +433,217 @@ class LlmService {
   static void refreshSystemPrompt() {
     _cachedSystemPrompt = null;
     _cachedSystemPromptKey = null;
+    _cachedSystemPromptWebSearch = false;
+    _cachedSystemPromptFileWrite = false;
     _cachedSystemPromptHasKey = false;
   }
 
-  static String _buildSystemPrompt({Set<String>? enabledSkillIds}) {
+  static String _buildSystemPrompt({
+    Set<String>? enabledSkillIds,
+    bool webSearchEnabled = false,
+    bool fileWriteEnabled = false,
+  }) {
     final parts = <String>[_systemPromptBase];
     final enabled = SkillService.filterEnabled(enabledSkillIds);
     if (enabled.isNotEmpty) parts.add(_buildSkillsBlock());
+    if (webSearchEnabled) parts.add(_buildWebSearchBlock());
+    if (fileWriteEnabled) parts.add(_buildFileWriteBlock());
     parts.add(_buildHostBlock());
     return parts.join('\n\n');
   }
 
-  /// Returns the `<skills_protocol>` block for the system prompt, or an
-  /// empty string when no skills are installed.
+  /// Returns the `<web_search_tool>` block for the system prompt, or an
+  /// empty string when the master switch is off.
   ///
-  /// IMPORTANT — what we DON'T put here (anymore):
-  /// the per-skill catalogue (id + description).  That table moved to a
-  /// `<system-reminder>` user-role attachment injected by the agent loop
-  /// at conversation start (and only re-injected when a NEW skill shows
-  /// up later — see [SkillService.buildPromptCatalogue] and the loop's
-  /// `_announcedSkillIds` tracker).
+  /// Modelled after Cursor's `<web_search_tool>` advertisement — short,
+  /// behaviour-focused, with a worked example so the model has a
+  /// reference pattern.  We deliberately do NOT name the upstream
+  /// provider (Brave) in the prompt: provider portability is a feature
+  /// (we may add Tavily / Serper / Perplexity Sonar later), and the
+  /// model doesn't care which crawler answers — only what shape its
+  /// output arrives in.
   ///
-  /// Why split:
-  ///   • Prompt caching: the system prompt stays IDENTICAL across boots
-  ///     as long as the skill PROTOCOL is unchanged, so providers' prompt
-  ///     caches stay warm even when the user installs new skills.
-  ///   • Delta announcements: long conversations don't pay the catalogue
-  ///     cost every turn — the listing lives ONCE in the transcript.
-  ///   • Inspectability: the listing shows up in conversation history, so
-  ///     it's grep-able / debuggable like any other message.
-  /// Same architecture Claude Code uses (see
-  /// `claude-code-source-code/src/utils/attachments.ts` →
-  /// `getSkillListingAttachments` + `<system-reminder>` wrapping).
-  static String _buildSkillsBlock() {
-    // Whether ANY skill is enabled is decided by the caller (see
-    // [_buildSystemPrompt] — it only invokes this when at least one
-    // skill survives the [SkillService.filterEnabled] check).  The
-    // protocol text itself is identical regardless of which skills are
-    // enabled, so it's a static string here.
+  /// Same marker-style invocation as USE_SKILL — `[WEB_SEARCH: query]`
+  /// on its OWN line, intercepted by the agent loop before any shell
+  /// command executes.  This keeps the protocol single-format until we
+  /// add structured tool_use; once that lands, this block becomes the
+  /// human-readable doc for the same tool exposed via the native
+  /// channel.
+  static String _buildWebSearchBlock() {
     return '''
-<skills_protocol>
-Skills are pre-curated playbooks for common tasks.  The list of currently-available skills is delivered as a user-role `<system-reminder>` message AT CONVERSATION START — re-read it before issuing any commands.
+<web_search_tool>
+You have a web-search tool for fetching current information from the public web. To search, emit `[WEB_SEARCH: <query>]` on its OWN line and STOP — the top results arrive as a user-role message in your NEXT turn, in this shape:
 
-To use a skill, emit `[USE_SKILL: <id>]` on its OWN line and STOP — the full skill body arrives as a user message in your NEXT turn.  Always prefer loading a relevant skill BEFORE issuing investigative commands.
+[Web search results]
+query: "<your query>"
+(N results)
 
-Turn-shape rules for skills:
-- A `[USE_SKILL: <id>]` turn MUST NOT also contain a ```bash block, `[TASK_COMPLETE]`, or `[ASK_USER]` — the agent loop intercepts the marker BEFORE executing anything, so combining them silently drops the command.
-- Loading a skill does NOT count as an investigation step.  Once the body arrives, you resume the normal INVESTIGATE → ANSWER cycle informed by the skill's playbook.
-- If no listed skill matches, do NOT invent an id — just proceed with normal INVESTIGATE turns.
-</skills_protocol>''';
+1. <title>
+   <description>
+   <url>  (age: …)
+2. …
+
+When to use it:
+- The user asks about a topic that is time-sensitive (recent versions, breaking changes, news, prices).
+- You need official documentation, API references, or error-message context that bash + local files cannot supply.
+- You are about to GUESS at an unfamiliar library / CLI flag / config field — search instead.
+
+When NOT to use it:
+- The answer is already in the conversation, in the shell output, or in a loaded skill.
+- The question is about THIS host (use `bash` instead — `uname`, `df`, `ps`, etc.).
+- Querying private data the user did NOT explicitly ask you to publish.
+
+Turn-shape rules (same as USE_SKILL):
+- A `[WEB_SEARCH: <query>]` turn MUST NOT also contain a ```bash block, [TASK_COMPLETE], [ASK_USER], or [USE_SKILL] — the agent loop intercepts the marker BEFORE executing anything, so combining silently drops the command.
+- Issue ONE search per turn; iterate based on the results.
+- Cite results by index in your ANSWER turn (e.g. "per [3]") so the user can verify the source.
+- If the result envelope arrives as `[Web search failed]`, do NOT retry the same query — follow the `recovery` directive in that envelope.
+
+Example INVESTIGATE turn:
+  I need the current syntax for the new GitHub Actions cache action.
+  [WEB_SEARCH: github actions cache action v4 syntax]
+</web_search_tool>''';
   }
 
-  /// Build the `<system-reminder>`-wrapped catalogue message that the
-  /// agent loop injects ahead of the user's first turn (and again when
-  /// new skills appear mid-conversation — though that won't happen for
-  /// asset-only installations).
+  /// Returns the `<file_write_tool>` block for the system prompt, or
+  /// an empty string when the master switch is off.
   ///
-  /// [include] restricts the listing to a specific subset of skill ids —
-  /// used by the agent loop's "delta" injection so only the ids that
-  /// haven't been announced yet show up in subsequent reminders.  Pass
-  /// null to format ALL currently-installed skills.
+  /// The tool uses a marker PAIR (`[WRITE_FILE_BEGIN: <path>]` /
+  /// `[WRITE_FILE_END]`) with verbatim content in between.  Picked
+  /// over a single marker + bash fence because the file content can
+  /// itself contain ```bash blocks (think: writing a CI yaml that
+  /// embeds shell snippets) — a fence inside a fence is ambiguous and
+  /// also collides with the agent loop's `extractCommands` pass.
   ///
-  /// Returns the empty string when there's nothing to announce; callers
-  /// should treat that as "no injection needed this turn".
-  static String buildSkillListingReminder({Iterable<String>? include}) {
-    final catalogue =
-        SkillService.buildPromptCatalogue(include: include);
+  /// Two things this block hammers on:
+  ///   1. The Apply button — model MUST understand that the write
+  ///      doesn't happen until the user clicks Apply.  Without this
+  ///      framing models often emit a follow-up `cat <path>` to verify
+  ///      and get confused when the file isn't there yet.
+  ///   2. Path absoluteness — the most common write failure is a
+  ///      relative path that lands somewhere unexpected (the Flutter
+  ///      process CWD, not the terminal's).
+  static String _buildFileWriteBlock() {
+    return '''
+<file_write_tool>
+You have a file-write tool for creating or replacing files atomically. To propose a write, emit on its OWN lines:
+
+[WRITE_FILE_BEGIN: <absolute-path>]
+<exact file contents — verbatim, NO shell interpretation, NO escaping>
+[WRITE_FILE_END]
+
+Then STOP — the user is shown a chat card with a diff preview and MUST click Apply before the bytes hit disk. The outcome arrives as a user-role message in your NEXT turn, in one of these shapes:
+
+[File written]                    [File write rejected by user]      [File write failed]
+path: …                           path: …                            path: …
+bytes: …                          reason: <free-form>                reason: <kind>
+created: true|false               …                                  message: …
+mtime: <iso8601>                                                     <recovery hint>
+
+MANDATORY — use [WRITE_FILE_BEGIN] for ALL of these, no exceptions:
+- Creating ANY new file (script, source, config, dotfile, snippet).
+- Replacing an existing file end-to-end (refactor, regenerate, rewrite).
+- ANY time you would otherwise reach for `cat > path`, `cat >> path`, `tee path`, `echo … > path`, `printf … > path`, `python3 -c "open(…)"`, or similar "build a file via shell" tricks.
+
+BANNED — DO NOT emit these as ```bash blocks when the file-write tool is available:
+  ❌ cat > path <<'EOF'      ❌ cat <<EOF > path
+  ❌ echo "…" > path          ❌ printf "…" > path
+  ❌ tee path <<<"…"          ❌ python3 -c "open('path','w').write(…)"
+These shell tricks are FRAGILE: heredoc edges break on `EOF` / backticks / `\$` in content, `echo` mangles backslashes, none of them are atomic, and command-safety guards inspect their body and may refuse them. The file-write tool has none of those failure modes — prefer it categorically.
+
+When NOT to use the tool (these are the ONLY exceptions):
+- True APPEND to an existing file — use `>>` via bash; this tool only does full replacement.
+- Narrow in-place patch of a large file (a few lines in a >1000-line file) — use `sed` / `awk` via bash, OR `cat` the file first and propose a full new version via [WRITE_FILE_BEGIN].
+- Anything the user has NOT asked for or implied. File writes are irreversible; when uncertain, [ASK_USER] first.
+
+Hard rules:
+- The path MUST be ABSOLUTE. Local: starting with `/` or `~/`. Remote (SSH tab): starting with `/` — `~` does NOT expand over SFTP.
+- ONE write proposal per turn. The Apply card needs an individual decision per file.
+- A `[WRITE_FILE_BEGIN]` turn MUST NOT also contain a ```bash block, [TASK_COMPLETE], [ASK_USER], [USE_SKILL], or [WEB_SEARCH] — the agent loop intercepts the marker BEFORE running anything, so combining silently drops the command.
+- After a `[File write rejected by user]` envelope, DO NOT re-emit the same write for the same path. Either ask the user what to change, propose a different path, or abandon the write.
+- After a `[File write failed]` envelope, follow the recovery hint inside it — usually `mkdir -p` first via bash, then re-emit [WRITE_FILE_BEGIN].
+
+Example INVESTIGATE turn (CORRECT — write via tool, run via bash on the next turn):
+  I'll create a script that prints prime numbers up to N.
+  [WRITE_FILE_BEGIN: /Users/me/primes.py]
+  #!/usr/bin/env python3
+  import sys
+  from sympy import primerange
+  for p in primerange(2, int(sys.argv[1])):
+      print(p)
+  [WRITE_FILE_END]
+
+Counter-example (WRONG — DO NOT do this when the file-write tool is available):
+  ```bash
+  cat > /Users/me/primes.py << 'PYEOF'
+  #!/usr/bin/env python3
+  …
+  PYEOF
+  chmod +x /Users/me/primes.py
+  ```
+The above is exactly the anti-pattern this tool replaces. Use [WRITE_FILE_BEGIN] for the write, then a SEPARATE bash turn for `chmod +x`.
+</file_write_tool>''';
+  }
+
+  /// Returns the `<agent_skills>` block for the system prompt, or an
+  /// empty string when no skills are enabled.
+  ///
+  /// Shape, modelled after Cursor's `<agent_skills>` block:
+  ///
+  /// ```
+  /// <agent_skills>
+  /// <policy text — when to use, IMMEDIATELY / NEVER directives, turn rules>
+  ///
+  /// <available_skills>
+  /// <agent_skill id="…" path="…">desc</agent_skill>
+  /// …
+  /// </available_skills>
+  /// </agent_skills>
+  /// ```
+  ///
+  /// The catalogue lives INSIDE this block (i.e. inside the system prompt)
+  /// rather than as a per-turn `<system-reminder>` user attachment — that
+  /// matches how Cursor (and Claude Code's newer builds) ship skills, and
+  /// it has three advantages over the old delta-announce design:
+  ///
+  ///   • Prompt cache: as long as the enabled-skill set is stable the
+  ///     entire system prompt is byte-identical, so the Anthropic /
+  ///     OpenAI / Google prompt-cache lanes stay warm forever.
+  ///   • One source of truth: the model sees the catalogue at the same
+  ///     position in every turn, no surprise re-injections, no
+  ///     per-conversation `_announcedSkillIds` bookkeeping in the panel.
+  ///   • Familiar shape: the `<agent_skill id="…" path="…">desc</agent_skill>`
+  ///     entries mirror real-world training data, so smaller open-source
+  ///     models parse the listing more reliably than our previous
+  ///     `- id: desc` bullet list.
+  ///
+  /// What we deliberately don't borrow from Cursor: their `Read(path)` tool
+  /// call.  ssterm has no tool_use protocol yet, so the model still loads
+  /// skill bodies via the `[USE_SKILL: <id>]` marker — the policy section
+  /// reflects that.
+  static String _buildSkillsBlock() {
+    final catalogue = SkillService.buildPromptCatalogue();
+    // Defensive: caller only invokes this when SkillService reports at
+    // least one enabled skill, but the catalogue can still come back
+    // empty (e.g. all entries omitted to fit budget — see
+    // [SkillService.buildPromptCatalogue]).  In that edge case we skip
+    // the whole block so the model doesn't see an empty container.
     if (catalogue.isEmpty) return '';
     return '''
-<system-reminder>
-The following skills are available for use with the `[USE_SKILL: <id>]` marker (see the `<skills_protocol>` section of your system prompt for invocation rules):
+<agent_skills>
+When the user asks you to perform a task, scan the skills below first. A skill is a pre-curated playbook for a common task; loading one usually saves several investigation rounds.
 
+To load a skill, emit `[USE_SKILL: <id>]` on its OWN line and STOP — the full skill body arrives as a user-role message in your NEXT turn. When a skill description matches the task, load it IMMEDIATELY as your first action, BEFORE issuing any investigative commands. NEVER just announce or mention a skill without actually loading it via the marker. Only use skill ids listed below — do not invent or guess ids.
+
+Turn-shape rules:
+- A `[USE_SKILL: <id>]` turn MUST NOT also contain a ```bash block, [TASK_COMPLETE], or [ASK_USER] — the agent loop intercepts the marker BEFORE executing anything, so combining them silently drops the command.
+- Loading a skill does NOT count as an investigation step. Once the body arrives, resume the normal INVESTIGATE → ANSWER cycle informed by the skill's playbook.
+- If no listed skill matches, proceed with normal INVESTIGATE turns.
+
+<available_skills description="Skills the agent can load via [USE_SKILL: <id>]. The `path` attribute is informational — show it to the user when explaining what was loaded.">
 $catalogue
-</system-reminder>''';
+</available_skills>
+</agent_skills>''';
   }
 
   static String _buildHostBlock() {
@@ -568,8 +888,11 @@ Blocked classes and their non-interactive equivalents:
       return LlmResponse(text: '', error: 'API key not configured for ${provider.displayName}.');
     }
 
-    final systemPrompt =
-        systemPromptFor(enabledSkillIds: config.enabledSkills);
+    final systemPrompt = systemPromptFor(
+      enabledSkillIds: config.enabledSkills,
+      webSearchEnabled: config.webSearchEnabled,
+      fileWriteEnabled: config.fileWriteEnabled,
+    );
     try {
       switch (provider.id) {
         case 'claude':
@@ -887,8 +1210,11 @@ Blocked classes and their non-interactive equivalents:
       throw Exception('API key not configured for ${provider.displayName}.');
     }
 
-    final systemPrompt =
-        systemPromptFor(enabledSkillIds: config.enabledSkills);
+    final systemPrompt = systemPromptFor(
+      enabledSkillIds: config.enabledSkills,
+      webSearchEnabled: config.webSearchEnabled,
+      fileWriteEnabled: config.fileWriteEnabled,
+    );
     switch (provider.id) {
       case 'claude':
         yield* _streamAnthropic(

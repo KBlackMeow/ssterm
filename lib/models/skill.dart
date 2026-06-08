@@ -72,6 +72,31 @@ class Skill {
     this.source = SkillSource.asset,
   });
 
+  /// A location string for the SKILL.md file, suitable for showing to
+  /// both the model (in the prompt catalogue) and the user (in the
+  /// Settings UI).  Always non-null:
+  ///
+  ///   • asset skills  → `assets/skills/<id>/SKILL.md` (the in-bundle path
+  ///     from the asset manifest).
+  ///   • user skills   → the real absolute filesystem path the user can
+  ///     `cat` / open in their editor (e.g.
+  ///     `/Users/foo/.ssterm/skills/my-skill/SKILL.md`).
+  ///   • bundled (dynamic) skills → `bundled://<id>` — these have no file
+  ///     on disk because the body is produced by a Dart function at
+  ///     runtime; the scheme is a synthetic marker, NOT a fetchable URL.
+  ///     Surfacing it (rather than null) keeps the prompt catalogue
+  ///     uniform and tells curious users WHY they can't grep the file.
+  ///
+  /// Cursor's `<agent_skill fullPath="…">` block uses real disk paths
+  /// because Cursor agents have a Read tool that can fetch them.  ssterm
+  /// has no Read tool today, so `fullPath` is purely informational —
+  /// the model still loads bodies via `[USE_SKILL: <id>]`.
+  String get fullPath {
+    final p = assetPath;
+    if (p != null && p.isNotEmpty) return p;
+    return 'bundled://$id';
+  }
+
   /// Parse a SKILL.md raw text.  Returns null when the file lacks valid
   /// frontmatter or required fields — SkillService logs and skips those
   /// instead of crashing the whole catalogue load.

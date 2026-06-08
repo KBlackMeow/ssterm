@@ -25,6 +25,7 @@ import 'models/ssh_config.dart';
 import 'models/ssh_host.dart';
 import 'services/host_key_verifier.dart';
 import 'services/bundled_skills.dart';
+import 'services/file_write_service.dart';
 import 'services/local_pty_service.dart';
 import 'services/local_shell_discovery.dart';
 import 'services/local_shell_wrapper.dart';

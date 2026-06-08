@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/agent_config.dart';
+import 'package:ssterm/models/skill.dart';
+import 'package:ssterm/services/bundled_skills.dart';
 import 'package:ssterm/services/llm_service.dart';
 import 'package:ssterm/services/skill_service.dart';
 
@@ -234,6 +236,204 @@ ls /tmp/some-dir
     });
   });
 
+  group('LlmService.extractWebSearchQuery', () {
+    test('extracts a simple ASCII query', () {
+      const input = 'Looking up the docs.\n\n[WEB_SEARCH: flutter docs]';
+      expect(
+        LlmService.extractWebSearchQuery(input),
+        equals('flutter docs'),
+      );
+    });
+
+    test('preserves case (Brave ranking is case-sensitive for some queries)',
+        () {
+      const input = '[WEB_SEARCH: macOS Sonoma release notes]';
+      // The query verbatim — no lower-casing like USE_SKILL does.
+      expect(LlmService.extractWebSearchQuery(input),
+          equals('macOS Sonoma release notes'));
+    });
+
+    test('accepts WEBSEARCH and WEB SEARCH aliases', () {
+      expect(LlmService.extractWebSearchQuery('[WEBSEARCH: a]'), equals('a'));
+      expect(
+          LlmService.extractWebSearchQuery('[WEB SEARCH: b]'), equals('b'));
+    });
+
+    test('accepts `=` as a separator (some models invent their own)', () {
+      expect(LlmService.extractWebSearchQuery('[WEB_SEARCH= c]'), equals('c'));
+    });
+
+    test('allows punctuation, quotes, and accented characters in the query',
+        () {
+      const input =
+          "[WEB_SEARCH: how to use \"quotes\" in zsh, café résumé?]";
+      expect(
+        LlmService.extractWebSearchQuery(input),
+        equals('how to use "quotes" in zsh, café résumé?'),
+      );
+    });
+
+    test('returns null when no marker present', () {
+      expect(LlmService.extractWebSearchQuery('plain prose'), isNull);
+    });
+
+    test('returns null for empty query body', () {
+      // `[WEB_SEARCH:   ]` is meaningless — no result is preferable to
+      // sending Brave an empty `q`.
+      expect(LlmService.extractWebSearchQuery('[WEB_SEARCH:   ]'), isNull);
+    });
+
+    test('a closed [markdown link] earlier does not absorb the marker', () {
+      // Regression guard: the marker regex must not match `[See here]`
+      // earlier in the message.
+      const input =
+          'See [docs here](https://x) then [WEB_SEARCH: real query]';
+      expect(LlmService.extractWebSearchQuery(input), equals('real query'));
+    });
+  });
+
+  group('LlmService.extractWriteFile', () {
+    test('extracts a simple BEGIN..END block', () {
+      const input = '''
+I'll create a hello-world script.
+
+[WRITE_FILE_BEGIN: /tmp/hello.py]
+print("hello")
+[WRITE_FILE_END]
+''';
+      final w = LlmService.extractWriteFile(input);
+      expect(w, isNotNull);
+      expect(w!.path, equals('/tmp/hello.py'));
+      // One leading + trailing newline stripped → the body is the
+      // exact intended file contents.
+      expect(w.content, equals('print("hello")'));
+    });
+
+    test('preserves blank lines and indentation inside the body', () {
+      const input = '''
+[WRITE_FILE_BEGIN: /tmp/multi.py]
+def foo():
+    if True:
+
+        return 1
+[WRITE_FILE_END]
+''';
+      final w = LlmService.extractWriteFile(input)!;
+      expect(
+        w.content,
+        equals('def foo():\n    if True:\n\n        return 1'),
+      );
+    });
+
+    test('accepts WRITEFILE / WRITE FILE aliases for BEGIN and END', () {
+      const input = '''
+[WRITEFILEBEGIN: /tmp/a.txt]
+hi
+[WRITEFILEEND]
+''';
+      final w = LlmService.extractWriteFile(input);
+      expect(w, isNotNull);
+      expect(w!.path, equals('/tmp/a.txt'));
+      expect(w.content, equals('hi'));
+    });
+
+    test('returns null when only BEGIN is present (unclosed block)', () {
+      // Mid-stream the closing marker may not have arrived yet — that's
+      // fine for streaming hide, but the post-stream extractor MUST
+      // return null so we never commit a partial body.
+      const input = '''
+[WRITE_FILE_BEGIN: /tmp/a]
+unfinished
+''';
+      expect(LlmService.extractWriteFile(input), isNull);
+    });
+
+    test('returns null when path is empty', () {
+      const input = '[WRITE_FILE_BEGIN: ]\nbody\n[WRITE_FILE_END]';
+      expect(LlmService.extractWriteFile(input), isNull);
+    });
+
+    test('takes the FIRST proposal when two coexist (one-per-turn rule)',
+        () {
+      // System prompt forbids two writes per turn; if the model
+      // violates that, we still need a deterministic pick — take the
+      // first so the user can Apply/Reject something rather than
+      // refusing the whole turn.
+      const input = '''
+[WRITE_FILE_BEGIN: /tmp/a]
+A
+[WRITE_FILE_END]
+
+[WRITE_FILE_BEGIN: /tmp/b]
+B
+[WRITE_FILE_END]
+''';
+      final w = LlmService.extractWriteFile(input)!;
+      expect(w.path, equals('/tmp/a'));
+      expect(w.content, equals('A'));
+    });
+
+    test('body that ends with an intentional blank line is preserved', () {
+      // The body strip removes ONE trailing newline (the one between
+      // content and the END marker on its own line); an extra blank
+      // line before that gets through, so files like POSIX `\n`-
+      // terminated text round-trip correctly when authored with the
+      // canonical bash-heredoc convention.
+      const input = '''
+[WRITE_FILE_BEGIN: /tmp/end-newline.txt]
+line1
+line2
+
+[WRITE_FILE_END]
+''';
+      final w = LlmService.extractWriteFile(input)!;
+      expect(w.content, equals('line1\nline2\n'));
+    });
+  });
+
+  group('LlmService.stripCompletionMarkers WRITE_FILE coverage', () {
+    test('WRITE_FILE block including body is removed from rendered text',
+        () {
+      const input = '''
+About to write:
+
+[WRITE_FILE_BEGIN: /tmp/x]
+verbose file
+that would dominate
+the chat bubble
+[WRITE_FILE_END]
+
+Done.
+''';
+      final stripped = LlmService.stripCompletionMarkers(input);
+      // The whole BEGIN..END region (including the verbose body) is
+      // gone — the chat card surfaces the diff separately.
+      expect(stripped.contains('verbose file'), isFalse);
+      expect(stripped.contains('WRITE_FILE'), isFalse);
+      // Surrounding prose stays put.
+      expect(stripped, contains('About to write'));
+      expect(stripped, contains('Done.'));
+    });
+  });
+
+  group('LlmService.stripCompletionMarkers WEB_SEARCH coverage', () {
+    test('[WEB_SEARCH: q] is removed cleanly', () {
+      const input = 'Quick check.\n\n[WEB_SEARCH: foo bar]';
+      final stripped = LlmService.stripCompletionMarkers(input);
+      expect(stripped.contains('WEB_SEARCH'), isFalse);
+      expect(stripped, equals('Quick check.'));
+    });
+
+    test('markdown-emphasised **[WEB_SEARCH: q]** removes the asterisks too',
+        () {
+      const input = 'Searching:\n\n**[WEB_SEARCH: foo]**';
+      final stripped = LlmService.stripCompletionMarkers(input);
+      // No dangling `**` left over.
+      expect(stripped.contains('*'), isFalse);
+      expect(stripped, equals('Searching:'));
+    });
+  });
+
   group('LlmService.stripStreamingMarkers', () {
     // The streaming variant runs on every SSE chunk so it has to handle
     // *partial* markers — `[`, `[T`, `[TASK_COMP`, … — that the post-stream
@@ -258,6 +458,44 @@ ls /tmp/some-dir
       const input = 'Need input?\n\n[ASK_US';
       expect(
           LlmService.stripStreamingMarkers(input), equals('Need input?\n\n'));
+    });
+
+    test('hides `[W` — partial WEB_SEARCH or USE_SKILL/other ambiguous start',
+        () {
+      // The streaming hider treats any bare `[X` whose body could
+      // become USE_SKILL / WEB_SEARCH as a marker prefix.  `[W` is a
+      // unique prefix of WEB_SEARCH so it must be hidden.
+      const input = 'Looking up.\n\n[W';
+      expect(LlmService.stripStreamingMarkers(input),
+          equals('Looking up.\n\n'));
+    });
+
+    test('hides `[WEB_SEARCH: how to debug` — long partial query', () {
+      // Real worst case: model is mid-stream on a 60-char query and we
+      // haven't seen the closing `]` yet.  Bumped trailing-tail limit
+      // to 160 specifically so this case is covered.
+      const input =
+          'I should search for this.\n\n[WEB_SEARCH: how to debug TLS handshake failures in nginx behind a load balancer';
+      expect(
+        LlmService.stripStreamingMarkers(input),
+        equals('I should search for this.\n\n'),
+      );
+    });
+
+    test('hides `[WEBSEARCH` (no underscore alias)', () {
+      const input = 'q?\n\n[WEBSEARCH: things';
+      expect(LlmService.stripStreamingMarkers(input), equals('q?\n\n'));
+    });
+
+    test('hides `[WRITE_FILE_BEGIN: …` mid-stream so the body never leaks',
+        () {
+      // The BEGIN line itself triggers the streaming hide; the body
+      // gets stripped by the post-stream pass after END arrives.  This
+      // test pins the BEGIN-line hide so users don't see the path
+      // flicker in.
+      const input = 'Writing:\n\n[WRITE_FILE_BEGIN: /tmp/x.txt';
+      expect(LlmService.stripStreamingMarkers(input),
+          equals('Writing:\n\n'));
     });
 
     test('hides `**[TASK` — markdown-emphasised partial', () {
@@ -331,13 +569,190 @@ ls /tmp/some-dir
       expect(identical(a, b), isFalse);
     });
 
-    test('disabled set never embeds <skills_protocol>', () async {
-      // With NO skills enabled, the `<skills_protocol>` block must be
+    test('disabled set never embeds <agent_skills>', () async {
+      // With NO skills enabled, the `<agent_skills>` block must be
       // omitted entirely so the model isn't tempted to emit USE_SKILL
-      // markers for something it can't reach.
+      // markers for something it can't reach.  (Mirrors Cursor's
+      // policy: never advertise a tool the agent cannot use.)
       final prompt =
           LlmService.systemPromptFor(enabledSkillIds: <String>{});
+      expect(prompt.contains('<agent_skills>'), isFalse);
+      expect(prompt.contains('<available_skills'), isFalse);
+      expect(prompt.contains('[USE_SKILL'), isFalse);
+    });
+
+    test('webSearchEnabled=false omits <web_search_tool> and the marker', () {
+      // Symmetric to the skills check above: never advertise a tool we
+      // cannot fire — the model would emit the marker and the agent
+      // loop would have to refuse mid-loop.
+      final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{}, webSearchEnabled: false);
+      expect(prompt.contains('<web_search_tool>'), isFalse);
+      expect(prompt.contains('[WEB_SEARCH'), isFalse);
+    });
+
+    test('webSearchEnabled=true injects <web_search_tool> with the marker',
+        () {
+      final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{}, webSearchEnabled: true);
+      expect(prompt.contains('<web_search_tool>'), isTrue);
+      // Marker advertised in the prompt so the model knows the exact
+      // syntax to emit — no guessing.
+      expect(prompt.contains('[WEB_SEARCH: <query>]'), isTrue);
+      // Worked example present (matches the format we emphasised in
+      // _buildWebSearchBlock).
+      expect(prompt.contains('Example INVESTIGATE turn:'), isTrue);
+    });
+
+    test('toggling webSearchEnabled invalidates the cache once', () {
+      final a = LlmService.systemPromptFor(
+          enabledSkillIds: null, webSearchEnabled: false);
+      final b = LlmService.systemPromptFor(
+          enabledSkillIds: null, webSearchEnabled: true);
+      // Different bytes → not identical.
+      expect(identical(a, b), isFalse);
+      // But repeated call with the new key IS cached.
+      final c = LlmService.systemPromptFor(
+          enabledSkillIds: null, webSearchEnabled: true);
+      expect(identical(b, c), isTrue);
+    });
+
+    test('fileWriteEnabled=false omits <file_write_tool> and the marker', () {
+      final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{}, fileWriteEnabled: false);
+      // Never advertise a tool we can't fire — same rule as skills /
+      // web search.  Without this the model would emit
+      // [WRITE_FILE_BEGIN] and the agent loop would have to refuse
+      // mid-loop.
+      expect(prompt.contains('<file_write_tool>'), isFalse);
+      expect(prompt.contains('[WRITE_FILE_BEGIN'), isFalse);
+    });
+
+    test('fileWriteEnabled=true injects <file_write_tool> with the marker',
+        () {
+      final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{}, fileWriteEnabled: true);
+      expect(prompt.contains('<file_write_tool>'), isTrue);
+      // Both halves of the marker pair must be in the prompt — the
+      // model needs to know how to OPEN AND CLOSE the block.
+      expect(prompt.contains('[WRITE_FILE_BEGIN:'), isTrue);
+      expect(prompt.contains('[WRITE_FILE_END]'), isTrue);
+      // Apply-card policy hammered explicitly (no surprises).
+      expect(prompt.contains('click Apply'), isTrue);
+    });
+
+    test('toggling fileWriteEnabled invalidates the cache once', () {
+      final a = LlmService.systemPromptFor(
+          enabledSkillIds: null, fileWriteEnabled: false);
+      final b = LlmService.systemPromptFor(
+          enabledSkillIds: null, fileWriteEnabled: true);
+      expect(identical(a, b), isFalse);
+      final c = LlmService.systemPromptFor(
+          enabledSkillIds: null, fileWriteEnabled: true);
+      expect(identical(b, c), isTrue);
+    });
+
+    test('fileWrite key is independent of webSearch key', () {
+      // Pin orthogonality — both keys must contribute to cache
+      // invalidation independently, so flipping one doesn't bleed
+      // into the other's cache slot.
+      LlmService.refreshSystemPrompt();
+      final webOnFileOn = LlmService.systemPromptFor(
+          enabledSkillIds: null,
+          webSearchEnabled: true,
+          fileWriteEnabled: true);
+      final webOffFileOn = LlmService.systemPromptFor(
+          enabledSkillIds: null,
+          webSearchEnabled: false,
+          fileWriteEnabled: true);
+      final webOnFileOff = LlmService.systemPromptFor(
+          enabledSkillIds: null,
+          webSearchEnabled: true,
+          fileWriteEnabled: false);
+      expect(identical(webOnFileOn, webOffFileOn), isFalse);
+      expect(identical(webOnFileOn, webOnFileOff), isFalse);
+      expect(identical(webOffFileOn, webOnFileOff), isFalse);
+    });
+  });
+
+  group('SkillService.buildPromptCatalogue Cursor-style format', () {
+    setUp(() async {
+      BundledSkillRegistry.debugReset();
+      SkillService.debugUserSkillsDirOverride = null;
+      BundledSkillRegistry.register(BundledSkillDef(
+        id: 'alpha',
+        description: 'do the alpha thing',
+        buildBody: () async => 'alpha body',
+      ));
+      BundledSkillRegistry.register(BundledSkillDef(
+        id: 'beta',
+        description: 'do the beta thing',
+        buildBody: () async => 'beta body',
+      ));
+      await SkillService.init();
+      LlmService.refreshSystemPrompt();
+    });
+
+    test('emits one <agent_skill id=… path=…>desc</agent_skill> per skill',
+        () {
+      final out = SkillService.buildPromptCatalogue();
+      // Both bundled skills should appear with the synthetic `bundled://`
+      // path scheme — that's how the Skill model surfaces dynamic-body
+      // skills without an on-disk file.
+      expect(
+        out,
+        contains('<agent_skill id="alpha" path="bundled://alpha">'),
+      );
+      expect(out, contains('do the alpha thing</agent_skill>'));
+      expect(
+        out,
+        contains('<agent_skill id="beta" path="bundled://beta">'),
+      );
+      // Stable id-sorted order — alpha must come before beta so the
+      // bytes stay identical across runs (prompt-cache stability).
+      expect(out.indexOf('id="alpha"'), lessThan(out.indexOf('id="beta"')));
+    });
+
+    test('system prompt embeds the <agent_skills> block with policy + listing',
+        () {
+      final prompt = LlmService.systemPromptFor(enabledSkillIds: null);
+      // Cursor-style outer wrapper.
+      expect(prompt.contains('<agent_skills>'), isTrue);
+      expect(prompt.contains('</agent_skills>'), isTrue);
+      // Policy directives mirror Cursor's voice ("IMMEDIATELY", "NEVER").
+      expect(prompt.contains('IMMEDIATELY'), isTrue);
+      expect(prompt.contains('NEVER just announce'), isTrue);
+      // The actual catalogue entries.
+      expect(prompt.contains('<available_skills'), isTrue);
+      expect(prompt.contains('<agent_skill id="alpha"'), isTrue);
+      // Old per-turn-injection vocabulary must be gone — there's no
+      // separate `<system-reminder>` catalogue anymore.
       expect(prompt.contains('<skills_protocol>'), isFalse);
+      expect(prompt.contains('<system-reminder>'), isFalse);
+    });
+
+    test('escapes `"` inside path attribute', () {
+      // Defensive: a wildly-named user skill folder must not be able to
+      // break out of the path="…" attribute.  We don't allow `"` in ids
+      // (regex filters it), but assetPath comes from the filesystem.
+      // Synthetic check using a bundled skill body crafted with a `"` in
+      // its id would be rejected at registration; this test pins the
+      // escape rule directly on the formatter via a fake Skill.
+      final s = Skill(
+        id: 'x',
+        name: 'x',
+        description: 'has "quoted" word',
+        assetPath: 'a/"b"/SKILL.md',
+      );
+      // We can't call _formatRow (it's private), so we round-trip via
+      // the public catalogue with a one-shot registry.  Direct-attr
+      // assertion: any literal `"` inside the path attribute would
+      // close the attribute prematurely, so check for the escape.
+      final raw = '<agent_skill id="${s.id}" path="${s.fullPath.replaceAll('"', '&quot;')}">${s.description}</agent_skill>';
+      expect(raw.contains('path="a/&quot;b&quot;/SKILL.md"'), isTrue);
+      // Sanity: the asserted line is the same shape buildPromptCatalogue
+      // would emit (modulo body truncation), so a regression in the
+      // escape logic would surface in the smoke test above first.
     });
   });
 

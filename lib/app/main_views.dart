@@ -384,6 +384,21 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       // SFTP overlay buttons (which we Stack on top in SshSessionView)
       // fully clickable while the agent runs commands.
       onTerminalLockChanged: (locked) => tab.terminalLocked.value = locked,
+      // Filesystem adapter for the agent's `[WRITE_FILE_BEGIN]` tool.
+      // Picked per active-tab kind:
+      //   • LOCAL → dart:io writer (atomic temp+rename on the host).
+      //   • SSH with a live SFTP channel → SFTP writer (atomic
+      //     temp+rename over the same session that runs the user's
+      //     terminal commands).
+      //   • SSH still connecting / SSH error / Settings tab → null;
+      //     the agent panel surfaces a "filesystem not available"
+      //     envelope to the model when it tries to write.
+      fileSystemAdapter: switch (tab.kind) {
+        _TabKind.local => const LocalFileSystemAdapter(),
+        _TabKind.ssh when tab.sftp != null =>
+          SftpFileSystemAdapter(sftp: tab.sftp, label: 'ssh: ${tab.title}'),
+        _ => null,
+      },
       child: body,
     );
 

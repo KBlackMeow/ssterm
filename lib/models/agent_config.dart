@@ -182,6 +182,19 @@ class ProviderConfig {
 // ── Top-level agent config ─────────────────────────────────────────────────
 
 class AgentConfig {
+  /// Provider id used by [ApiKeyStorage] for the Brave Search API key.
+  /// We deliberately reuse the existing key-storage path (keychain +
+  /// 0600-permissioned file) instead of inventing a parallel store —
+  /// the only thing that distinguishes a search key from an LLM key
+  /// downstream is the id we look it up by, and storing them side by
+  /// side keeps backup/restore semantics consistent.
+  ///
+  /// Lives here (not in a hypothetical `WebSearchConfig`) because there
+  /// is currently exactly one search provider and adding a sub-class
+  /// just to hold one constant would be overkill.  When (if) a second
+  /// provider arrives, lift this into its own enum/class.
+  static const braveSearchKeyId = 'brave-search';
+
   String? defaultProvider;
   String? defaultModel;
   List<ProviderConfig> providers;
@@ -190,6 +203,27 @@ class AgentConfig {
   /// code blocks) using `gpt_markdown`.  Off by default; rendering cost
   /// scales with reply length and re-parses on every streamed token.
   bool markdownEnabled;
+
+  /// Master switch for the (Brave-backed) web-search tool.  When false,
+  /// the tool is hidden from the LLM entirely — saves prompt tokens AND
+  /// stops the model from cheerfully asking to use a tool that can't
+  /// fire.  The Brave API key itself is stored under [braveSearchKeyId]
+  /// in [ApiKeyStorage], NOT here, so toggling this off doesn't wipe
+  /// the key.
+  bool webSearchEnabled;
+
+  /// Master switch for the file-write tool (`[WRITE_FILE_BEGIN: …]` /
+  /// `[WRITE_FILE_END]` marker pair).  When false the tool block is
+  /// omitted from the system prompt so the model won't try to emit the
+  /// marker.  When true, the agent loop still REQUIRES the user to
+  /// click "Apply" on each proposed write — there is no auto-apply
+  /// (yet); flipping this switch only makes the *capability* available,
+  /// it does not grant blanket file-write authority.
+  ///
+  /// Off by default because file writes are irreversible: a runaway
+  /// write to `/etc/hosts` has no `exit_code != 0` to surface it.
+  /// The Settings copy makes this trade-off explicit.
+  bool fileWriteEnabled;
 
   /// Whitelist of skill ids the agent is allowed to use.  Semantics:
   ///   • null (the default) → ALL installed skills are enabled.  Newly
@@ -211,6 +245,8 @@ class AgentConfig {
     this.defaultModel,
     List<ProviderConfig>? providers,
     this.markdownEnabled = false,
+    this.webSearchEnabled = false,
+    this.fileWriteEnabled = false,
     this.enabledSkills,
   }) : providers = providers ??
             [
@@ -247,6 +283,8 @@ class AgentConfig {
         if (defaultModel != null) 'defaultModel': defaultModel,
         'providers': providers.map((p) => p.toJson()).toList(),
         'markdownEnabled': markdownEnabled,
+        'webSearchEnabled': webSearchEnabled,
+        'fileWriteEnabled': fileWriteEnabled,
         // Serialise as a sorted list so the JSON diff stays stable across
         // saves (toggling unrelated settings shouldn't reshuffle this).
         if (enabledSkills != null)
@@ -295,6 +333,8 @@ class AgentConfig {
       defaultModel: json['defaultModel'] as String?,
       providers: providers,
       markdownEnabled: json['markdownEnabled'] as bool? ?? false,
+      webSearchEnabled: json['webSearchEnabled'] as bool? ?? false,
+      fileWriteEnabled: json['fileWriteEnabled'] as bool? ?? false,
       enabledSkills: parsedEnabledSkills,
     );
   }
@@ -308,6 +348,8 @@ class AgentConfig {
     String? defaultModel,
     List<ProviderConfig>? providers,
     bool? markdownEnabled,
+    bool? webSearchEnabled,
+    bool? fileWriteEnabled,
     Set<String>? enabledSkills,
     bool resetEnabledSkills = false,
   }) =>
@@ -316,6 +358,8 @@ class AgentConfig {
         defaultModel: defaultModel ?? this.defaultModel,
         providers: providers ?? List.of(this.providers),
         markdownEnabled: markdownEnabled ?? this.markdownEnabled,
+        webSearchEnabled: webSearchEnabled ?? this.webSearchEnabled,
+        fileWriteEnabled: fileWriteEnabled ?? this.fileWriteEnabled,
         enabledSkills: resetEnabledSkills
             ? null
             : (enabledSkills ?? this.enabledSkills),

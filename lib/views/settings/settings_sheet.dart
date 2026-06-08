@@ -63,6 +63,13 @@ class _SettingsPageState extends State<SettingsPage>
   final _baseUrlControllers = <String, TextEditingController>{};
   final _modelAddController = TextEditingController();
 
+  // Web-search (Brave) state.  Kept as a standalone controller — not in
+  // the per-LLM-provider `_apiKeyControllers` map — because the search
+  // key has no associated ProviderConfig and the UI section is rendered
+  // independently from the Providers list.
+  final _braveSearchKeyController = TextEditingController();
+  bool _braveSearchKeyVisible = false;
+
   @override
   void initState() {
     super.initState();
@@ -81,12 +88,19 @@ class _SettingsPageState extends State<SettingsPage>
       _apiKeyVisible[p.id] = false;
       _loadApiKey(p.id);
     }
+    _loadBraveSearchKey();
   }
 
   Future<void> _loadApiKey(String id) async {
     final key = await ApiKeyStorage.load(id);
     if (!mounted) return;
     _apiKeyControllers[id]?.text = key ?? '';
+  }
+
+  Future<void> _loadBraveSearchKey() async {
+    final key = await ApiKeyStorage.load(AgentConfig.braveSearchKeyId);
+    if (!mounted) return;
+    _braveSearchKeyController.text = key ?? '';
   }
 
   void _agentApply(AgentConfig next) {
@@ -120,6 +134,7 @@ class _SettingsPageState extends State<SettingsPage>
       c.dispose();
     }
     _modelAddController.dispose();
+    _braveSearchKeyController.dispose();
     super.dispose();
   }
 
@@ -518,6 +533,12 @@ class _SettingsPageState extends State<SettingsPage>
         _sectionTitle('Display'),
         _buildAgentDisplaySection(),
         const SizedBox(height: 16),
+        _sectionTitle('Web Search'),
+        _buildWebSearchSection(),
+        const SizedBox(height: 16),
+        _sectionTitle('File Write'),
+        _buildFileWriteSection(),
+        const SizedBox(height: 16),
         _sectionTitle('Skills'),
         _buildSkillsSection(),
         const SizedBox(height: 16),
@@ -731,6 +752,124 @@ class _SettingsPageState extends State<SettingsPage>
         onChanged: (v) {
           _agentApply(_agentConfig.copyWith(markdownEnabled: v));
         },
+      ),
+    );
+  }
+
+  // ── Web search section ────────────────────────────────────────────────
+  //
+  // Currently Brave-only.  The provider name is hard-coded rather than
+  // hidden behind a "Provider" dropdown because shipping just one choice
+  // would be a fake choice — when (if) a second provider lands, lift this
+  // into a dropdown + per-provider key field.
+  //
+  // The API key field is hidden behind the master toggle on purpose:
+  // a stale/empty key field next to a disabled feature reads as
+  // "this is broken, please fix" — surfacing it only when enabled cuts
+  // visual noise and matches how the per-provider cards behave.
+
+  Widget _buildWebSearchSection() {
+    final enabled = _agentConfig.webSearchEnabled;
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _kDivider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SwitchListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+            dense: true,
+            title: const Text(
+              'Enable web search (Brave)',
+              style: TextStyle(color: _kFg, fontSize: 13),
+            ),
+            subtitle: const Text(
+              'Lets the agent search the web via Brave Search. '
+              'Get a free API key (2 000 queries/month) at '
+              'api-dashboard.search.brave.com.',
+              style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+            ),
+            value: enabled,
+            activeThumbColor: _kAccent,
+            onChanged: (v) =>
+                _agentApply(_agentConfig.copyWith(webSearchEnabled: v)),
+          ),
+          if (enabled)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: _agentTextFieldRow(
+                label: 'API Key',
+                controller: _braveSearchKeyController,
+                obscure: !_braveSearchKeyVisible,
+                suffix: IconButton(
+                  icon: Icon(
+                    _braveSearchKeyVisible
+                        ? Icons.visibility_off
+                        : Icons.visibility,
+                    size: 16,
+                    color: _kFgMuted,
+                  ),
+                  onPressed: () => setState(() {
+                    _braveSearchKeyVisible = !_braveSearchKeyVisible;
+                  }),
+                ),
+                // Persisted directly into ApiKeyStorage (keychain + 0600
+                // file) on every keystroke — same write-on-edit semantics
+                // as the per-provider API-key field above.  No "Save"
+                // button to forget to click.
+                onChanged: (v) => ApiKeyStorage.store(
+                    AgentConfig.braveSearchKeyId, v.trim()),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── File write section ────────────────────────────────────────────────
+  //
+  // Single switch — no API key, no provider list.  The tool itself is
+  // free; the only knob is "is the agent allowed to propose writes".
+  // The subtitle spells out the always-Apply policy so users don't
+  // expect auto-execute to silently rewrite files when this is on.
+  //
+  // We deliberately keep this off by default: a runaway file write is
+  // FAR more dangerous than a runaway shell command — `chmod 755 …`
+  // has an exit code that surfaces failure, but a botched overwrite
+  // of `~/.zshrc` is silent until the next login.
+
+  Widget _buildFileWriteSection() {
+    final enabled = _agentConfig.fileWriteEnabled;
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _kDivider),
+      ),
+      child: SwitchListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        dense: true,
+        title: const Text(
+          'Enable file write',
+          style: TextStyle(color: _kFg, fontSize: 13),
+        ),
+        subtitle: const Text(
+          'Lets the agent propose `[WRITE_FILE_BEGIN]` markers. Every '
+          'proposed write shows up as a chat card with a diff preview '
+          'and requires you to click Apply — auto-execute does NOT '
+          'auto-write. Local writes use atomic temp+rename; SSH writes '
+          'go through the active SFTP session.',
+          style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+        ),
+        value: enabled,
+        activeThumbColor: _kAccent,
+        onChanged: (v) =>
+            _agentApply(_agentConfig.copyWith(fileWriteEnabled: v)),
       ),
     );
   }
