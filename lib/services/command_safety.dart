@@ -33,6 +33,23 @@ class CommandSafety {
     'telnet', 'ftp', 'sftp',
   };
 
+  /// Synthetic envelope text returned when the active terminal is in an
+  /// alternate-screen application (vim / less / tmux / htop / …).
+  ///
+  /// Lives here — next to the `_alwaysInteractive` list — so the
+  /// "what counts as a TUI" policy stays in one file.  The actual
+  /// detection (xterm's `Terminal.isUsingAltBuffer`) is performed at
+  /// the call site in `_executeAndCapture`: this string is pure data
+  /// so the LLM-facing wording can be regression-tested without
+  /// spinning up a Terminal instance.
+  static const altScreenReason =
+      'Terminal is in an alternate-screen application '
+      '(vim / less / tmux / htop / etc). Agent commands would be '
+      'interpreted as keystrokes inside that program instead of being '
+      'run by the shell. Ask the user to exit the program '
+      '(e.g. `:q` in vim, `q` in less, `Ctrl-B d` in tmux) before '
+      'retrying. Do NOT retry until they confirm.';
+
   /// Language REPLs.  Interactive iff invoked WITHOUT any positional /
   /// `-c` / `-e` / `-m` argument, OR with an explicit `-i` /
   /// `--interactive` flag.

@@ -471,44 +471,35 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   }
 
   /// Build a small `<session_context>` block describing the active
-  /// tab's working directory + HOME so the LLM can emit absolute
-  /// file-write paths from turn 1.
+  /// tab's environment so the LLM can emit absolute file-write paths
+  /// AND reason about relative dates from turn 1.
   ///
-  /// Returns null when there's no useful context to surface (no
-  /// filesystem adapter at all, or all three signals are unknown) —
-  /// in that case we leave the user message unchanged and rely on the
-  /// existing recovery loop.
+  /// Delegates the actual string formatting to [SessionContext.build]
+  /// so the format is pure-Dart unit-testable (see
+  /// `test/services/session_context_test.dart`).  This wrapper exists
+  /// only to gather the inputs from the active tab's adapter +
+  /// system clock.
+  ///
+  /// Always returns a non-null string today — the date/time line alone
+  /// is worth the few tokens even when the adapter is missing.  The
+  /// caller still tolerates null for backwards safety in case a future
+  /// build path decides to suppress the block entirely.
   Future<String?> _buildSessionContext() async {
     final adapter = widget.fileSystemAdapter;
-    if (adapter == null) return null;
-    final cwd = adapter.currentDirectory;
     String? home;
-    try {
-      home = await adapter.homeDirectory();
-    } catch (_) {
-      home = null;
+    if (adapter != null) {
+      try {
+        home = await adapter.homeDirectory();
+      } catch (_) {
+        home = null;
+      }
     }
-    // Defensive: don't emit a block carrying nothing — the model would
-    // just see noise.  Adapter label alone is too sparse to be useful.
-    if ((cwd == null || cwd.isEmpty) && (home == null || home.isEmpty)) {
-      return null;
-    }
-    final buf = StringBuffer('<session_context>\n')
-      ..writeln('Active tab: ${adapter.label}');
-    if (cwd != null && cwd.isNotEmpty) {
-      buf.writeln('Working directory: $cwd');
-    }
-    if (home != null && home.isNotEmpty) {
-      buf.writeln('HOME: $home');
-    }
-    buf.write(
-      'Note: relative file-write paths AND `~/…` are resolved against '
-      'the working directory shown above by [WRITE_FILE_BEGIN], so '
-      'either form is safe to emit. Prefer absolute paths when you '
-      'want to write outside the current directory.\n'
-      '</session_context>',
+    return SessionContext.build(
+      activeTab: adapter?.label,
+      cwd: adapter?.currentDirectory,
+      home: home,
+      now: DateTime.now(),
     );
-    return buf.toString();
   }
 
   Future<void> _runManualCommand(String cmd) async {

@@ -32,6 +32,8 @@ class _AiPanelContent extends StatelessWidget {
     this.terminalBackground,
     this.terminalLineHeight,
     this.onWriteProposalDecision,
+    required this.position,
+    this.onPositionToggle,
   });
 
   final AiPanelMode mode;
@@ -85,6 +87,15 @@ class _AiPanelContent extends StatelessWidget {
   /// view, the same shape every other interactive control here uses.
   final void Function(_WriteProposal proposal,
       {required bool apply, String? reason})? onWriteProposalDecision;
+
+  /// Current dock side — drives the icon shown on the position toggle
+  /// button so it reads "switch to the OTHER side".
+  final AiPanelPosition position;
+
+  /// Tap handler for the position toggle in the mode-switch row.  Null
+  /// hides the button (used in tests / hosts that don't persist
+  /// layout).
+  final VoidCallback? onPositionToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -144,6 +155,8 @@ class _AiPanelContent extends StatelessWidget {
             mode: mode,
             onChanged: onModeChanged,
             shellIntegrationActive: shellIntegrationActive,
+            position: position,
+            onPositionToggle: onPositionToggle,
           ),
           // Command mode: multi-line input fills available space
           if (mode == AiPanelMode.command)

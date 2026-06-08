@@ -608,10 +608,36 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final pipe = isSplitPane ? tab.splitPipe : tab.pipe;
     if (term == null) return null;
 
-    // Pre-flight: refuse commands that would hang the agent or leak output.
-    // Returning a synthetic CommandResult (instead of throwing) keeps the
-    // agent loop deterministic — the LLM gets standard `[Command executed]`
-    // feedback and can self-correct on the next turn.
+    // Pre-flight #1: alt-screen TUI detection.
+    //
+    // `CommandSafety.reason` only sees the COMMAND STRING the agent wants
+    // to run, so it can't catch the case where the USER is already inside
+    // vim/less/tmux/htop and then triggers the agent.  In that situation
+    // anything we send hits the running TUI as keystrokes (chaos: `ls`
+    // becomes `l` + `s` in vim normal mode, silently mutating the open
+    // file), the OSC 133 D marker never fires, and the echo-fallback
+    // path waits the full 120 s timeout while the auto-execute lock
+    // prevents the user from escaping the TUI.
+    //
+    // Detect it via xterm's `isUsingAltBuffer` (set when the program
+    // emits `CSI ?1049h`/`?1047h`) and return a synthetic envelope.
+    // The wording lives in `CommandSafety.altScreenReason` — see the
+    // comment there for why it's a const + co-located with the
+    // always-interactive list.
+    if (term.isUsingAltBuffer) {
+      stdout.writeln(
+        '[capture] blocked cmd=${_logQuote(cmd)} reason=alt_screen',
+      );
+      return CommandResult(
+        output: '[ssterm safety check] ${CommandSafety.altScreenReason}',
+        exitCode: null,
+      );
+    }
+
+    // Pre-flight #2: refuse commands that would hang the agent or leak
+    // output.  Returning a synthetic CommandResult (instead of throwing)
+    // keeps the agent loop deterministic — the LLM gets standard
+    // `[Command executed]` feedback and can self-correct on the next turn.
     final safetyReason = CommandSafety.reason(cmd);
     if (safetyReason != null) {
       stdout.writeln(

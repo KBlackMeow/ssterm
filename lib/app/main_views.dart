@@ -416,6 +416,18 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         ),
         _ => null,
       },
+      // Persist dock side + drag-resized extent the same way SFTP does
+      // (see `initialPosition` / `initialSize` / `onLayoutChanged` on
+      // `SshSessionView` above) — the AI panel's in-panel toggle and
+      // resize handle fire `onLayoutChanged`, which lands in config so
+      // the layout sticks across launches.
+      initialPosition: _config.aiPosition,
+      initialSize: _config.aiSize,
+      onLayoutChanged: (pos, size) {
+        _config.aiPosition = pos;
+        _config.aiSize = size;
+        _config.save();
+      },
       child: body,
     );
 

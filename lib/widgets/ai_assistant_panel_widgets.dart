@@ -18,11 +18,15 @@ class _ModeSwitch extends StatelessWidget {
     required this.mode,
     required this.onChanged,
     this.shellIntegrationActive,
+    required this.position,
+    this.onPositionToggle,
   });
 
   final AiPanelMode mode;
   final ValueChanged<AiPanelMode> onChanged;
   final bool? shellIntegrationActive;
+  final AiPanelPosition position;
+  final VoidCallback? onPositionToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +34,16 @@ class _ModeSwitch extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      // Layout shape:
+      //   [Command] [Agent]  ╌╌  [badge] [toggle] [label]
+      // The trailing cluster sits inside an `Expanded` so it can never
+      // push the row past its constraint — when the right-docked panel
+      // gets narrow (≤ ~280 px) each trailing item shrinks (badge text
+      // collapses to a dot-only pill, label ellipses, finally label
+      // drops entirely) instead of overflowing.  See the long-form
+      // calc in the commit that introduced the position toggle: at
+      // 300 px wide the badge + toggle ALONE exceeded the available
+      // width, so the previous Spacer-based layout couldn't help.
       child: Row(
         children: [
           _TabChip(
@@ -45,16 +59,69 @@ class _ModeSwitch extends StatelessWidget {
             selected: mode == AiPanelMode.agent,
             onTap: () => onChanged(AiPanelMode.agent),
           ),
-          const Spacer(),
-          if (mode == AiPanelMode.agent && shellIntegrationActive != null) ...[
-            _ShellIntegrationBadge(active: shellIntegrationActive!),
-            const SizedBox(width: 8),
-          ],
-          Text(
-            mode == AiPanelMode.command ? 'Type & execute' : 'Ask & insert',
-            style: TextStyle(color: dim, fontSize: 10),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (mode == AiPanelMode.agent &&
+                    shellIntegrationActive != null) ...[
+                  // Flexible badge — its inner label shrinks first, then
+                  // hides entirely (dot-only pill) when the trailing
+                  // cluster can't fit.  Tooltip retains the full meaning.
+                  Flexible(
+                    child: _ShellIntegrationBadge(
+                      active: shellIntegrationActive!,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (onPositionToggle != null)
+                  _PositionToggle(
+                    position: position,
+                    onTap: onPositionToggle!,
+                    color: dim,
+                  ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Compact dock-side toggle.  Mirrors the SFTP toolbar's pair of
+/// `view_agenda_outlined` / `view_sidebar_outlined` icons so a user
+/// who flips one panel intuits the same gesture for the other.
+class _PositionToggle extends StatelessWidget {
+  const _PositionToggle({
+    required this.position,
+    required this.onTap,
+    required this.color,
+  });
+
+  final AiPanelPosition position;
+  final VoidCallback onTap;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final dockedRight = position == AiPanelPosition.right;
+    return Tooltip(
+      message: dockedRight ? 'Move to bottom' : 'Move to right',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            dockedRight
+                ? Icons.view_agenda_outlined
+                : Icons.view_sidebar_outlined,
+            size: 14,
+            color: color,
+          ),
+        ),
       ),
     );
   }
@@ -77,24 +144,38 @@ class _ShellIntegrationBadge extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(3),
           border: Border.all(color: color.withValues(alpha: 0.4), width: 0.5),
         ),
+        // Compact pill — the dot's colour conveys status at a glance and
+        // the tooltip carries the full explanation, so we keep the label
+        // to a single short token ("OSC133" / "echo") to leave room for
+        // the position toggle in a narrow right-docked panel.
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 5,
-              height: 5,
+              width: 4,
+              height: 4,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            const SizedBox(width: 4),
-            Text(
-              active ? 'shell integration' : 'echo fallback',
-              style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w600),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                active ? 'OSC133' : 'echo',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.1,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
             ),
           ],
         ),

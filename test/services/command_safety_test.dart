@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/command_safety.dart';
+import 'package:xterm/xterm.dart';
 
 void main() {
   group('CommandSafety.parseInvocation', () {
@@ -334,6 +335,65 @@ print(sieve(100)[-1])
       expect(() => CommandSafety.reason(script), returnsNormally);
       expect(CommandSafety.reason(script), isNull,
           reason: 'python3 -c "…" should be allowed');
+    });
+  });
+
+  group('CommandSafety.altScreenReason', () {
+    // Pin the LLM-facing wording.  The actual `term.isUsingAltBuffer`
+    // gate lives in `_executeAndCapture` (private to main_ssh.dart);
+    // this group exercises the two halves the gate composes:
+    //
+    //   1. The const message exists and contains the user-recovery
+    //      hints the LLM is supposed to relay verbatim.
+    //   2. xterm's `Terminal.isUsingAltBuffer` actually flips on the
+    //      escape sequences a real TUI emits — proving our chosen
+    //      detection signal works end-to-end without spinning up a
+    //      Tab/Session harness.
+    //
+    // Together these guarantee that a refactor of either side (a
+    // rewording of the envelope OR an xterm upgrade that changes the
+    // alt-buffer trigger) breaks a test before it ships.
+    test('message names common TUIs and gives concrete escape hatches', () {
+      final r = CommandSafety.altScreenReason;
+      expect(r, contains('alternate-screen'));
+      expect(r, contains('vim'));
+      expect(r, contains('less'));
+      expect(r, contains('tmux'));
+      // Recovery hints the model should pass to the user.
+      expect(r, contains(':q'));
+      expect(r, contains('Ctrl-B d'));
+      // Loop-control directive: prevent retry storms while user is
+      // still inside the TUI.
+      expect(r, contains('Do NOT retry'));
+    });
+
+    test('xterm Terminal.isUsingAltBuffer flips on CSI ?1049h / ?1049l', () {
+      // The detection signal we depend on.  If a future xterm upgrade
+      // ever changes this, the agent's alt-screen guard would silently
+      // stop firing and the user would be back to "agent typed `ls`
+      // into my vim buffer" — this test makes that regression loud.
+      final terminal = Terminal();
+      expect(terminal.isUsingAltBuffer, isFalse,
+          reason: 'fresh terminal must start on the main buffer');
+
+      terminal.write('\x1b[?1049h');
+      expect(terminal.isUsingAltBuffer, isTrue,
+          reason: 'CSI ?1049h must enter the alt buffer');
+
+      terminal.write('\x1b[?1049l');
+      expect(terminal.isUsingAltBuffer, isFalse,
+          reason: 'CSI ?1049l must restore the main buffer');
+    });
+
+    test('xterm Terminal.isUsingAltBuffer also flips on legacy CSI ?1047h', () {
+      // Older TUIs (and `less` on some platforms) still emit the
+      // pre-xterm-251 `?1047` toggle.  Cover it explicitly so dropping
+      // support in xterm would be caught here too.
+      final terminal = Terminal();
+      terminal.write('\x1b[?1047h');
+      expect(terminal.isUsingAltBuffer, isTrue);
+      terminal.write('\x1b[?1047l');
+      expect(terminal.isUsingAltBuffer, isFalse);
     });
   });
 }

@@ -10,6 +10,7 @@ import '../models/agent_config.dart';
 import '../models/skill.dart';
 import '../services/llm_service.dart';
 import '../services/file_write_service.dart';
+import '../services/session_context.dart';
 import '../services/skill_service.dart';
 import '../services/web_search_service.dart';
 import 'frosted_glass.dart';
@@ -30,7 +31,14 @@ part 'ai_assistant_panel_loop.dart';
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
-const _kPanelMinHeight = 120.0;
+
+/// Minimum side (height when docked at bottom, width when docked right).
+///
+/// Sized to keep the chat list usable in both orientations:
+///   • At 240 px tall the bottom panel shows ~6 chat lines + the input bar.
+///   • At 240 px wide the right panel keeps the markdown code blocks from
+///     wrapping every shell command across multiple lines.
+const _kPanelMinExtent = 240.0;
 const _kPanelDefaultFraction = 0.35;
 const _kPanelMaxFraction = 0.6;
 
@@ -66,6 +74,11 @@ const _kFeedbackTailBytes = 4 * 1024;
 
 enum AiPanelMode { command, agent }
 
+/// Dock side for the AI assistant panel.  Mirrors [SftpPanelPosition] so the
+/// two side-by-side panels can both be toggled between the same two
+/// orientations and persisted the same way in [AppConfig].
+enum AiPanelPosition { bottom, right }
+
 class AiAssistantOverlay extends StatefulWidget {
   const AiAssistantOverlay({
     super.key,
@@ -80,6 +93,9 @@ class AiAssistantOverlay extends StatefulWidget {
     this.terminalLineHeight,
     this.onTerminalLockChanged,
     this.fileSystemAdapter,
+    this.initialPosition = AiPanelPosition.right,
+    this.initialSize,
+    this.onLayoutChanged,
   });
 
   final Widget child;
@@ -146,12 +162,42 @@ class AiAssistantOverlay extends StatefulWidget {
   /// immediately swaps the adapter the next Apply click will use.
   final FileSystemAdapter? fileSystemAdapter;
 
+  /// Initial dock side — restored from [AppConfig.aiPosition] on app
+  /// launch.  The user can flip this from the in-panel toggle, which
+  /// fires [onLayoutChanged] so the new value persists.
+  final AiPanelPosition initialPosition;
+
+  /// Initial pixel extent of the panel along its dock axis (height when
+  /// docked at the bottom, width when docked at the right).  Null falls
+  /// back to [_kPanelDefaultFraction] of the available extent.
+  final double? initialSize;
+
+  /// Fires whenever the user drags the resize handle OR flips the dock
+  /// side via the toggle button.  Hosts wire this to
+  /// [AppConfig.aiPosition] / [AppConfig.aiSize] + `save()` so the
+  /// layout sticks across launches.
+  final void Function(AiPanelPosition position, double? size)?
+      onLayoutChanged;
+
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
 
 class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   AiPanelMode _mode = AiPanelMode.command;
+
+  // Dock side + custom drag-resized extent.  Initialised in [initState]
+  // from the host's persisted values; subsequent mutations notify the
+  // host via `widget.onLayoutChanged` so the new value rides into config.
+  late AiPanelPosition _position;
+  double? _customPanelSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _position = widget.initialPosition;
+    _customPanelSize = widget.initialSize;
+  }
 
   // Separate state per mode
   final _cmdController = TextEditingController();
@@ -351,9 +397,35 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     });
   }
 
-  double _panelHeight(BoxConstraints constraints) {
-    return (constraints.maxHeight * _kPanelDefaultFraction)
-        .clamp(_kPanelMinHeight, constraints.maxHeight * _kPanelMaxFraction);
+  /// Resolve the panel's extent along its dock axis (height when docked
+  /// bottom, width when docked right).  Clamps any persisted custom size
+  /// to the current viewport so a window resized smaller can't leave the
+  /// panel inflated past [_kPanelMaxFraction].
+  double _panelExtent(BoxConstraints constraints) {
+    final total = _position == AiPanelPosition.right
+        ? constraints.maxWidth
+        : constraints.maxHeight;
+    final maxSide =
+        (total * _kPanelMaxFraction).clamp(_kPanelMinExtent, double.infinity);
+    if (_customPanelSize != null) {
+      return _customPanelSize!.clamp(_kPanelMinExtent, maxSide);
+    }
+    return (total * _kPanelDefaultFraction)
+        .clamp(_kPanelMinExtent, maxSide);
+  }
+
+  /// Flip dock side and clear the custom size so the new orientation
+  /// starts at its default fraction (a width that fits 35 % of the
+  /// window often makes a poor height, and vice versa — picking a fresh
+  /// default avoids the "thin slit" failure mode on rotation).
+  void _togglePosition() {
+    setState(() {
+      _position = _position == AiPanelPosition.right
+          ? AiPanelPosition.bottom
+          : AiPanelPosition.right;
+      _customPanelSize = null;
+    });
+    widget.onLayoutChanged?.call(_position, null);
   }
 
   @override
@@ -387,50 +459,105 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final panelHeight = _panelHeight(constraints);
-        return Column(
-          children: [
-            Expanded(child: _buildTerminalBody()),
-            Container(
-              height: panelHeight,
-              color: panelBg,
-              child: Padding(
-                // Same 8px margin SFTP uses (`_kSftpPanelMargin`) so the AI
-                // panel reads as a floating, rounded card consistent with the
-                // SFTP card next door instead of a flat, edge-to-edge strip.
-                padding: const EdgeInsets.fromLTRB(
+        final panelExtent = _panelExtent(constraints);
+        final dockRight = _position == AiPanelPosition.right;
+
+        // Padded card body.  The padding here IS the 8 px floating
+        // margin around the rounded card — kept on the panel-card side
+        // (not on the resize-handle side) so the handle sits flush
+        // against the terminal pane and the user can grab the very
+        // edge instead of hunting for the gap.
+        final panelCard = Padding(
+          padding: dockRight
+              ? const EdgeInsets.fromLTRB(
+                  0,
+                  _kAiPanelMargin,
+                  _kAiPanelMargin,
+                  _kAiPanelMargin,
+                )
+              : const EdgeInsets.fromLTRB(
                   _kAiPanelMargin,
                   0,
                   _kAiPanelMargin,
                   _kAiPanelMargin,
                 ),
-                child: _AiPanelContent(
-                  mode: _mode,
-                  busy: _agentBusy,
-                  autoExecute: _autoExecute,
-                  loopStatus: _agentLoopStatus,
-                  messages: _messages,
-                  textController: _textController,
-                  scrollController: _scrollController,
-                  onSend: _send,
-                  onCancel: _cancelAgent,
-                  onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
-                  onInsert: widget.onInsert,
-                  onSendToTerminal: widget.onExecute,
-                  onRunManualCommand: widget.onExecuteAsync != null
-                      ? _runManualCommand
-                      : null,
-                  onModeChanged: (m) => setState(() => _mode = m),
-                  shellIntegrationActive:
-                      widget.onGetShellIntegrationActive?.call(),
-                  markdownEnabled:
-                      widget.agentConfig?.markdownEnabled ?? false,
-                  terminalBackground: widget.terminalBackground,
-                  terminalLineHeight: widget.terminalLineHeight,
-                  onWriteProposalDecision: _decideWriteProposal,
-                ),
-              ),
-            ),
+          child: _AiPanelContent(
+            mode: _mode,
+            busy: _agentBusy,
+            autoExecute: _autoExecute,
+            loopStatus: _agentLoopStatus,
+            messages: _messages,
+            textController: _textController,
+            scrollController: _scrollController,
+            onSend: _send,
+            onCancel: _cancelAgent,
+            onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
+            onInsert: widget.onInsert,
+            onSendToTerminal: widget.onExecute,
+            onRunManualCommand: widget.onExecuteAsync != null
+                ? _runManualCommand
+                : null,
+            onModeChanged: (m) => setState(() => _mode = m),
+            shellIntegrationActive:
+                widget.onGetShellIntegrationActive?.call(),
+            markdownEnabled:
+                widget.agentConfig?.markdownEnabled ?? false,
+            terminalBackground: widget.terminalBackground,
+            terminalLineHeight: widget.terminalLineHeight,
+            onWriteProposalDecision: _decideWriteProposal,
+            position: _position,
+            onPositionToggle: _togglePosition,
+          ),
+        );
+
+        // Resize handle lives on the edge that abuts the terminal pane.
+        //   • bottom dock → top edge,  drag UP   ⇒ taller panel
+        //   • right dock  → left edge, drag LEFT ⇒ wider  panel
+        //
+        // Dragging towards the terminal grows the panel, so we subtract
+        // the delta (positive Y/X moves away from the terminal, which
+        // should SHRINK the panel) — same convention SFTP uses.
+        final handle = _AiResizeHandle(
+          axis: dockRight ? Axis.horizontal : Axis.vertical,
+          onDrag: (d) {
+            setState(() {
+              final total = dockRight
+                  ? constraints.maxWidth
+                  : constraints.maxHeight;
+              final maxSide = total * _kPanelMaxFraction;
+              _customPanelSize =
+                  (panelExtent - d).clamp(_kPanelMinExtent, maxSide);
+            });
+            widget.onLayoutChanged?.call(_position, _customPanelSize);
+          },
+        );
+
+        // Wrap the WHOLE panel area — handle + padded card — in a single
+        // bg fill.  Without this, the 4 px transparent resize handle
+        // would leak whatever sits behind it (Scaffold or the SFTP
+        // floating overlay), showing up as a thin gap between the
+        // terminal and the AI card.  Painting the same `panelBg` the
+        // 8 px margin uses makes the handle area read as one contiguous
+        // chrome strip with the rest of the card surround.
+        final panelArea = ColoredBox(
+          color: panelBg,
+          child: dockRight
+              ? Row(children: [handle, Expanded(child: panelCard)])
+              : Column(children: [handle, Expanded(child: panelCard)]),
+        );
+
+        if (dockRight) {
+          return Row(
+            children: [
+              Expanded(child: _buildTerminalBody()),
+              SizedBox(width: panelExtent, child: panelArea),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            Expanded(child: _buildTerminalBody()),
+            SizedBox(height: panelExtent, child: panelArea),
           ],
         );
       },
@@ -488,4 +615,34 @@ String _logQuote(String s) {
       .replaceAll('\t', r'\t');
   if (v.length > cap) v = '${v.substring(0, cap)}…';
   return '"$v"';
+}
+
+/// 4 px wide / tall transparent grab strip the user drags to resize the
+/// AI panel.  Twin of `_ResizeHandle` in `ssh_session_view.dart` — kept
+/// local so the AI panel library doesn't reach into the SFTP layer for
+/// a private widget.
+class _AiResizeHandle extends StatelessWidget {
+  const _AiResizeHandle({required this.axis, required this.onDrag});
+
+  final Axis axis;
+  final ValueChanged<double> onDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: axis == Axis.horizontal
+          ? SystemMouseCursors.resizeColumn
+          : SystemMouseCursors.resizeRow,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onPanUpdate: (d) =>
+            onDrag(axis == Axis.horizontal ? d.delta.dx : d.delta.dy),
+        child: Container(
+          width: axis == Axis.horizontal ? 4 : double.infinity,
+          height: axis == Axis.vertical ? 4 : double.infinity,
+          color: Colors.transparent,
+        ),
+      ),
+    );
+  }
 }
