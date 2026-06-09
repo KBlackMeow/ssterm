@@ -458,27 +458,52 @@ extension _AgentSettingsExt on _SettingsPageState {
           ),
           if (provider.enabled) ...[
             const SizedBox(height: 10),
-            _agentTextFieldRow(
-              label: 'API Key',
-              controller: apiKeyCtrl,
-              obscure: !(_apiKeyVisible[provider.id] ?? false),
-              suffix: IconButton(
-                icon: Icon(
-                  (_apiKeyVisible[provider.id] ?? false)
-                      ? Icons.visibility_off
-                      : Icons.visibility,
-                  size: 16,
-                  color: _kFgMuted,
+            // Local providers (Ollama et al.) have no auth wall — show a
+            // gentle hint instead of an inert API-key textbox the user
+            // would otherwise fill in for nothing.  See
+            // `ProviderConfig.requiresApiKey`.
+            if (provider.requiresApiKey)
+              _agentTextFieldRow(
+                label: 'API Key',
+                controller: apiKeyCtrl,
+                obscure: !(_apiKeyVisible[provider.id] ?? false),
+                suffix: IconButton(
+                  icon: Icon(
+                    (_apiKeyVisible[provider.id] ?? false)
+                        ? Icons.visibility_off
+                        : Icons.visibility,
+                    size: 16,
+                    color: _kFgMuted,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _apiKeyVisible[provider.id] =
+                          !(_apiKeyVisible[provider.id] ?? false);
+                    });
+                  },
                 ),
-                onPressed: () {
-                  setState(() {
-                    _apiKeyVisible[provider.id] =
-                        !(_apiKeyVisible[provider.id] ?? false);
-                  });
-                },
+                onChanged: (v) => ApiKeyStorage.store(provider.id, v),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.lock_open, size: 14, color: _kFgMuted),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'No API key required (local provider). '
+                        'Set Base URL to point at your daemon.',
+                        style: const TextStyle(
+                          color: _kFgMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onChanged: (v) => ApiKeyStorage.store(provider.id, v),
-            ),
             const SizedBox(height: 8),
             _agentTextFieldRow(
               label: 'Base URL',
@@ -684,6 +709,11 @@ IconData _providerIcon(String id) {
       return Icons.flutter_dash;
     case 'deepseek':
       return Icons.explore;
+    case 'ollama':
+      // The llama silhouette doesn't exist in Material; `pets` is the
+      // closest "this is the local animal-themed model runner" cue and
+      // matches Ollama's mascot well enough at icon size.
+      return Icons.pets;
     default:
       return Icons.smart_toy;
   }

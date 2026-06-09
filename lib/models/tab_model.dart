@@ -40,6 +40,15 @@ class AppTab {
   SshHost? sshProfile;
   bool manuallyDisconnected = false;
   Timer? keepaliveTimer;
+  /// True while a keepalive `client.run('true')` is still pending.  Used to
+  /// suppress stacking on slow links: without the guard a 30-second periodic
+  /// keepalive against a link with > 30s RTT to `true` would queue an
+  /// unbounded backlog of probes and DoS the SSH channel.
+  bool keepaliveInFlight = false;
+  /// Number of consecutive reconnect attempts since the last successful
+  /// connection.  Reset to 0 on success.  Drives exponential backoff and
+  /// the hard retry ceiling in `_reconnectTab`.
+  int reconnectAttempt = 0;
   bool sftpPanelVisible = false;
   bool aiPanelVisible = false;
   TransferManager? transferManager;

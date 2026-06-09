@@ -34,7 +34,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final exit = result?.exitCode;
     final exitStr = exit == null ? 'unknown' : exit.toString();
     final raw = result?.output ?? '';
-    final body = _truncateForLlm(raw);
+    // The truncation budget is denominated in BYTES (LLM context windows are
+    // tokenised from UTF-8), but Dart's `String.length` returns UTF-16 code
+    // units — for CJK / Emoji output a 4 KB Dart-length head can be ≥ 12 KB
+    // on the wire.  Measure once in UTF-8 and reuse.
+    final rawBytes = utf8.encode(raw);
+    final body = _truncateForLlmBytes(rawBytes);
     final header = StringBuffer()
       ..writeln('[Command executed]')
       ..writeln('\$ $cmd')
@@ -48,8 +53,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     if (result?.truncated == true) {
       header.writeln('[capture_truncated=true reason="output exceeded ssterm capture cap; head and/or tail may be missing"]');
     }
-    if (raw.length > _kMaxFeedbackBytes) {
-      header.writeln('[feedback_truncated=true reason="middle elided to fit context; ${raw.length} bytes captured, ~8 KB sent"]');
+    if (rawBytes.length > _kMaxFeedbackBytes) {
+      header.writeln('[feedback_truncated=true reason="middle elided to fit context; ${rawBytes.length} bytes captured, ~8 KB sent"]');
     }
     if (body.isEmpty) {
       header.writeln('[output: <empty>]');
@@ -61,12 +66,41 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     return header.toString().trimRight();
   }
 
-  String _truncateForLlm(String text) {
-    if (text.length <= _kMaxFeedbackBytes) return text;
-    final head = text.substring(0, _kFeedbackHeadBytes);
-    final tail = text.substring(text.length - _kFeedbackTailBytes);
-    final elided = text.length - _kFeedbackHeadBytes - _kFeedbackTailBytes;
+  /// Byte-accurate version of `_truncateForLlm`.  Slices on UTF-8 byte
+  /// boundaries; `allowMalformed: true` replaces any straddled multi-byte
+  /// sequence at the cut points with U+FFFD instead of throwing.
+  String _truncateForLlmBytes(List<int> bytes) {
+    if (bytes.length <= _kMaxFeedbackBytes) {
+      return utf8.decode(bytes, allowMalformed: true);
+    }
+    final head = utf8.decode(
+      bytes.sublist(0, _kFeedbackHeadBytes),
+      allowMalformed: true,
+    );
+    final tail = utf8.decode(
+      bytes.sublist(bytes.length - _kFeedbackTailBytes),
+      allowMalformed: true,
+    );
+    final elided = bytes.length - _kFeedbackHeadBytes - _kFeedbackTailBytes;
     return '$head\n... [$elided bytes elided] ...\n$tail';
+  }
+
+  /// Transient stream errors that we'll retry ONCE if nothing has been
+  /// yielded yet.  Keeps the agent loop alive across DeepSeek's frequent
+  /// "connection closed while receiving data" hiccups (and similar TLS /
+  /// socket flakiness on the other providers) without retrying after the
+  /// model has already started speaking — partial chunks aren't safe to
+  /// replay because re-streaming would duplicate the head of the reply.
+  bool _isTransientStreamError(Object e) {
+    if (e is HttpException) return true;
+    if (e is SocketException) return true;
+    // Match-by-string for exceptions whose classes we don't import.
+    // `dart:io`'s `HandshakeException` and `TlsException` extend
+    // `IOException` and surface via `chatStream`'s underlying HttpClient.
+    final s = e.toString();
+    return s.contains('HandshakeException') ||
+        s.contains('TlsException') ||
+        s.contains('Connection closed');
   }
 
   Future<String?> _streamAiResponse(
@@ -75,44 +109,61 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     _ChatMessage aiMsg,
     AgentConfig config,
   ) async {
-    final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
-    try {
-      result = LlmService.chatStream(
-        config: config,
-        messages: _conversationHistory,
-      );
-    } catch (e) {
-      // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
-      _logAgent('error scope=setup_stream type=${e.runtimeType} msg=${_logQuote('$e')}');
-      while (_conversationHistory.length > historyLenBefore) {
-        _conversationHistory.removeLast();
-      }
-      if (mounted && gen == _generation) {
-        setState(() {
-          _messages.removeLast();
-          _messages.add(_ChatMessage.ai(text: '', error: '$e'));
-        });
-      }
-      return null;
-    }
-
-    _cancelStream = result.cancel;
-
     String fullText = '';
     String reasoningText = '';
-    var scheduled = false;
-    try {
-      await for (final event in result.stream) {
-        if (event.kind == 'reasoning') {
-          reasoningText += event.content;
-        } else {
-          fullText += event.content;
+
+    // Outer retry loop: at most one extra attempt, and only when the
+    // first attempt yielded zero content AND failed with a transient
+    // network error.  Anything more aggressive would risk duplicating
+    // half-streamed answers.
+    const maxAttempts = 2;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
+      try {
+        result = LlmService.chatStream(
+          config: config,
+          messages: _conversationHistory,
+        );
+      } catch (e) {
+        // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
+        _logAgent('error scope=setup_stream type=${e.runtimeType} msg=${_logQuote('$e')}');
+        while (_conversationHistory.length > historyLenBefore) {
+          _conversationHistory.removeLast();
         }
-        if (mounted && !scheduled) {
-          scheduled = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            scheduled = false;
-            if (mounted) {
+        if (mounted && gen == _generation) {
+          setState(() {
+            _messages.removeLast();
+            _messages.add(_ChatMessage.ai(text: '', error: '$e'));
+          });
+        }
+        return null;
+      }
+
+      _cancelStream = result.cancel;
+
+      fullText = '';
+      reasoningText = '';
+      var scheduled = false;
+      // Once the stream completes (success OR error), block all pending
+      // post-frame callbacks from clobbering `aiMsg.text` with the
+      // half-processed `stripStreamingMarkers` view AFTER the agent
+      // loop has applied the final `stripCompletionMarkers` view.
+      // Without this guard, the very last in-flight callback can race
+      // the stream-end `setState` and reintroduce trailing blank lines
+      // or partial markers into the rendered card.
+      var streamDone = false;
+      try {
+        await for (final event in result.stream) {
+          if (event.kind == 'reasoning') {
+            reasoningText += event.content;
+          } else {
+            fullText += event.content;
+          }
+          if (mounted && !scheduled) {
+            scheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              scheduled = false;
+              if (!mounted || streamDone || gen != _generation) return;
               setState(() {
                 // Hide markers during streaming — without this the user
                 // briefly sees `[`, `[TASK`, `[TASK_COMPLETE]` flicker
@@ -123,35 +174,56 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                 aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
               });
               _scrollToBottom();
-            }
-          });
+            });
+          }
         }
-      }
-      if (mounted) {
-        setState(() {
-          aiMsg.text = LlmService.stripStreamingMarkers(fullText);
-          aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
-        });
-      }
-    } catch (e) {
-      // Catch EVERYTHING — stream errors, SSE parse failures, etc.
-      _logAgent('error scope=stream type=${e.runtimeType} msg=${_logQuote('$e')}');
-      while (_conversationHistory.length > historyLenBefore) {
-        _conversationHistory.removeLast();
-      }
-      if (mounted) {
-        if (gen == _generation) {
+        streamDone = true;
+        if (mounted) {
           setState(() {
-            _messages.removeLast();
-            _messages.add(_ChatMessage.ai(text: '', error: 'Stream error: $e'));
+            aiMsg.text = LlmService.stripStreamingMarkers(fullText);
+            aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
           });
-        } else {
-          setState(() => _messages.removeLast());
         }
+        // Stream finished cleanly — break out of the retry loop.
+        break;
+      } catch (e) {
+        streamDone = true;
+        // Catch EVERYTHING — stream errors, SSE parse failures, etc.
+        final canRetry = attempt < maxAttempts &&
+            fullText.isEmpty &&
+            reasoningText.isEmpty &&
+            mounted &&
+            gen == _generation &&
+            _isTransientStreamError(e);
+        if (canRetry) {
+          _logAgent(
+            'stream_retry attempt=$attempt/$maxAttempts '
+            'type=${e.runtimeType} msg=${_logQuote('$e')}',
+          );
+          _cancelStream = null;
+          // Brief backoff so we don't hammer a flapping endpoint.
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          if (!mounted || gen != _generation) return null;
+          continue;
+        }
+        _logAgent('error scope=stream type=${e.runtimeType} msg=${_logQuote('$e')}');
+        while (_conversationHistory.length > historyLenBefore) {
+          _conversationHistory.removeLast();
+        }
+        if (mounted) {
+          if (gen == _generation) {
+            setState(() {
+              _messages.removeLast();
+              _messages.add(_ChatMessage.ai(text: '', error: 'Stream error: $e'));
+            });
+          } else {
+            setState(() => _messages.removeLast());
+          }
+        }
+        return null;
+      } finally {
+        _cancelStream = null;
       }
-      return null;
-    } finally {
-      _cancelStream = null;
     }
 
     if (!mounted || gen != _generation) return null;
@@ -637,6 +709,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (remove.isOdd) remove++;
         final maxRemovable = _conversationHistory.length - _kPinnedHeadMessages;
         if (remove > maxRemovable) remove = maxRemovable;
+        // The `maxRemovable` clamp above can turn an even `remove` back
+        // into an odd one when the pinned-head count is itself odd
+        // (e.g. one bootstrapping system message).  We MUST re-floor to
+        // an even count or we'd snip a user-without-its-assistant (or
+        // vice-versa) out of the middle, leaving the role pattern
+        // broken — which Anthropic rejects with a 400.  Better to keep
+        // one extra turn than to corrupt the alternation.
+        if (remove.isOdd) remove--;
         if (remove > 0) {
           _conversationHistory.removeRange(
             _kPinnedHeadMessages,

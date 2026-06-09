@@ -205,21 +205,37 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       profile: r.profile,
     );
 
-    // Feature 1: port forwarding
+    // Feature 1: port forwarding.  Errors here used to be `.ignore()`d
+    // silently, leaving the user wondering why `-L 8080:…` does nothing —
+    // surface them to the terminal and continue (other features still work).
     if (r.profile.forwardRules.isNotEmpty) {
       final fwdService = PortForwardService();
       tab.forwardService = fwdService;
-      fwdService.startAll(r.client, r.profile.forwardRules).ignore();
+      unawaited(
+        fwdService.startAll(r.client, r.profile.forwardRules).catchError((e) {
+          if (mounted) {
+            tab.terminal?.write(
+              '[Port forward error: $e]\r\n',
+            );
+          }
+        }),
+      );
     }
 
-    // Feature 4: keepalive
+    // Feature 4: keepalive.  See `_reconnectTab` for the `keepaliveInFlight`
+    // rationale — both call sites need the same in-flight guard.
     if (r.profile.keepaliveInterval > 0) {
+      tab.keepaliveInFlight = false;
       tab.keepaliveTimer = Timer.periodic(
         Duration(seconds: r.profile.keepaliveInterval),
         (_) async {
+          if (tab.keepaliveInFlight) return;
+          tab.keepaliveInFlight = true;
           try {
             await r.client.run('true').timeout(const Duration(seconds: 5));
-          } catch (_) {}
+          } catch (_) {} finally {
+            tab.keepaliveInFlight = false;
+          }
         },
       );
     }
@@ -441,37 +457,84 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       if (profile.forwardRules.isNotEmpty) {
         final fwdService = PortForwardService();
         tab.forwardService = fwdService;
-        fwdService.startAll(result.client, profile.forwardRules).ignore();
+        unawaited(
+          fwdService.startAll(result.client, profile.forwardRules).catchError((e) {
+            if (mounted) {
+              tab.terminal?.write('[Port forward error: $e]\r\n');
+            }
+          }),
+        );
       }
 
       if (profile.keepaliveInterval > 0) {
+        tab.keepaliveInFlight = false;
         tab.keepaliveTimer = Timer.periodic(
           Duration(seconds: profile.keepaliveInterval),
           (_) async {
+            // In-flight guard: drop the tick if the previous `true` is
+            // still pending (slow link / unresponsive server) so we don't
+            // queue an unbounded backlog of probes on the SSH channel.
+            if (tab.keepaliveInFlight) return;
+            tab.keepaliveInFlight = true;
             try {
               await result.client
                   .run('true')
                   .timeout(const Duration(seconds: 5));
-            } catch (_) {}
+            } catch (_) {
+              // Failures here are expected when the link is degrading —
+              // the surrounding session lifecycle will catch the actual
+              // disconnect and trigger reconnect.  Don't escalate.
+            } finally {
+              tab.keepaliveInFlight = false;
+            }
           },
         );
       }
 
+      // Success — clear the backoff counter so the NEXT disconnect starts
+      // from the bottom of the ladder again.
+      tab.reconnectAttempt = 0;
       tab.terminal?.write('[Reconnected]\r\n');
       if (mounted) setState(() {});
     } catch (e) {
-      if (mounted) {
-        tab.terminal?.write('[Reconnect failed: $e]\r\n${_TerminalHomeLocalMethods._kRestartPrompt}');
-        tab.primarySessionEnded = true;
-        if (tab.sshProfile?.autoReconnect == true &&
-            !tab.manuallyDisconnected) {
-          await Future<void>.delayed(const Duration(seconds: 5));
-          if (!mounted || tab.manuallyDisconnected) return;
-          _reconnectTab(tab);
-        }
+      if (!mounted) return;
+      tab.terminal?.write(
+        '[Reconnect failed: $e]\r\n${_TerminalHomeLocalMethods._kRestartPrompt}',
+      );
+      tab.primarySessionEnded = true;
+      if (tab.sshProfile?.autoReconnect != true || tab.manuallyDisconnected) {
+        return;
       }
+      // Exponential backoff: 2s, 4s, 8s, 16s, 32s, 60s (cap), 60s, …
+      // Hard ceiling at `_kMaxReconnectAttempts` so a permanently-down
+      // host doesn't burn cycles forever (and tickle fail2ban / IDS).
+      const maxAttempts = _kMaxReconnectAttempts;
+      tab.reconnectAttempt += 1;
+      if (tab.reconnectAttempt > maxAttempts) {
+        tab.terminal?.write(
+          '[Reconnect aborted after $maxAttempts attempts — host appears '
+          'permanently unreachable. Press a key to retry manually.]\r\n',
+        );
+        tab.reconnectAttempt = 0;
+        return;
+      }
+      final delaySeconds =
+          (1 << tab.reconnectAttempt).clamp(2, 60); // 2,4,8,16,32,60,60,…
+      tab.terminal?.write(
+        '[Retry ${tab.reconnectAttempt}/$maxAttempts in ${delaySeconds}s…]\r\n',
+      );
+      await Future<void>.delayed(Duration(seconds: delaySeconds));
+      if (!mounted || tab.manuallyDisconnected) return;
+      _reconnectTab(tab);
     }
   }
+
+  /// Max consecutive reconnect attempts before we stop the auto-reconnect
+  /// loop.  At 8 with exponential backoff capped at 60s the total wall-time
+  /// is ≈ 2+4+8+16+32+60+60+60 = 242s ≈ 4 minutes — enough to bridge a
+  /// laptop-lid event or a Wi-Fi roam, short enough that a truly-down host
+  /// stops thrashing.
+  static const int _kMaxReconnectAttempts = 8;
 
   // ── Tab management ─────────────────────────────────────────────────────────
 
@@ -545,19 +608,57 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       }
       final data = utf8.encode('$cmd\n');
       final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
-      if (isSplitPane && tab.splitSshSession != null) {
-        tab.splitSshSession!.stdin.add(data);
-      } else if (isSplitPane && tab.splitPty != null) {
-        tab.splitPty!.write(data);
-      } else if (tab.sshSession != null) {
+      // Crucially, when the SPLIT pane is active but its session / PTY
+      // aren't wired up yet (still connecting, just torn down, …), we
+      // MUST NOT fall through to the primary pane's transport.  Doing
+      // so would silently execute the agent's command in the wrong
+      // shell while `_executeAndCapture` is `awaitNextCommand`-ing the
+      // SPLIT pipe — guaranteeing a 120 s timeout and a stale capture.
+      // Paste into the split terminal instead, which is visible and
+      // makes the broken-pane state obvious to the user.
+      if (isSplitPane) {
+        if (tab.splitSshSession != null) {
+          tab.splitSshSession!.stdin.add(data);
+        } else if (tab.splitPty != null) {
+          tab.splitPty!.write(data);
+        } else {
+          tab.splitTerminal?.paste('$cmd\n');
+        }
+        return;
+      }
+      if (tab.sshSession != null) {
         tab.sshSession!.stdin.add(data);
       } else if (tab.pty != null) {
         tab.pty!.write(data);
       } else {
-        final targetTerm = isSplitPane ? tab.splitTerminal : tab.terminal;
-        targetTerm?.paste('$cmd\n');
+        tab.terminal?.paste('$cmd\n');
       }
     };
+  }
+
+  /// Sends raw bytes (no trailing newline, no shell quoting) to the active
+  /// pane's transport.  Used for control characters like `Ctrl-C`/`Ctrl-D`
+  /// that the agent's echo-sentinel fallback needs to fire on timeout.
+  ///
+  /// Mirrors `_executeOnTab`'s split-pane safety: when the split pane is
+  /// active but its session / PTY aren't established, we drop the bytes
+  /// rather than route them to the primary pane (which would interrupt
+  /// whatever the user is running there).
+  void _sendRawToTab(_Tab tab, Uint8List bytes) {
+    final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
+    if (isSplitPane) {
+      if (tab.splitSshSession != null) {
+        tab.splitSshSession!.stdin.add(bytes);
+      } else if (tab.splitPty != null) {
+        tab.splitPty!.write(bytes);
+      }
+      return;
+    }
+    if (tab.sshSession != null) {
+      tab.sshSession!.stdin.add(bytes);
+    } else if (tab.pty != null) {
+      tab.pty!.write(bytes);
+    }
   }
 
   /// Wraps a multi-line command in `<shell> -c '<cmd>'` so the user shell
@@ -655,17 +756,62 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     if (pipe != null && pipe.hasOsc133) {
       stdout.writeln('[capture] osc133 start cmd=${_logQuote(cmd)}');
       // Subscribe BEFORE sending so we don't race the next D marker.
-      final pending = pipe.awaitNextCommand(isCancelled: isCancelled);
+      const osc133Timeout = Duration(seconds: 120);
+      final pending = pipe.awaitNextCommand(
+        timeout: osc133Timeout,
+        isCancelled: isCancelled,
+      );
       _executeOnTab(tab)(wrapped);
       final result = await pending;
-      if (result == null) {
+      if (result != null) {
+        stdout.writeln(
+          '[capture] osc133 done exit=${result.exitCode} bytes=${result.output.length}',
+        );
+        return result;
+      }
+      // `awaitNextCommand` returns null for BOTH cancel and timeout — disambiguate
+      // by re-polling the cancellation closure.  Cancel: short-circuit.
+      if (isCancelled != null && isCancelled()) {
         stdout.writeln('[capture] osc133 cancelled');
         return null;
       }
+      // Otherwise we timed out.  Without this recovery block we used to silently
+      // leave the hung command running in the shell — the next agent step would
+      // then race its late output and corrupt the next capture.  Mirror the
+      // echo-fallback's behaviour: send Ctrl-C, give the shell a short grace
+      // period to flush a D marker, then surface a synthetic error envelope.
       stdout.writeln(
-        '[capture] osc133 done exit=${result.exitCode} bytes=${result.output.length}',
+        '[capture] osc133 timeout after ${osc133Timeout.inSeconds}s '
+        '— sending Ctrl-C to abort stuck command',
       );
-      return result;
+      _sendRawToTab(tab, Uint8List.fromList(const [0x03])); // SIGINT
+      final recovery = await pipe.awaitNextCommand(
+        timeout: const Duration(seconds: 5),
+        isCancelled: isCancelled,
+      );
+      if (recovery != null) {
+        stdout.writeln(
+          '[capture] osc133 recovered after Ctrl-C exit=${recovery.exitCode}',
+        );
+        return recovery;
+      }
+      if (isCancelled != null && isCancelled()) {
+        stdout.writeln('[capture] osc133 abort cancelled');
+        return null;
+      }
+      stdout.writeln(
+        '[capture] osc133 unrecoverable timeout — giving up; '
+        'shell may still be busy',
+      );
+      return CommandResult(
+        output: '[ssterm capture] command exceeded '
+            '${osc133Timeout.inSeconds}s without producing its OSC 133 ;D '
+            'marker; Ctrl-C was sent but the shell did not return to a '
+            'prompt. The command may still be running — please switch to '
+            'the terminal and clean up before continuing.',
+        exitCode: null,
+        truncated: false,
+      );
     }
 
     // ── 2. Echo-sentinel fallback ────────────────────────────────────────
@@ -712,6 +858,61 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       if (exitCode != null) break;
     }
 
+    // ── Timeout-recovery: the command never printed its sentinel within
+    // `maxWait`.  Before this block, we'd silently return whatever
+    // partial output was on screen with `exitCode = null`, leaving the
+    // command STILL RUNNING in the shell.  The next agent step would
+    // then interleave with its output and corrupt the next capture.
+    //
+    // Best-effort: send SIGINT (Ctrl-C, byte 0x03) and wait a short
+    // grace period for the sentinel.  If that doesn't surface either,
+    // bail with a synthetic result so the agent loop can report the
+    // problem to the user and stop the loop instead of racing on.
+    var timedOut = false;
+    if (exitCode == null) {
+      timedOut = true;
+      stdout.writeln(
+        '[capture] echo timeout after ${stopwatch.elapsedMilliseconds}ms '
+        '— sending Ctrl-C to abort stuck command',
+      );
+      _sendRawToTab(tab, Uint8List.fromList(const [0x03])); // SIGINT
+      final abortStart = Stopwatch()..start();
+      const abortMaxWait = Duration(seconds: 5);
+      while (abortStart.elapsed < abortMaxWait) {
+        if (isCancelled != null && isCancelled()) {
+          stdout.writeln('[capture] echo abort cancelled');
+          return null;
+        }
+        await Future<void>.delayed(pollInterval);
+        pollCount++;
+        exitCode = extractExit();
+        if (exitCode != null) {
+          stdout.writeln(
+            '[capture] echo recovered after Ctrl-C exit=$exitCode',
+          );
+          break;
+        }
+      }
+      if (exitCode == null) {
+        // Still stuck.  Synthesise an envelope the agent layer can show
+        // verbatim and treat as a hard failure — *don't* keep racing
+        // against the live shell.
+        stdout.writeln(
+          '[capture] echo unrecoverable timeout — giving up; '
+          'shell may still be busy',
+        );
+        return CommandResult(
+          output: '[ssterm capture] command exceeded '
+              '${maxWait.inSeconds}s without producing its sentinel; '
+              'Ctrl-C was sent but the shell did not return to a prompt. '
+              'The command may still be running — please switch to the '
+              'terminal and clean up before continuing.',
+          exitCode: null,
+          truncated: false,
+        );
+      }
+    }
+
     final len = term.buffer.lines.length;
     final totalLines = len - beforeLen;
     // Echo-fallback path: cap at the last 2000 lines of the captured region.
@@ -735,7 +936,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     stdout.writeln(
       '[capture] echo done exit=$exitCode bytes=${cleaned.length} '
       'lines=${buf.length} polls=$pollCount '
-      'elapsed=${stopwatch.elapsedMilliseconds}ms truncated=$wasTruncated',
+      'elapsed=${stopwatch.elapsedMilliseconds}ms truncated=$wasTruncated '
+      'timedOut=$timedOut',
     );
     return CommandResult(output: cleaned, exitCode: exitCode, truncated: wasTruncated);
   }

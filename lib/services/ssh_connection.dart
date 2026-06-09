@@ -61,62 +61,75 @@ Future<ConnectResult> connectSshHost(
       onVerifyHostKey: (type, fp) => jumpVerifyHostKey(type, fp),
     );
 
-    await jumpClient.authenticated
-        .timeout(const Duration(seconds: 15), onTimeout: () {
-      jumpClient!.close();
-      throw TimeoutException('Jump host authentication timed out');
-    });
-  }
-
-  // ── 公钥通道：与密码通道独立 ──────────────────────────────
-  List<SSHKeyPair>? identities;
-  if (host.identityFile != null && host.identityFile!.isNotEmpty) {
-    final path = expandHomePath(host.identityFile!);
-    final f = File(path);
-    if (!await f.exists()) {
-      jumpClient?.close();
-      throw FormatException('Key file not found:\n$path');
+    try {
+      // Catches BOTH the explicit timeout and any other auth-time failure
+      // (host-key rejection, password rejection, protocol error) so the
+      // half-open SSH session is always closed.
+      await jumpClient.authenticated.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () =>
+            throw TimeoutException('Jump host authentication timed out'),
+      );
+    } catch (_) {
+      jumpClient.close();
+      rethrow;
     }
-    identities = SSHKeyPair.fromPem(await f.readAsString());
-    if (identities.isEmpty) {
-      jumpClient?.close();
-      throw FormatException('Cannot parse key:\n$path');
-    }
-  } else {
-    identities = await _defaultIdentities();
   }
 
-  // ── 密码通道：与公钥通道独立 ──────────────────────────────
-  FutureOr<String?> Function()? onPassword;
-  if (host.password != null && host.password!.isNotEmpty) {
-    onPassword = () => host.password!;
-  } else if (onPasswordNeeded != null) {
-    onPassword = onPasswordNeeded;
-  }
-
-  // Use tunnel socket when jump host is present, otherwise direct TCP
-  final socket = jumpClient != null
-      ? await jumpClient
-          .forwardLocal(host.hostname, host.port)
-          .timeout(const Duration(seconds: 10), onTimeout: () {
-          jumpClient!.close();
-          throw TimeoutException('Jump host tunnel timed out');
-        })
-      : await NoDelaySocket.connect(
-          host.hostname,
-          host.port,
-          timeout: const Duration(seconds: 10),
-        );
-
-  final client = SSHClient(
-    socket,
-    username: user,
-    identities: identities,
-    onPasswordRequest: onPassword,
-    onVerifyHostKey: (type, fingerprint) => verifyHostKey(type, fingerprint),
-  );
-
+  // Everything below this point can throw — wrap so the (already-authenticated)
+  // jumpClient is always closed on the failure path.  Previously only the
+  // explicit `.timeout(onTimeout:)` callbacks closed it, leaking the SSH
+  // session on key-parse errors, default-identity load failures, non-timeout
+  // tunnel errors, host-key rejections, and the post-auth execute/sftp paths.
+  SSHClient? client;
   try {
+    // ── 公钥通道：与密码通道独立 ──────────────────────────────
+    List<SSHKeyPair>? identities;
+    if (host.identityFile != null && host.identityFile!.isNotEmpty) {
+      final path = expandHomePath(host.identityFile!);
+      final f = File(path);
+      if (!await f.exists()) {
+        throw FormatException('Key file not found:\n$path');
+      }
+      identities = SSHKeyPair.fromPem(await f.readAsString());
+      if (identities.isEmpty) {
+        throw FormatException('Cannot parse key:\n$path');
+      }
+    } else {
+      identities = await _defaultIdentities();
+    }
+
+    // ── 密码通道：与公钥通道独立 ──────────────────────────────
+    FutureOr<String?> Function()? onPassword;
+    if (host.password != null && host.password!.isNotEmpty) {
+      onPassword = () => host.password!;
+    } else if (onPasswordNeeded != null) {
+      onPassword = onPasswordNeeded;
+    }
+
+    // Use tunnel socket when jump host is present, otherwise direct TCP.
+    // The timeout branch no longer closes jumpClient itself — the outer
+    // catch handles it uniformly for ALL failure modes.
+    final socket = jumpClient != null
+        ? await jumpClient
+            .forwardLocal(host.hostname, host.port)
+            .timeout(const Duration(seconds: 10), onTimeout: () {
+            throw TimeoutException('Jump host tunnel timed out');
+          })
+        : await NoDelaySocket.connect(
+            host.hostname,
+            host.port,
+            timeout: const Duration(seconds: 10),
+          );
+
+    client = SSHClient(
+      socket,
+      username: user,
+      identities: identities,
+      onPasswordRequest: onPassword,
+      onVerifyHostKey: (type, fingerprint) => verifyHostKey(type, fingerprint),
+    );
+
     SSHSession? session;
     SftpClient? sftp;
 
@@ -146,8 +159,8 @@ Future<ConnectResult> connectSshHost(
       profile: host,
       mode: mode,
     );
-  } catch (e) {
-    client.close();
+  } catch (_) {
+    client?.close();
     jumpClient?.close();
     rethrow;
   }

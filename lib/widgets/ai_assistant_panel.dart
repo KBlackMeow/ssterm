@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io' show stdout;
+import 'dart:io' show stdout, HttpException, SocketException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -387,6 +387,11 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // `hasClients` alone is NOT sufficient — the controller can still
+      // be alive on a disposed State (e.g. the user closed the panel
+      // mid-stream).  Always re-check `mounted` first so we never call
+      // animateTo on a disposed ScrollController.
+      if (!mounted) return;
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
@@ -500,8 +505,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onModeChanged: (m) => setState(() => _mode = m),
             shellIntegrationActive:
                 widget.onGetShellIntegrationActive?.call(),
+            // Mirror `AgentConfig.markdownEnabled`'s true default so the
+            // very first frame (before agentConfig has been wired in)
+            // doesn't flash plain-text rendering and then "snap" to
+            // markdown on the next rebuild.
             markdownEnabled:
-                widget.agentConfig?.markdownEnabled ?? false,
+                widget.agentConfig?.markdownEnabled ?? true,
             terminalBackground: widget.terminalBackground,
             terminalLineHeight: widget.terminalLineHeight,
             onWriteProposalDecision: _decideWriteProposal,

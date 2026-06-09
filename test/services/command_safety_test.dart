@@ -229,6 +229,56 @@ void main() {
     test('sudo-wrapped bare python is blocked', () {
       block('sudo python3');
     });
+
+    test('python tuning flags WITHOUT a script still drop into REPL '
+        '(REGRESSION — used to slip through _replIsInteractive)', () {
+      // Pre-fix behaviour: `_replIsInteractive` only blocked args
+      // containing `-i`; ANY other flag was taken as "non-interactive"
+      // and the user got a 120-second deadlock as python sat at `>>>`.
+      block('python3 -B');
+      block('python3 -u');
+      block('python3 -OO');
+      block('python3 -B -u -OO');
+      block('python -O');
+      // Long flags without an execute form are still REPLs.
+      block('python3 --no-warnings');
+    });
+
+    test('node tuning flags WITHOUT a script are blocked', () {
+      block('node --no-warnings');
+      block('node --experimental-vm-modules');
+    });
+
+    test('python3 -i script.py is blocked even with a script path', () {
+      // `-i` makes python drop into the REPL *after* the script runs.
+      // Must stay blocked even though there's also a positional arg.
+      block('python3 -i script.py');
+      block('python3 -i -B script.py');
+    });
+  });
+
+  group('CommandSafety.reason — REPL allow-list', () {
+    void allow(String cmd) {
+      final r = CommandSafety.reason(cmd);
+      expect(r, isNull,
+          reason: '$cmd should be allowed but was blocked: "$r"');
+    }
+
+    test('node -p / --print is non-interactive', () {
+      allow('node -p "process.version"');
+      allow('node --print "process.platform"');
+    });
+
+    test('--eval=expr / --command=stmt long forms are non-interactive', () {
+      // `node --eval="..."` and `psql --command="..."` both use the
+      // joined `=value` long-form.  Without _replExecutePrefixes these
+      // looked like opaque flags to the REPL checker.
+      allow('node --eval="1+1"');
+    });
+
+    test('python -c (clustered with quotes) is non-interactive', () {
+      allow('python3 -c "import os; print(os.getcwd())"');
+    });
   });
 
   group('CommandSafety.reason — DB CLI blocks', () {

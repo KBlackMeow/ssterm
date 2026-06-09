@@ -254,20 +254,57 @@ class CommandSafety {
 
   // ── REPL classification ─────────────────────────────────────────────
 
+  // Flags that turn a REPL invocation into a non-interactive one-shot:
+  //   • `-c "<code>"`   (python, node)
+  //   • `-e "<code>"`   (node, ruby)
+  //   • `-m <module>`   (python: run a stdlib module)
+  //   • `-p "<expr>"`   (node: print the value)
+  //   • `--command=…`/`--eval=…`/`--print=…` (long forms)
+  // Plus info-only flags that print-and-exit (`--version`, `-V`, `-v`, `-h`,
+  // `--help`).  Any of these → not a REPL.  Anything else that *starts*
+  // with `-` is just a tuning knob (`-B`, `-u`, `-OO`, `--no-warnings`) and
+  // does NOT save us from the REPL — so it must NOT short-circuit the
+  // check to "non-interactive".
+  //
+  // We deliberately keep this list short instead of trying to encode every
+  // language's exact flag set: any unknown flag falls through to the
+  // positional-arg check below, which is enough for the common cases.
+  static const _replExecuteFlags = {
+    '-c', '-e', '-m', '-p',
+    '--command', '--eval', '--print',
+  };
+  static const _replExecutePrefixes = [
+    '--command=', '--eval=', '--print=',
+  ];
+  static const _replInfoFlags = {
+    '-V', '-v', '-h',
+    '--version', '--help',
+  };
+
   static bool _replIsInteractive(List<String> args) {
     if (args.isEmpty) return true;
-    // Force-interactive flags: `-i` (python, ruby, node), `--interactive`.
-    // We accept them as standalone tokens — `-il` would be a node multi-flag
-    // but it still implies interactive, so we also catch `-` clusters that
-    // *contain* `i` for python/ruby (they accept clustered flags).
+    // Force-interactive flags ALWAYS win, even alongside a script path
+    // (`python3 -i script.py` runs the script then drops into the REPL).
     for (final a in args) {
       if (a == '-i' || a == '--interactive') return true;
-      // `-i` can appear alone; for clustered short flags like `-Bi` python
-      // doesn't actually accept that, but ruby does.  Cheap heuristic: a
-      // single-dash flag whose body starts with `i`.
-      if (RegExp(r'^-i$|^-i[A-Za-z]+$').hasMatch(a)) return true;
+      // Clustered short flags whose first letter is `i` (`-il` etc.) —
+      // ruby honours these; python/node ignore them but a false-positive
+      // block is far safer than a false-negative hang.
+      if (RegExp(r'^-i[A-Za-z]+$').hasMatch(a)) return true;
     }
-    return false;
+    // From here we're looking for a positive signal that this is a ONE-SHOT
+    // invocation (will exit on its own).  Iterate the tokens; if NOTHING
+    // matches, default back to "interactive" so the REPL is blocked.
+    for (var i = 0; i < args.length; i++) {
+      final a = args[i];
+      if (_replExecuteFlags.contains(a)) return false;
+      if (_replInfoFlags.contains(a)) return false;
+      if (_replExecutePrefixes.any(a.startsWith)) return false;
+      // Positional (non-flag) token — a script path / module name / one-off
+      // expression that the REPL will execute and exit.
+      if (!a.startsWith('-')) return false;
+    }
+    return true;
   }
 
   // ── DB CLI classification ───────────────────────────────────────────

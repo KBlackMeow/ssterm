@@ -4,7 +4,13 @@ enum LlmProvider {
   chatgpt,
   claude,
   gemini,
-  deepseek;
+  deepseek,
+  /// Local Ollama server (https://ollama.ai).  Uses the native `/api/chat`
+  /// NDJSON streaming endpoint (NOT the OpenAI-compat shim) so we get
+  /// first-class access to the `thinking` channel from reasoning models
+  /// like deepseek-r1 / qwq and don't have to lie about needing a bearer
+  /// token the local daemon ignores anyway.
+  ollama;
 
   String get displayName {
     switch (this) {
@@ -16,6 +22,8 @@ enum LlmProvider {
         return 'Gemini (Google)';
       case LlmProvider.deepseek:
         return 'DeepSeek';
+      case LlmProvider.ollama:
+        return 'Ollama (local)';
     }
   }
 
@@ -29,6 +37,8 @@ enum LlmProvider {
         return 'gemini';
       case LlmProvider.deepseek:
         return 'deepseek';
+      case LlmProvider.ollama:
+        return 'ollama';
     }
   }
 
@@ -42,6 +52,8 @@ enum LlmProvider {
         return LlmProvider.gemini;
       case 'deepseek':
         return LlmProvider.deepseek;
+      case 'ollama':
+        return LlmProvider.ollama;
       default:
         throw ArgumentError('Unknown provider: $id');
     }
@@ -57,12 +69,25 @@ class ProviderConfig {
   String? baseUrl;
   List<String> models;
 
+  /// True iff this provider requires a per-user API key.  Cloud providers
+  /// (OpenAI/Anthropic/Gemini/DeepSeek) all do; local-only providers like
+  /// Ollama do NOT — they run on the user's own machine and have no
+  /// auth wall by default.  The Settings UI uses this flag to hide the
+  /// API-key field, and [LlmService] skips the "no key configured"
+  /// pre-flight that would otherwise refuse to dispatch.
+  ///
+  /// Conservative default `true`: a third-party / unknown provider id is
+  /// safer treated as needing a key (better to surface a "configure key"
+  /// nudge than to silently dispatch unauthenticated).
+  final bool requiresApiKey;
+
   ProviderConfig({
     required this.id,
     required this.displayName,
     this.enabled = false,
     this.baseUrl,
     List<String>? models,
+    this.requiresApiKey = true,
   }) : models = models ?? [];
 
   factory ProviderConfig.chatgpt() => ProviderConfig(
@@ -106,6 +131,25 @@ class ProviderConfig {
         ],
       );
 
+  /// Local Ollama daemon (https://ollama.ai).  Default `baseUrl` is the
+  /// loopback bind Ollama ships with; users running it on another machine
+  /// (or inside Docker with a forwarded port) can override.
+  ///
+  /// Model list is intentionally EMPTY: Ollama only knows about whatever
+  /// the user has `ollama pull`ed locally, and there's no canonical "right
+  /// default" — `llama3.2` would be a hallucination on a box that only
+  /// pulled `qwen2.5-coder`.  Better to render a blank dropdown that
+  /// makes the user explicitly add their installed model names via the
+  /// Settings UI's "+" affordance than to ship phantom defaults that
+  /// fail with `model not found` on first dispatch.
+  factory ProviderConfig.ollama() => ProviderConfig(
+        id: 'ollama',
+        displayName: 'Ollama (local)',
+        baseUrl: 'http://localhost:11434',
+        requiresApiKey: false,
+        models: const [],
+      );
+
   static ProviderConfig fromId(String id) {
     switch (id) {
       case 'chatgpt':
@@ -116,6 +160,8 @@ class ProviderConfig {
         return ProviderConfig.gemini();
       case 'deepseek':
         return ProviderConfig.deepseek();
+      case 'ollama':
+        return ProviderConfig.ollama();
       default:
         throw ArgumentError('Unknown provider: $id');
     }
@@ -127,6 +173,10 @@ class ProviderConfig {
         'enabled': enabled,
         if (baseUrl != null) 'baseUrl': baseUrl,
         'models': models,
+        // Persisted so a user-defined provider's "no-auth" flag round-trips.
+        // Built-in providers don't strictly need it (the factory hard-codes
+        // their `requiresApiKey`) but it keeps the JSON self-describing.
+        'requiresApiKey': requiresApiKey,
       };
 
   /// Parses a single provider entry.  Returns `null` for malformed or
@@ -137,12 +187,15 @@ class ProviderConfig {
     final id = json['id'];
     if (id is! String || id.isEmpty) return null;
     String fallbackName;
+    bool fallbackRequiresKey = true;
     try {
-      fallbackName = LlmProvider.fromId(id).displayName;
+      final factory = ProviderConfig.fromId(id);
+      fallbackName = factory.displayName;
+      fallbackRequiresKey = factory.requiresApiKey;
     } catch (_) {
       // Unknown provider id (third-party, deprecated) — keep the entry
       // anyway so the user doesn't lose their stored API key list, but
-      // pick a sensible display name.
+      // pick a sensible display name and the safe "needs a key" default.
       fallbackName = id;
     }
     return ProviderConfig(
@@ -154,6 +207,8 @@ class ProviderConfig {
               ?.map((e) => e as String)
               .toList() ??
           [],
+      requiresApiKey:
+          json['requiresApiKey'] as bool? ?? fallbackRequiresKey,
     );
   }
 
@@ -169,6 +224,7 @@ class ProviderConfig {
     bool? enabled,
     String? baseUrl,
     List<String>? models,
+    bool? requiresApiKey,
   }) =>
       ProviderConfig(
         id: id,
@@ -176,6 +232,7 @@ class ProviderConfig {
         enabled: enabled ?? this.enabled,
         baseUrl: baseUrl ?? this.baseUrl,
         models: models ?? List.of(this.models),
+        requiresApiKey: requiresApiKey ?? this.requiresApiKey,
       );
 }
 
@@ -200,8 +257,11 @@ class AgentConfig {
   List<ProviderConfig> providers;
 
   /// Render assistant replies as full markdown (bold, lists, headings,
-  /// code blocks) using `gpt_markdown`.  Off by default; rendering cost
-  /// scales with reply length and re-parses on every streamed token.
+  /// code blocks) using `gpt_markdown`.  ON by default — the readability
+  /// win (especially for code blocks, lists, and `**emphasis**`) is
+  /// large enough that we accept the per-token re-parse cost.  Users
+  /// who care about raw streaming throughput on very long replies can
+  /// toggle it off in Settings.
   bool markdownEnabled;
 
   /// Master switch for the (Brave-backed) web-search tool.  When false,
@@ -220,9 +280,12 @@ class AgentConfig {
   /// (yet); flipping this switch only makes the *capability* available,
   /// it does not grant blanket file-write authority.
   ///
-  /// Off by default because file writes are irreversible: a runaway
-  /// write to `/etc/hosts` has no `exit_code != 0` to surface it.
-  /// The Settings copy makes this trade-off explicit.
+  /// ON by default.  The "writes are irreversible" worry that
+  /// originally kept this off is already mitigated by the per-write
+  /// Apply confirmation in the UI — the model can PROPOSE writes but
+  /// nothing hits disk until the user clicks through.  Shipping off
+  /// just meant the agent silently refused to even draft a file for
+  /// review, which surprised more users than it protected.
   bool fileWriteEnabled;
 
   /// Whitelist of skill ids the agent is allowed to use.  Semantics:
@@ -244,9 +307,9 @@ class AgentConfig {
     this.defaultProvider,
     this.defaultModel,
     List<ProviderConfig>? providers,
-    this.markdownEnabled = false,
+    this.markdownEnabled = true,
     this.webSearchEnabled = false,
-    this.fileWriteEnabled = false,
+    this.fileWriteEnabled = true,
     this.enabledSkills,
   }) : providers = providers ??
             [
@@ -254,6 +317,7 @@ class AgentConfig {
               ProviderConfig.claude(),
               ProviderConfig.gemini(),
               ProviderConfig.deepseek(),
+              ProviderConfig.ollama(),
             ];
 
   /// The currently enabled provider matching [defaultProvider], or the first
@@ -323,6 +387,23 @@ class AgentConfig {
         // Unknown provider id — leave its model list untouched.
       }
     }
+    // Back-fill any built-in provider that was added to the enum AFTER
+    // this config file was first saved.  Without this, a user who saved
+    // their settings before (say) Ollama was added would never see the
+    // new provider in the Settings sheet — `fromJson` would faithfully
+    // reload their 4-entry list and `AgentConfig.fromJson` wouldn't
+    // know to append the newcomer.  Appending (vs prepending) keeps
+    // the user's existing visual order intact.
+    final presentIds = providers.map((p) => p.id).toSet();
+    for (final builtin in LlmProvider.values) {
+      if (presentIds.contains(builtin.id)) continue;
+      try {
+        providers.add(ProviderConfig.fromId(builtin.id));
+      } catch (_) {
+        // Shouldn't happen for enum values, but a defensive skip costs
+        // nothing and matches the "never crash AppConfig.load" rule.
+      }
+    }
     Set<String>? parsedEnabledSkills;
     final rawEnabledSkills = json['enabledSkills'];
     if (rawEnabledSkills is List) {
@@ -332,9 +413,16 @@ class AgentConfig {
       defaultProvider: json['defaultProvider'] as String?,
       defaultModel: json['defaultModel'] as String?,
       providers: providers,
-      markdownEnabled: json['markdownEnabled'] as bool? ?? false,
+      // Defaults mirror the constructor: markdown + file-write ship ON
+      // (the agent's reply formatting + skill output looks markedly worse
+      // unrendered, and the file-write tool is gated by a per-write
+      // "Apply" confirmation anyway, so the irreversibility risk that
+      // originally kept this off is already mitigated UI-side).  Web
+      // search stays OFF because it costs API tokens and needs a Brave
+      // key the user must explicitly provide.
+      markdownEnabled: json['markdownEnabled'] as bool? ?? true,
       webSearchEnabled: json['webSearchEnabled'] as bool? ?? false,
-      fileWriteEnabled: json['fileWriteEnabled'] as bool? ?? false,
+      fileWriteEnabled: json['fileWriteEnabled'] as bool? ?? true,
       enabledSkills: parsedEnabledSkills,
     );
   }

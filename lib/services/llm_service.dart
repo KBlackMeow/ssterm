@@ -76,10 +76,19 @@ class LlmService {
   // Dot-all so the body can span any number of lines; non-greedy so a
   // turn with two consecutive write blocks still matches each one
   // individually instead of swallowing the gap.
+  //
+  // Both markers MUST sit at the start of their own line (optional leading
+  // whitespace allowed for indented bullet lists).  Without this anchoring
+  // a model that DOCUMENTS the write tool — e.g. teaching the user how to
+  // use it inline as `here's the marker: [WRITE_FILE_END]` — would
+  // prematurely close a real subsequent write block AND a model that
+  // dumps a write-block-inside-an-explanation paragraph could be
+  // mistaken for a real write.  System prompt always emits the markers
+  // on their own lines, so this is a tightening, not a behaviour change.
   static final RegExp _writeFileRe = RegExp(
-    r'\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*([^\]\n]+?)\s*\]'
+    r'^[ \t]*\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*([^\]\n]+?)\s*\][ \t]*$'
     r'(.*?)'
-    r'\[\s*WRITE[_ ]?FILE[_ ]?END\s*\]',
+    r'^[ \t]*\[\s*WRITE[_ ]?FILE[_ ]?END\s*\][ \t]*$',
     caseSensitive: false,
     multiLine: true,
     dotAll: true,
@@ -118,11 +127,12 @@ class LlmService {
   // Strip variant for WRITE_FILE — eats the whole BEGIN..END region
   // including the file body, so the rendered chat bubble doesn't show
   // a giant verbatim paste of the new file contents (the Apply card
-  // surfaces that separately, with a diff preview).
+  // surfaces that separately, with a diff preview).  Same line-anchoring
+  // rationale as `_writeFileRe` above.
   static final RegExp _writeFileStripRe = RegExp(
-    r'\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*[^\]\n]+?\s*\]\*{0,2}'
+    r'^[ \t]*\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?BEGIN\s*[:=]\s*[^\]\n]+?\s*\]\*{0,2}[ \t]*$'
     r'.*?'
-    r'\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?END\s*\]\*{0,2}',
+    r'^[ \t]*\*{0,2}\[\s*WRITE[_ ]?FILE[_ ]?END\s*\]\*{0,2}[ \t]*$',
     caseSensitive: false,
     multiLine: true,
     dotAll: true,
@@ -460,9 +470,20 @@ class LlmService {
       return LlmResponse(text: '', error: 'No model available for the selected provider.');
     }
 
-    final apiKey = await ApiKeyStorage.load(provider.id);
-    if (apiKey == null || apiKey.isEmpty) {
-      return LlmResponse(text: '', error: 'API key not configured for ${provider.displayName}.');
+    // Local providers (Ollama et al.) skip the key precondition — see
+    // `ProviderConfig.requiresApiKey`.  Use an empty string downstream
+    // so the cloud code paths' `Bearer …` builders don't NPE if we ever
+    // wire a local provider through them by accident.
+    String apiKey = '';
+    if (provider.requiresApiKey) {
+      final loaded = await ApiKeyStorage.load(provider.id);
+      if (loaded == null || loaded.isEmpty) {
+        return LlmResponse(
+          text: '',
+          error: 'API key not configured for ${provider.displayName}.',
+        );
+      }
+      apiKey = loaded;
     }
 
     final systemPrompt = systemPromptFor(
@@ -476,6 +497,8 @@ class LlmService {
           return _callAnthropic(provider, model, apiKey, messages, systemPrompt);
         case 'gemini':
           return _callGemini(provider, model, apiKey, messages, systemPrompt);
+        case 'ollama':
+          return _callOllama(provider, model, messages, systemPrompt);
         default:
           // OpenAI-compatible (OpenAI, DeepSeek, etc.) — prefix caching is
           // automatic on these providers (no `cache_control` to set).
@@ -555,9 +578,15 @@ class LlmService {
     final model = config.resolvedModel;
     if (model == null) throw Exception('No model available for the selected provider.');
 
-    final apiKey = await ApiKeyStorage.load(provider.id);
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception('API key not configured for ${provider.displayName}.');
+    // Mirror the non-streaming dispatcher: local providers skip the key
+    // pre-flight (see `ProviderConfig.requiresApiKey`).
+    String apiKey = '';
+    if (provider.requiresApiKey) {
+      final loaded = await ApiKeyStorage.load(provider.id);
+      if (loaded == null || loaded.isEmpty) {
+        throw Exception('API key not configured for ${provider.displayName}.');
+      }
+      apiKey = loaded;
     }
 
     final systemPrompt = systemPromptFor(
@@ -572,6 +601,9 @@ class LlmService {
       case 'gemini':
         yield* _streamGemini(
             provider, model, apiKey, messages, client, systemPrompt);
+      case 'ollama':
+        yield* _streamOllama(
+            provider, model, messages, client, systemPrompt);
       default:
         yield* _streamOpenAi(
             provider, model, apiKey, messages, client, systemPrompt);

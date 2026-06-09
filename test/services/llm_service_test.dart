@@ -389,6 +389,40 @@ line2
       final w = LlmService.extractWriteFile(input)!;
       expect(w.content, equals('line1\nline2\n'));
     });
+
+    test('inline mention of `[WRITE_FILE_END]` does NOT close a real block',
+        () {
+      // Regression: when the model TEACHES the write syntax inline
+      // ("just type [WRITE_FILE_END] to finish") and then issues a
+      // real write later in the same turn, the inline mention used
+      // to close the real block early, truncating the body.
+      // Line-anchored markers (added when fixing this bug) keep the
+      // inline reference inert.
+      const input = '''
+The way to close a write block is to type `[WRITE_FILE_END]` on its own line.
+
+Here's the real write:
+
+[WRITE_FILE_BEGIN: /tmp/real.py]
+print("real body")
+[WRITE_FILE_END]
+''';
+      final w = LlmService.extractWriteFile(input);
+      expect(w, isNotNull);
+      expect(w!.path, equals('/tmp/real.py'));
+      expect(w.content, equals('print("real body")'));
+    });
+
+    test('inline `[WRITE_FILE_BEGIN: foo]` inside prose does NOT trigger',
+        () {
+      // Same regression as above but for the opening marker — a
+      // documentation paragraph quoting the syntax shouldn't be
+      // mistaken for a real write proposal.
+      const input =
+          'To start a write, emit `[WRITE_FILE_BEGIN: /path]` followed by '
+          'the body and `[WRITE_FILE_END]`.  Nothing to write this turn.';
+      expect(LlmService.extractWriteFile(input), isNull);
+    });
   });
 
   group('LlmService.stripCompletionMarkers WRITE_FILE coverage', () {
@@ -797,6 +831,125 @@ Done.
       SkillService.debugUserSkillsDirOverride = null;
       expect(SkillService.userSkillsDirPath.endsWith('/.ssterm/skills'),
           isTrue);
+    });
+  });
+
+  group('Ollama provider registration', () {
+    test('LlmProvider.ollama is wired into the enum (id + display + fromId)',
+        () {
+      expect(LlmProvider.ollama.id, equals('ollama'));
+      expect(LlmProvider.ollama.displayName, contains('Ollama'));
+      expect(LlmProvider.fromId('ollama'), equals(LlmProvider.ollama));
+    });
+
+    test('ProviderConfig.ollama() defaults are sane (local URL, no API key)',
+        () {
+      final p = ProviderConfig.ollama();
+      expect(p.id, equals('ollama'));
+      // Loopback bind that ships out of the box — users running the
+      // daemon on another host MUST be able to override this from the
+      // Settings UI, hence the explicit (non-null) default rather than
+      // a `?? null` shrug.
+      expect(p.baseUrl, equals('http://localhost:11434'));
+      // The whole point of adding the `requiresApiKey` flag is this
+      // line — Ollama is auth-less and the dispatcher relies on it.
+      expect(p.requiresApiKey, isFalse);
+      // Model list MUST be empty — we have no way to know what the user
+      // has `ollama pull`ed.  Shipping phantom defaults like `llama3.2`
+      // would 404 on first dispatch for users who only pulled, say,
+      // `qwen2.5-coder`.  Blank dropdown forces the right next action.
+      expect(p.models, isEmpty);
+    });
+
+    test('Cloud providers still require an API key (regression guard)', () {
+      expect(ProviderConfig.chatgpt().requiresApiKey, isTrue);
+      expect(ProviderConfig.claude().requiresApiKey, isTrue);
+      expect(ProviderConfig.gemini().requiresApiKey, isTrue);
+      expect(ProviderConfig.deepseek().requiresApiKey, isTrue);
+    });
+
+    test('default AgentConfig now ships Ollama in the providers list', () {
+      final cfg = AgentConfig();
+      final ids = cfg.providers.map((p) => p.id).toSet();
+      expect(ids, contains('ollama'));
+    });
+
+    test('ProviderConfig.ollama() round-trips through JSON (incl. requiresApiKey)',
+        () {
+      final original = ProviderConfig.ollama()
+        ..enabled = true
+        ..baseUrl = 'http://10.0.0.5:11434';
+      final decoded = ProviderConfig.fromJson(original.toJson());
+      expect(decoded.id, equals('ollama'));
+      expect(decoded.requiresApiKey, isFalse);
+      expect(decoded.baseUrl, equals('http://10.0.0.5:11434'));
+      expect(decoded.enabled, isTrue);
+    });
+
+    test(
+        'legacy JSON without requiresApiKey falls back to the factory default',
+        () {
+      // Simulate a config saved by an older build that predates the
+      // requiresApiKey field — the loader must still recognise Ollama
+      // as auth-less, not silently flip it to "needs a key" and then
+      // block dispatch.
+      final legacyJson = {
+        'id': 'ollama',
+        'displayName': 'Ollama (local)',
+        'enabled': true,
+        'baseUrl': 'http://localhost:11434',
+        'models': ['llama3.2'],
+        // requiresApiKey intentionally omitted
+      };
+      final decoded = ProviderConfig.tryFromJson(legacyJson);
+      expect(decoded, isNotNull);
+      expect(decoded!.requiresApiKey, isFalse);
+    });
+
+    test(
+        'AgentConfig.fromJson back-fills new built-in providers missing from '
+        'older saved configs (regression: Ollama added post-launch)', () {
+      // Simulate a config saved by a build that predates Ollama — only
+      // the four cloud providers appear in the JSON.  Without the
+      // back-fill, the loader would faithfully reload the 4-entry list
+      // and the user would never see the new provider in Settings.
+      final legacyJson = {
+        'providers': [
+          {'id': 'chatgpt', 'displayName': 'ChatGPT', 'enabled': true},
+          {'id': 'claude', 'displayName': 'Claude', 'enabled': false},
+          {'id': 'gemini', 'displayName': 'Gemini', 'enabled': false},
+          {'id': 'deepseek', 'displayName': 'DeepSeek', 'enabled': false},
+        ],
+      };
+      final cfg = AgentConfig.fromJson(legacyJson);
+      final ids = cfg.providers.map((p) => p.id).toList();
+      // All originals preserved IN ORDER (we mustn't reshuffle existing
+      // entries — that would surprise users who'd dragged things around
+      // mentally), with Ollama appended at the tail.
+      expect(ids, equals(['chatgpt', 'claude', 'gemini', 'deepseek', 'ollama']));
+      // The back-filled Ollama entry must inherit factory defaults
+      // (including the no-key flag) — otherwise the dispatcher would
+      // refuse to fire it.
+      final ollama = cfg.providers.firstWhere((p) => p.id == 'ollama');
+      expect(ollama.requiresApiKey, isFalse);
+      expect(ollama.baseUrl, equals('http://localhost:11434'));
+    });
+
+    test(
+        'unknown provider id without requiresApiKey falls back to the safe '
+        'default (true)', () {
+      // Conservative default for third-party / typo'd ids — we'd rather
+      // nag the user to set a key for a real cloud provider than
+      // silently dispatch unauthenticated requests.
+      final unknownJson = {
+        'id': 'made-up-provider-xyz',
+        'displayName': 'Custom',
+        'enabled': false,
+        'models': <String>[],
+      };
+      final decoded = ProviderConfig.tryFromJson(unknownJson);
+      expect(decoded, isNotNull);
+      expect(decoded!.requiresApiKey, isTrue);
     });
   });
 }
