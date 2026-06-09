@@ -215,6 +215,16 @@ class SkillService {
     }
     assetPaths.sort();
 
+    // Track per-source loads for the consolidated summary line at the
+    // very end of init().  We deliberately DON'T emit one `[skill] loaded
+    // id=…` line per skill on the happy path — for a typical install
+    // (4 asset + 0 bundled + 0 user) that's 4 lines of "nothing
+    // interesting happened" noise on every cold boot.  Skips and errors
+    // ARE still logged individually because those are anomalies.
+    final assetIds = <String>[];
+    final bundledIds = <String>[];
+    final userIds = <String>[];
+
     for (final path in assetPaths) {
       try {
         final raw = await rootBundle.loadString(path);
@@ -230,9 +240,7 @@ class SkillService {
         }
         collected.add(parsed.skill);
         _assetBodies[id] = parsed.body;
-        _log('loaded source=asset id=$id '
-            'desc_chars=${parsed.skill.description.length} '
-            'body_chars=${parsed.body.length}');
+        assetIds.add(id);
       } catch (e) {
         _log('error scope=load path=$path msg="$e"');
       }
@@ -248,8 +256,7 @@ class SkillService {
       }
       collected.add(def.toSkill());
       _bundledBuilders[def.id] = def.buildBody;
-      _log('loaded source=bundled id=${def.id} '
-          'desc_chars=${def.description.length}');
+      bundledIds.add(def.id);
     }
 
     // ── User-dir skills (`~/.ssterm/skills/<id>/SKILL.md`) ─────────────
@@ -259,27 +266,39 @@ class SkillService {
     // in the user dir can't silently shadow a tested built-in.  Users
     // who want to customise a built-in skill should pick a NEW id (e.g.
     // `git-bisect-mine`).
-    await _scanUserDir(collected);
+    await _scanUserDir(collected, userIds);
 
     // Stable id-sorted order so prompt cache hits stay warm across boots
     // when the skill set is unchanged.
     collected.sort((a, b) => a.id.compareTo(b.id));
     _skills.addAll(collected);
     _initialized = true;
-    _log('init done count=${_skills.length}');
+    // One consolidated summary instead of `loaded …` per skill.  Sources
+    // are listed in declaration order so a glance tells you "the asset
+    // set + my custom user skills + N bundled".  Empty groups are
+    // omitted to keep the line tight on the common all-asset case.
+    final parts = <String>['count=${_skills.length}'];
+    if (assetIds.isNotEmpty) parts.add('asset=${assetIds.join(",")}');
+    if (bundledIds.isNotEmpty) parts.add('bundled=${bundledIds.join(",")}');
+    if (userIds.isNotEmpty) parts.add('user=${userIds.join(",")}');
+    _log('init done ${parts.join(" ")}');
   }
 
   /// Walk `~/.ssterm/skills/`, append every well-formed SKILL.md to
   /// [collected], cache the body in [_assetBodies] (shared map: at body-
   /// load time we don't care where the bytes came from), and log every
   /// decision.  Missing dir = no-op.
-  static Future<void> _scanUserDir(List<Skill> collected) async {
+  static Future<void> _scanUserDir(
+    List<Skill> collected,
+    List<String> userIds,
+  ) async {
     final dirPath = userSkillsDirPath;
     final dir = Directory(dirPath);
-    if (!await dir.exists()) {
-      _log('user_dir scope=skip path=$dirPath reason=not_present');
-      return;
-    }
+    // No-op silently when the dir doesn't exist — that's the default for
+    // anyone who hasn't customised skills, so logging it as a "skip"
+    // event was pure noise.  An actual scan failure (permission denied,
+    // I/O error) still surfaces below.
+    if (!await dir.exists()) return;
 
     final List<Directory> subdirs;
     try {
@@ -325,9 +344,7 @@ class SkillService {
         }
         collected.add(parsed.skill);
         _assetBodies[id] = parsed.body;
-        _log('loaded source=user id=$id '
-            'desc_chars=${parsed.skill.description.length} '
-            'body_chars=${parsed.body.length}');
+        userIds.add(id);
       } catch (e) {
         _log('error scope=user_load id=$id msg="$e"');
       }

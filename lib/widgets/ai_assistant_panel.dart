@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show stdout, HttpException, SocketException;
 
@@ -8,6 +9,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import '../io/output_pipe.dart' show CommandResult;
 import '../models/agent_config.dart';
 import '../models/skill.dart';
+import '../services/command_safety.dart';
 import '../services/llm_service.dart';
 import '../services/file_write_service.dart';
 import '../services/session_context.dart';
@@ -26,6 +28,7 @@ part 'ai_assistant_panel_models.dart';
 part 'ai_assistant_panel_widgets.dart';
 part 'ai_assistant_panel_content.dart';
 part 'ai_assistant_panel_write_card.dart';
+part 'ai_assistant_panel_danger_card.dart';
 part 'ai_assistant_panel_loop.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
@@ -210,6 +213,15 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   String? _agentLoopStatus;
   void Function()? _cancelStream;
   int _generation = 0;
+
+  /// Monotonic counter for the user-message-driven agent turns within
+  /// this process.  Used as the `t=N` prefix on every `[agent] iter=…`
+  /// log line so consecutive turns are visually distinguishable in
+  /// `flutter run` output (each new user message bumps the counter,
+  /// while each LLM iteration WITHIN that turn shares it).  Without
+  /// this you can't tell whether `iter=1 start history=5` is the start
+  /// of a new turn or a retry of the previous one.
+  int _agentTurnSeq = 0;
 
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = <Map<String, String>>[];
@@ -514,6 +526,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             terminalBackground: widget.terminalBackground,
             terminalLineHeight: widget.terminalLineHeight,
             onWriteProposalDecision: _decideWriteProposal,
+            onDangerProposalDecision: _decideDangerProposal,
             position: _position,
             onPositionToggle: _togglePosition,
           ),
@@ -606,8 +619,23 @@ void _logAgent(String event) {
 /// Centralised so every break path uses the same vocabulary (`task_complete`,
 /// `ask_user`, `no_commands`, `auto_execute_off`, `no_executor`,
 /// `max_iterations`, `stream_error_or_cancelled`).
-void _logAgentStop(int iter, String reason) {
-  _logAgent('iter=$iter stop reason=$reason');
+///
+/// [turnId] is the optional per-user-message counter that prefixes every
+/// in-turn log line (`t=N`).  We accept null so the centralised helper
+/// stays usable from any future caller that isn't inside the agent
+/// loop's own `_continueAgentLoopBody` scope.
+void _logAgentStop(int iter, String reason, {int? turnId}) {
+  final prefix = turnId == null ? '' : 't=$turnId ';
+  _logAgent('${prefix}iter=$iter stop reason=$reason');
+}
+
+/// Emit one structured `[safety] …` line for dangerous-command events.
+///
+/// Kept separate from `_logAgent` so `[safety]` can be grepped on its
+/// own — useful for post-mortems where the question is "did the agent
+/// ever trip a safety rule?" without sifting through every iteration log.
+void _logSafety(String event) {
+  stdout.writeln('[safety] $event');
 }
 
 /// Quote and escape a string for safe inclusion in a single-line log

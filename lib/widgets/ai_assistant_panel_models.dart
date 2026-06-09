@@ -75,6 +75,12 @@ class _ChatMessage {
   /// objects safe across class shape changes.
   _WriteProposal? writeProposal;
 
+  /// For "dangerous command proposal" messages: the pending agent-emitted
+  /// command the user must Approve or Reject before `_executeAndCapture`
+  /// is allowed to forward it to the shell.  Same nullable / hot-reload
+  /// rationale as [writeProposal].  Null for every other message kind.
+  _DangerProposal? dangerProposal;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -86,6 +92,7 @@ class _ChatMessage {
     this.commandRun,
     this.commandExitCode,
     this.writeProposal,
+    this.dangerProposal,
   });
 
   factory _ChatMessage.user(String text) => _ChatMessage._(text: text, isUser: true);
@@ -126,6 +133,17 @@ class _ChatMessage {
         text: '',
         isUser: false,
         writeProposal: proposal,
+      );
+
+  /// "Dangerous command proposal" card.  Rendered by
+  /// `_buildAgentMessage` as a distinct Approve/Reject card with the
+  /// rule label + command snippet; the contained [_DangerProposal]
+  /// holds the mutable state machine driving the buttons.
+  factory _ChatMessage.dangerProposal(_DangerProposal proposal) =>
+      _ChatMessage._(
+        text: '',
+        isUser: false,
+        dangerProposal: proposal,
       );
 }
 
@@ -196,6 +214,74 @@ class _WriteProposal {
     required this.resolvedPath,
     required this.content,
     required this.preview,
+    required this.agentGeneration,
+  });
+}
+
+// ── Dangerous-command proposal (Approve/Reject card state machine) ─────────
+
+/// Lifecycle states for a [_DangerProposal].  Mirrors
+/// [_WriteProposalState] one-for-one (the agent loop's pause/resume
+/// machinery already knows how to wait on a `Completer<bool>` with
+/// these state transitions, so we reuse the shape verbatim).
+enum _DangerProposalState {
+  /// Waiting for the user to Approve or Reject the dangerous command.
+  pending,
+
+  /// Approved; the agent loop is in the process of executing the
+  /// command via `_executeAndCapture`.  Buttons disabled so a stray
+  /// double-tap can't kick off a second run.
+  running,
+
+  /// Command ran (regardless of exit code).  Result is in the chat
+  /// history as the next system "command card"; this proposal card
+  /// just shows a small "Approved" badge.
+  ran,
+
+  /// User clicked Reject.  No command hits the shell.  The loop
+  /// receives a synthetic `[Dangerous command rejected by user]`
+  /// envelope so the LLM can decide what to do next (typically: pick
+  /// a less destructive alternative).
+  rejected,
+}
+
+/// Per-proposal record for a dangerous agent command awaiting user
+/// confirmation.  Created in `_executeAndCapture` whenever
+/// `CommandSafety.danger(...)` returns non-null AND the policy's
+/// `agentConfirmEnabled` is true.  Mutable on purpose — the chat card
+/// re-renders via plain `setState` as the state field flips.
+class _DangerProposal {
+  /// The full command line as emitted by the LLM.  Shown verbatim in
+  /// the confirmation card so the user can audit it before clicking
+  /// Approve; truncated to a single line for the card header (long
+  /// scripts expand on tap).
+  final String command;
+
+  /// Verdict from `CommandSafety.danger(...)`.  Carries the rule id
+  /// (for logs) and the one-line human label (shown as the card's
+  /// subtitle, e.g. "Recursive force-delete of / (root filesystem)").
+  final DangerVerdict verdict;
+
+  /// Generation counter snapshot.  Same staleness check as
+  /// [_WriteProposal.agentGeneration]: if the user starts a fresh
+  /// agent turn before answering, the older proposal silently
+  /// resolves as [rejected] without invoking the shell.
+  final int agentGeneration;
+
+  _DangerProposalState state = _DangerProposalState.pending;
+
+  /// Completer the agent loop awaits while the card is on screen.
+  /// We use a Completer (vs the file-write pattern of "tear down loop
+  /// → re-enter on click") because the agent loop is mid-for-loop over
+  /// multiple commands when this fires — pausing in place keeps the
+  /// remaining commands queued without us having to capture and replay
+  /// the iteration state.  Completes with `true` on Approve, `false`
+  /// on Reject (or when staleness detection auto-rejects).
+  final Completer<bool> decision = Completer<bool>();
+
+  _DangerProposal({
+    required this.command,
+    required this.verdict,
     required this.agentGeneration,
   });
 }

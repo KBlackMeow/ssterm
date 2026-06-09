@@ -4,6 +4,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
 import '../../services/api_key_storage.dart';
+import '../../services/command_safety.dart';
 import '../../widgets/frosted_glass.dart';
 import '../../models/agent_config.dart';
 import '../../models/command.dart';
@@ -21,6 +22,7 @@ import 'settings_dialogs.dart';
 
 part 'settings_sheet_agent.dart';
 part 'settings_sheet_commands.dart';
+part 'settings_sheet_safety.dart';
 
 const _kSheetBg = Color(0xFF111113);
 const _kDivider = Color(0xFF252525);
@@ -73,12 +75,25 @@ class _SettingsPageState extends State<SettingsPage>
   final _braveSearchKeyController = TextEditingController();
   bool _braveSearchKeyVisible = false;
 
+  // ── Safety tab state ───────────────────────────────────────────────────
+  //
+  // Persistent [TextEditingController]s for custom-rule label/pattern
+  // fields, keyed by [CustomDangerPattern.id].  Stored on the state (not
+  // rebuilt every frame) so the user's caret position survives setState
+  // cycles triggered by editing other rows.
+  //
+  // Created lazily on first access in [_dangerLabelCtrl] /
+  // [_dangerPatternCtrl] and removed when the corresponding rule is
+  // deleted.  Disposed wholesale in [dispose].
+  final _dangerLabelControllers = <String, TextEditingController>{};
+  final _dangerPatternControllers = <String, TextEditingController>{};
+
   @override
   void initState() {
     super.initState();
     _s = widget.settings.copyWith();
     _agentConfig = widget.agent ?? AgentConfig();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _loadPackageInfo();
     _loadCommands();
     _initAgentControllers();
@@ -136,6 +151,12 @@ class _SettingsPageState extends State<SettingsPage>
     for (final c in _baseUrlControllers.values) {
       c.dispose();
     }
+    for (final c in _dangerLabelControllers.values) {
+      c.dispose();
+    }
+    for (final c in _dangerPatternControllers.values) {
+      c.dispose();
+    }
     _modelAddController.dispose();
     _braveSearchKeyController.dispose();
     super.dispose();
@@ -189,6 +210,7 @@ class _SettingsPageState extends State<SettingsPage>
               Tab(text: 'SSH'),
               Tab(text: 'Commands'),
               Tab(text: 'Agent'),
+              Tab(text: 'Safety'),
               Tab(text: 'About'),
             ],
           ),
@@ -202,6 +224,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildSshTab(),
                 _buildCommandsTab(),
                 _buildAgentTab(),
+                _buildSafetyTab(),
                 _buildAboutTab(),
               ],
             ),
@@ -344,6 +367,8 @@ class _SettingsPageState extends State<SettingsPage>
   // Commands tab lives in `settings_sheet_commands.dart` (part).
 
   // Agent tab lives in `settings_sheet_agent.dart` (part).
+
+  // Safety tab lives in `settings_sheet_safety.dart` (part).
 
   // ── About tab ─────────────────────────────────────────────────────────────
 

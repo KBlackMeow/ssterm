@@ -754,9 +754,17 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
     // ── 1. Shell-integration capture (OSC 133) ────────────────────────────
     if (pipe != null && pipe.hasOsc133) {
-      stdout.writeln('[capture] osc133 start cmd=${_logQuote(cmd)}');
-      // Subscribe BEFORE sending so we don't race the next D marker.
+      // We used to emit a separate `[capture] osc133 start cmd=…` line
+      // here and let `done` carry only `exit=` + `bytes=`.  In practice
+      // that gave two log lines for every command on the happy path
+      // with NO new information on the `start` line — the cmd is far
+      // more useful next to the exit code than ahead of it.  We now
+      // emit a single `done` line carrying the cmd, exit, and byte
+      // count.  Error/timeout/cancel branches still log on their own
+      // lines because those carry recovery info that wouldn't survive
+      // being folded into `done`.
       const osc133Timeout = Duration(seconds: 120);
+      // Subscribe BEFORE sending so we don't race the next D marker.
       final pending = pipe.awaitNextCommand(
         timeout: osc133Timeout,
         isCancelled: isCancelled,
@@ -765,7 +773,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       final result = await pending;
       if (result != null) {
         stdout.writeln(
-          '[capture] osc133 done exit=${result.exitCode} bytes=${result.output.length}',
+          '[capture] osc133 done cmd=${_logQuote(cmd)} '
+          'exit=${result.exitCode} bytes=${result.output.length}',
         );
         return result;
       }
@@ -815,11 +824,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     }
 
     // ── 2. Echo-sentinel fallback ────────────────────────────────────────
+    // We drop the `[capture] echo start cmd=… marker=…` line for the
+    // same reason as the OSC 133 branch above: the marker is a
+    // process-local sentinel never useful to the user, and the cmd is
+    // more discoverable on the `done` line next to the exit code.
+    // Timeout / cancel branches keep their own log lines.
     final beforeLen = term.buffer.lines.length;
     final marker = '__SSTM_${DateTime.now().microsecondsSinceEpoch}__';
-    stdout.writeln(
-      '[capture] echo start cmd=${_logQuote(cmd)} marker=$marker',
-    );
 
     // Use a parenthesised group + `printf` so the marker is emitted whether the
     // command exits 0 or non-zero; `; echo` would lose the original $? without
@@ -931,10 +942,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     }
     final raw = buf.join('\n');
     final cleaned = stripAnsi(raw).trim();
-    // Single done-line that combines both old prints
-    // (`echo-marker done` + `returning N lines`) — cuts noise in half.
+    // Single done-line that combines what used to be three records
+    // (`echo start`, `echo-marker done`, `returning N lines`).  `cmd=`
+    // is now carried here too so the user can pair a `done` with the
+    // command it ran without scrolling back.
     stdout.writeln(
-      '[capture] echo done exit=$exitCode bytes=${cleaned.length} '
+      '[capture] echo done cmd=${_logQuote(cmd)} '
+      'exit=$exitCode bytes=${cleaned.length} '
       'lines=${buf.length} polls=$pollCount '
       'elapsed=${stopwatch.elapsedMilliseconds}ms truncated=$wasTruncated '
       'timedOut=$timedOut',

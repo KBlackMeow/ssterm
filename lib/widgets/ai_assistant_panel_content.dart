@@ -32,6 +32,7 @@ class _AiPanelContent extends StatelessWidget {
     this.terminalBackground,
     this.terminalLineHeight,
     this.onWriteProposalDecision,
+    this.onDangerProposalDecision,
     required this.position,
     this.onPositionToggle,
   });
@@ -87,6 +88,13 @@ class _AiPanelContent extends StatelessWidget {
   /// view, the same shape every other interactive control here uses.
   final void Function(_WriteProposal proposal,
       {required bool apply, String? reason})? onWriteProposalDecision;
+
+  /// Handler the [_DangerProposalCard] calls when the user clicks
+  /// Approve or Reject.  Same pattern as [onWriteProposalDecision] —
+  /// the panel stays a pure view, the state machine lives in
+  /// [_AiAssistantOverlayState._decideDangerProposal].
+  final void Function(_DangerProposal proposal, {required bool approve})?
+      onDangerProposalDecision;
 
   /// Current dock side — drives the icon shown on the position toggle
   /// button so it reads "switch to the OTHER side".
@@ -520,6 +528,27 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
               ? ({String? reason}) {}
               : ({String? reason}) =>
                   decide(proposal, apply: false, reason: reason),
+        ),
+      );
+    }
+
+    // Dangerous-command proposal: same Apply/Reject pattern as the
+    // file-write card, distinct visual hierarchy.  Card-level null
+    // callback collapses to a no-op for the same defensive reason as
+    // the write-proposal handler above.
+    final danger = msg.dangerProposal;
+    if (danger != null) {
+      final decide = onDangerProposalDecision;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _DangerProposalCard(
+          proposal: danger,
+          onApprove: decide == null
+              ? () {}
+              : () => decide(danger, approve: true),
+          onReject: decide == null
+              ? () {}
+              : () => decide(danger, approve: false),
         ),
       );
     }

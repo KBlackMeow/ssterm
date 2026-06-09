@@ -236,6 +236,159 @@ class ProviderConfig {
       );
 }
 
+// ── Dangerous-command blacklist ───────────────────────────────────────────
+
+/// A user-defined dangerous-command rule.  Built-in rules live in code
+/// (see `_builtinDangerRules` in `services/command_safety.dart`) — the
+/// user only ever adds/edits CUSTOM patterns through Settings → Safety;
+/// built-ins are toggled on/off via [DangerousCommandsPolicy.disabledBuiltins].
+class CustomDangerPattern {
+  /// Stable id used as the persistence key.  Independent from [pattern]
+  /// on purpose: editing the regex must NOT reset the rule's identity
+  /// (so e.g. its position in the Settings list, or future "matched N
+  /// times" telemetry, survives a typo fix).
+  final String id;
+
+  /// One-line human-readable description shown in the chat card / modal
+  /// when this rule fires.  E.g. "Recursive delete of $HOME".
+  String label;
+
+  /// Dart-`RegExp` source.  Compile-validated at edit time in the
+  /// Settings UI; runtime compile failures are silently skipped so one
+  /// bad rule can't take down the whole classifier (and with it, the
+  /// agent loop).
+  String pattern;
+
+  bool enabled;
+
+  CustomDangerPattern({
+    required this.id,
+    required this.label,
+    required this.pattern,
+    this.enabled = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'pattern': pattern,
+        'enabled': enabled,
+      };
+
+  /// Returns null for malformed entries so the caller can skip them
+  /// rather than abort the whole config load — same defensive style as
+  /// [ProviderConfig.tryFromJson].
+  static CustomDangerPattern? tryFromJson(Map<String, dynamic> json) {
+    final id = json['id'];
+    final pattern = json['pattern'];
+    if (id is! String || id.isEmpty) return null;
+    if (pattern is! String || pattern.isEmpty) return null;
+    return CustomDangerPattern(
+      id: id,
+      label: json['label'] as String? ?? id,
+      pattern: pattern,
+      enabled: json['enabled'] as bool? ?? true,
+    );
+  }
+
+  CustomDangerPattern copyWith({
+    String? label,
+    String? pattern,
+    bool? enabled,
+  }) =>
+      CustomDangerPattern(
+        id: id,
+        label: label ?? this.label,
+        pattern: pattern ?? this.pattern,
+        enabled: enabled ?? this.enabled,
+      );
+}
+
+/// Settings for the dangerous-command blacklist.
+///
+/// When the agent (in auto-execute mode) is about to run a command
+/// matching any enabled rule, the loop pauses and a chat card asks
+/// the user to Approve / Reject.  Default ON: the surface reuses the
+/// same Apply/Reject UX as file-writes and only fires on the rare
+/// LLM-emitted destructive command, so silently shipping it on costs
+/// nothing for the common case.
+///
+/// We deliberately do NOT gate user-typed terminal input — accurately
+/// reconstructing what the shell will execute from raw keystrokes
+/// (history recall, autosuggest accept, tab completion, mid-line
+/// edits, heredocs) requires either a brittle byte-state-machine
+/// that silently misses on common paths, or a shell-integration hook
+/// we don't currently have.  A safety net that fires inconsistently
+/// is worse than none: it trains the user to either tune out the
+/// prompts or assume safety when there isn't any.
+class DangerousCommandsPolicy {
+  bool agentConfirmEnabled;
+
+  /// Built-in rule ids the user has explicitly disabled.  We persist
+  /// the *disabled* set (not enabled) so adding a new built-in rule in
+  /// a future release auto-applies for existing users without
+  /// requiring a settings touch — matches how new providers back-fill
+  /// in [AgentConfig.fromJson].
+  Set<String> disabledBuiltins;
+
+  List<CustomDangerPattern> customPatterns;
+
+  DangerousCommandsPolicy({
+    this.agentConfirmEnabled = true,
+    Set<String>? disabledBuiltins,
+    List<CustomDangerPattern>? customPatterns,
+  })  : disabledBuiltins = disabledBuiltins ?? <String>{},
+        customPatterns = customPatterns ?? <CustomDangerPattern>[];
+
+  Map<String, dynamic> toJson() => {
+        'agentConfirmEnabled': agentConfirmEnabled,
+        // Sort so unrelated settings toggles don't reshuffle the JSON
+        // diff — same rationale as `enabledSkills` above.
+        if (disabledBuiltins.isNotEmpty)
+          'disabledBuiltins': (disabledBuiltins.toList()..sort()),
+        if (customPatterns.isNotEmpty)
+          'customPatterns': customPatterns.map((p) => p.toJson()).toList(),
+      };
+
+  factory DangerousCommandsPolicy.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return DangerousCommandsPolicy();
+    final patterns = <CustomDangerPattern>[];
+    final rawPatterns = json['customPatterns'];
+    if (rawPatterns is List) {
+      for (final e in rawPatterns) {
+        if (e is! Map<String, dynamic>) continue;
+        final p = CustomDangerPattern.tryFromJson(e);
+        if (p != null) patterns.add(p);
+      }
+    }
+    Set<String> disabled = <String>{};
+    final rawDisabled = json['disabledBuiltins'];
+    if (rawDisabled is List) {
+      disabled = rawDisabled.whereType<String>().toSet();
+    }
+    // `userConfirmEnabled` was an opt-in keystroke-gate toggle in
+    // earlier versions; the gate has been removed, so any persisted
+    // value is silently ignored.  Kept tolerant in fromJson so old
+    // configs load without warnings.
+    return DangerousCommandsPolicy(
+      agentConfirmEnabled: json['agentConfirmEnabled'] as bool? ?? true,
+      disabledBuiltins: disabled,
+      customPatterns: patterns,
+    );
+  }
+
+  DangerousCommandsPolicy copyWith({
+    bool? agentConfirmEnabled,
+    Set<String>? disabledBuiltins,
+    List<CustomDangerPattern>? customPatterns,
+  }) =>
+      DangerousCommandsPolicy(
+        agentConfirmEnabled: agentConfirmEnabled ?? this.agentConfirmEnabled,
+        disabledBuiltins: disabledBuiltins ?? Set.of(this.disabledBuiltins),
+        customPatterns: customPatterns ?? List.of(this.customPatterns),
+      );
+}
+
 // ── Top-level agent config ─────────────────────────────────────────────────
 
 class AgentConfig {
@@ -303,6 +456,12 @@ class AgentConfig {
   /// all" / "disable all" buttons make trivial.
   Set<String>? enabledSkills;
 
+  /// Dangerous-command blacklist + agent confirmation toggle.  See
+  /// [DangerousCommandsPolicy] for semantics; defaults to ON.
+  /// Non-nullable so the agent loop never has to null-check before
+  /// consulting the policy on every command.
+  DangerousCommandsPolicy dangerousPolicy;
+
   AgentConfig({
     this.defaultProvider,
     this.defaultModel,
@@ -311,7 +470,9 @@ class AgentConfig {
     this.webSearchEnabled = false,
     this.fileWriteEnabled = true,
     this.enabledSkills,
-  }) : providers = providers ??
+    DangerousCommandsPolicy? dangerousPolicy,
+  })  : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
+        providers = providers ??
             [
               ProviderConfig.chatgpt(),
               ProviderConfig.claude(),
@@ -353,6 +514,7 @@ class AgentConfig {
         // saves (toggling unrelated settings shouldn't reshuffle this).
         if (enabledSkills != null)
           'enabledSkills': (enabledSkills!.toList()..sort()),
+        'dangerousPolicy': dangerousPolicy.toJson(),
       };
 
   factory AgentConfig.fromJson(Map<String, dynamic>? json) {
@@ -424,6 +586,12 @@ class AgentConfig {
       webSearchEnabled: json['webSearchEnabled'] as bool? ?? false,
       fileWriteEnabled: json['fileWriteEnabled'] as bool? ?? true,
       enabledSkills: parsedEnabledSkills,
+      // Missing key (old config) → DangerousCommandsPolicy() defaults
+      // (agent confirm ON).  Existing users get the agent safety
+      // net automatically on first launch.
+      dangerousPolicy: DangerousCommandsPolicy.fromJson(
+        json['dangerousPolicy'] as Map<String, dynamic>?,
+      ),
     );
   }
 
@@ -440,6 +608,7 @@ class AgentConfig {
     bool? fileWriteEnabled,
     Set<String>? enabledSkills,
     bool resetEnabledSkills = false,
+    DangerousCommandsPolicy? dangerousPolicy,
   }) =>
       AgentConfig(
         defaultProvider: defaultProvider ?? this.defaultProvider,
@@ -451,5 +620,6 @@ class AgentConfig {
         enabledSkills: resetEnabledSkills
             ? null
             : (enabledSkills ?? this.enabledSkills),
+        dangerousPolicy: dangerousPolicy ?? this.dangerousPolicy,
       );
 }

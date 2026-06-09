@@ -22,6 +22,263 @@
 /// Pure static API — no Flutter / dart:io dependency, fully unit-testable.
 library;
 
+import '../models/agent_config.dart' show DangerousCommandsPolicy;
+
+// ── Dangerous-command classifier ─────────────────────────────────────────
+//
+// A SECOND, independent layer on top of [CommandSafety.reason].  The
+// existing `reason()` is operational ("will this hang the agent loop?");
+// `danger()` below is intent-based ("would running this likely destroy
+// data?").  We keep them split because:
+//
+//   • The agent loop wants different recovery for each — `reason()`
+//     returns a self-correction envelope to the LLM, `danger()` triggers
+//     a user-facing confirmation card.
+//   • Disabling all dangerous-command rules (or even loading a malformed
+//     custom one) must NEVER weaken the operational safety net.
+
+/// Structured verdict returned by [CommandSafety.danger].  Carries the
+/// rule's id (for logs) and a one-line label (for the chat card /
+/// confirmation modal) so the caller doesn't need to look the rule up
+/// again.
+class DangerVerdict {
+  /// Rule id.  Built-in ids are prefixed `builtin:` (e.g.
+  /// `builtin:rm-rf-root`); user custom rules use their stored uuid
+  /// (no prefix).  Stable across releases so log greps survive.
+  final String patternId;
+
+  /// One-line human-readable description of WHY this command is
+  /// dangerous.  Shown in the confirmation UI.
+  final String label;
+
+  /// Source of the rule.  Useful for the Settings UI's "this fired"
+  /// telemetry (future) and for logs.
+  final DangerRuleSource source;
+
+  const DangerVerdict({
+    required this.patternId,
+    required this.label,
+    required this.source,
+  });
+}
+
+enum DangerRuleSource { builtin, custom }
+
+/// Built-in rule definition.  Kept private — external callers see only
+/// the [DangerVerdict].  The `id` is stamped into [DangerVerdict.patternId]
+/// with a `builtin:` prefix so it can never collide with a user's
+/// custom-pattern uuid.
+class _BuiltinDangerRule {
+  final String id;
+  final String label;
+  final String pattern;
+  const _BuiltinDangerRule(this.id, this.label, this.pattern);
+}
+
+/// Initial built-in rule set.  Designed for HIGH precision on obvious
+/// destructive intent, not exhaustive coverage — every entry below
+/// either wipes data, hands the box to a remote script, or shuts the
+/// system off.  Lower-precision rules (e.g. "any rm -rf anywhere")
+/// would generate too many false positives for legitimate workflows
+/// (`rm -rf node_modules`) and erode the user's trust in the prompt.
+///
+/// Adding a rule:
+///   1. Pick a stable kebab-case id (becomes `builtin:<id>`).  Never
+///      rename — that would silently re-enable a rule the user had
+///      disabled via [DangerousCommandsPolicy.disabledBuiltins].
+///   2. Write the regex assuming the FULL line as candidate.  Multi-
+///      line input is split per-line by [CommandSafety.danger] before
+///      matching, so `^`/`$` anchor to a single command line.
+///   3. Prefer permissive regexes with the confirmation as the safety
+///      net (a false positive = one extra click).  False NEGATIVES
+///      (genuine destruction not caught) are the bug we care about.
+const List<_BuiltinDangerRule> _builtinDangerRules = [
+  // `rm -rf /` and its sloppy-flag variants (`-fR`, `-r -f`, `-Rfv`).
+  _BuiltinDangerRule(
+    'rm-rf-root',
+    'Recursive force-delete of / (root filesystem)',
+    r'\brm\s+(?:-\S+\s+)*-\S*[rR]\S*(?:\s+-\S+)*\s+/(?:\s|\*|/|$)',
+  ),
+  // `rm -rf $HOME` / `~` — wipes the user's home directory.  We do not
+  // try to resolve $HOME to a literal path; matching the literal token
+  // is enough because both shells expand it BEFORE running the command,
+  // so the token "$HOME" / "~" can only appear pre-expansion.
+  _BuiltinDangerRule(
+    'rm-rf-home',
+    'Recursive force-delete of \$HOME (entire home directory)',
+    r'\brm\s+(?:-\S+\s+)*-\S*[rR]\S*(?:\s+-\S+)*\s+(?:\$HOME|~)(?:\s|\*|/|$)',
+  ),
+  // `dd ... of=/dev/sda` — raw-write to a block device, instantly
+  // wipes the partition table.
+  _BuiltinDangerRule(
+    'dd-block-device',
+    'dd writing directly to a block device',
+    r'\bdd\b[^|;&\n]*\bof=/dev/(?:sd[a-z]|hd[a-z]|nvme\d+n\d+|disk\d+|mmcblk\d+)',
+  ),
+  // `mkfs.*` on /dev/... — reformats the filesystem.
+  _BuiltinDangerRule(
+    'mkfs',
+    'Reformatting a filesystem',
+    r'\bmkfs(?:\.\w+)?\s+(?:-\S+\s+)*/dev/\S+',
+  ),
+  // Classic fork bomb.  Exact-shape match — the bracketed form has
+  // essentially no legitimate use outside teaching examples.
+  _BuiltinDangerRule(
+    'fork-bomb',
+    'Fork bomb (recursive self-spawn until OS limits hit)',
+    r':\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:',
+  ),
+  // `chmod -R 777 /` / `chmod 777 /` — world-writable on root.
+  _BuiltinDangerRule(
+    'chmod-permissive-root',
+    'Making the root filesystem world-writable',
+    r'\bchmod\s+(?:-\S+\s+)*[0-7]?777\s+/(?:\s|\*|/|$)',
+  ),
+  // Redirecting output to a raw block device — corrupts the disk.
+  _BuiltinDangerRule(
+    'redirect-to-block-device',
+    'Redirecting output to a raw disk device',
+    r'>\s*/dev/(?:sd[a-z]|hd[a-z]|nvme\d+n\d+|disk\d+|mmcblk\d+)',
+  ),
+  // `curl ... | sh` — execute untrusted remote script with shell
+  // privileges.  Covers wget too.  Also flags `| sudo bash` etc.
+  _BuiltinDangerRule(
+    'curl-pipe-shell',
+    'Piping a remote download straight into a shell',
+    r'\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:bash|sh|zsh|fish|ksh)(?:\s|$)',
+  ),
+  // System shutdown / reboot.  Catches `shutdown -h now`, `reboot`,
+  // `halt`, `poweroff`, `init 0`, `init 6`, `systemctl poweroff`, etc.
+  _BuiltinDangerRule(
+    'shutdown-or-reboot',
+    'System shutdown / reboot',
+    r'\b(?:shutdown|halt|poweroff|reboot|init\s+[06]|systemctl\s+(?:halt|poweroff|reboot))\b',
+  ),
+  // Git force-push — overwrites remote history, can lose teammates'
+  // commits.  Explicitly carve out the safe variants `--force-with-lease`
+  // and `--force-if-includes` (whose entire reason for existing is to be
+  // a non-destructive force-push).  `-f` short form is matched with a
+  // word-boundary so `--force-with-lease` doesn't accidentally trigger
+  // the short-flag branch.
+  _BuiltinDangerRule(
+    'git-push-force',
+    'Git force push (overwrites remote history)',
+    r'\bgit\s+push\b(?:\s+\S+)*\s+(?:-f\b|--force(?!-with-lease|-if-includes)\b)',
+  ),
+  // Git hard reset — discards uncommitted changes in index + worktree.
+  // Common agent footgun: model "fixes" a state mismatch by hard-
+  // resetting and silently wipes the user's WIP.
+  _BuiltinDangerRule(
+    'git-reset-hard',
+    'Git hard reset (discards uncommitted changes)',
+    r'\bgit\s+reset\b(?:\s+\S+)*\s+--hard\b',
+  ),
+  // `git clean -f` permanently removes UNTRACKED files (anything not in
+  // .gitignore + not in the index).  No git reflog to undo from.
+  _BuiltinDangerRule(
+    'git-clean-force',
+    'Git clean -f (permanently deletes untracked files)',
+    r'\bgit\s+clean\b(?:\s+\S+)*\s+-\S*f\S*',
+  ),
+  // Git history rewrite tools.  Even a "successful" run leaves dangling
+  // SHAs that stale clones can re-push, and signed-commit metadata is
+  // destroyed irreversibly.
+  _BuiltinDangerRule(
+    'git-history-rewrite',
+    'Git history rewrite (filter-branch / filter-repo)',
+    r'\bgit\s+(?:filter-branch|filter-repo)\b',
+  ),
+  // `find … -delete` is `rm -rf` wearing a fake moustache.  Same
+  // recursive blast radius, but lexically nothing like `rm` so our
+  // existing rules miss it.
+  _BuiltinDangerRule(
+    'find-delete',
+    '`find -delete` (recursive deletion via find)',
+    r'\bfind\b[^|;&\n]*\s-delete\b',
+  ),
+  // `chown -R` on root filesystem — symmetric with `chmod 777 /`.
+  // Even a non-malicious recursive chown of `/` breaks every setuid
+  // binary on the system and locks out the original owner.
+  _BuiltinDangerRule(
+    'chown-recursive-root',
+    'Recursive chown of / (root filesystem)',
+    r'\bchown\s+(?:-\S+\s+)*-\S*[rR]\S*(?:\s+-\S+)*\s+\S+\s+/(?:\s|\*|/|$)',
+  ),
+  // IaC teardown.  `terraform destroy` / `pulumi destroy` happily wipe
+  // production infrastructure — and there's no "undo", just re-apply
+  // and pray the state file is still in sync.
+  _BuiltinDangerRule(
+    'iac-destroy',
+    'Tearing down infrastructure (terraform / pulumi destroy)',
+    r'\b(?:terraform|pulumi)\s+destroy\b',
+  ),
+  // Bulk S3 deletion.  `aws s3 rm --recursive` wipes a prefix; `aws s3
+  // rb --force` deletes the bucket AND all objects.  Versioned buckets
+  // give you a recovery window, unversioned ones do not.
+  _BuiltinDangerRule(
+    'aws-s3-recursive-delete',
+    'Recursive S3 delete (rm --recursive / rb --force)',
+    r'\baws\s+s3\s+(?:rm|rb)\b(?:\s+\S+)*\s+(?:--recursive|--force)\b',
+  ),
+  // Cluster-wide / namespace-wide kubectl delete.  `delete --all`
+  // tears down everything of a kind, `delete namespace foo` wipes
+  // every resource in the namespace.
+  _BuiltinDangerRule(
+    'kubectl-delete-all',
+    'Cluster- or namespace-wide kubectl delete',
+    r'\bkubectl\s+delete\b(?:\s+\S+)*\s+(?:--all\b|--all-namespaces\b|namespace\b)',
+  ),
+  // Docker prune.  `system prune -a` removes ALL unused images, not
+  // just dangling ones; `volume prune` deletes persistent data.  Both
+  // are irreversible.
+  _BuiltinDangerRule(
+    'docker-prune-all',
+    'Docker prune (removes all images / volumes)',
+    r'\bdocker\s+(?:system\s+prune\b(?:\s+\S+)*\s+-\S*a\S*|volume\s+prune\b)',
+  ),
+  // `kill -9 1` (PID 1 = init) hangs the box; `kill -9 -1` SIGKILLs
+  // every process the caller owns (including the shell itself).
+  // Negative lookahead `(?!\d)` distinguishes `1` from `12`, `123`, …
+  _BuiltinDangerRule(
+    'kill-init-or-all',
+    'Killing PID 1 (init) or every process (-1)',
+    r'\bkill\s+(?:-\S+\s+)*-?1(?!\d)',
+  ),
+  // `redis-cli FLUSHALL` / `FLUSHDB` — one-shot DB wipe.  The
+  // operational-safety layer lets `redis-cli <subcommand>` through
+  // (it exits cleanly, doesn't block the agent loop) but the intent
+  // layer must still flag it.
+  _BuiltinDangerRule(
+    'redis-flush',
+    'Redis FLUSHALL / FLUSHDB (wipes Redis data)',
+    r'\bredis-cli\b[^|;&\n]*\bflush(?:all|db)\b',
+  ),
+];
+
+/// Compiled-regex cache for both built-ins and user-defined patterns.
+/// Keyed by pattern source string — same pattern across multiple rules
+/// (custom users re-typing a builtin) shares one [RegExp] instance.
+/// Capacity is unbounded but in practice tops out at low-double-digits
+/// (10 built-ins + however many custom rules the user typed); a real
+/// LRU is overkill.
+final Map<String, RegExp> _dangerRegexCache = <String, RegExp>{};
+
+RegExp? _compileDanger(String pattern) {
+  final cached = _dangerRegexCache[pattern];
+  if (cached != null) return cached;
+  try {
+    final r = RegExp(pattern, caseSensitive: false);
+    _dangerRegexCache[pattern] = r;
+    return r;
+  } catch (_) {
+    // Malformed user regex.  Silently skip — a Settings-UI edit-time
+    // validator should have caught it, but defence in depth: one bad
+    // rule must NOT take down the classifier (which would let every
+    // subsequent command through unchecked).
+    return null;
+  }
+}
+
 class CommandSafety {
   /// Programs that are ALWAYS interactive — there is no flag combination
   /// that makes them exit on their own.  Block unconditionally.
@@ -138,6 +395,96 @@ class CommandSafety {
 
     return null;
   }
+
+  /// Classify [cmd] against the dangerous-command blacklist defined by
+  /// [policy].  Returns the FIRST matching rule (custom rules checked
+  /// before built-ins, so a user pattern can deliberately mask a
+  /// built-in label), or null if nothing matched.
+  ///
+  /// Multi-line input is scanned per-line so a pasted script can't
+  /// hide `rm -rf /` behind earlier benign lines.  Empty / whitespace
+  /// input short-circuits to null.
+  ///
+  /// Designed to be called on the hot path (every Enter / every
+  /// agent command), so:
+  ///   • Regex compilation goes through [_compileDanger]'s cache —
+  ///     each rule compiles once per process.
+  ///   • Loop short-circuits on the first hit via [RegExp.firstMatch]
+  ///     (NOT `allMatches`), so common-case "safe command" pays for
+  ///     at most one full pass over the rule list.
+  ///   • A malformed user pattern is skipped silently rather than
+  ///     bubbling an exception — the classifier MUST be infallible
+  ///     for the gate's invariant ("never silently let a forbidden
+  ///     line through") to hold.
+  static DangerVerdict? danger(String cmd, DangerousCommandsPolicy policy) {
+    final trimmed = cmd.trim();
+    if (trimmed.isEmpty) return null;
+
+    final lines = trimmed.split('\n');
+
+    // Custom patterns first so a user can override a built-in's wording
+    // by adding a rule with the same regex (matches first → wins).
+    // Enabled-flag check happens here, not inside the inner loop, so a
+    // disabled rule never even pays for `firstMatch`.
+    for (final cp in policy.customPatterns) {
+      if (!cp.enabled) continue;
+      final re = _compileDanger(cp.pattern);
+      if (re == null) continue;
+      for (final raw in lines) {
+        final line = raw.trim();
+        if (line.isEmpty) continue;
+        if (re.firstMatch(line) != null) {
+          return DangerVerdict(
+            patternId: cp.id,
+            label: cp.label.isEmpty ? cp.pattern : cp.label,
+            source: DangerRuleSource.custom,
+          );
+        }
+      }
+    }
+
+    for (final rule in _builtinDangerRules) {
+      // Built-ins disabled via [DangerousCommandsPolicy.disabledBuiltins]
+      // are skipped here — same place as `enabled` for custom rules so
+      // disabled rules cost a Set lookup, not a regex pass.
+      if (policy.disabledBuiltins.contains(rule.id)) continue;
+      final re = _compileDanger(rule.pattern);
+      if (re == null) continue;
+      for (final raw in lines) {
+        final line = raw.trim();
+        if (line.isEmpty) continue;
+        if (re.firstMatch(line) != null) {
+          return DangerVerdict(
+            patternId: 'builtin:${rule.id}',
+            label: rule.label,
+            source: DangerRuleSource.builtin,
+          );
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /// All built-in rule ids paired with their labels.  Exposed for the
+  /// Settings UI so it can render a per-rule toggle list without the
+  /// classifier's internals leaking out.  Order is the source-code
+  /// order in [_builtinDangerRules] — stable, suitable for stable UI
+  /// keys.
+  static List<({String id, String label})> get builtinDangerRules => [
+        for (final r in _builtinDangerRules) (id: r.id, label: r.label),
+      ];
+
+  /// Compile-check a candidate regex.  Used by the Settings UI's
+  /// edit-time validator: returns true iff the pattern would actually
+  /// be honoured at runtime (i.e. doesn't throw at construction).
+  ///
+  /// Side effect: caches the compiled regex, so the very next runtime
+  /// call to [danger] with this pattern is already warm.  That's
+  /// intentional — users typically run the new rule against a test
+  /// input immediately after saving it.
+  static bool isValidDangerRegex(String pattern) =>
+      _compileDanger(pattern) != null;
 
   /// Splits [line] into the effective program name and its remaining
   /// argument tokens, after stripping `VAR=val` assignments and well-known
