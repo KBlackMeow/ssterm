@@ -263,6 +263,12 @@ class FrostedGlassSurface extends StatelessWidget {
   }
 }
 
+/// Active frosted menu dismisser. Set while a menu is on screen so a
+/// re-entrant call to [showFrostedMenu] (e.g. user right-clicks a second
+/// row before the first menu closes) can tear down the previous overlay
+/// before inserting a new one — otherwise both menus would render.
+VoidCallback? _activeFrostedMenuDismiss;
+
 /// Overlay-based frosted popup menu — inserts directly into the overlay stack
 /// (no route animation) so [BackdropFilter] blur is immediate, matching
 /// [showTransferMenu].
@@ -273,6 +279,10 @@ Future<T?> showFrostedMenu<T>({
   BoxConstraints? constraints,
   ShapeBorder? shape,
 }) {
+  // Tear down any previously-shown frosted menu so a fast right-click
+  // sequence never leaves stacked overlays on screen.
+  _activeFrostedMenuDismiss?.call();
+
   final overlayState = Overlay.of(context, rootOverlay: true);
   final screen      = MediaQuery.sizeOf(context);
 
@@ -284,14 +294,20 @@ Future<T?> showFrostedMenu<T>({
 
   final completer = Completer<T?>();
   OverlayEntry? entry;
+  VoidCallback? selfDismiss;
 
   void dismiss([T? value]) {
     if (entry != null && !completer.isCompleted) {
       entry!.remove();
       entry = null;
+      if (identical(_activeFrostedMenuDismiss, selfDismiss)) {
+        _activeFrostedMenuDismiss = null;
+      }
       completer.complete(value);
     }
   }
+  selfDismiss = () => dismiss(null);
+  _activeFrostedMenuDismiss = selfDismiss;
 
   // Only use bounded constraint values; BoxConstraints defaults maxWidth to
   // double.infinity when not set, so guard with isFinite before consuming.
@@ -312,8 +328,31 @@ Future<T?> showFrostedMenu<T>({
     menuLeft = position.left.clamp(8.0, screen.width - minW - 8);
   }
 
-  final menuTop = position.top.clamp(8.0, screen.height - 8.0);
-  final availH  = (screen.height - menuTop - 8).clamp(0.0, maxH);
+  // Vertical placement: prefer opening below the click; flip above when the
+  // full menu wouldn't fit (e.g. right-clicking the last row near the screen
+  // bottom). PopupSurface adds a 1px border on each side, so add ~2px to the
+  // entries' raw height for a sufficient fit estimate.
+  final contentH   = (_entriesTotalHeight(items) + 2).clamp(0.0, maxH).toDouble();
+  final spaceBelow = (screen.height - position.top - 8).clamp(0.0, double.infinity);
+  final spaceAbove = (position.top - 8).clamp(0.0, double.infinity);
+
+  final double menuTop;
+  final double availH;
+  if (contentH <= spaceBelow) {
+    menuTop = position.top.clamp(8.0, screen.height - 8.0);
+    availH  = spaceBelow.clamp(0.0, maxH);
+  } else if (contentH <= spaceAbove) {
+    // Flip above: anchor the menu's bottom edge at the click point.
+    menuTop = (position.top - contentH).clamp(8.0, screen.height - 8.0);
+    availH  = spaceAbove.clamp(0.0, maxH);
+  } else if (spaceAbove > spaceBelow) {
+    // Neither side fits the full menu; use the larger half and let it scroll.
+    menuTop = 8.0;
+    availH  = spaceAbove.clamp(0.0, maxH);
+  } else {
+    menuTop = position.top.clamp(8.0, screen.height - 8.0);
+    availH  = spaceBelow.clamp(0.0, maxH);
+  }
 
   entry = OverlayEntry(
     builder: (ctx) => Stack(
@@ -322,6 +361,12 @@ Future<T?> showFrostedMenu<T>({
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: () => dismiss(null),
+            // Right-clicking outside the menu also dismisses it. The
+            // `_activeFrostedMenuDismiss` guard above already protects
+            // against re-entrant `showFrostedMenu` calls, but this catches
+            // right-clicks on regions that never re-trigger a menu (e.g.
+            // whitespace, the toolbar) so the open menu doesn't linger.
+            onSecondaryTapDown: (_) => dismiss(null),
           ),
         ),
         Positioned(
