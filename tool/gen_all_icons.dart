@@ -12,13 +12,14 @@ void main() {
     throw StateError('Unable to decode $sourcePath');
   }
 
-  final iosSource = _makeIosSource(source);
-  final opaqueSource = _flatten(source);
+  final iconSource = _trimTransparent(source);
+  final iosSource = _makeIosSource(iconSource);
+  final opaqueSource = _flatten(iconSource);
 
   _writePng(iosSource, 'assets/icon/icon_ios.png', 1024);
 
-  _writeWebIcons(source);
-  _writeAndroidIcons(source);
+  _writeWebIcons(iconSource);
+  _writeAndroidIcons(iconSource);
   _writeAppleIcons(
     iosSource,
     'ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json',
@@ -28,9 +29,12 @@ void main() {
     opaqueSource,
     'macos/Runner/Assets.xcassets/AppIcon.appiconset',
   );
-  _writeWindowsIcon(source);
+  _writeWindowsIcon(iconSource);
 
-  stdout.writeln('Generated app icons from $sourcePath');
+  stdout.writeln(
+    'Generated app icons from $sourcePath '
+    '(${source.width}x${source.height} -> ${iconSource.width}x${iconSource.height})',
+  );
 }
 
 void _writeWebIcons(img.Image source) {
@@ -97,7 +101,7 @@ void _writeMacIcons(img.Image source, String outputDir) {
     'app_icon_1024.png': 1024,
   };
   for (final entry in sizes.entries) {
-    _writePng(source, '$outputDir/${entry.key}', entry.value, flatten: true);
+    _writePng(source, '$outputDir/${entry.key}', entry.value);
   }
 }
 
@@ -202,6 +206,41 @@ img.Image _flatten(img.Image source) {
     }
   }
   return out;
+}
+
+img.Image _trimTransparent(img.Image source) {
+  const alphaThreshold = 12;
+  var minX = source.width;
+  var minY = source.height;
+  var maxX = -1;
+  var maxY = -1;
+
+  for (var y = 0; y < source.height; y++) {
+    for (var x = 0; x < source.width; x++) {
+      if (source.getPixel(x, y).a <= alphaThreshold) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return source;
+  final boundsWidth = maxX - minX + 1;
+  final boundsHeight = maxY - minY + 1;
+  final side = math.max(boundsWidth, boundsHeight);
+  var x = minX - ((side - boundsWidth) ~/ 2);
+  var y = minY - ((side - boundsHeight) ~/ 2);
+  x = x.clamp(0, source.width - side);
+  y = y.clamp(0, source.height - side);
+
+  return img.copyCrop(
+    source,
+    x: x,
+    y: y,
+    width: side,
+    height: side,
+  );
 }
 
 img.Image _makeIosSource(img.Image source) {
