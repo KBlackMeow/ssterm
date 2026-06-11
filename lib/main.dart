@@ -36,6 +36,7 @@ import 'services/session_logger.dart';
 import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
 import 'services/wallpaper_storage.dart';
+import 'utils/app_dir.dart';
 import 'utils/fd_limit.dart';
 import 'utils/ssh_error_messages.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;

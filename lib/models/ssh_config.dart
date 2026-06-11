@@ -1,11 +1,12 @@
 import 'dart:io';
 
+import '../utils/app_dir.dart';
 import 'ssh_host.dart';
 
 /// Parses OpenSSH `~/.ssh/config` (and optional `Include` files).
 Future<List<SshHost>> parseSshConfig() async {
-  final home = Platform.environment['HOME'] ?? '';
-  final root = File('$home/.ssh/config');
+  final home = appBasePath();
+  final root = File('${userSshDir()}/config');
   if (!await root.exists()) return [];
 
   final seen = <String>{};

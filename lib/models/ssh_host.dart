@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../utils/app_dir.dart';
 import 'port_forward_rule.dart';
 
 class SshHost {
@@ -96,7 +97,7 @@ bool looksLikeKeyPath(String value) {
 }
 
 String expandHomePath(String path) {
-  final home = Platform.environment['HOME'] ?? '';
+  final home = appBasePath();
   if (path.startsWith('~/')) return '$home${path.substring(1)}';
   if (path == '~') return home;
   return path;

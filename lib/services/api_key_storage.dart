@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../utils/app_dir.dart';
+
 /// API key storage backed by a permission-restricted file at
 /// `~/.ssterm/api_keys.json`.  Also attempts keychain I/O as a bonus
 /// (works on signed macOS builds and other OS-native keychains).
@@ -12,19 +14,15 @@ class ApiKeyStorage {
   static Map<String, String>? _cache;
 
   static Future<File> get _file async {
-    final base = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '.';
-    final dir = Directory('$base/.ssterm');
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-      // Restrict the directory itself so an accidental file with default
-      // umask still isn't world-readable through directory listing.
-      if (!Platform.isWindows) {
-        try {
-          await Process.run('chmod', ['700', dir.path]);
-        } catch (_) {}
-      }
+    final dir = await appDataDir();
+    // Restrict the directory itself so an accidental file with default
+    // umask still isn't world-readable through directory listing.
+    // (Best-effort and only meaningful on POSIX; appDataDir already
+    // created the dir, so chmod here is idempotent.)
+    if (!Platform.isWindows) {
+      try {
+        await Process.run('chmod', ['700', dir.path]);
+      } catch (_) {}
     }
     return File('${dir.path}/api_keys.json');
   }

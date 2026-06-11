@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
+import '../utils/app_dir.dart';
 import '../widgets/frosted_glass.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
 
@@ -194,7 +195,16 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
           : Directory.systemTemp.parent.path;
       return '$container/Documents';
     }
-    return '${Platform.environment['HOME'] ?? ''}/Downloads';
+    // Pre-create the dir.  `File.openWrite()` on the worker side does
+    // NOT create parent directories, so a missing `~/Downloads` would
+    // make every download silently fail with `PathNotFoundException`.
+    final dir = Directory(userDownloadsDir());
+    if (!await dir.exists()) {
+      try {
+        await dir.create(recursive: true);
+      } catch (_) {/* fall through; openWrite will surface the real error */}
+    }
+    return dir.path;
   }
 
   @override
@@ -211,7 +221,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
       if (mounted) {
         setState(() => _status = (Platform.isIOS || Platform.isAndroid)
             ? 'Downloading…'
-            : 'Downloading to ~/Downloads/$safeName');
+            : 'Downloading to $dest');
       }
       if (Platform.isIOS || Platform.isAndroid) {
         _shareOnComplete(task, dest, safeName);

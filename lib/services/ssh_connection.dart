@@ -5,6 +5,7 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../models/connect_result.dart';
 import '../models/ssh_host.dart';
+import '../utils/app_dir.dart';
 import 'host_key_verifier.dart';
 import 'no_delay_socket.dart';
 
@@ -356,11 +357,11 @@ Future<ConnectResult> connectSshParams({
 
 Future<List<SSHKeyPair>?> _defaultIdentities() async {
   if (Platform.isIOS) return null;
-  final home = Platform.environment['HOME'] ?? '';
+  final ssh = userSshDir();
   for (final p in [
-    '$home/.ssh/id_ed25519',
-    '$home/.ssh/id_rsa',
-    '$home/.ssh/id_ecdsa',
+    '$ssh/id_ed25519',
+    '$ssh/id_rsa',
+    '$ssh/id_ecdsa',
   ]) {
     final f = File(p);
     if (await f.exists()) {

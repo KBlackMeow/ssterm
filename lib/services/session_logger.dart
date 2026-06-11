@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:ssterm/io/output_pipe.dart';
 
+import '../utils/app_dir.dart';
+
 class SessionLogger implements LogSink {
   final IOSink _sink;
   final String path;
@@ -9,8 +11,8 @@ class SessionLogger implements LogSink {
   SessionLogger._(this._sink, this.path);
 
   static Future<SessionLogger> create(String alias) async {
-    final home = Platform.environment['HOME'] ?? '';
-    final dir = Directory('$home/.ssterm/logs');
+    final base = await appDataDir();
+    final dir = Directory('${base.path}/logs');
     if (!await dir.exists()) await dir.create(recursive: true);
 
     final safe = alias.replaceAll(RegExp(r'[^\w\-.]'), '_');

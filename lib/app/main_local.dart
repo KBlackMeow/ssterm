@@ -143,8 +143,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final shell =
           tab.localShell ?? LocalShellDiscovery.defaultShell(_localShells);
       final cwd = tab.localPath?.value;
-      final home =
-          Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+      final home = userHomeDir();
       _spawnLocalPty(
         tab: tab,
         terminal: terminal,
@@ -213,8 +212,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     if (columns < 1 || rows < 1) return;
 
     final isSplit = pane == 1;
-    final home =
-        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    final home = userHomeDir();
     final env = _environmentForLocalShell(shell);
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
 
@@ -509,8 +507,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       buildInteractiveShellWrapper();
 
   void _newLocalTab(LocalShellOption shell) {
-    final home =
-        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    final home = userHomeDir();
     final tab = _Tab.local(title: shell.displayName, shell: shell)
       ..terminal = _createTerminal()
       ..localPath = ValueNotifier<String>(home ?? '/');

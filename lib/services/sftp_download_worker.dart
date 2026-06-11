@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 
 import '../models/ssh_host.dart';
+import '../utils/app_dir.dart';
 import 'no_delay_socket.dart';
 
 /// Arguments passed to the download isolate via [Isolate.spawn].
@@ -93,11 +94,11 @@ Future<void> sftpDownloadMain(SftpDownloadArgs args) async {
 }
 
 Future<List<SSHKeyPair>?> _loadDefaultIdentities() async {
-  final home = Platform.environment['HOME'] ?? '';
+  final ssh = userSshDir();
   for (final path in [
-    '$home/.ssh/id_ed25519',
-    '$home/.ssh/id_rsa',
-    '$home/.ssh/id_ecdsa',
+    '$ssh/id_ed25519',
+    '$ssh/id_rsa',
+    '$ssh/id_ecdsa',
   ]) {
     try {
       final f = File(path);

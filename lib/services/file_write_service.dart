@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 
+import '../utils/app_dir.dart';
+
 /// Error categories surfaced by [FileSystemAdapter].  Mapped to a
 /// stable user-facing message in [FileWriteService.formatErrorForLlm]
 /// so the agent loop doesn't have to re-derive "what went wrong" from
@@ -214,16 +216,10 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
 
   @override
   String? get currentDirectory =>
-      cwdProvider?.call() ??
-      homeOverride ??
-      Platform.environment['HOME'] ??
-      Platform.environment['USERPROFILE'];
+      cwdProvider?.call() ?? homeOverride ?? userHomeDir();
 
   @override
-  Future<String?> homeDirectory() async =>
-      homeOverride ??
-      Platform.environment['HOME'] ??
-      Platform.environment['USERPROFILE'];
+  Future<String?> homeDirectory() async => homeOverride ?? userHomeDir();
 
   @override
   Future<FileWritePreview> preview(String path) async {
@@ -357,11 +353,8 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       );
     }
     if (p == '~' || p.startsWith('~/')) {
-      final home = homeOverride ??
-          Platform.environment['HOME'] ??
-          Platform.environment['USERPROFILE'] ??
-          '';
-      if (home.isEmpty) {
+      final home = homeOverride ?? userHomeDir();
+      if (home == null || home.isEmpty) {
         throw const FileWriteException(
           FileWriteErrorKind.invalidPath,
           'Cannot expand ~ — no HOME environment variable.',

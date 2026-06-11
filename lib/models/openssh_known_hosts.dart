@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import '../utils/app_dir.dart';
 import '../utils/ssh_fingerprint.dart';
 import 'known_hosts_store.dart';
 
@@ -22,8 +23,7 @@ class _OpenSshKeyLine {
 /// Reads OpenSSH `~/.ssh/known_hosts` (plain and hashed `|1|` entries).
 class OpenSshKnownHosts {
   static Future<File> file() async {
-    final home = Platform.environment['HOME'] ?? '';
-    return File('$home/.ssh/known_hosts');
+    return File('${userSshDir()}/known_hosts');
   }
 
   static Future<List<_OpenSshKeyLine>> _loadLines() async {
