@@ -124,13 +124,12 @@ class _MobileActionSheet extends StatelessWidget {
   const _MobileActionSheet({
     required this.entry,
     required this.canDownload,
-    this.frostedGlass = false,
     this.chromeBackground = const Color(0xFF111113),
   });
 
   final SftpName entry;
   final bool canDownload;
-  final bool frostedGlass;
+  final bool frostedGlass = false;
   final Color chromeBackground;
 
   @override

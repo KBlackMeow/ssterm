@@ -2,7 +2,6 @@ part of '../main.dart';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const _kCardFill   = Color(0xFF1D1D1F);
-const _kCardBorder = Color(0x14FFFFFF);
 const _kDivider    = Color(0x0CFFFFFF);
 const _kAccent     = Color(0xFF2472C8);
 const _kCardRadius = 16.0;

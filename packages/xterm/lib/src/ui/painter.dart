@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/painting.dart';
 
 import 'package:xterm/src/ui/char_metrics.dart';

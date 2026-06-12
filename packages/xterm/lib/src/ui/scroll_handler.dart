@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/core.dart';
-import 'package:xterm/src/core/input/handler.dart';
 
 /// Handles scrolling gestures in the alternate screen buffer. In alternate
 /// screen buffer, the terminal don't have a scrollback buffer, instead, the

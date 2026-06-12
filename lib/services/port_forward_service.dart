@@ -5,6 +5,15 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../models/port_forward_rule.dart';
 
+class PortForwardException implements Exception {
+  PortForwardException(this.failures);
+
+  final List<String> failures;
+
+  @override
+  String toString() => failures.join('; ');
+}
+
 class PortForwardService {
   final _serverSockets = <ServerSocket>[];
   final _remoteForwards = <SSHRemoteForward>[];
@@ -16,13 +25,17 @@ class PortForwardService {
       _dynamicForward != null;
 
   Future<void> startAll(SSHClient client, List<PortForwardRule> rules) async {
+    final failures = <String>[];
     for (final rule in rules) {
       if (!rule.enabled) continue;
       try {
         await _startRule(client, rule);
-      } catch (_) {
-        // Keep going — don't abort other rules if one fails
+      } catch (e) {
+        failures.add('${rule.label}: $e');
       }
+    }
+    if (failures.isNotEmpty) {
+      throw PortForwardException(failures);
     }
   }
 
@@ -46,7 +59,9 @@ class PortForwardService {
 
       case ForwardType.remote:
         final fwd = await client.forwardRemote(port: rule.remotePort);
-        if (fwd == null) return;
+        if (fwd == null) {
+          throw StateError('remote forwarding was rejected by the SSH server');
+        }
         _remoteForwards.add(fwd);
         fwd.connections.listen((channel) async {
           try {

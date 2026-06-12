@@ -109,8 +109,12 @@ void main() async {
       minimumSize: Size(640, 480),
       center: true,
       titleBarStyle: TitleBarStyle.hidden,
+      windowButtonVisibility: true,
       backgroundColor: Color(0xFF1E1E1E),
     );
+    if (Platform.isMacOS) {
+      await windowManager.setBrightness(Brightness.dark);
+    }
     await windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();
       await windowManager.focus();

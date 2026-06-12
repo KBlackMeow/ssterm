@@ -6,7 +6,9 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../models/ssh_host.dart';
 import '../utils/app_dir.dart';
+import '../utils/ssh_fingerprint.dart';
 import 'no_delay_socket.dart';
+import 'trusted_host_keys.dart';
 
 /// Arguments passed to the download isolate via [Isolate.spawn].
 /// All fields must be isolate-sendable (no native resources).
@@ -59,8 +61,10 @@ Future<void> sftpDownloadMain(SftpDownloadArgs args) async {
       username: user,
       identities: identities,
       onPasswordRequest: onPassword,
-      // The user already accepted this host key when the main tab connected.
-      onVerifyHostKey: (_, _) => true,
+      onVerifyHostKey: (keyType, fingerprint) {
+        final fp = normalizeFingerprint(formatMd5Fingerprint(fingerprint));
+        return TrustedHostKeys.isTrusted(h.hostname, h.port, keyType, fp);
+      },
     );
     await client.authenticated.timeout(const Duration(seconds: 15));
 

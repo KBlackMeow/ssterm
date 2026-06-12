@@ -111,36 +111,46 @@ class _TabBarState extends State<_TabBar> with WindowListener {
       decoration: BoxDecoration(
         color: widget.backgroundColor,
         border: const Border(
-          top:    BorderSide(color: Color(0x14FFFFFF), width: 1),
+          top: BorderSide(color: Color(0x14FFFFFF), width: 1),
           bottom: BorderSide(color: Color(0x0CFFFFFF), width: 1),
         ),
       ),
       child: Padding(
-      padding: EdgeInsets.fromLTRB(leftPadding, 6 + topSafeArea, rightPadding, 6),
-      child: Row(
-        children: [
-          Expanded(
-            // Inline drag-area: window_manager's DragToMoveArea ships with a
-            // built-in onDoubleTap that sits in the gesture arena and delays
-            // every child onTap by ~300ms (the double-tap timeout). We only
-            // want pan-to-drag, no double-tap-to-maximize — users have the
-            // maximize button in [_WindowControls].
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onPanStart: (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
-                  ? (_) => windowManager.startDragging()
-                  : null,
-              child: LayoutBuilder(
+        padding: EdgeInsets.fromLTRB(
+          leftPadding,
+          6 + topSafeArea,
+          rightPadding,
+          6,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              // Inline drag-area: window_manager's DragToMoveArea ships with a
+              // built-in onDoubleTap that sits in the gesture arena and delays
+              // every child onTap by ~300ms (the double-tap timeout). We only
+              // want pan-to-drag, no double-tap-to-maximize — users have the
+              // maximize button in [_WindowControls].
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onPanStart:
+                    (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
+                    ? (_) => windowManager.startDragging()
+                    : null,
+                child: LayoutBuilder(
                   builder: (context, constraints) {
                     if (widget.tabs.isEmpty) return const SizedBox();
 
                     const tabGap = 4.0;
                     final slotWidth =
-                        (constraints.maxWidth - tabGap * (widget.tabs.length - 1)) /
+                        (constraints.maxWidth -
+                            tabGap * (widget.tabs.length - 1)) /
                         widget.tabs.length;
-                    final tabWidth =
-                        slotWidth.clamp(_TabBar._minTabWidth, _TabBar._preferredTabWidth);
-                    final needsScroll = tabWidth <= _TabBar._minTabWidth &&
+                    final tabWidth = slotWidth.clamp(
+                      _TabBar._minTabWidth,
+                      _TabBar._preferredTabWidth,
+                    );
+                    final needsScroll =
+                        tabWidth <= _TabBar._minTabWidth &&
                         widget.tabs.length * (_TabBar._minTabWidth + tabGap) >
                             constraints.maxWidth;
 
@@ -151,7 +161,9 @@ class _TabBarState extends State<_TabBar> with WindowListener {
                             right: i < widget.tabs.length - 1 ? tabGap : 0,
                           ),
                           child: SizedBox(
-                            width: needsScroll ? _TabBar._minTabWidth : tabWidth,
+                            width: needsScroll
+                                ? _TabBar._minTabWidth
+                                : tabWidth,
                             child: _TabChip(
                               tab: widget.tabs[i],
                               isActive: i == widget.active,
@@ -176,61 +188,65 @@ class _TabBarState extends State<_TabBar> with WindowListener {
                             children: chips,
                           );
                   },
-              ),
-            ),
-          ),
-          _PlusMenu(
-            onNewLocal: widget.onNewLocal,
-            shells: widget.localShells,
-            onRefreshLocalShells: widget.onRefreshLocalShells,
-            onNewSsh: widget.onNewSsh,
-            savedHosts: widget.savedHosts,
-            configHosts: widget.configHosts,
-            onConnectHost: widget.onConnectHost,
-          ),
-          CmdPickerButton(
-            onInsert: widget.onInsertCommand,
-          ),
-          AiAssistantButton(visible: widget.aiPanelVisible, onToggle: widget.onToggleAiPanel),
-          if (widget.hasSftp) ...[
-            _SftpButton(sftpVisible: widget.sftpVisible, onToggle: widget.onToggleSftp),
-            if (widget.transferManager != null)
-              RepaintBoundary(
-                child: _TransferButton(
-                  manager: widget.transferManager!,
                 ),
               ),
+            ),
+            _PlusMenu(
+              onNewLocal: widget.onNewLocal,
+              shells: widget.localShells,
+              onRefreshLocalShells: widget.onRefreshLocalShells,
+              onNewSsh: widget.onNewSsh,
+              savedHosts: widget.savedHosts,
+              configHosts: widget.configHosts,
+              onConnectHost: widget.onConnectHost,
+            ),
+            CmdPickerButton(onInsert: widget.onInsertCommand),
+            AiAssistantButton(
+              visible: widget.aiPanelVisible,
+              onToggle: widget.onToggleAiPanel,
+            ),
+            if (widget.hasSftp) ...[
+              _SftpButton(
+                sftpVisible: widget.sftpVisible,
+                onToggle: widget.onToggleSftp,
+              ),
+              if (widget.transferManager != null)
+                RepaintBoundary(
+                  child: _TransferButton(manager: widget.transferManager!),
+                ),
+            ],
+            _SplitButton(
+              canSplit: widget.canSplit,
+              isSplit: widget.isSplit,
+              splitAxis: widget.splitAxis,
+              onSplitHorizontal: widget.onSplitHorizontal,
+              onSplitVertical: widget.onSplitVertical,
+            ),
+            GestureDetector(
+              onTap: widget.onSettings,
+              child: Tooltip(
+                message: 'Settings (⌘,)',
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.settings_outlined,
+                    size: 15,
+                    color:
+                        AppColors.maybeOf(context)?.foregroundDim ??
+                        _kFgInactive,
+                  ),
+                ),
+              ),
+            ),
+            if (Platform.isWindows || Platform.isLinux) ...[
+              const SizedBox(width: 6),
+              const _WindowControls(),
+            ] else
+              const SizedBox(width: 2),
           ],
-          _SplitButton(
-            canSplit: widget.canSplit,
-            isSplit: widget.isSplit,
-            splitAxis: widget.splitAxis,
-            onSplitHorizontal: widget.onSplitHorizontal,
-            onSplitVertical: widget.onSplitVertical,
-          ),
-          GestureDetector(
-            onTap: widget.onSettings,
-            child: Tooltip(
-              message: 'Settings (⌘,)',
-              child: Container(
-                width: 28,
-                height: 28,
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.settings_outlined,
-                  size: 15,
-                  color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
-                ),
-              ),
-            ),
-          ),
-          if (Platform.isWindows || Platform.isLinux) ...[
-            const SizedBox(width: 6),
-            const _WindowControls(),
-          ] else
-            const SizedBox(width: 2),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -247,8 +263,7 @@ class _WindowControls extends StatefulWidget {
   State<_WindowControls> createState() => _WindowControlsState();
 }
 
-class _WindowControlsState extends State<_WindowControls>
-    with WindowListener {
+class _WindowControlsState extends State<_WindowControls> with WindowListener {
   bool _isMaximized = false;
 
   @override
@@ -377,7 +392,9 @@ class _SftpButton extends StatelessWidget {
           child: Icon(
             Icons.folder_outlined,
             size: 15,
-            color: sftpVisible ? const Color(0xFF2472C8) : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+            color: sftpVisible
+                ? const Color(0xFF2472C8)
+                : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
           ),
         ),
       ),
@@ -412,10 +429,7 @@ class _TransferButton extends StatelessWidget {
   }
 
   void _showMobileSheet(BuildContext context) {
-    showMobileTransferSheet(
-      context: context,
-      manager: manager,
-    );
+    showMobileTransferSheet(context: context, manager: manager);
   }
 
   @override
@@ -463,9 +477,8 @@ class _TransferButton extends StatelessWidget {
         return Tooltip(
           message: 'Transfers',
           child: GestureDetector(
-            onTap: () => isMobile
-                ? _showMobileSheet(ctx)
-                : _showDesktopMenu(ctx),
+            onTap: () =>
+                isMobile ? _showMobileSheet(ctx) : _showDesktopMenu(ctx),
             child: isMobile
                 ? SizedBox(
                     width: 44,
@@ -519,16 +532,23 @@ class _SplitButton extends StatelessWidget {
           height: 36,
           child: Builder(
             builder: (ctx) {
-              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
               final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-              return Row(children: [
-                Icon(Icons.vertical_split, size: 13, color: dim),
-                const SizedBox(width: 8),
-                Text('Split horizontal', style: TextStyle(
-                  color: splitAxis == Axis.horizontal ? const Color(0xFF2472C8) : fg,
-                  fontSize: 13,
-                )),
-              ]);
+              return Row(
+                children: [
+                  Icon(Icons.vertical_split, size: 13, color: dim),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Split horizontal',
+                    style: TextStyle(
+                      color: splitAxis == Axis.horizontal
+                          ? const Color(0xFF2472C8)
+                          : fg,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              );
             },
           ),
         ),
@@ -537,16 +557,23 @@ class _SplitButton extends StatelessWidget {
           height: 36,
           child: Builder(
             builder: (ctx) {
-              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
               final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-              return Row(children: [
-                Icon(Icons.splitscreen, size: 13, color: dim),
-                const SizedBox(width: 8),
-                Text('Split vertical', style: TextStyle(
-                  color: splitAxis == Axis.vertical ? const Color(0xFF2472C8) : fg,
-                  fontSize: 13,
-                )),
-              ]);
+              return Row(
+                children: [
+                  Icon(Icons.splitscreen, size: 13, color: dim),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Split vertical',
+                    style: TextStyle(
+                      color: splitAxis == Axis.vertical
+                          ? const Color(0xFF2472C8)
+                          : fg,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              );
             },
           ),
         ),
@@ -574,7 +601,8 @@ class _SplitButton extends StatelessWidget {
                 ? const Color(0xFF2472C8)
                 : canSplit
                 ? AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive
-                : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withAlpha(80),
+                : (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                      .withAlpha(80),
           ),
         ),
       ),
@@ -657,8 +685,9 @@ class _TabChipState extends State<_TabChip> {
                     style: TextStyle(
                       color: isActive ? fgActive : fgInactive,
                       fontSize: 12,
-                      fontWeight:
-                          isActive ? FontWeight.w500 : FontWeight.normal,
+                      fontWeight: isActive
+                          ? FontWeight.w500
+                          : FontWeight.normal,
                     ),
                   ),
                 )
@@ -671,17 +700,15 @@ class _TabChipState extends State<_TabChip> {
                     style: TextStyle(
                       color: isActive ? fgActive : fgInactive,
                       fontSize: 12,
-                      fontWeight:
-                          isActive ? FontWeight.w500 : FontWeight.normal,
+                      fontWeight: isActive
+                          ? FontWeight.w500
+                          : FontWeight.normal,
                     ),
                   ),
                 ),
               if (widget.showClose) ...[
                 const SizedBox(width: 4),
-                _CloseBtn(
-                  onTap: widget.onClose,
-                  visible: isActive || _hover,
-                ),
+                _CloseBtn(onTap: widget.onClose, visible: isActive || _hover),
               ],
             ],
           ),
@@ -723,8 +750,9 @@ class _CloseBtnState extends State<_CloseBtn> {
             size: 11,
             color: widget.visible
                 ? (_hover
-                    ? AppColors.maybeOf(context)?.foreground ?? _kFgActive
-                    : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                      ? AppColors.maybeOf(context)?.foreground ?? _kFgActive
+                      : AppColors.maybeOf(context)?.foregroundDim ??
+                            _kFgInactive)
                 : Colors.transparent,
           ),
         ),
@@ -748,6 +776,7 @@ class _PlusMenu extends StatelessWidget {
   static const _refreshShellsValue = '__refresh_shells__';
 
   final ValueChanged<LocalShellOption> onNewLocal;
+
   /// Cached list rendered synchronously. Updated by the host via
   /// [onRefreshLocalShells] (background diff; no per-open work).
   final List<LocalShellOption> shells;
@@ -764,7 +793,8 @@ class _PlusMenu extends StatelessWidget {
       builder: (ctx) => Text(
         label,
         style: TextStyle(
-          color: AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
+          color:
+              AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
           fontSize: 10,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.3,
@@ -779,7 +809,7 @@ class _PlusMenu extends StatelessWidget {
         height: 36,
         child: Builder(
           builder: (ctx) {
-            final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+            final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
             final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
             return Row(
               children: [
@@ -796,10 +826,18 @@ class _PlusMenu extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(h.alias,   maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: fg,  fontSize: 13)),
-                      Text(h.displayInfo, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: dim, fontSize: 11)),
+                      Text(
+                        h.alias,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: fg, fontSize: 13),
+                      ),
+                      Text(
+                        h.displayInfo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: dim, fontSize: 11),
+                      ),
                     ],
                   ),
                 ),
@@ -809,22 +847,50 @@ class _PlusMenu extends StatelessWidget {
         ),
       );
 
+  String _shellSubtitle(LocalShellOption shell) {
+    if (shell.arguments.isEmpty) return shell.executable;
+    return '${shell.executable} ${shell.arguments.join(' ')}';
+  }
+
   PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
     value: 'shell:${shell.id}',
-    height: 36,
+    height: 48,
     child: Builder(
       builder: (ctx) {
-        final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+        final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
         final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+        final subtitle = _shellSubtitle(shell);
         return Row(
           children: [
-            Icon(shell.isWsl ? Icons.laptop_windows : Icons.terminal,
-                size: 13, color: dim),
+            Icon(
+              shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+              size: 13,
+              color: dim,
+            ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(shell.displayName, maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: fg, fontSize: 13)),
+              child: Tooltip(
+                message: subtitle,
+                waitDuration: const Duration(milliseconds: 500),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      shell.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: fg, fontSize: 13),
+                    ),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: dim, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         );
@@ -859,12 +925,18 @@ class _PlusMenu extends StatelessWidget {
             height: 32,
             child: Builder(
               builder: (ctx) {
-                final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-                return Row(children: [
-                  Icon(Icons.refresh, size: 13, color: dim),
-                  const SizedBox(width: 8),
-                  Text('Refresh shells', style: TextStyle(color: dim, fontSize: 12)),
-                ]);
+                final dim =
+                    AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
+                return Row(
+                  children: [
+                    Icon(Icons.refresh, size: 13, color: dim),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Refresh shells',
+                      style: TextStyle(color: dim, fontSize: 12),
+                    ),
+                  ],
+                );
               },
             ),
           ),
@@ -884,13 +956,15 @@ class _PlusMenu extends StatelessWidget {
           height: 36,
           child: Builder(
             builder: (ctx) {
-              final fg  = AppColors.maybeOf(ctx)?.foreground    ?? _kFgActive;
+              final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
               final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-              return Row(children: [
-                Icon(Icons.add, size: 13, color: dim),
-                const SizedBox(width: 8),
-                Text('New SSH…', style: TextStyle(color: fg, fontSize: 13)),
-              ]);
+              return Row(
+                children: [
+                  Icon(Icons.add, size: 13, color: dim),
+                  const SizedBox(width: 8),
+                  Text('New SSH…', style: TextStyle(color: fg, fontSize: 13)),
+                ],
+              );
             },
           ),
         ),
@@ -940,7 +1014,11 @@ class _PlusMenu extends StatelessWidget {
           width: 28,
           height: 28,
           alignment: Alignment.center,
-          child: Icon(Icons.add, size: 15, color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive),
+          child: Icon(
+            Icons.add,
+            size: 15,
+            color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+          ),
         ),
       ),
     );

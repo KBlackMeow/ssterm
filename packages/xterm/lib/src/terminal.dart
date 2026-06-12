@@ -68,6 +68,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   final TerminalTargetPlatform platform;
 
   /// vim / strict DEC compatibility toggles (alt buffer scroll, DECSC/DECRC).
+  @override
   final TerminalCompat compat;
 
   /// Characters that break selection when double clicking. If not set, the

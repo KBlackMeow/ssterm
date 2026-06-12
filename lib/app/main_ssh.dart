@@ -6,7 +6,6 @@ part of '../main.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
-
   // ── Host list ──────────────────────────────────────────────────────────────
 
   Future<void> _loadSshHosts() async {
@@ -27,11 +26,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
   // ── SSH / SFTP ─────────────────────────────────────────────────────────────
 
-  Future<void> _showConnectDialog({SshHost? initialHost, required BuildContext ctx}) async {
-    final profile = await showConnectDialog(
-      ctx,
-      initialHost: initialHost,
-    );
+  Future<void> _showConnectDialog({
+    SshHost? initialHost,
+    required BuildContext ctx,
+  }) async {
+    final profile = await showConnectDialog(ctx, initialHost: initialHost);
     if (profile == null || !mounted) return;
     await _rememberHostProfile(profile);
     if (!mounted) return;
@@ -53,13 +52,14 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     hosts.removeWhere((h) => h.profileKey == updated.profileKey);
     hosts.add(updated);
     await SavedHostsStore.save(hosts);
+    if (original != null) {
+      await SavedHostsStore.deleteStaleCredentials(original, updated);
+    }
     if (mounted) await _loadSshHosts();
   }
 
   Future<void> _deleteSavedHost(SshHost host) async {
-    final hosts = await SavedHostsStore.load();
-    hosts.removeWhere((h) => h.profileKey == host.profileKey);
-    await SavedHostsStore.save(hosts);
+    await SavedHostsStore.deleteHost(host);
     if (mounted) await _loadSshHosts();
   }
 
@@ -214,9 +214,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       unawaited(
         fwdService.startAll(r.client, r.profile.forwardRules).catchError((e) {
           if (mounted) {
-            tab.terminal?.write(
-              '[Port forward error: $e]\r\n',
-            );
+            tab.terminal?.write('[Port forward error: $e]\r\n');
           }
         }),
       );
@@ -233,7 +231,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           tab.keepaliveInFlight = true;
           try {
             await r.client.run('true').timeout(const Duration(seconds: 5));
-          } catch (_) {} finally {
+          } catch (_) {
+          } finally {
             tab.keepaliveInFlight = false;
           }
         },
@@ -264,13 +263,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     unawaited(_runConnectionForTab(tab));
   }
 
-  Future<void> _editAndRetryConnectingTab(_Tab tab, {required BuildContext ctx}) async {
+  Future<void> _editAndRetryConnectingTab(
+    _Tab tab, {
+    required BuildContext ctx,
+  }) async {
     final profile = tab.sshProfile;
     if (profile == null) return;
-    final updated = await showConnectDialog(
-      ctx,
-      initialHost: profile,
-    );
+    final updated = await showConnectDialog(ctx, initialHost: profile);
     if (updated == null || !mounted) return;
     await _rememberHostProfile(updated);
     if (!mounted) return;
@@ -409,6 +408,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       final oldSession = tab.sshSession;
       final oldClient = tab.sshClient;
       final oldJump = tab.jumpClient;
+      final oldSftp = tab.sftp;
+      final oldTransferManager = tab.transferManager;
       tab.keepaliveTimer?.cancel();
       tab.forwardService?.stopAll();
       tab.clearSplit();
@@ -421,6 +422,27 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         try {
           logger = await SessionLogger.create(profile.alias);
         } catch (_) {}
+      }
+
+      SftpClient? sftp;
+      TransferManager? transferManager;
+      var remoteHome = tab.remotePath?.value ?? '/';
+      try {
+        sftp = await result.client.sftp();
+        transferManager = TransferManager(sshProfile: result.profile);
+        remoteHome = await fetchRemoteHome(result.client);
+      } catch (e) {
+        tab.terminal?.write('[SFTP unavailable after reconnect: $e]\r\n');
+      }
+
+      if (!mounted || tab.manuallyDisconnected) {
+        logger?.close();
+        sftp?.close();
+        transferManager?.dispose();
+        result.session?.close();
+        result.client.close();
+        result.jumpClient?.close();
+        return;
       }
 
       final pipe = OutputPipe(
@@ -449,7 +471,14 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.sshSession = session;
       tab.sshClient = result.client;
       tab.jumpClient = result.jumpClient;
+      tab.sftp = sftp;
+      tab.transferManager = transferManager;
+      tab.remoteCwdPane0 = remoteHome;
+      tab.remoteCwdPane1 = null;
+      tab.remotePath?.value = remoteHome;
 
+      oldSftp?.close();
+      oldTransferManager?.dispose();
       oldSession?.close();
       oldClient?.close();
       oldJump?.close();
@@ -458,7 +487,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         final fwdService = PortForwardService();
         tab.forwardService = fwdService;
         unawaited(
-          fwdService.startAll(result.client, profile.forwardRules).catchError((e) {
+          fwdService.startAll(result.client, profile.forwardRules).catchError((
+            e,
+          ) {
             if (mounted) {
               tab.terminal?.write('[Port forward error: $e]\r\n');
             }
@@ -518,8 +549,10 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         tab.reconnectAttempt = 0;
         return;
       }
-      final delaySeconds =
-          (1 << tab.reconnectAttempt).clamp(2, 60); // 2,4,8,16,32,60,60,…
+      final delaySeconds = (1 << tab.reconnectAttempt).clamp(
+        2,
+        60,
+      ); // 2,4,8,16,32,60,60,…
       tab.terminal?.write(
         '[Retry ${tab.reconnectAttempt}/$maxAttempts in ${delaySeconds}s…]\r\n',
       );
@@ -682,7 +715,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     if (!cmd.contains('\n')) return cmd;
     // POSIX-safe: close the single-quoted region, escape one `'`, reopen.
     final escaped = cmd.replaceAll("'", "'\\''");
-    return r"${SSTM_SHELL_BIN:-sh} -c '" "$escaped" "'";
+    return r"${SSTM_SHELL_BIN:-sh} -c '"
+        "$escaped"
+        "'";
   }
 
   /// Executes [cmd] on [tab]'s active pane, waits for it to finish, and
@@ -816,7 +851,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         'shell may still be busy',
       );
       return CommandResult(
-        output: '[ssterm capture] command exceeded '
+        output:
+            '[ssterm capture] command exceeded '
             '${osc133Timeout.inSeconds}s without producing its OSC 133 ;D '
             'marker; Ctrl-C was sent but the shell did not return to a '
             'prompt. The command may still be running — please switch to '
@@ -838,7 +874,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     // Use a parenthesised group + `printf` so the marker is emitted whether the
     // command exits 0 or non-zero; `; echo` would lose the original $? without
     // saving it first.
-    _executeOnTab(tab)('$wrapped; __ssterm_ec=\$?; printf "$marker:%s\\n" "\$__ssterm_ec"');
+    _executeOnTab(tab)(
+      '$wrapped; __ssterm_ec=\$?; printf "$marker:%s\\n" "\$__ssterm_ec"',
+    );
 
     final stopwatch = Stopwatch()..start();
     const pollInterval = Duration(milliseconds: 200);
@@ -916,7 +954,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           'shell may still be busy',
         );
         return CommandResult(
-          output: '[ssterm capture] command exceeded '
+          output:
+              '[ssterm capture] command exceeded '
               '${maxWait.inSeconds}s without producing its sentinel; '
               'Ctrl-C was sent but the shell did not return to a prompt. '
               'The command may still be running — please switch to the '
@@ -956,7 +995,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       'elapsed=${stopwatch.elapsedMilliseconds}ms truncated=$wasTruncated '
       'timedOut=$timedOut',
     );
-    return CommandResult(output: cleaned, exitCode: exitCode, truncated: wasTruncated);
+    return CommandResult(
+      output: cleaned,
+      exitCode: exitCode,
+      truncated: wasTruncated,
+    );
   }
 
   /// Quote a value for safe inclusion in a structured log record — the

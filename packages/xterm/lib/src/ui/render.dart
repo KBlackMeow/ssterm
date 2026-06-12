@@ -187,8 +187,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   void _onScroll() {
     final lineHeight = _painter.cellSize.height;
-    _stickToBottom =
-        (_maxScrollExtent - _offset.pixels).abs() < lineHeight / 2;
+    _stickToBottom = (_maxScrollExtent - _offset.pixels).abs() < lineHeight / 2;
     markNeedsPaint();
     _scheduleNotifyEditableRect();
   }

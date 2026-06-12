@@ -10,7 +10,6 @@ part of '../main.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
-
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   bool get _activeTabCanSplit {
@@ -27,8 +26,9 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   Widget _buildChrome() {
     final ts = _config.terminal;
     final hasWallpaper = ts.hasWallpaper;
-    final wallpaperFile =
-        hasWallpaper ? WallpaperStorage.resolveFile(ts.wallpaperId) : null;
+    final wallpaperFile = hasWallpaper
+        ? WallpaperStorage.resolveFile(ts.wallpaperId)
+        : null;
 
     return Builder(
       builder: (innerCtx) {
@@ -125,8 +125,9 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         }
 
         return Scaffold(
-          backgroundColor:
-              wallpaperFile != null ? Colors.transparent : ts.chromeBackground,
+          backgroundColor: wallpaperFile != null
+              ? Colors.transparent
+              : ts.chromeBackground,
           body: chrome,
         );
       },
@@ -137,8 +138,9 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
 
   Widget _buildMobileChrome() {
     final ts = _config.terminal;
-    final activeTab =
-        _tabs.isNotEmpty && _active < _tabs.length ? _tabs[_active] : null;
+    final activeTab = _tabs.isNotEmpty && _active < _tabs.length
+        ? _tabs[_active]
+        : null;
     final hasSftp =
         activeTab?.sftp != null && activeTab?.transferManager != null;
     final hasTerminal = activeTab?.terminal != null;
@@ -199,13 +201,13 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       // Mirror the desktop _TabBar wiring so mobile and
                       // chrome stay in sync — without this the AI panel
                       // could be opened only on desktop.
-                      aiPanelVisible: hasTerminal &&
-                          _tabs[_active].aiPanelVisible,
+                      aiPanelVisible:
+                          hasTerminal && _tabs[_active].aiPanelVisible,
                       onToggleAiPanel: hasTerminal
                           ? () => setState(
-                                () => _tabs[_active].aiPanelVisible =
-                                    !_tabs[_active].aiPanelVisible,
-                              )
+                              () => _tabs[_active].aiPanelVisible =
+                                  !_tabs[_active].aiPanelVisible,
+                            )
                           : null,
                       terminalBody: _buildTerminalArea(),
                       chromeBackground: ts.chromeBackground,
@@ -245,8 +247,8 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                       },
                       chromeBackground: uiBackground,
                     ),
-                    ],
-                  ),
+                  ],
+                ),
               ),
               _MobileBottomBar(
                 activeTabIndex: _mobileTabIndex,
@@ -375,11 +377,13 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       onInsert: tab.terminal != null ? (cmd) => tab.terminal!.paste(cmd) : null,
       onExecute: tab.terminal != null ? _executeOnTab(tab) : null,
       onExecuteAsync: tab.terminal != null
-          ? (String cmd, {isCancelled}) => _executeAndCapture(tab, cmd, isCancelled: isCancelled)
+          ? (String cmd, {isCancelled}) =>
+                _executeAndCapture(tab, cmd, isCancelled: isCancelled)
           : null,
       agentConfig: _config.agent,
-      onGetShellIntegrationActive:
-          tab.terminal != null ? () => _activePaneHasShellIntegration(tab) : null,
+      onGetShellIntegrationActive: tab.terminal != null
+          ? () => _activePaneHasShellIntegration(tab)
+          : null,
       // Pass the terminal pane's background through so AI-reply code
       // blocks render on the SAME color as the terminal next to them
       // (via a Theme override that swaps `colorScheme.onInverseSurface`
@@ -500,7 +504,8 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
             Text(
               'You can switch tabs while waiting.',
               style: TextStyle(
-                color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                color:
+                    AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
                 fontSize: 13,
               ),
             ),
@@ -514,72 +519,76 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     final alias = tab.sshProfile?.alias ?? tab.title;
     return Builder(
       builder: (innerCtx) => Container(
-      color: _config.terminal.chromeBackground,
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6E67).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFFFF6E67).withValues(alpha: 0.25),
-                    width: 0.5,
+        color: _config.terminal.chromeBackground,
+        alignment: Alignment.center,
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6E67).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: const Color(0xFFFF6E67).withValues(alpha: 0.25),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.wifi_off_rounded,
+                    size: 26,
+                    color: Color(0xFFFF6E67),
                   ),
                 ),
-                child: const Icon(
-                  Icons.wifi_off_rounded,
-                  size: 26,
-                  color: Color(0xFFFF6E67),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                alias,
-                style: TextStyle(
-                  color: AppColors.maybeOf(innerCtx)?.foreground ?? _kFgActive,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                tab.connectionError ?? 'Connection failed',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.maybeOf(innerCtx)?.foregroundDim ?? _kFgInactive,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _Ios26Button(
-                    label: 'Retry',
-                    icon: Icons.refresh_rounded,
-                    onPressed: () => _retryConnectingTab(tab),
+                const SizedBox(height: 18),
+                Text(
+                  alias,
+                  style: TextStyle(
+                    color:
+                        AppColors.maybeOf(innerCtx)?.foreground ?? _kFgActive,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
                   ),
-                  const SizedBox(width: 10),
-                  _Ios26Button(
-                    label: 'Edit…',
-                    icon: Icons.edit_outlined,
-                    onPressed: () => _editAndRetryConnectingTab(tab, ctx: innerCtx),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  tab.connectionError ?? 'Connection failed',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color:
+                        AppColors.maybeOf(innerCtx)?.foregroundDim ??
+                        _kFgInactive,
+                    fontSize: 13,
                   ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _Ios26Button(
+                      label: 'Retry',
+                      icon: Icons.refresh_rounded,
+                      onPressed: () => _retryConnectingTab(tab),
+                    ),
+                    const SizedBox(width: 10),
+                    _Ios26Button(
+                      label: 'Edit…',
+                      icon: Icons.edit_outlined,
+                      onPressed: () =>
+                          _editAndRetryConnectingTab(tab, ctx: innerCtx),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }

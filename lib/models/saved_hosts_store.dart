@@ -55,9 +55,52 @@ class SavedHostsStore {
 
   static Future<void> upsert(SshHost host) async {
     final hosts = await load();
+    final stale = hosts.where((h) => h.profileKey == host.profileKey).toList();
     hosts.removeWhere((h) => h.profileKey == host.profileKey);
     hosts.add(host);
     await save(hosts);
+    for (final h in stale) {
+      await deleteStaleCredentials(h, host);
+    }
+  }
+
+  static Future<void> deleteHost(SshHost host) async {
+    final hosts = await load();
+    hosts.removeWhere((h) => h.profileKey == host.profileKey);
+    await save(hosts);
+    await deleteCredentials(host);
+  }
+
+  static Future<void> deleteCredentials(SshHost host) async {
+    try {
+      await CredentialStorage.delete(host.profileKey);
+    } catch (_) {}
+    final jump = host.jumpHost;
+    if (jump != null) {
+      await deleteCredentials(jump);
+    }
+  }
+
+  static Future<void> deleteStaleCredentials(
+    SshHost oldHost,
+    SshHost newHost,
+  ) async {
+    final keep = _credentialKeys(newHost);
+    for (final key in _credentialKeys(oldHost)) {
+      if (keep.contains(key)) continue;
+      try {
+        await CredentialStorage.delete(key);
+      } catch (_) {}
+    }
+  }
+
+  static Set<String> _credentialKeys(SshHost host) {
+    final keys = <String>{host.profileKey};
+    final jump = host.jumpHost;
+    if (jump != null) {
+      keys.addAll(_credentialKeys(jump));
+    }
+    return keys;
   }
 
   static Future<SshHost> _hostFromStorage(Map<String, dynamic> json) async {

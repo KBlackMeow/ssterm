@@ -34,6 +34,16 @@ int sftpEntryRank({required bool isDirectory, required bool isSymbolicLink}) {
   return 2;
 }
 
+String? sftpEntryNameError(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return 'Name cannot be empty';
+  if (trimmed == '.' || trimmed == '..') return 'Name cannot be "." or ".."';
+  if (trimmed.contains('/') || trimmed.contains('\u0000')) {
+    return 'Name cannot contain path separators';
+  }
+  return null;
+}
+
 String _sftpFmtSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} K';
@@ -115,6 +125,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   SftpName? _selected;
   String? _status;
   bool _isDragOver = false;
+  int _listRequestId = 0;
 
   String get currentPath => _path;
 
@@ -153,6 +164,8 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
 
   @override
   Future<void> _listDir(String path) async {
+    final requestId = ++_listRequestId;
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -170,7 +183,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
             ));
         return r != 0 ? r : a.filename.compareTo(b.filename);
       });
-      if (mounted) {
+      if (mounted && requestId == _listRequestId) {
         setState(() {
           _path = path;
           _entries = raw.where((e) => e.filename != '.').toList();
@@ -178,7 +191,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _listRequestId) {
         setState(() {
           _loading = false;
           _error = e.toString();
@@ -337,12 +350,19 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         child: _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
       ),
     );
-    if (name == null || name.isEmpty || name == entry.filename) return;
+    if (name == null) return;
+    final trimmed = name.trim();
+    if (trimmed == entry.filename) return;
+    final error = sftpEntryNameError(trimmed);
+    if (error != null) {
+      if (mounted) setState(() => _status = error);
+      return;
+    }
 
     try {
       await widget.sftp.rename(
         sftpJoin(_path, entry.filename),
-        sftpJoin(_path, name),
+        sftpJoin(_path, trimmed),
       );
       _listDir(_path);
     } catch (e) {
@@ -361,10 +381,16 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         child: _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
       ),
     );
-    if (name == null || name.isEmpty) return;
+    if (name == null) return;
+    final trimmed = name.trim();
+    final error = sftpEntryNameError(trimmed);
+    if (error != null) {
+      if (mounted) setState(() => _status = error);
+      return;
+    }
 
     try {
-      await widget.sftp.mkdir(sftpJoin(_path, name));
+      await widget.sftp.mkdir(sftpJoin(_path, trimmed));
       _listDir(_path);
     } catch (e) {
       if (mounted) setState(() => _status = 'Error: $e');
@@ -951,4 +977,3 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   }
 
 }
-

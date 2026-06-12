@@ -87,8 +87,6 @@ class AppTab {
     required this.kind,
     required this.title,
     this.localShell,
-    this.terminal,
-    this.localPath,
     this.sshProfile,
   });
 

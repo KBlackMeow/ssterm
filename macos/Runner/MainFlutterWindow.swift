@@ -8,6 +8,7 @@ class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
+    self.appearance = NSAppearance(named: .vibrantDark)
     setContentSize(Self.defaultContentSize)
     center()
 

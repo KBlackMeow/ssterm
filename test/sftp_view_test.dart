@@ -95,4 +95,21 @@ void main() {
       expect(sftpParent(joined), equals('/'));
     });
   });
+
+  group('sftpEntryNameError', () {
+    test('allows a plain filename', () {
+      expect(sftpEntryNameError('notes.txt'), isNull);
+    });
+
+    test('rejects empty, dot, and dot-dot names', () {
+      expect(sftpEntryNameError('   '), isNotNull);
+      expect(sftpEntryNameError('.'), isNotNull);
+      expect(sftpEntryNameError('..'), isNotNull);
+    });
+
+    test('rejects path-like names', () {
+      expect(sftpEntryNameError('../escape'), isNotNull);
+      expect(sftpEntryNameError('nested/dir'), isNotNull);
+    });
+  });
 }
