@@ -353,13 +353,23 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// least one cell is selected even if [from] and [to] are same.
   void selectCharacters(Offset from, [Offset? to]) {
     final fromPosition = getCellOffset(from);
-    if (to == null) {
+    selectCharactersFromCellOffset(
+      fromPosition,
+      to == null ? null : getCellOffset(to),
+    );
+  }
+
+  /// Selects characters in the terminal from a stable buffer cell offset.
+  /// Useful while autoscrolling, where the original screen offset no longer
+  /// maps to the same buffer line after the viewport moves.
+  void selectCharactersFromCellOffset(CellOffset fromPosition,
+      [CellOffset? toPosition]) {
+    if (toPosition == null) {
       _controller.setSelection(
         _terminal.buffer.createAnchorFromOffset(fromPosition),
         _terminal.buffer.createAnchorFromOffset(fromPosition),
       );
     } else {
-      var toPosition = getCellOffset(to);
       if (toPosition.x >= fromPosition.x) {
         toPosition = CellOffset(toPosition.x + 1, toPosition.y);
       }

@@ -388,6 +388,31 @@ class TerminalViewState extends State<TerminalView> {
         renderTerminal.cellSize;
   }
 
+  /// Scroll the main-buffer viewport by [delta] pixels during drag selection.
+  /// Returns true when the scroll position changed.
+  bool scrollBy(double delta) {
+    if (widget.terminal.isUsingAltBuffer) {
+      return false;
+    }
+
+    final position = _scrollableKey.currentState?.position;
+    if (position == null || !_scrollController.hasClients) {
+      return false;
+    }
+
+    final target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+
+    if (target == position.pixels) {
+      return false;
+    }
+
+    position.jumpTo(target);
+    return true;
+  }
+
   void _onTapUp(TapUpDetails details) {
     final offset = renderTerminal.getCellOffset(details.localPosition);
     widget.onTapUp?.call(details, offset);
