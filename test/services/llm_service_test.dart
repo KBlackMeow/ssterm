@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/agent_config.dart';
 import 'package:ssterm/models/skill.dart';
@@ -183,6 +185,140 @@ ls /tmp/some-dir
     });
   });
 
+  group('LlmService.extractToolCalls', () {
+    test('extracts canonical fenced tool_call JSON', () {
+      const input = '''
+I'll list files.
+
+```tool_call
+{"id":"call_ls","name":"bash","arguments":{"command":"ls -la"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls, hasLength(1));
+      expect(calls.first.id, equals('call_ls'));
+      expect(calls.first.name, equals('bash'));
+      expect(calls.first.command, equals('ls -la'));
+      expect(calls.first.legacyMarkdown, isFalse);
+      expect(LlmService.extractCommands(input), equals(['ls -la']));
+    });
+
+    test('prefers structured calls over legacy bash fences', () {
+      const input = '''
+Example only:
+
+```bash
+echo old
+```
+
+Now the real call:
+
+```tool_call
+{"id":"call_real","name":"bash","arguments":{"command":"echo new"}}
+```
+''';
+      expect(LlmService.extractCommands(input), equals(['echo new']));
+    });
+
+    test('accepts OpenAI function-style arguments as a JSON string', () {
+      const input = r'''
+```tool_call
+{"id":"call_fn","type":"function","function":{"name":"bash","arguments":"{\"command\":\"pwd\"}"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.id, equals('call_fn'));
+      expect(calls.single.command, equals('pwd'));
+    });
+
+    test('accepts Anthropic tool_use input shape', () {
+      const input = '''
+```tool_call
+{"type":"tool_use","id":"toolu_1","name":"bash","input":{"command":"whoami"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.id, equals('toolu_1'));
+      expect(calls.single.command, equals('whoami'));
+    });
+
+    test('accepts MCP tools/call params shape', () {
+      const input = '''
+```tool_call
+{"method":"tools/call","params":{"name":"bash","arguments":{"command":"uname -a"}}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.name, equals('bash'));
+      expect(calls.single.command, equals('uname -a'));
+    });
+
+    test('extracts structured use_skill calls', () {
+      const input = '''
+```tool_call
+{"id":"call_skill","name":"use_skill","arguments":{"skill_id":"verify-fix"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.id, equals('call_skill'));
+      expect(calls.single.isUseSkill, isTrue);
+      expect(calls.single.skillId, equals('verify-fix'));
+      expect(LlmService.extractCommands(input), isEmpty);
+    });
+
+    test('extracts structured web_search calls', () {
+      const input = '''
+```tool_call
+{"id":"call_search","name":"web_search","arguments":{"query":"Flutter 3.35 release notes"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.isWebSearch, isTrue);
+      expect(calls.single.query, equals('Flutter 3.35 release notes'));
+      expect(LlmService.extractCommands(input), isEmpty);
+    });
+
+    test('extracts structured write_file calls', () {
+      const input = r'''
+```tool_call
+{"id":"call_write","name":"write_file","arguments":{"path":"/tmp/a.txt","content":"hello\n"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.isWriteFile, isTrue);
+      expect(calls.single.path, equals('/tmp/a.txt'));
+      expect(calls.single.content, equals('hello\n'));
+      expect(LlmService.extractCommands(input), isEmpty);
+    });
+
+    test('extracts a tool_calls array with mixed supported tools', () {
+      const input = '''
+```tool_call
+{"tool_calls":[
+  {"id":"call_search","name":"web_search","arguments":{"query":"ssterm"}},
+  {"id":"call_shell","name":"bash","arguments":{"command":"pwd"}}
+]}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.map((c) => c.id), equals(['call_search', 'call_shell']));
+      expect(calls.first.isWebSearch, isTrue);
+      expect(calls.last.isShell, isTrue);
+      expect(LlmService.extractCommands(input), equals(['pwd']));
+    });
+
+    test('falls back to legacy bash fences as legacy tool calls', () {
+      const input = '''
+```bash
+date
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.command, equals('date'));
+      expect(calls.single.legacyMarkdown, isTrue);
+    });
+  });
+
   group('LlmService completion markers', () {
     test('plain [TASK_COMPLETE] is detected and stripped', () {
       const input = 'All done.\n\n[TASK_COMPLETE]';
@@ -287,6 +423,34 @@ It is Friday.
 
       final stripped = LlmService.stripCompletionMarkers(input);
       expect(stripped, equals('```bash\ndate\n```'));
+    });
+
+    test('structured shell tool_call renders as a bash block for display', () {
+      const input = '''
+I'll check the current directory.
+
+```tool_call
+{"id":"call_pwd","name":"bash","arguments":{"command":"pwd"}}
+```
+''';
+      final stripped = LlmService.stripCompletionMarkers(input);
+      expect(stripped, contains('```bash\npwd\n```'));
+      expect(stripped.contains('tool_call'), isFalse);
+      expect(stripped.contains('"arguments"'), isFalse);
+    });
+
+    test('structured non-shell tool_calls are hidden from display text', () {
+      const input = '''
+I'll load the relevant skill.
+
+```tool_call
+{"id":"call_skill","name":"use_skill","arguments":{"skill_id":"verify-fix"}}
+```
+''';
+      expect(
+        LlmService.stripCompletionMarkers(input),
+        equals("I'll load the relevant skill."),
+      );
     });
   });
 
@@ -663,18 +827,19 @@ Done.
 
     test('disabled set never embeds <agent_skills>', () async {
       // With NO skills enabled, the `<agent_skills>` block must be
-      // omitted entirely so the model isn't tempted to emit USE_SKILL
-      // markers for something it can't reach.  (Mirrors Cursor's
-      // policy: never advertise a tool the agent cannot use.)
+      // omitted entirely so the model isn't tempted to call a tool it
+      // can't reach.  (Mirrors Cursor's policy: never advertise a tool
+      // the agent cannot use.)
       final prompt = LlmService.systemPromptFor(enabledSkillIds: <String>{});
       expect(prompt.contains('<agent_skills>'), isFalse);
       expect(prompt.contains('<available_skills'), isFalse);
       expect(prompt.contains('[USE_SKILL'), isFalse);
+      expect(prompt.contains('"name":"use_skill"'), isFalse);
     });
 
-    test('webSearchEnabled=false omits <web_search_tool> and the marker', () {
+    test('webSearchEnabled=false omits <web_search_tool> and the tool', () {
       // Symmetric to the skills check above: never advertise a tool we
-      // cannot fire — the model would emit the marker and the agent
+      // cannot fire — the model would emit the tool call and the agent
       // loop would have to refuse mid-loop.
       final prompt = LlmService.systemPromptFor(
         enabledSkillIds: <String>{},
@@ -682,20 +847,21 @@ Done.
       );
       expect(prompt.contains('<web_search_tool>'), isFalse);
       expect(prompt.contains('[WEB_SEARCH'), isFalse);
+      expect(prompt.contains('"name":"web_search"'), isFalse);
     });
 
-    test('webSearchEnabled=true injects <web_search_tool> with the marker', () {
+    test('webSearchEnabled=true injects <web_search_tool> with tool_call', () {
       final prompt = LlmService.systemPromptFor(
         enabledSkillIds: <String>{},
         webSearchEnabled: true,
       );
       expect(prompt.contains('<web_search_tool>'), isTrue);
-      // Marker advertised in the prompt so the model knows the exact
-      // syntax to emit — no guessing.
-      expect(prompt.contains('[WEB_SEARCH: <query>]'), isTrue);
+      expect(prompt.contains('"name":"web_search"'), isTrue);
+      expect(prompt.contains('[WEB_SEARCH'), isFalse);
       // Worked example present (matches the format we emphasised in
       // _buildWebSearchBlock).
       expect(prompt.contains('Example INVESTIGATE turn:'), isTrue);
+      expect(prompt.contains('`tool_call`'), isTrue);
     });
 
     test('toggling webSearchEnabled invalidates the cache once', () {
@@ -717,29 +883,27 @@ Done.
       expect(identical(b, c), isTrue);
     });
 
-    test('fileWriteEnabled=false omits <file_write_tool> and the marker', () {
+    test('fileWriteEnabled=false omits <file_write_tool> and the tool', () {
       final prompt = LlmService.systemPromptFor(
         enabledSkillIds: <String>{},
         fileWriteEnabled: false,
       );
       // Never advertise a tool we can't fire — same rule as skills /
-      // web search.  Without this the model would emit
-      // [WRITE_FILE_BEGIN] and the agent loop would have to refuse
-      // mid-loop.
+      // web search.
       expect(prompt.contains('<file_write_tool>'), isFalse);
       expect(prompt.contains('[WRITE_FILE_BEGIN'), isFalse);
+      expect(prompt.contains('"name":"write_file"'), isFalse);
     });
 
-    test('fileWriteEnabled=true injects <file_write_tool> with the marker', () {
+    test('fileWriteEnabled=true injects <file_write_tool> with tool_call', () {
       final prompt = LlmService.systemPromptFor(
         enabledSkillIds: <String>{},
         fileWriteEnabled: true,
       );
       expect(prompt.contains('<file_write_tool>'), isTrue);
-      // Both halves of the marker pair must be in the prompt — the
-      // model needs to know how to OPEN AND CLOSE the block.
-      expect(prompt.contains('[WRITE_FILE_BEGIN:'), isTrue);
-      expect(prompt.contains('[WRITE_FILE_END]'), isTrue);
+      expect(prompt.contains('"name":"write_file"'), isTrue);
+      expect(prompt.contains('[WRITE_FILE_BEGIN'), isFalse);
+      expect(prompt.contains('[WRITE_FILE_END]'), isFalse);
       // Apply-card policy hammered explicitly (no surprises).
       expect(prompt.contains('click Apply'), isTrue);
     });
@@ -784,6 +948,22 @@ Done.
       expect(identical(webOnFileOn, webOffFileOn), isFalse);
       expect(identical(webOnFileOn, webOnFileOff), isFalse);
       expect(identical(webOffFileOn, webOnFileOff), isFalse);
+    });
+
+    test('all advertised tool_call examples are valid JSON', () {
+      final prompt = LlmService.systemPromptFor(
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: true,
+      );
+      final matches = RegExp(
+        r'```tool_call\s*\n([\s\S]*?)```',
+        caseSensitive: false,
+      ).allMatches(prompt);
+      expect(matches, isNotEmpty);
+      for (final match in matches) {
+        final json = match.group(1)!.trim();
+        expect(() => jsonDecode(json), returnsNormally, reason: json);
+      }
     });
   });
 

@@ -295,9 +295,11 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
     }
     // Suffix randomness: timestamp + microsecond + isolate hash gives
     // collision-safe naming without depending on `package:uuid`.
-    final tmp = File('$resolved.ssterm-tmp-'
-        '${DateTime.now().microsecondsSinceEpoch}-'
-        '${identityHashCode(this)}');
+    final tmp = File(
+      '$resolved.ssterm-tmp-'
+      '${DateTime.now().microsecondsSinceEpoch}-'
+      '${identityHashCode(this)}',
+    );
     try {
       // writeAsString already fsync-ish on dart:io for the file body;
       // rename() then makes the swap atomic at the directory level
@@ -369,7 +371,8 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       // resolve to the .app bundle on macOS, which is never what the
       // user wants.
       final cwd = cwdProvider?.call();
-      if (cwd != null && cwd.isNotEmpty &&
+      if (cwd != null &&
+          cwd.isNotEmpty &&
           (cwd.startsWith('/') || _isWindowsAbsolute(cwd))) {
         p = _joinPath(cwd, p);
       } else {
@@ -377,11 +380,11 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
           FileWriteErrorKind.invalidPath,
           cwd == null || cwd.isEmpty
               ? 'Path must be absolute (start with `/`, `~`, or a '
-                  'drive letter): $p\n'
-                  '(Terminal PWD is not known yet — type a command in '
-                  'the shell so OSC 7 reports it, then retry.)'
+                    'drive letter): $p\n'
+                    '(Terminal PWD is not known yet — type a command in '
+                    'the shell so OSC 7 reports it, then retry.)'
               : 'Path must be absolute (start with `/`, `~`, or a '
-                  'drive letter): $p',
+                    'drive letter): $p',
         );
       }
     }
@@ -402,7 +405,7 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
     final isLetter = (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
     return isLetter &&
         p.codeUnitAt(1) == 0x3A /* : */ &&
-        (p.codeUnitAt(2) == 0x2F /* / */ || p.codeUnitAt(2) == 0x5C /* \\ */);
+        (p.codeUnitAt(2) == 0x2F /* / */ || p.codeUnitAt(2) == 0x5C /* \\ */ );
   }
 
   String _dirname(String p) {
@@ -578,7 +581,8 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
       final cur = await client.stat(resolved);
       if (expectedMtime != null && cur.modifyTime != null) {
         final curDt = DateTime.fromMillisecondsSinceEpoch(
-            cur.modifyTime! * 1000);
+          cur.modifyTime! * 1000,
+        );
         if (curDt.difference(expectedMtime).abs() >
             const Duration(seconds: 1)) {
           throw FileWriteException(
@@ -602,13 +606,15 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
 
     // Write to a sibling temp path and rename onto the target — same
     // atomicity recipe as the local adapter, just using SFTP ops.
-    final tmpPath = '$resolved.ssterm-tmp-'
+    final tmpPath =
+        '$resolved.ssterm-tmp-'
         '${DateTime.now().microsecondsSinceEpoch}-'
         '${identityHashCode(this)}';
     try {
       final remote = await client.open(
         tmpPath,
-        mode: SftpFileOpenMode.write |
+        mode:
+            SftpFileOpenMode.write |
             SftpFileOpenMode.create |
             SftpFileOpenMode.truncate,
       );
@@ -645,10 +651,7 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
         await client.remove(tmpPath);
       } catch (_) {}
       if (e is FileWriteException) rethrow;
-      throw FileWriteException(
-        FileWriteErrorKind.io,
-        'SFTP write failed: $e',
-      );
+      throw FileWriteException(FileWriteErrorKind.io, 'SFTP write failed: $e');
     }
 
     DateTime? mtime;
@@ -777,7 +780,7 @@ class FileWriteService {
         'path: $path\n'
         'reason: $why\n\n'
         'The user declined this write. Do NOT re-emit the same '
-        '[WRITE_FILE_BEGIN] for the same path. Either ask the user '
+        'write_file tool call for the same path. Either ask the user '
         'what to change, propose a different path, or proceed without '
         'the write.';
   }
@@ -790,9 +793,9 @@ class FileWriteService {
       FileWriteErrorKind.invalidPath =>
         'Path resolution failed. Prefer an ABSOLUTE path (starting with `/`). `~/…` works on BOTH local and SSH tabs (ssterm expands it for you over SFTP). Relative paths resolve against the active terminal pane\'s PWD only when OSC 7 has reported one — the upstream `message` above says whether the PWD was known. When unsure, reuse the absolute PWD or HOME shown in the `<session_context>` block from earlier in this conversation.',
       FileWriteErrorKind.parentMissing =>
-        'Run `mkdir -p <parent>` via bash FIRST, then retry [WRITE_FILE_BEGIN].',
+        'Run `mkdir -p <parent>` via bash FIRST, then retry write_file.',
       FileWriteErrorKind.mtimeMismatch =>
-        'The file changed under you. Re-read it with `cat` to see the current contents, then issue a NEW [WRITE_FILE_BEGIN] reflecting that state.',
+        'The file changed under you. Re-read it with `cat` to see the current contents, then issue a NEW write_file tool call reflecting that state.',
       FileWriteErrorKind.permission =>
         'Permission denied. Tell the user the path needs to be writable (or `sudo`-owned) — do NOT retry with the same path until they confirm.',
       FileWriteErrorKind.io =>

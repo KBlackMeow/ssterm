@@ -30,7 +30,12 @@ part of 'ai_assistant_panel.dart';
 // ───────────────────────────────────────────────────────────────────────────
 
 extension _AiAgentLoopExt on _AiAssistantOverlayState {
-  String _formatCommandFeedback(String cmd, CommandResult? result) {
+  String _formatCommandFeedback(
+    String cmd,
+    CommandResult? result, {
+    String? toolCallId,
+    String toolName = 'bash',
+  }) {
     final exit = result?.exitCode;
     final exitStr = exit == null ? 'unknown' : exit.toString();
     final raw = result?.output ?? '';
@@ -40,7 +45,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     // on the wire.  Measure once in UTF-8 and reuse.
     final rawBytes = utf8.encode(raw);
     final body = _truncateForLlmBytes(rawBytes);
-    final header = StringBuffer()
+    final header = StringBuffer();
+    if (toolCallId != null) {
+      header
+        ..writeln('[Tool result]')
+        ..writeln('[tool_call_id=$toolCallId]')
+        ..writeln('[tool_name=$toolName]');
+    }
+    header
       ..writeln('[Command executed]')
       ..writeln('\$ $cmd')
       ..writeln('[exit_code=$exitStr]');
@@ -266,7 +278,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           'query: "${query.replaceAll('"', r'\"')}"\n'
           'reason: disabled\n'
           'message: Web search is disabled in Settings.\n\n'
-          'Tell the user to open Settings → Agent → Web search to enable the tool and add a Brave Search API key. Proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker.';
+          'Tell the user to open Settings → Agent → Web search to enable the tool and add a Brave Search API key. Proceed without web_search. Do NOT retry the same web_search tool call.';
     }
 
     setState(() => _agentLoopStatus = 'Searching the web: $query');
@@ -318,7 +330,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           'query: "${query.replaceAll('"', r'\"')}"\n'
           'reason: unknown\n'
           'message: ${e.toString().replaceAll('\n', ' ')}\n\n'
-          'Proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker for the same query.';
+          'Proceed without web_search. Do NOT retry the same web_search tool call for the same query.';
     }
   }
 
@@ -349,7 +361,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             'path: $path\n'
             'reason: disabled\n'
             'message: File write tool is disabled in Settings.\n\n'
-            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed WITHOUT [WRITE_FILE_BEGIN]. Do NOT retry the marker.',
+            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without write_file. Do NOT retry the same write_file tool call.',
       });
       return _WriteProposalOutcome.injectedAndContinue;
     }
@@ -952,7 +964,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
 
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
-      final commands = LlmService.extractCommands(protocolText);
+      final toolCalls = LlmService.extractToolCalls(protocolText);
+      final shellToolCalls = toolCalls.where((call) => call.isShell).toList();
+      final commands = shellToolCalls
+          .map((call) => call.command?.trim())
+          .whereType<String>()
+          .where((cmd) => cmd.isNotEmpty)
+          .toList();
       _conversationHistory.add({'role': 'assistant', 'content': protocolText});
       final displayText = LlmService.stripCompletionMarkers(protocolText);
       aiMsg.text = displayText;
@@ -963,9 +981,33 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
       final askUser = LlmService.hasAskUserMarker(protocolText);
-      final useSkill = LlmService.extractUseSkillMarker(protocolText);
-      final webQuery = LlmService.extractWebSearchQuery(protocolText);
-      final writeFile = LlmService.extractWriteFile(protocolText);
+      ToolCall? useSkillTool;
+      ToolCall? webSearchTool;
+      ToolCall? writeFileTool;
+      for (final call in toolCalls) {
+        if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
+          useSkillTool = call;
+        }
+        if (webSearchTool == null && call.isWebSearch && call.query != null) {
+          webSearchTool = call;
+        }
+        if (writeFileTool == null &&
+            call.isWriteFile &&
+            call.path != null &&
+            call.content != null) {
+          writeFileTool = call;
+        }
+      }
+      final useSkill =
+          useSkillTool?.skillId ??
+          LlmService.extractUseSkillMarker(protocolText);
+      final webQuery =
+          webSearchTool?.query ??
+          LlmService.extractWebSearchQuery(protocolText);
+      final markerWriteFile = LlmService.extractWriteFile(protocolText);
+      final writeFile = writeFileTool == null
+          ? markerWriteFile
+          : (path: writeFileTool.path!, content: writeFileTool.content!);
       final markerLabel = taskComplete
           ? 'task_complete'
           : (askUser
@@ -979,6 +1021,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
         'protocol_chars=${protocolText.length} '
+        'tools=${toolCalls.length} shell_tools=${shellToolCalls.length} '
         'cmds=${commands.length} marker=$markerLabel',
       );
 
@@ -994,7 +1037,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // works in BOTH manual and auto modes — the model can pull in a
       // playbook even when the user hasn't ticked auto-execute, because
       // loading a skill doesn't run any shell commands.  When a USE_SKILL
-      // turn also (incorrectly) contained a ```bash block, the marker
+      // turn also (incorrectly) contained a shell tool call, the marker
       // wins and the commands are dropped, matching how TASK_COMPLETE /
       // ASK_USER behave today — and matching what the system prompt
       // tells the model to expect.
@@ -1021,7 +1064,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           injected =
               '[Skill not found: $useSkill]\n\nNo skill with this id is installed. Available ids: '
               '${SkillService.skills.map((s) => s.id).join(', ')}. '
-              'Proceed without a skill — DO NOT retry [USE_SKILL] with the same id.';
+              'Proceed without a skill — DO NOT retry the same use_skill tool call.';
           logIter('iter=$loopIterations skill_miss id=$useSkill');
         } else {
           injected = '[Skill loaded: $useSkill]\n\n$body';
@@ -1061,7 +1104,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       // ── Web search ──────────────────────────────────────────────────
       // Same intercept-before-execute pattern as USE_SKILL: when the
-      // model emits `[WEB_SEARCH: <query>]` we call Brave, format the
+      // model emits a `web_search` tool call we call Brave, format the
       // results, and inject them as the next user message so the model
       // can read them on its NEXT turn.  Bash blocks in the same turn
       // are dropped (system prompt warns about this); we match the
@@ -1092,7 +1135,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
 
       // ── File-write proposal ─────────────────────────────────────────
-      // The marker is intercepted BEFORE we look at ```bash blocks,
+      // The marker is intercepted BEFORE we look at shell tool calls,
       // [TASK_COMPLETE], or auto-execute — same precedence as
       // USE_SKILL / WEB_SEARCH.  Unlike those two, the write does NOT
       // run automatically: per the user-ratified design (always-Apply
@@ -1157,7 +1200,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // exit code and byte count, so logging both ends would double the
       // noise without adding information.
       final feedbacks = <String>[];
-      for (var i = 0; i < commands.length; i++) {
+      for (var i = 0; i < shellToolCalls.length; i++) {
+        final toolCall = shellToolCalls[i];
+        final command = toolCall.command!.trim();
         // ── Dangerous-command gate ─────────────────────────────────
         //
         // Runs BEFORE `onExecuteAsync` so a rejected command never
@@ -1180,14 +1225,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         final dangerPolicy = config.dangerousPolicy;
         DangerVerdict? verdict;
         if (dangerPolicy.agentConfirmEnabled) {
-          verdict = CommandSafety.danger(commands[i], dangerPolicy);
+          verdict = CommandSafety.danger(command, dangerPolicy);
         }
 
         bool approved = true;
         _DangerProposal? dangerProposal;
         if (verdict != null) {
           dangerProposal = _DangerProposal(
-            command: commands[i],
+            command: command,
             verdict: verdict,
             agentGeneration: gen,
           );
@@ -1216,7 +1261,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // (no command was actually run); the chat history keeps
           // only the danger-proposal card flipped to its rejected
           // state, which is the visible transcript of what happened.
-          feedbacks.add(_formatDangerRejection(commands[i], verdict!));
+          feedbacks.add(_formatDangerRejection(command, verdict!));
           _logSafety(
             't=$turnId danger_rejected side=agent iter=$loopIterations '
             'rule=${verdict.patternId} '
@@ -1232,11 +1277,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           );
         }
 
-        setState(() => _agentLoopStatus = 'Executing: ${commands[i]}');
+        setState(() => _agentLoopStatus = 'Executing: $command');
         _scrollToBottom();
 
         final result = await widget.onExecuteAsync!(
-          commands[i],
+          command,
           isCancelled: () => gen != _generation,
         );
         if (!mounted || gen != _generation) {
@@ -1257,14 +1302,21 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _messages.add(
             _ChatMessage.system(
               text: result?.output ?? '',
-              commandRun: commands[i],
+              commandRun: command,
               commandExitCode: result?.exitCode,
             ),
           );
         });
         _scrollToBottom();
 
-        feedbacks.add(_formatCommandFeedback(commands[i], result));
+        feedbacks.add(
+          _formatCommandFeedback(
+            command,
+            result,
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+          ),
+        );
       }
 
       _conversationHistory.add({

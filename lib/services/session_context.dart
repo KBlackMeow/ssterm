@@ -39,7 +39,8 @@ class SessionContext {
     final sign = offset.isNegative ? '-' : '+';
     final hh = offset.inHours.abs().toString().padLeft(2, '0');
     final mm = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
-    final iso = '${local.year.toString().padLeft(4, '0')}-'
+    final iso =
+        '${local.year.toString().padLeft(4, '0')}-'
         '${local.month.toString().padLeft(2, '0')}-'
         '${local.day.toString().padLeft(2, '0')}T'
         '${local.hour.toString().padLeft(2, '0')}:'
@@ -52,14 +53,14 @@ class SessionContext {
   }
 
   static String _weekday(int w) => const [
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday',
-        'Sunday',
-      ][w - 1];
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ][w - 1];
 
   /// Builds the full `<session_context>` XML-style block.
   ///
@@ -92,7 +93,7 @@ class SessionContext {
     buf.writeln('Current date/time: ${formatDateTime(now)}');
     buf.write(
       'Note: relative file-write paths AND `~/…` are resolved against '
-      'the working directory shown above by [WRITE_FILE_BEGIN], so '
+      'the working directory shown above by the write_file tool, so '
       'either form is safe to emit. Prefer absolute paths when you '
       'want to write outside the current directory. The date/time above '
       'is your authoritative "now" — use it for relative-time math '

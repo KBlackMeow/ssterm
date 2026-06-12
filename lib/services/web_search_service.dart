@@ -45,7 +45,9 @@ class BraveSearchResult {
     if (raw is! Map<String, dynamic>) return null;
     final title = (raw['title'] as String?)?.trim() ?? '';
     final url = (raw['url'] as String?)?.trim() ?? '';
-    final desc = _stripHighlightTags((raw['description'] as String?)?.trim() ?? '');
+    final desc = _stripHighlightTags(
+      (raw['description'] as String?)?.trim() ?? '',
+    );
     if (title.isEmpty || url.isEmpty || desc.isEmpty) return null;
     final age = (raw['age'] as String?)?.trim();
     return BraveSearchResult(
@@ -134,8 +136,7 @@ class WebSearchException implements Exception {
 /// shares the keychain / file-permissioned storage path with the LLM
 /// keys — one less surface to lock down.
 class WebSearchService {
-  static const _endpoint =
-      'https://api.search.brave.com/res/v1/web/search';
+  static const _endpoint = 'https://api.search.brave.com/res/v1/web/search';
 
   /// Hard ceiling on results requested per call.  The Brave API
   /// accepts up to 20 per page; we cap lower because each result eats
@@ -184,8 +185,8 @@ class WebSearchService {
         'Query is empty.',
       );
     }
-    final key = overrideKey ??
-        await ApiKeyStorage.load(AgentConfig.braveSearchKeyId);
+    final key =
+        overrideKey ?? await ApiKeyStorage.load(AgentConfig.braveSearchKeyId);
     if (key == null || key.isEmpty) {
       throw const WebSearchException(
         WebSearchErrorKind.missingKey,
@@ -354,7 +355,9 @@ class WebSearchService {
         // omitted" footer so the model can request more if it needs
         // to (e.g. "summarise sources 4-10" in a follow-up search).
         final omitted = results.length - emitted;
-        buf.writeln('… ($omitted more result${omitted == 1 ? '' : 's'} omitted to fit context budget)');
+        buf.writeln(
+          '… ($omitted more result${omitted == 1 ? '' : 's'} omitted to fit context budget)',
+        );
         break;
       }
       buf.write(entry);
@@ -374,13 +377,13 @@ class WebSearchService {
     // failed for a permanent reason (no key, bad key).
     final recovery = switch (e.kind) {
       WebSearchErrorKind.missingKey =>
-        'Web search is not configured. Tell the user to open Settings → Agent → Web search and paste a Brave Search API key, then proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker.',
+        'Web search is not configured. Tell the user to open Settings → Agent → Web search and paste a Brave Search API key, then proceed without web_search. Do NOT retry the same web_search tool call.',
       WebSearchErrorKind.unauthorized =>
-        'The stored Brave Search API key was rejected. Tell the user to update the key in Settings, then proceed WITHOUT [WEB_SEARCH]. Do NOT retry the marker.',
+        'The stored Brave Search API key was rejected. Tell the user to update the key in Settings, then proceed without web_search. Do NOT retry the same web_search tool call.',
       WebSearchErrorKind.rateLimit =>
         'Rate-limited by Brave Search. Wait ~60s OR continue without web search.',
       WebSearchErrorKind.network =>
-        'Network failed mid-search. You may retry [WEB_SEARCH: <query>] ONCE; if it fails again, proceed without it.',
+        'Network failed mid-search. You may retry the same web_search tool call ONCE; if it fails again, proceed without it.',
       WebSearchErrorKind.server =>
         'Brave Search returned an unexpected response. Proceed without web search.',
     };

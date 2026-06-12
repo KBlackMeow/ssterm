@@ -23,6 +23,75 @@ class LlmStreamEvent {
   LlmStreamEvent(this.kind, this.content);
 }
 
+/// Structured tool invocation emitted by the model.
+///
+/// The canonical shell shape is:
+///
+/// ```tool_call
+/// {"id":"call_x","name":"bash","arguments":{"command":"ls -la"}}
+/// ```
+///
+/// The parser also accepts common industry variants:
+///   • OpenAI-ish: `{"type":"function","function":{"name":"bash","arguments":"{...}"}}`
+///   • Anthropic-ish: `{"type":"tool_use","id":"...","name":"bash","input":{...}}`
+///   • MCP-ish: `{"method":"tools/call","params":{"name":"bash","arguments":{...}}}`
+class ToolCall {
+  final String id;
+  final String name;
+  final Map<String, Object?> arguments;
+  final bool legacyMarkdown;
+
+  const ToolCall({
+    required this.id,
+    required this.name,
+    required this.arguments,
+    this.legacyMarkdown = false,
+  });
+
+  String? get command {
+    final value =
+        arguments['command'] ?? arguments['cmd'] ?? arguments['script'];
+    return value is String && value.trim().isNotEmpty ? value : null;
+  }
+
+  bool get isShell =>
+      name == 'bash' ||
+      name == 'shell' ||
+      name == 'terminal.exec' ||
+      name == 'terminal_execute';
+
+  bool get isUseSkill =>
+      name == 'use_skill' || name == 'skill.load' || name == 'load_skill';
+
+  bool get isWebSearch =>
+      name == 'web_search' || name == 'web.search' || name == 'search_web';
+
+  bool get isWriteFile =>
+      name == 'write_file' || name == 'file_write' || name == 'fs.write';
+
+  String? get skillId {
+    final value = arguments['skill_id'] ?? arguments['id'] ?? arguments['name'];
+    return value is String && value.trim().isNotEmpty
+        ? value.trim().toLowerCase()
+        : null;
+  }
+
+  String? get query {
+    final value = arguments['query'] ?? arguments['q'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
+  String? get path {
+    final value = arguments['path'] ?? arguments['absolute_path'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
+  String? get content {
+    final value = arguments['content'] ?? arguments['text'];
+    return value is String ? value : null;
+  }
+}
+
 /// Minimal LLM service that routes requests to the configured provider.
 /// Supports OpenAI-compatible APIs, Anthropic's native format, and
 /// Google Gemini's native format.
@@ -63,10 +132,10 @@ class LlmService {
   // We use a marker PAIR instead of a single `[WRITE_FILE: path]` +
   // fenced code block because:
   //   • Code fences inside file content (e.g. writing a markdown file
-  //     that itself contains ```bash blocks) would otherwise terminate
+  //     that itself contains shell snippets) would otherwise terminate
   //     the outer fence and leak the rest as agent prose.
   //   • The agent loop already runs `extractCommands` on every reply
-  //     to harvest ```bash blocks — using a fence here would force a
+  //     to harvest legacy bash fences — using a fence here would force a
   //     second parse pass to distinguish "execute me" from "write me".
   //
   // Capture groups:
@@ -138,6 +207,10 @@ class LlmService {
     dotAll: true,
   );
   static final RegExp _collapseBlankLinesRe = RegExp(r'\n{3,}');
+  static final RegExp _toolCallFenceRe = RegExp(
+    r'```(?:tool_call|tool-call|tool|json\s+tool_call)\s*\n([\s\S]*?)```',
+    caseSensitive: false,
+  );
 
   /// True if the model's reply contains the "task complete" sentinel in
   /// any of the accepted forms.
@@ -237,6 +310,7 @@ class LlmService {
         // body if the body happens to contain something that looks
         // like a TASK_COMPLETE / ASK_USER marker.
         .replaceAll(_writeFileStripRe, '')
+        .replaceAllMapped(_toolCallFenceRe, _toolCallFenceDisplayReplacement)
         .replaceAll(_taskCompleteStripRe, '')
         .replaceAll(_askUserStripRe, '')
         .replaceAll(_useSkillStripRe, '')
@@ -339,6 +413,7 @@ class LlmService {
         // its body is removed before TASK/ASK/USE/WEB strip touches
         // anything else.
         .replaceAll(_writeFileStripRe, '')
+        .replaceAllMapped(_toolCallFenceRe, _toolCallFenceDisplayReplacement)
         .replaceAll(_taskCompleteStripRe, '')
         .replaceAll(_askUserStripRe, '')
         .replaceAll(_useSkillStripRe, '')
@@ -372,6 +447,20 @@ class LlmService {
       if (hide) out = out.substring(0, m.start);
     }
     return out;
+  }
+
+  static String _toolCallFenceDisplayReplacement(Match match) {
+    final raw = match.group(1);
+    if (raw == null || raw.trim().isEmpty) return '';
+    final decoded = _decodeToolCallJson(raw.trim());
+    if (decoded == null) return match.group(0) ?? '';
+    final shellBlocks = <String>[];
+    for (final item in _toolCallJsonItems(decoded)) {
+      final call = _toolCallFromJsonLike(item, shellBlocks.length);
+      if (call == null || !call.isShell || call.command == null) continue;
+      shellBlocks.add('```bash\n${call.command!.trim()}\n```');
+    }
+    return shellBlocks.join('\n\n');
   }
 
   // ── Host environment block ──────────────────────────────────────────────
@@ -543,27 +632,182 @@ class LlmService {
   // Provider HTTP and streaming code lives in
   // `llm_service_providers.dart` (part of this library).
 
-  /// Parse shell commands from a markdown response.
+  /// Parse structured shell tool calls from a model response.
   ///
-  /// Only fenced blocks tagged `bash` / `sh` / `shell` / `zsh` (case
-  /// insensitive) are recognised — UNTAGGED blocks are intentionally
-  /// IGNORED, otherwise the agent would happily try to execute snippets
-  /// the LLM intended as plain text (warnings, JSON examples, diff blocks).
+  /// Prefer fenced `tool_call` JSON. If no structured call exists, fall back
+  /// to legacy executable markdown fences so older prompts / in-flight
+  /// conversations continue to work.
+  static List<ToolCall> extractToolCalls(String text) {
+    final calls = _extractStructuredToolCalls(text);
+    if (calls.isNotEmpty) return _dedupeToolCalls(calls);
+    return _extractLegacyMarkdownToolCalls(text);
+  }
+
+  static List<ToolCall> _extractStructuredToolCalls(String text) {
+    final out = <ToolCall>[];
+    for (final match in _toolCallFenceRe.allMatches(text)) {
+      final raw = match.group(1);
+      if (raw == null || raw.trim().isEmpty) continue;
+      final decoded = _decodeToolCallJson(raw.trim());
+      if (decoded == null) continue;
+      final items = _toolCallJsonItems(decoded);
+      for (final item in items) {
+        final call = _toolCallFromJsonLike(item, out.length);
+        if (call == null || !_isSupportedToolCall(call)) continue;
+        out.add(call);
+      }
+    }
+    return out;
+  }
+
+  static bool _isSupportedToolCall(ToolCall call) {
+    if (call.isShell) return call.command != null;
+    if (call.isUseSkill) return call.skillId != null;
+    if (call.isWebSearch) return call.query != null;
+    if (call.isWriteFile) return call.path != null && call.content != null;
+    return false;
+  }
+
+  static List<Object?> _toolCallJsonItems(Object? decoded) {
+    if (decoded is List) return decoded;
+    if (decoded is Map) {
+      final map = decoded.cast<String, Object?>();
+      final calls = map['tool_calls'];
+      if (calls is List) return calls;
+    }
+    return <Object?>[decoded];
+  }
+
+  static Object? _decodeToolCallJson(String raw) {
+    try {
+      return jsonDecode(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static ToolCall? _toolCallFromJsonLike(Object? value, int index) {
+    if (value is! Map) return null;
+    final map = value.cast<String, Object?>();
+
+    if (map['tool_call'] is Map) {
+      return _toolCallFromJsonLike(map['tool_call'], index);
+    }
+    String? id = _stringValue(map['id']);
+    String? name = _stringValue(map['name']);
+    Object? args = map['arguments'] ?? map['input'];
+
+    final function = map['function'];
+    if (function is Map) {
+      final fn = function.cast<String, Object?>();
+      name ??= _stringValue(fn['name']);
+      args ??= fn['arguments'];
+    }
+
+    final params = map['params'];
+    if (params is Map && map['method'] == 'tools/call') {
+      final p = params.cast<String, Object?>();
+      name ??= _stringValue(p['name']);
+      args ??= p['arguments'];
+    }
+
+    final parsedArgs = _parseArguments(args);
+    if (name == null || parsedArgs == null) return null;
+    id ??= 'call_${index + 1}';
+    return ToolCall(id: id, name: name, arguments: parsedArgs);
+  }
+
+  static String? _stringValue(Object? value) => value is String ? value : null;
+
+  static Map<String, Object?>? _parseArguments(Object? value) {
+    if (value is Map) return value.cast<String, Object?>();
+    if (value is String) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) return decoded.cast<String, Object?>();
+      } catch (_) {
+        return {'command': value};
+      }
+    }
+    return null;
+  }
+
+  static List<ToolCall> _dedupeToolCalls(List<ToolCall> calls) {
+    final seen = <String>{};
+    final out = <ToolCall>[];
+    for (final call in calls) {
+      final key = switch (call.name) {
+        'bash' ||
+        'shell' ||
+        'terminal.exec' ||
+        'terminal_execute' => '${call.name}\n${call.command}',
+        'use_skill' ||
+        'skill.load' ||
+        'load_skill' => '${call.name}\n${call.skillId}',
+        'web_search' ||
+        'web.search' ||
+        'search_web' => '${call.name}\n${call.query}',
+        'write_file' ||
+        'file_write' ||
+        'fs.write' => '${call.name}\n${call.path}\n${call.content}',
+        _ => '${call.name}\n${jsonEncode(call.arguments)}',
+      };
+      if (seen.add(key)) out.add(call);
+    }
+    return out;
+  }
+
+  static List<ToolCall> _extractLegacyMarkdownToolCalls(String text) {
+    final seen = <String>{};
+    final calls = <ToolCall>[];
+    var index = 0;
+    for (final command in _extractLegacyMarkdownCommands(text)) {
+      if (!seen.add(command)) continue;
+      index++;
+      calls.add(
+        ToolCall(
+          id: 'legacy_bash_$index',
+          name: 'bash',
+          arguments: {'command': command},
+          legacyMarkdown: true,
+        ),
+      );
+    }
+    return calls;
+  }
+
+  /// Parse shell commands from a model response.
   ///
-  /// Each line of the body is also stripped of pseudo-prompt prefixes
-  /// (`$ `, `# `, `> `) that GPT-4 / Claude routinely add — those would
-  /// otherwise produce `command not found: $`.
-  ///
-  /// **EXACT duplicate commands are deduplicated, preserving first-seen
-  /// order.**  Models occasionally emit the same command twice — once in
-  /// an "explanation" code block and again in a "now let me run it" code
-  /// block — and without this dedupe the auto-execute loop would run it
-  /// twice.  The result is observable in the chat panel (the duplicate
-  /// fence is still rendered by `gpt_markdown`), but the agent's exec
-  /// path treats both as one command.
+  /// Structured `tool_call` JSON is preferred. Legacy fenced blocks tagged
+  /// `bash` / `sh` / `shell` / `zsh` are still accepted for backwards
+  /// compatibility.
   static List<String> extractCommands(String text) {
+    return extractToolCalls(text)
+        .map((call) => call.command?.trim())
+        .whereType<String>()
+        .where((cmd) => cmd.isNotEmpty)
+        .toList();
+  }
+
+  static List<String> _extractLegacyMarkdownCommands(String text) {
     final seen = <String>{};
     final commands = <String>[];
+    // Only fenced blocks tagged `bash` / `sh` / `shell` / `zsh` (case
+    // insensitive) are recognised — UNTAGGED blocks are intentionally
+    // IGNORED, otherwise the agent would happily try to execute snippets
+    // the LLM intended as plain text (warnings, JSON examples, diff blocks).
+    ///
+    /// Each line of the body is also stripped of pseudo-prompt prefixes
+    /// (`$ `, `# `, `> `) that GPT-4 / Claude routinely add — those would
+    /// otherwise produce `command not found: $`.
+    ///
+    /// **EXACT duplicate commands are deduplicated, preserving first-seen
+    /// order.**  Models occasionally emit the same command twice — once in
+    /// an "explanation" code block and again in a "now let me run it" code
+    /// block — and without this dedupe the auto-execute loop would run it
+    /// twice.  The result is observable in the chat panel (the duplicate
+    /// fence is still rendered by `gpt_markdown`), but the agent's exec
+    /// path treats both as one command.
     // Mandatory language tag — the trailing `?` of the previous version
     // matched untagged blocks too, which was a foot-gun.
     final regex = RegExp(
