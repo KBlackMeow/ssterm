@@ -8,7 +8,7 @@ A cross-platform desktop terminal — local shell, SSH, and SFTP in a unified da
 
 ### Terminal
 
-- **Local shell** — PTY-backed with `xterm-256color`, TrueColor, and OSC 7 working directory tracking
+- **Local shell** — PTY-backed with `xterm-256color`, TrueColor, and working directory tracking
 - **Auto shell discovery** — detects `zsh`, `bash`, `fish`, etc. on macOS/Linux; WSL distros and Git Bash on Windows
 - **Pre-raised FD limit** — bumps `RLIMIT_NOFILE` at startup so plugin-heavy zsh setups (autosuggestions, fast-syntax-highlighting) don't exhaust macOS's default 256 soft limit
 
@@ -28,6 +28,18 @@ A cross-platform desktop terminal — local shell, SSH, and SFTP in a unified da
 - **Tabs and split panes** — each tab can be split horizontally or vertically for multiple concurrent sessions
 - **Command panel** — one-click command insertion from the toolbar; built-in official commands are read-only, users can freely add, edit, and delete custom commands
 - **Settings panel** — terminal themes (presets + custom colors), fonts (JetBrains Mono / SF Mono / Monaco with CJK fallback), cursor shape and blink, wallpaper (blur + opacity), frosted glass effects
+
+### AI Agent
+
+- **Terminal-aware agent panel** — chat with an AI assistant beside the active local or SSH terminal
+- **Session context on first turn** — fresh agent conversations include the active tab, local date/time, and current folder when available
+- **Command output capture** — commands run through the agent return their results to the conversation
+- **Auto-execute mode** — let the agent run shell commands and iterate on their results, or keep auto-execute off and run proposed commands manually
+- **Dangerous-command review gate** — destructive commands can pause for approval before execution, with configurable safety rules
+- **File-write proposals** — the agent can propose file writes with a diff preview; files are written only after user approval
+- **Optional web search** — the agent can request current web results when enabled in Settings
+- **Built-in skills** — operational skills can be enabled or disabled in Settings
+- **Conversation reset commands** — `/clear`, `/reset`, and `/new` wipe the current agent transcript and memory
 
 ---
 
@@ -90,6 +102,18 @@ Output: `build/macos/Build/Products/`
 3. **SFTP** — toggle the panel from the toolbar; right-click entries to download (defaults to `~/Downloads`), rename, mkdir, or delete
 4. **Split** — toolbar split button (or right-click in the terminal) to split the active tab horizontally or vertically
 5. **Command panel** — toolbar terminal icon button; select a command to insert it directly into the terminal input; manage custom commands under Settings → Commands
+6. **AI agent** — open the AI panel, switch to **Agent**, configure a provider under Settings → Agent, and ask for help in natural language
+
+### Agent Usage Notes
+
+- Use **Auto-execute** when you want the agent to run commands and continue from captured results automatically.
+- Leave **Auto-execute** off when you want the agent to propose commands for manual review.
+- Click **Exec** on a proposed shell command to run it with the same safety checks and output feedback.
+- Use `/clear`, `/reset`, or `/new` to start a fresh agent conversation.
+- The agent automatically receives the active tab, current date/time, and current folder when available on the first turn of a fresh conversation.
+- Previous terminal output and commands run before opening the agent are not sent automatically; only commands executed through the agent are fed back into its conversation.
+- Enable web search and file writes under Settings → Agent if you want the corresponding tools available.
+- Configure destructive-command confirmation under Settings → Safety.
 
 ---
 
@@ -115,8 +139,8 @@ packages/
 
 The following are planned but not yet implemented:
 
-- **Security workbench** — vulnerability detection, malware screening, anomalous login alerts
-- **Ops agent** — natural-language SSH operations with a review gate for destructive commands
+- **Attach terminal context** — manually attach recent terminal output or failed-command context to a fresh agent prompt
+- **Command blocks** — structured command history with selectable command/output blocks for agent context
 - **Linux / Windows builds** — the stack supports them; macOS is the current primary platform
 
 ---
