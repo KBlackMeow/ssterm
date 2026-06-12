@@ -92,6 +92,12 @@ class TransferTask extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_writer?.abort());
+    _writer = null;
+    _downloadIsolate?.kill(priority: Isolate.immediate);
+    _downloadIsolate = null;
+    _downloadReceivePort?.close();
+    _downloadReceivePort = null;
     super.dispose();
   }
 }
@@ -250,6 +256,7 @@ class TransferManager extends ChangeNotifier {
     for (final t in _tasks) {
       t.dispose();
     }
+    _tasks.clear();
     super.dispose();
   }
 }

@@ -23,6 +23,7 @@ String _buildSystemPrompt({
   parts.add(_buildHostBlock());
   return parts.join('\n\n');
 }
+
 /// Returns the `<web_search_tool>` block for the system prompt, or an
 /// empty string when the master switch is off.
 ///
@@ -229,7 +230,8 @@ String _buildHostBlock() {
     shell = Platform.environment['SHELL'] ?? '(unknown)';
     locale = Platform.localeName;
     // On macOS / Linux uname-style env vars give a cheap arch hint.
-    arch = Platform.environment['HOSTTYPE'] ??
+    arch =
+        Platform.environment['HOSTTYPE'] ??
         Platform.environment['PROCESSOR_ARCHITECTURE'] ??
         '(unknown)';
   } catch (_) {
@@ -277,6 +279,7 @@ When the active tab is a LOCAL terminal, commands run on THIS host — pick the 
 When the active tab is an SSH session, commands run on the REMOTE — if behaviour is OS-specific, run `uname -srm` (or `cat /etc/os-release`) FIRST to detect the remote platform, THEN issue the OS-appropriate command. Do NOT assume the dialect tips above apply to the remote.
 </host_environment>''';
 }
+
 // ── System prompt design notes ──────────────────────────────────────────
 //
 // Structured with Anthropic's recommended XML-tag delimiters
@@ -419,6 +422,7 @@ Your turn 3 — ANSWER:
 - Always explain the command in ONE short sentence BEFORE its block.
 - DO NOT emit the same command twice in one turn (ssterm dedupes exact duplicates anyway, but it noises the transcript and confuses the user).
 - Use the captured exit_code and output to plan the next step. On non-zero exit, diagnose and PIVOT — never blindly re-run the same command.
+- NEVER write `[Command executed]`, `[exit_code=…]`, or `[output]` yourself. Those are host-generated feedback only. After a bash block, STOP and wait for ssterm to inject the real result.
 - Prefer non-interactive flags (`-y`, `--no-pager`, `head -n`, `--batch`). Avoid commands that wait for stdin.
 - If you don't know something, say so plainly. NEVER fabricate output, exit codes, or facts about the host.
 </rules>

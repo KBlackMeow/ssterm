@@ -51,10 +51,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     //   • feedback_truncated: capture was complete but we still elide the
     //     middle to fit the LLM context window (head 4 KB + tail 4 KB).
     if (result?.truncated == true) {
-      header.writeln('[capture_truncated=true reason="output exceeded ssterm capture cap; head and/or tail may be missing"]');
+      header.writeln(
+        '[capture_truncated=true reason="output exceeded ssterm capture cap; head and/or tail may be missing"]',
+      );
     }
     if (rawBytes.length > _kMaxFeedbackBytes) {
-      header.writeln('[feedback_truncated=true reason="middle elided to fit context; ${rawBytes.length} bytes captured, ~8 KB sent"]');
+      header.writeln(
+        '[feedback_truncated=true reason="middle elided to fit context; ${rawBytes.length} bytes captured, ~8 KB sent"]',
+      );
     }
     if (body.isEmpty) {
       header.writeln('[output: <empty>]');
@@ -126,7 +130,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         );
       } catch (e) {
         // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
-        _logAgent('error scope=setup_stream type=${e.runtimeType} msg=${_logQuote('$e')}');
+        _logAgent(
+          'error scope=setup_stream type=${e.runtimeType} msg=${_logQuote('$e')}',
+        );
         while (_conversationHistory.length > historyLenBefore) {
           _conversationHistory.removeLast();
         }
@@ -171,7 +177,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                 // LlmService.stripStreamingMarkers for partial-marker
                 // handling.
                 aiMsg.text = LlmService.stripStreamingMarkers(fullText);
-                aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
+                aiMsg.reasoning = reasoningText.isNotEmpty
+                    ? reasoningText
+                    : null;
               });
               _scrollToBottom();
             });
@@ -189,7 +197,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       } catch (e) {
         streamDone = true;
         // Catch EVERYTHING — stream errors, SSE parse failures, etc.
-        final canRetry = attempt < maxAttempts &&
+        final canRetry =
+            attempt < maxAttempts &&
             fullText.isEmpty &&
             reasoningText.isEmpty &&
             mounted &&
@@ -206,7 +215,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           if (!mounted || gen != _generation) return null;
           continue;
         }
-        _logAgent('error scope=stream type=${e.runtimeType} msg=${_logQuote('$e')}');
+        _logAgent(
+          'error scope=stream type=${e.runtimeType} msg=${_logQuote('$e')}',
+        );
         while (_conversationHistory.length > historyLenBefore) {
           _conversationHistory.removeLast();
         }
@@ -214,7 +225,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           if (gen == _generation) {
             setState(() {
               _messages.removeLast();
-              _messages.add(_ChatMessage.ai(text: '', error: 'Stream error: $e'));
+              _messages.add(
+                _ChatMessage.ai(text: '', error: 'Stream error: $e'),
+              );
             });
           } else {
             setState(() => _messages.removeLast());
@@ -244,7 +257,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final tp = turnId == null ? '' : 't=$turnId ';
     if (!enabled) {
       _logAgent(
-          '${tp}iter=$iter web_search_skip reason=disabled query=${_logQuote(query)}');
+        '${tp}iter=$iter web_search_skip reason=disabled query=${_logQuote(query)}',
+      );
       // Mirror the "[Web search failed]" envelope shape so the model
       // applies the same recovery logic regardless of whether the
       // tool was off at config time vs failed at request time.
@@ -267,11 +281,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         'elapsed_ms=$elapsed query=${_logQuote(query)}',
       );
       setState(() {
-        _messages.add(_ChatMessage.notice(
-          results.isEmpty
-              ? '**Web search**: `$query` — no results'
-              : '**Web search**: `$query` — ${results.length} result${results.length == 1 ? '' : 's'}',
-        ));
+        _messages.add(
+          _ChatMessage.notice(
+            results.isEmpty
+                ? '**Web search**: `$query` — no results'
+                : '**Web search**: `$query` — ${results.length} result${results.length == 1 ? '' : 's'}',
+          ),
+        );
       });
       _scrollToBottom();
       return WebSearchService.formatForLlm(query, results);
@@ -282,9 +298,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         'status=${e.statusCode ?? '-'} query=${_logQuote(query)}',
       );
       setState(() {
-        _messages.add(_ChatMessage.notice(
-          '**Web search failed**: `$query` — ${e.kind.name}',
-        ));
+        _messages.add(
+          _ChatMessage.notice(
+            '**Web search failed**: `$query` — ${e.kind.name}',
+          ),
+        );
       });
       _scrollToBottom();
       return WebSearchService.formatErrorForLlm(query, e);
@@ -322,10 +340,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final tp = turnId == null ? '' : 't=$turnId ';
     if (!enabled) {
       _logAgent(
-          '${tp}iter=$iter file_write_skip reason=disabled path=${_logQuote(path)}');
+        '${tp}iter=$iter file_write_skip reason=disabled path=${_logQuote(path)}',
+      );
       _conversationHistory.add({
         'role': 'user',
-        'content': '[File write failed]\n'
+        'content':
+            '[File write failed]\n'
             'path: $path\n'
             'reason: disabled\n'
             'message: File write tool is disabled in Settings.\n\n'
@@ -336,7 +356,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final adapter = widget.fileSystemAdapter;
     if (adapter == null || !adapter.isAvailable) {
       _logAgent(
-          '${tp}iter=$iter file_write_skip reason=no_adapter path=${_logQuote(path)}');
+        '${tp}iter=$iter file_write_skip reason=no_adapter path=${_logQuote(path)}',
+      );
       _conversationHistory.add({
         'role': 'user',
         'content': FileWriteService.formatErrorForLlm(
@@ -350,8 +371,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       return _WriteProposalOutcome.injectedAndContinue;
     }
 
-    setState(() =>
-        _agentLoopStatus = 'Previewing write: $path (${adapter.label})');
+    setState(
+      () => _agentLoopStatus = 'Previewing write: $path (${adapter.label})',
+    );
     _scrollToBottom();
 
     FileWritePreview preview;
@@ -361,8 +383,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (!mounted || gen != _generation) {
         return _WriteProposalOutcome.injectedAndContinue;
       }
-      _logAgent('${tp}iter=$iter file_write_preview_err kind=${e.kind.name} '
-          'path=${_logQuote(path)}');
+      _logAgent(
+        '${tp}iter=$iter file_write_preview_err kind=${e.kind.name} '
+        'path=${_logQuote(path)}',
+      );
       _conversationHistory.add({
         'role': 'user',
         'content': FileWriteService.formatErrorForLlm(path, e),
@@ -372,8 +396,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (!mounted || gen != _generation) {
         return _WriteProposalOutcome.injectedAndContinue;
       }
-      _logAgent('${tp}iter=$iter file_write_preview_crash type=${e.runtimeType} '
-          'path=${_logQuote(path)} msg=${_logQuote('$e')}');
+      _logAgent(
+        '${tp}iter=$iter file_write_preview_crash type=${e.runtimeType} '
+        'path=${_logQuote(path)} msg=${_logQuote('$e')}',
+      );
       _conversationHistory.add({
         'role': 'user',
         'content': FileWriteService.formatErrorForLlm(
@@ -398,8 +424,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       _agentLoopStatus = 'Awaiting Apply for ${preview.resolvedPath}';
     });
     _scrollToBottom();
-    _logAgent('${tp}iter=$iter file_write_proposed exists=${preview.exists} '
-        'bytes=${content.length} path=${_logQuote(preview.resolvedPath)}');
+    _logAgent(
+      '${tp}iter=$iter file_write_proposed exists=${preview.exists} '
+      'bytes=${content.length} path=${_logQuote(preview.resolvedPath)}',
+    );
     return _WriteProposalOutcome.waitingForUser;
   }
 
@@ -476,8 +504,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             proposal.result = result;
           });
           envelope = FileWriteService.formatSuccessForLlm(result);
-          _logAgent('file_write_applied bytes=${result.bytesWritten} '
-              'created=${result.created} path=${_logQuote(result.resolvedPath)}');
+          _logAgent(
+            'file_write_applied bytes=${result.bytesWritten} '
+            'created=${result.created} path=${_logQuote(result.resolvedPath)}',
+          );
         } on FileWriteException catch (e) {
           if (!mounted) return;
           setState(() {
@@ -485,9 +515,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             proposal.outcomeMessage = e.message;
           });
           envelope = FileWriteService.formatErrorForLlm(
-              proposal.requestedPath, e);
-          _logAgent('file_write_commit_err kind=${e.kind.name} '
-              'path=${_logQuote(proposal.resolvedPath)}');
+            proposal.requestedPath,
+            e,
+          );
+          _logAgent(
+            'file_write_commit_err kind=${e.kind.name} '
+            'path=${_logQuote(proposal.resolvedPath)}',
+          );
         } catch (e) {
           if (!mounted) return;
           setState(() {
@@ -498,8 +532,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             proposal.requestedPath,
             FileWriteException(FileWriteErrorKind.io, '$e'),
           );
-          _logAgent('file_write_commit_crash type=${e.runtimeType} '
-              'path=${_logQuote(proposal.resolvedPath)}');
+          _logAgent(
+            'file_write_commit_crash type=${e.runtimeType} '
+            'path=${_logQuote(proposal.resolvedPath)}',
+          );
         }
       }
     }
@@ -523,8 +559,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   /// stale-conversation-safe (if the user fired a new agent turn
   /// between proposal time and click time, the older proposal
   /// silently resolves as rejected without invoking the shell).
-  void _decideDangerProposal(_DangerProposal proposal,
-      {required bool approve}) {
+  void _decideDangerProposal(
+    _DangerProposal proposal, {
+    required bool approve,
+  }) {
     if (proposal.decision.isCompleted) return;
 
     if (proposal.agentGeneration != _generation) {
@@ -542,9 +580,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           ? _DangerProposalState.running
           : _DangerProposalState.rejected;
     });
-    _logAgent(approve
-        ? 'danger_approved rule=${proposal.verdict.patternId}'
-        : 'danger_rejected rule=${proposal.verdict.patternId}');
+    _logAgent(
+      approve
+          ? 'danger_approved rule=${proposal.verdict.patternId}'
+          : 'danger_rejected rule=${proposal.verdict.patternId}',
+    );
     proposal.decision.complete(approve);
   }
 
@@ -568,10 +608,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     if (config == null) {
       if (!mounted || gen != _generation) return;
       setState(() {
-        _messages.add(_ChatMessage.ai(
-          text: '',
-          error: 'Agent is not configured. Go to Settings → Agent to set it up.',
-        ));
+        _messages.add(
+          _ChatMessage.ai(
+            text: '',
+            error:
+                'Agent is not configured. Go to Settings → Agent to set it up.',
+          ),
+        );
       });
       return;
     }
@@ -683,9 +726,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         _agentLoopStatus = 'Awaiting approval: ${verdict!.label}';
       });
       _scrollToBottom();
-      _logSafety('danger_detected side=agent mode=manual '
-          'rule=${verdict.patternId} '
-          'source=${verdict.source.name}');
+      _logSafety(
+        'danger_detected side=agent mode=manual '
+        'rule=${verdict.patternId} '
+        'source=${verdict.source.name}',
+      );
       approved = await dangerProposal.decision.future;
       if (!mounted || gen != _generation) {
         _logAgent('manual_exec exit stale_generation');
@@ -700,9 +745,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         // No shell call.  Mirror the auto path: skip the system card,
         // feed a `[Dangerous command rejected]` envelope back so the
         // LLM sees what happened and can react on the next turn.
-        _logSafety('danger_rejected side=agent mode=manual '
-            'rule=${verdict!.patternId} '
-            'source=${verdict.source.name}');
+        _logSafety(
+          'danger_rejected side=agent mode=manual '
+          'rule=${verdict!.patternId} '
+          'source=${verdict.source.name}',
+        );
         _conversationHistory.add({
           'role': 'user',
           'content': _formatDangerRejection(cmd, verdict),
@@ -713,9 +760,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         return;
       }
       if (verdict != null) {
-        _logSafety('danger_approved side=agent mode=manual '
-            'rule=${verdict.patternId} '
-            'source=${verdict.source.name}');
+        _logSafety(
+          'danger_approved side=agent mode=manual '
+          'rule=${verdict.patternId} '
+          'source=${verdict.source.name}',
+        );
       }
 
       setState(() => _agentLoopStatus = 'Executing: $cmd');
@@ -735,11 +784,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
 
       setState(() {
-        _messages.add(_ChatMessage.system(
-          text: result?.output ?? '',
-          commandRun: cmd,
-          commandExitCode: result?.exitCode,
-        ));
+        _messages.add(
+          _ChatMessage.system(
+            text: result?.output ?? '',
+            commandRun: cmd,
+            commandExitCode: result?.exitCode,
+          ),
+        );
       });
       _scrollToBottom();
 
@@ -757,14 +808,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // this guard the future propagates unhandled and _agentBusy /
       // _terminalLocked stick on forever — the user's only escape is a
       // manual cancel button.
-      _logAgent('error scope=manual_exec type=${e.runtimeType} msg=${_logQuote('$e')}');
+      _logAgent(
+        'error scope=manual_exec type=${e.runtimeType} msg=${_logQuote('$e')}',
+      );
       stdout.writeln(st);
       if (mounted && gen == _generation) {
         setState(() {
-          _messages.add(_ChatMessage.ai(
-            text: '',
-            error: 'Execution failed: $e',
-          ));
+          _messages.add(
+            _ChatMessage.ai(text: '', error: 'Execution failed: $e'),
+          );
         });
       }
     } finally {
@@ -799,11 +851,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     try {
       await _continueAgentLoopBody(gen, config);
     } catch (e, st) {
-      _logAgent('error scope=loop type=${e.runtimeType} msg=${_logQuote('$e')}');
+      _logAgent(
+        'error scope=loop type=${e.runtimeType} msg=${_logQuote('$e')}',
+      );
       stdout.writeln(st);
       if (mounted && gen == _generation) {
         setState(() {
-          _messages.add(_ChatMessage.ai(text: '', error: 'Agent loop crashed: $e'));
+          _messages.add(
+            _ChatMessage.ai(text: '', error: 'Agent loop crashed: $e'),
+          );
         });
       }
     } finally {
@@ -833,10 +889,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (loopIterations >= _maxLoopIterations) {
         stopIter(loopIterations, 'max_iterations');
         setState(() {
-          _messages.add(_ChatMessage.ai(
-            text: '',
-            error: 'Max loop iterations ($_maxLoopIterations) reached.',
-          ));
+          _messages.add(
+            _ChatMessage.ai(
+              text: '',
+              error: 'Max loop iterations ($_maxLoopIterations) reached.',
+            ),
+          );
         });
         break;
       }
@@ -882,38 +940,45 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // one line of pure heartbeat noise from every iteration on the
       // happy path.
       final historyLenAtCall = _conversationHistory.length;
-      final fullText = await _streamAiResponse(gen, historyLenBefore, aiMsg, config);
+      final fullText = await _streamAiResponse(
+        gen,
+        historyLenBefore,
+        aiMsg,
+        config,
+      );
       if (fullText == null) {
         stopIter(loopIterations, 'stream_error_or_cancelled');
         break;
       }
 
-      final commands = LlmService.extractCommands(fullText);
-      _conversationHistory.add({'role': 'assistant', 'content': fullText});
-      final displayText = LlmService.stripCompletionMarkers(fullText);
+      final protocolText = LlmService.stripForgedCommandFeedback(fullText);
+      final commands = LlmService.extractCommands(protocolText);
+      _conversationHistory.add({'role': 'assistant', 'content': protocolText});
+      final displayText = LlmService.stripCompletionMarkers(protocolText);
       aiMsg.text = displayText;
       setState(() {
         aiMsg.commands = commands.isNotEmpty ? commands : null;
       });
       _scrollToBottom();
 
-      final taskComplete = LlmService.hasTaskCompleteMarker(fullText);
-      final askUser = LlmService.hasAskUserMarker(fullText);
-      final useSkill = LlmService.extractUseSkillMarker(fullText);
-      final webQuery = LlmService.extractWebSearchQuery(fullText);
-      final writeFile = LlmService.extractWriteFile(fullText);
+      final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
+      final askUser = LlmService.hasAskUserMarker(protocolText);
+      final useSkill = LlmService.extractUseSkillMarker(protocolText);
+      final webQuery = LlmService.extractWebSearchQuery(protocolText);
+      final writeFile = LlmService.extractWriteFile(protocolText);
       final markerLabel = taskComplete
           ? 'task_complete'
           : (askUser
-              ? 'ask_user'
-              : (useSkill != null
-                  ? 'use_skill:$useSkill'
-                  : (webQuery != null
-                      ? 'web_search'
-                      : (writeFile != null ? 'write_file' : 'none'))));
+                ? 'ask_user'
+                : (useSkill != null
+                      ? 'use_skill:$useSkill'
+                      : (webQuery != null
+                            ? 'web_search'
+                            : (writeFile != null ? 'write_file' : 'none'))));
       logIter(
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
+        'protocol_chars=${protocolText.length} '
         'cmds=${commands.length} marker=$markerLabel',
       );
 
@@ -941,8 +1006,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         // clean "skill not available" notice instead of silently loading
         // something the user disabled.
         final enabledWhitelist = config.enabledSkills;
-        final isAllowed = enabledWhitelist == null ||
-            enabledWhitelist.contains(useSkill);
+        final isAllowed =
+            enabledWhitelist == null || enabledWhitelist.contains(useSkill);
         // loadBody is async because BUNDLED dynamic skills produce their
         // body via a Dart function that may embed runtime values (e.g.
         // feature flags, probe output).  None ship by default today, but
@@ -953,14 +1018,17 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (!mounted || gen != _generation) return;
         final String injected;
         if (body == null) {
-          injected = '[Skill not found: $useSkill]\n\nNo skill with this id is installed. Available ids: '
+          injected =
+              '[Skill not found: $useSkill]\n\nNo skill with this id is installed. Available ids: '
               '${SkillService.skills.map((s) => s.id).join(', ')}. '
               'Proceed without a skill — DO NOT retry [USE_SKILL] with the same id.';
           logIter('iter=$loopIterations skill_miss id=$useSkill');
         } else {
           injected = '[Skill loaded: $useSkill]\n\n$body';
-          logIter('iter=$loopIterations skill_hit id=$useSkill '
-              'body_chars=${body.length}');
+          logIter(
+            'iter=$loopIterations skill_hit id=$useSkill '
+            'body_chars=${body.length}',
+          );
         }
         _conversationHistory.add({'role': 'user', 'content': injected});
         setState(() {
@@ -971,11 +1039,16 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               : 'Loaded skill: $useSkill';
           // Persistent transcript notice: stays visible after the loop
           // moves on so users can see WHICH skill the model consulted.
-          _messages.add(_ChatMessage.notice(
-            body == null
-                ? '**Skill not found**: `$useSkill`'
-                : '**Loaded skill**: `$useSkill` — ${SkillService.skills.firstWhere((s) => s.id == useSkill, orElse: () => Skill(id: useSkill, name: useSkill, description: '', assetPath: '')).description}',
-          ));
+          _messages.add(
+            _ChatMessage.notice(
+              body == null
+                  ? '**Skill not found**: `$useSkill`'
+                  : '**Loaded skill**: `$useSkill` — ${SkillService.skills.firstWhere(
+                      (s) => s.id == useSkill,
+                      orElse: () => Skill(id: useSkill, name: useSkill, description: '', assetPath: ''),
+                    ).description}',
+            ),
+          );
         });
         _scrollToBottom();
         // Loop continues so the model immediately gets to read the
@@ -1120,13 +1193,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           );
           setState(() {
             _messages.add(_ChatMessage.dangerProposal(dangerProposal!));
-            _agentLoopStatus =
-                'Awaiting approval: ${verdict!.label}';
+            _agentLoopStatus = 'Awaiting approval: ${verdict!.label}';
           });
           _scrollToBottom();
-          _logSafety('t=$turnId danger_detected side=agent iter=$loopIterations '
-              'rule=${verdict.patternId} '
-              'source=${verdict.source.name}');
+          _logSafety(
+            't=$turnId danger_detected side=agent iter=$loopIterations '
+            'rule=${verdict.patternId} '
+            'source=${verdict.source.name}',
+          );
           approved = await dangerProposal.decision.future;
           // Generation may have flipped while the user was deciding —
           // bail out exactly like the post-execute staleness check
@@ -1143,15 +1217,19 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // only the danger-proposal card flipped to its rejected
           // state, which is the visible transcript of what happened.
           feedbacks.add(_formatDangerRejection(commands[i], verdict!));
-          _logSafety('t=$turnId danger_rejected side=agent iter=$loopIterations '
-              'rule=${verdict.patternId} '
-              'source=${verdict.source.name}');
+          _logSafety(
+            't=$turnId danger_rejected side=agent iter=$loopIterations '
+            'rule=${verdict.patternId} '
+            'source=${verdict.source.name}',
+          );
           continue;
         }
         if (verdict != null) {
-          _logSafety('t=$turnId danger_approved side=agent iter=$loopIterations '
-              'rule=${verdict.patternId} '
-              'source=${verdict.source.name}');
+          _logSafety(
+            't=$turnId danger_approved side=agent iter=$loopIterations '
+            'rule=${verdict.patternId} '
+            'source=${verdict.source.name}',
+          );
         }
 
         setState(() => _agentLoopStatus = 'Executing: ${commands[i]}');
@@ -1176,11 +1254,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
 
         setState(() {
-          _messages.add(_ChatMessage.system(
-            text: result?.output ?? '',
-            commandRun: commands[i],
-            commandExitCode: result?.exitCode,
-          ));
+          _messages.add(
+            _ChatMessage.system(
+              text: result?.output ?? '',
+              commandRun: commands[i],
+              commandExitCode: result?.exitCode,
+            ),
+          );
         });
         _scrollToBottom();
 
@@ -1201,5 +1281,4 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     // it here, otherwise an early `return` from the inner loop would skip
     // it and the outer wrapper's finally would still need to fire anyway.
   }
-
 }

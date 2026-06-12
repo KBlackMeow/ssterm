@@ -244,9 +244,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
     if (isSplit) {
       tab.splitPty?.kill();
+      tab.splitPty?.dispose();
       tab.splitPty = pty;
     } else {
       tab.pty?.kill();
+      tab.pty?.dispose();
       tab.pty = pty;
     }
 

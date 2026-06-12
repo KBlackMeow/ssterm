@@ -387,6 +387,20 @@ class FlutterPtyBindings {
   late final _pty_create = _pty_createPtr
       .asFunction<ffi.Pointer<PtyHandle> Function(ffi.Pointer<PtyOptions>)>();
 
+  void pty_destroy(
+    ffi.Pointer<PtyHandle> handle,
+  ) {
+    return _pty_destroy(
+      handle,
+    );
+  }
+
+  late final _pty_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<PtyHandle>)>>(
+          'pty_destroy');
+  late final _pty_destroy =
+      _pty_destroyPtr.asFunction<void Function(ffi.Pointer<PtyHandle>)>();
+
   void pty_write(
     ffi.Pointer<PtyHandle> handle,
     ffi.Pointer<ffi.Char> buffer,

@@ -87,6 +87,9 @@ class Pty {
       }
     }
 
+    final executableNative = executable.toNativeUtf8();
+    final workingDirectoryNative = workingDirectory?.toNativeUtf8();
+
     // build argv
     final argv = calloc<Pointer<Utf8>>(arguments.length + 2);
     argv[0] = executable.toNativeUtf8();
@@ -106,7 +109,7 @@ class Pty {
     final options = calloc<PtyOptions>();
     options.ref.rows = rows;
     options.ref.cols = columns;
-    options.ref.executable = executable.toNativeUtf8().cast();
+    options.ref.executable = executableNative.cast();
     options.ref.arguments = argv.cast();
     options.ref.environment = envp.cast();
     options.ref.stdout_port = _stdoutPort.sendPort.nativePort;
@@ -114,14 +117,28 @@ class Pty {
     options.ref.ackRead = ackRead;
 
     if (workingDirectory != null) {
-      options.ref.working_directory = workingDirectory.toNativeUtf8().cast();
+      options.ref.working_directory = workingDirectoryNative!.cast();
     } else {
       options.ref.working_directory = nullptr;
     }
 
-    _handle = _bindings.pty_create(options);
-
-    calloc.free(options);
+    try {
+      _handle = _bindings.pty_create(options);
+    } finally {
+      calloc.free(options);
+      malloc.free(executableNative);
+      if (workingDirectoryNative != null) {
+        malloc.free(workingDirectoryNative);
+      }
+      for (var i = 0; i < arguments.length + 1; i++) {
+        malloc.free(argv[i]);
+      }
+      calloc.free(argv);
+      for (var i = 0; i < effectiveEnv.length; i++) {
+        malloc.free(envp[i]);
+      }
+      calloc.free(envp);
+    }
 
     if (_handle == nullptr) {
       throw StateError('Failed to create PTY: ${_getPtyError()}');
@@ -137,6 +154,8 @@ class Pty {
   final _exitCodeCompleter = Completer<int>();
 
   late final Pointer<PtyHandle> _handle;
+
+  var _disposed = false;
 
   /// The output stream from the pseudo-terminal. Note that pseudo-terminals
   /// do not distinguish between stdout and stderr.
@@ -192,7 +211,20 @@ class Pty {
   /// Linux and OS X. The default signal is [ProcessSignal.sigterm]
   /// which will normally terminate the process.
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    if (_disposed) return false;
     return Process.killPid(pid, signal);
+  }
+
+  /// Releases the native PTY handle and Dart receive ports.
+  ///
+  /// This does not guarantee graceful shell shutdown; call [kill] first when
+  /// the process should be terminated.
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _bindings.pty_destroy(_handle);
+    _stdoutPort.close();
+    _exitPort.close();
   }
 
   /// indicates that a data chunk has been processed.
@@ -203,8 +235,11 @@ class Pty {
   }
 
   void _onExitCode(dynamic exitCode) {
+    if (_disposed) return;
+    _disposed = true;
     _stdoutPort.close();
     _exitPort.close();
+    _bindings.pty_destroy(_handle);
     _exitCodeCompleter.complete(exitCode);
   }
 }

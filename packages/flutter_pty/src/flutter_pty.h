@@ -39,6 +39,8 @@ typedef struct PtyHandle PtyHandle;
 
 FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options);
 
+FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle);
+
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length);
 
 FFI_PLUGIN_EXPORT void pty_ack_read(PtyHandle *handle);

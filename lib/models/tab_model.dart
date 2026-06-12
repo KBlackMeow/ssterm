@@ -114,6 +114,7 @@ class AppTab {
     splitPipe?.dispose();
     splitSshSession?.close();
     splitPty?.kill();
+    splitPty?.dispose();
     splitTerminal = null;
     splitSshSession = null;
     splitPty = null;
@@ -146,6 +147,7 @@ class AppTab {
     pipe?.dispose();
     pipe = null;
     pty?.kill();
+    pty?.dispose();
     pty = null;
     sshSession?.close();
     sshSession = null;
@@ -172,6 +174,7 @@ class AppTab {
     localPath?.dispose();
     forwardService?.stopAll();
     pty?.kill();
+    pty?.dispose();
     sshSession?.close();
     sshClient?.close();
     jumpClient?.close();

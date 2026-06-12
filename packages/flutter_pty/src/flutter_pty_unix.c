@@ -78,6 +78,7 @@ static void *read_loop(void *arg)
         Dart_PostCObject_DL(options->port, &result);
     }
 
+    free(options);
     return NULL;
 }
 
@@ -95,7 +96,14 @@ static void start_read_thread(int fd, Dart_Port port, pthread_mutex_t *mutex, bo
 
     pthread_t _thread;
 
-    pthread_create(&_thread, NULL, &read_loop, options);
+    if (pthread_create(&_thread, NULL, &read_loop, options) == 0)
+    {
+        pthread_detach(_thread);
+    }
+    else
+    {
+        free(options);
+    }
 }
 
 typedef struct WaitExitOptions
@@ -123,6 +131,7 @@ static void *wait_exit_thread(void *arg)
         Dart_PostInteger_DL(options->port, -WTERMSIG(status));
     }
 
+    free(options);
     return NULL;
 }
 
@@ -136,7 +145,14 @@ static void start_wait_exit_thread(int pid, Dart_Port port)
 
     pthread_t _thread;
 
-    pthread_create(&_thread, NULL, &wait_exit_thread, options);
+    if (pthread_create(&_thread, NULL, &wait_exit_thread, options) == 0)
+    {
+        pthread_detach(_thread);
+    }
+    else
+    {
+        free(options);
+    }
 }
 
 static void set_environment(char **environment)
@@ -200,6 +216,17 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     start_wait_exit_thread(pid, options->exit_port);
 
     return handle;
+}
+
+FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
+{
+    if (handle == NULL)
+    {
+        return;
+    }
+
+    close(handle->ptm);
+    free(handle);
 }
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)

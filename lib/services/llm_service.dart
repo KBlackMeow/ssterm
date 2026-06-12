@@ -147,6 +147,22 @@ class LlmService {
   /// True if the model's reply asks the user to step in.
   static bool hasAskUserMarker(String text) => _askUserRe.hasMatch(text);
 
+  /// Remove command-feedback envelopes that appear inside an assistant reply.
+  ///
+  /// Real `[Command executed]` envelopes are generated only by ssterm and
+  /// injected as user-role messages after the shell actually runs.  If the
+  /// model emits one in its own assistant turn, it is fabricating tool output
+  /// and any prose after it is reasoning over fake data.  Keep the command
+  /// proposal above the forged envelope, and drop the forged feedback plus the
+  /// derived answer.
+  static String stripForgedCommandFeedback(String text) {
+    final m = RegExp(
+      r'(^|\r?\n)[ \t]*\[Command executed\][ \t]*(?:\r?\n|$)',
+    ).firstMatch(text);
+    if (m == null) return text;
+    return text.substring(0, m.start).trimRight();
+  }
+
   /// Extract the skill id from a `[USE_SKILL: <id>]` marker, or null when
   /// the reply doesn't request a skill.  Lower-cased so callers can use
   /// the id as a stable key into [SkillService] regardless of how the
@@ -216,7 +232,7 @@ class LlmService {
   /// dumping the verbatim body into the rendered bubble too would
   /// just waste vertical space.
   static String stripCompletionMarkers(String text) {
-    var out = text
+    var out = stripForgedCommandFeedback(text)
         // Strip WRITE_FILE FIRST so we don't accidentally chew on its
         // body if the body happens to contain something that looks
         // like a TASK_COMPLETE / ASK_USER marker.
@@ -263,8 +279,9 @@ class LlmService {
   // an acceptable trade for never leaking a partial marker into the
   // visible bubble.  Both cases self-heal: the `]` always arrives in
   // the next chunk or two.
-  static final RegExp _trailingPartialMarkerRe =
-      RegExp(r'\*{0,2}\[[^\]\n]{0,160}$');
+  static final RegExp _trailingPartialMarkerRe = RegExp(
+    r'\*{0,2}\[[^\]\n]{0,160}$',
+  );
 
   // USE_SKILL / WEB_SEARCH have a variable-length `<id>` / `<query>`
   // portion, so the `startsWith` prefix trick that handles
@@ -317,7 +334,7 @@ class LlmService {
   /// as new tokens arrive.  The full normalisation runs once after the
   /// stream completes.
   static String stripStreamingMarkers(String text) {
-    var out = text
+    var out = stripForgedCommandFeedback(text)
         // Same order as the post-stream variant: WRITE_FILE first so
         // its body is removed before TASK/ASK/USE/WEB strip touches
         // anything else.
@@ -344,8 +361,7 @@ class LlmService {
       // arrives.  "Body is a prefix" is what lets us hide `[W` or `[US`
       // early, before the model has finished typing the marker name.
       if (!hide) {
-        final body =
-            tail.replaceFirst(RegExp(r'^\*{0,2}\['), '');
+        final body = tail.replaceFirst(RegExp(r'^\*{0,2}\['), '');
         for (final p in _variableMarkerBodyPrefixes) {
           if (body.startsWith(p) || p.startsWith(body)) {
             hide = true;
@@ -425,8 +441,9 @@ class LlmService {
       fileWriteEnabled: fileWriteEnabled,
     );
     _cachedSystemPrompt = built;
-    _cachedSystemPromptKey =
-        enabledSkillIds == null ? null : Set.of(enabledSkillIds);
+    _cachedSystemPromptKey = enabledSkillIds == null
+        ? null
+        : Set.of(enabledSkillIds);
     _cachedSystemPromptWebSearch = webSearchEnabled;
     _cachedSystemPromptFileWrite = fileWriteEnabled;
     _cachedSystemPromptHasKey = true;
@@ -454,7 +471,6 @@ class LlmService {
   // _buildSystemPrompt and its per-block helpers live in
   // `llm_service_prompts.dart` (part of this library).
 
-
   /// Send a chat message to the configured LLM and return the response.
   static Future<LlmResponse> chat({
     required AgentConfig config,
@@ -467,7 +483,10 @@ class LlmService {
 
     final model = config.resolvedModel;
     if (model == null) {
-      return LlmResponse(text: '', error: 'No model available for the selected provider.');
+      return LlmResponse(
+        text: '',
+        error: 'No model available for the selected provider.',
+      );
     }
 
     // Local providers (Ollama et al.) skip the key precondition — see
@@ -494,7 +513,13 @@ class LlmService {
     try {
       switch (provider.id) {
         case 'claude':
-          return _callAnthropic(provider, model, apiKey, messages, systemPrompt);
+          return _callAnthropic(
+            provider,
+            model,
+            apiKey,
+            messages,
+            systemPrompt,
+          );
         case 'gemini':
           return _callGemini(provider, model, apiKey, messages, systemPrompt);
         case 'ollama':
@@ -503,7 +528,12 @@ class LlmService {
           // OpenAI-compatible (OpenAI, DeepSeek, etc.) — prefix caching is
           // automatic on these providers (no `cache_control` to set).
           return _callOpenAiCompatible(
-              provider, model, apiKey, messages, systemPrompt);
+            provider,
+            model,
+            apiKey,
+            messages,
+            systemPrompt,
+          );
       }
     } catch (e) {
       return LlmResponse(text: '', error: 'Request failed: $e');
@@ -550,7 +580,6 @@ class LlmService {
     return commands;
   }
 
-
   // ── Streaming ─────────────────────────────────────────────────────────
 
   /// Start a streaming chat and return the stream along with a cancel function.
@@ -576,7 +605,9 @@ class LlmService {
     if (provider == null) throw Exception('No enabled provider selected.');
 
     final model = config.resolvedModel;
-    if (model == null) throw Exception('No model available for the selected provider.');
+    if (model == null) {
+      throw Exception('No model available for the selected provider.');
+    }
 
     // Mirror the non-streaming dispatcher: local providers skip the key
     // pre-flight (see `ProviderConfig.requiresApiKey`).
@@ -597,17 +628,33 @@ class LlmService {
     switch (provider.id) {
       case 'claude':
         yield* _streamAnthropic(
-            provider, model, apiKey, messages, client, systemPrompt);
+          provider,
+          model,
+          apiKey,
+          messages,
+          client,
+          systemPrompt,
+        );
       case 'gemini':
         yield* _streamGemini(
-            provider, model, apiKey, messages, client, systemPrompt);
+          provider,
+          model,
+          apiKey,
+          messages,
+          client,
+          systemPrompt,
+        );
       case 'ollama':
-        yield* _streamOllama(
-            provider, model, messages, client, systemPrompt);
+        yield* _streamOllama(provider, model, messages, client, systemPrompt);
       default:
         yield* _streamOpenAi(
-            provider, model, apiKey, messages, client, systemPrompt);
+          provider,
+          model,
+          apiKey,
+          messages,
+          client,
+          systemPrompt,
+        );
     }
   }
-
 }

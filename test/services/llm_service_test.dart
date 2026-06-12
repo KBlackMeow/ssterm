@@ -19,11 +19,13 @@ ls -la
       expect(LlmService.extractCommands(input), equals(['ls -la']));
     });
 
-    test('IGNORES untagged code blocks (regression — previous regex used `?`)', () {
-      // The LLM might emit a plain ``` block for warnings, JSON, diff
-      // output, etc.  Executing those as shell commands would be a
-      // foot-gun (`command not found: warning`).
-      const input = '''
+    test(
+      'IGNORES untagged code blocks (regression — previous regex used `?`)',
+      () {
+        // The LLM might emit a plain ``` block for warnings, JSON, diff
+        // output, etc.  Executing those as shell commands would be a
+        // foot-gun (`command not found: warning`).
+        const input = '''
 Here is some output:
 
 ```
@@ -36,8 +38,9 @@ And the actual command:
 ls /tmp
 ```
 ''';
-      expect(LlmService.extractCommands(input), equals(['ls /tmp']));
-    });
+        expect(LlmService.extractCommands(input), equals(['ls /tmp']));
+      },
+    );
 
     test('case-insensitive language tags (Bash, SH, ZSH all valid)', () {
       const input = '''
@@ -135,16 +138,19 @@ Now I'll run it:
 ifconfig | grep "inet "
 ```
 ''';
-      expect(LlmService.extractCommands(input),
-          equals(['ifconfig | grep "inet "']));
+      expect(
+        LlmService.extractCommands(input),
+        equals(['ifconfig | grep "inet "']),
+      );
     });
 
-    test('NEAR-duplicates (different whitespace / args) are NOT deduplicated',
-        () {
-      // Distinct commands stay distinct — only EXACT post-strip matches
-      // collapse, otherwise we'd mask legitimate "almost the same but
-      // not quite" pairs (e.g. `ls` and `ls -la`).
-      const input = '''
+    test(
+      'NEAR-duplicates (different whitespace / args) are NOT deduplicated',
+      () {
+        // Distinct commands stay distinct — only EXACT post-strip matches
+        // collapse, otherwise we'd mask legitimate "almost the same but
+        // not quite" pairs (e.g. `ls` and `ls -la`).
+        const input = '''
 ```bash
 ls
 ```
@@ -153,8 +159,9 @@ ls
 ls -la
 ```
 ''';
-      expect(LlmService.extractCommands(input), equals(['ls', 'ls -la']));
-    });
+        expect(LlmService.extractCommands(input), equals(['ls', 'ls -la']));
+      },
+    );
 
     test('untagged ``` block with `rm -rf /tmp` is NOT executed', () {
       // Real-world worst case: LLM puts a destructive example inside a
@@ -172,10 +179,7 @@ But instead, do this safely:
 ls /tmp/some-dir
 ```
 ''';
-      expect(
-        LlmService.extractCommands(input),
-        equals(['ls /tmp/some-dir']),
-      );
+      expect(LlmService.extractCommands(input), equals(['ls /tmp/some-dir']));
     });
   });
 
@@ -204,8 +208,10 @@ ls /tmp/some-dir
     test('[ASK_USER] in single-asterisk italics is removed', () {
       const input = 'Need a decision.\n\n*[ASK_USER]*';
       expect(LlmService.hasAskUserMarker(input), isTrue);
-      expect(LlmService.stripCompletionMarkers(input),
-          equals('Need a decision.'));
+      expect(
+        LlmService.stripCompletionMarkers(input),
+        equals('Need a decision.'),
+      );
     });
 
     test('multiple consecutive blank lines collapse after stripping', () {
@@ -234,44 +240,94 @@ ls /tmp/some-dir
       expect(stripped.contains('TASK_COMPLETE'), isFalse);
       expect(stripped.startsWith('Everything passed'), isTrue);
     });
+
+    test('strips forged command feedback from assistant replies', () {
+      const input = '''
+I'll check the weather.
+
+```bash
+curl -s "wttr.in?lang=zh&format=%l:+%c+%t+%h+%w"
+```
+
+[Command executed]
+\$ curl -s "wttr.in?lang=zh&format=%l:+%c+%t+%h+%w"
+[exit_code=0]
+[output]
+上海: ☁️ +27°C 💦 71% ↙20km/h
+
+你当前所在位置的天气是上海。
+[TASK_COMPLETE]
+''';
+
+      final stripped = LlmService.stripForgedCommandFeedback(input);
+      expect(stripped, contains('```bash'));
+      expect(stripped, contains('curl -s'));
+      expect(stripped.contains('[Command executed]'), isFalse);
+      expect(stripped.contains('上海'), isFalse);
+      expect(stripped.contains('TASK_COMPLETE'), isFalse);
+      expect(LlmService.extractCommands(stripped), hasLength(1));
+      expect(LlmService.hasTaskCompleteMarker(stripped), isFalse);
+    });
+
+    test('completion stripping also removes forged feedback first', () {
+      const input = '''
+```bash
+date
+```
+
+[Command executed]
+\$ date
+[exit_code=0]
+[output]
+Fri Jun 12 10:00:00 CST 2026
+
+It is Friday.
+[TASK_COMPLETE]
+''';
+
+      final stripped = LlmService.stripCompletionMarkers(input);
+      expect(stripped, equals('```bash\ndate\n```'));
+    });
   });
 
   group('LlmService.extractWebSearchQuery', () {
     test('extracts a simple ASCII query', () {
       const input = 'Looking up the docs.\n\n[WEB_SEARCH: flutter docs]';
-      expect(
-        LlmService.extractWebSearchQuery(input),
-        equals('flutter docs'),
-      );
+      expect(LlmService.extractWebSearchQuery(input), equals('flutter docs'));
     });
 
-    test('preserves case (Brave ranking is case-sensitive for some queries)',
-        () {
-      const input = '[WEB_SEARCH: macOS Sonoma release notes]';
-      // The query verbatim — no lower-casing like USE_SKILL does.
-      expect(LlmService.extractWebSearchQuery(input),
-          equals('macOS Sonoma release notes'));
-    });
+    test(
+      'preserves case (Brave ranking is case-sensitive for some queries)',
+      () {
+        const input = '[WEB_SEARCH: macOS Sonoma release notes]';
+        // The query verbatim — no lower-casing like USE_SKILL does.
+        expect(
+          LlmService.extractWebSearchQuery(input),
+          equals('macOS Sonoma release notes'),
+        );
+      },
+    );
 
     test('accepts WEBSEARCH and WEB SEARCH aliases', () {
       expect(LlmService.extractWebSearchQuery('[WEBSEARCH: a]'), equals('a'));
-      expect(
-          LlmService.extractWebSearchQuery('[WEB SEARCH: b]'), equals('b'));
+      expect(LlmService.extractWebSearchQuery('[WEB SEARCH: b]'), equals('b'));
     });
 
     test('accepts `=` as a separator (some models invent their own)', () {
       expect(LlmService.extractWebSearchQuery('[WEB_SEARCH= c]'), equals('c'));
     });
 
-    test('allows punctuation, quotes, and accented characters in the query',
-        () {
-      const input =
-          "[WEB_SEARCH: how to use \"quotes\" in zsh, café résumé?]";
-      expect(
-        LlmService.extractWebSearchQuery(input),
-        equals('how to use "quotes" in zsh, café résumé?'),
-      );
-    });
+    test(
+      'allows punctuation, quotes, and accented characters in the query',
+      () {
+        const input =
+            "[WEB_SEARCH: how to use \"quotes\" in zsh, café résumé?]";
+        expect(
+          LlmService.extractWebSearchQuery(input),
+          equals('how to use "quotes" in zsh, café résumé?'),
+        );
+      },
+    );
 
     test('returns null when no marker present', () {
       expect(LlmService.extractWebSearchQuery('plain prose'), isNull);
@@ -286,8 +342,7 @@ ls /tmp/some-dir
     test('a closed [markdown link] earlier does not absorb the marker', () {
       // Regression guard: the marker regex must not match `[See here]`
       // earlier in the message.
-      const input =
-          'See [docs here](https://x) then [WEB_SEARCH: real query]';
+      const input = 'See [docs here](https://x) then [WEB_SEARCH: real query]';
       expect(LlmService.extractWebSearchQuery(input), equals('real query'));
     });
   });
@@ -319,10 +374,7 @@ def foo():
 [WRITE_FILE_END]
 ''';
       final w = LlmService.extractWriteFile(input)!;
-      expect(
-        w.content,
-        equals('def foo():\n    if True:\n\n        return 1'),
-      );
+      expect(w.content, equals('def foo():\n    if True:\n\n        return 1'));
     });
 
     test('accepts WRITEFILE / WRITE FILE aliases for BEGIN and END', () {
@@ -353,8 +405,7 @@ unfinished
       expect(LlmService.extractWriteFile(input), isNull);
     });
 
-    test('takes the FIRST proposal when two coexist (one-per-turn rule)',
-        () {
+    test('takes the FIRST proposal when two coexist (one-per-turn rule)', () {
       // System prompt forbids two writes per turn; if the model
       // violates that, we still need a deterministic pick — take the
       // first so the user can Apply/Reject something rather than
@@ -390,15 +441,16 @@ line2
       expect(w.content, equals('line1\nline2\n'));
     });
 
-    test('inline mention of `[WRITE_FILE_END]` does NOT close a real block',
-        () {
-      // Regression: when the model TEACHES the write syntax inline
-      // ("just type [WRITE_FILE_END] to finish") and then issues a
-      // real write later in the same turn, the inline mention used
-      // to close the real block early, truncating the body.
-      // Line-anchored markers (added when fixing this bug) keep the
-      // inline reference inert.
-      const input = '''
+    test(
+      'inline mention of `[WRITE_FILE_END]` does NOT close a real block',
+      () {
+        // Regression: when the model TEACHES the write syntax inline
+        // ("just type [WRITE_FILE_END] to finish") and then issues a
+        // real write later in the same turn, the inline mention used
+        // to close the real block early, truncating the body.
+        // Line-anchored markers (added when fixing this bug) keep the
+        // inline reference inert.
+        const input = '''
 The way to close a write block is to type `[WRITE_FILE_END]` on its own line.
 
 Here's the real write:
@@ -407,14 +459,14 @@ Here's the real write:
 print("real body")
 [WRITE_FILE_END]
 ''';
-      final w = LlmService.extractWriteFile(input);
-      expect(w, isNotNull);
-      expect(w!.path, equals('/tmp/real.py'));
-      expect(w.content, equals('print("real body")'));
-    });
+        final w = LlmService.extractWriteFile(input);
+        expect(w, isNotNull);
+        expect(w!.path, equals('/tmp/real.py'));
+        expect(w.content, equals('print("real body")'));
+      },
+    );
 
-    test('inline `[WRITE_FILE_BEGIN: foo]` inside prose does NOT trigger',
-        () {
+    test('inline `[WRITE_FILE_BEGIN: foo]` inside prose does NOT trigger', () {
       // Same regression as above but for the opening marker — a
       // documentation paragraph quoting the syntax shouldn't be
       // mistaken for a real write proposal.
@@ -426,8 +478,7 @@ print("real body")
   });
 
   group('LlmService.stripCompletionMarkers WRITE_FILE coverage', () {
-    test('WRITE_FILE block including body is removed from rendered text',
-        () {
+    test('WRITE_FILE block including body is removed from rendered text', () {
       const input = '''
 About to write:
 
@@ -458,14 +509,16 @@ Done.
       expect(stripped, equals('Quick check.'));
     });
 
-    test('markdown-emphasised **[WEB_SEARCH: q]** removes the asterisks too',
-        () {
-      const input = 'Searching:\n\n**[WEB_SEARCH: foo]**';
-      final stripped = LlmService.stripCompletionMarkers(input);
-      // No dangling `**` left over.
-      expect(stripped.contains('*'), isFalse);
-      expect(stripped, equals('Searching:'));
-    });
+    test(
+      'markdown-emphasised **[WEB_SEARCH: q]** removes the asterisks too',
+      () {
+        const input = 'Searching:\n\n**[WEB_SEARCH: foo]**';
+        final stripped = LlmService.stripCompletionMarkers(input);
+        // No dangling `**` left over.
+        expect(stripped.contains('*'), isFalse);
+        expect(stripped, equals('Searching:'));
+      },
+    );
   });
 
   group('LlmService.stripStreamingMarkers', () {
@@ -480,7 +533,9 @@ Done.
     test('hides a partial trailing `[` (could be either marker)', () {
       const input = 'Almost there.\n\n[';
       expect(
-          LlmService.stripStreamingMarkers(input), equals('Almost there.\n\n'));
+        LlmService.stripStreamingMarkers(input),
+        equals('Almost there.\n\n'),
+      );
     });
 
     test('hides `[TASK_COM` — definitely a marker prefix', () {
@@ -491,18 +546,24 @@ Done.
     test('hides `[ASK_US` — partial ASK_USER prefix', () {
       const input = 'Need input?\n\n[ASK_US';
       expect(
-          LlmService.stripStreamingMarkers(input), equals('Need input?\n\n'));
+        LlmService.stripStreamingMarkers(input),
+        equals('Need input?\n\n'),
+      );
     });
 
-    test('hides `[W` — partial WEB_SEARCH or USE_SKILL/other ambiguous start',
-        () {
-      // The streaming hider treats any bare `[X` whose body could
-      // become USE_SKILL / WEB_SEARCH as a marker prefix.  `[W` is a
-      // unique prefix of WEB_SEARCH so it must be hidden.
-      const input = 'Looking up.\n\n[W';
-      expect(LlmService.stripStreamingMarkers(input),
-          equals('Looking up.\n\n'));
-    });
+    test(
+      'hides `[W` — partial WEB_SEARCH or USE_SKILL/other ambiguous start',
+      () {
+        // The streaming hider treats any bare `[X` whose body could
+        // become USE_SKILL / WEB_SEARCH as a marker prefix.  `[W` is a
+        // unique prefix of WEB_SEARCH so it must be hidden.
+        const input = 'Looking up.\n\n[W';
+        expect(
+          LlmService.stripStreamingMarkers(input),
+          equals('Looking up.\n\n'),
+        );
+      },
+    );
 
     test('hides `[WEB_SEARCH: how to debug` — long partial query', () {
       // Real worst case: model is mid-stream on a 60-char query and we
@@ -521,15 +582,13 @@ Done.
       expect(LlmService.stripStreamingMarkers(input), equals('q?\n\n'));
     });
 
-    test('hides `[WRITE_FILE_BEGIN: …` mid-stream so the body never leaks',
-        () {
+    test('hides `[WRITE_FILE_BEGIN: …` mid-stream so the body never leaks', () {
       // The BEGIN line itself triggers the streaming hide; the body
       // gets stripped by the post-stream pass after END arrives.  This
       // test pins the BEGIN-line hide so users don't see the path
       // flicker in.
       const input = 'Writing:\n\n[WRITE_FILE_BEGIN: /tmp/x.txt';
-      expect(LlmService.stripStreamingMarkers(input),
-          equals('Writing:\n\n'));
+      expect(LlmService.stripStreamingMarkers(input), equals('Writing:\n\n'));
     });
 
     test('hides `**[TASK` — markdown-emphasised partial', () {
@@ -575,8 +634,7 @@ Done.
       LlmService.refreshSystemPrompt();
     });
 
-    test('repeated calls with the same whitelist return the SAME string',
-        () {
+    test('repeated calls with the same whitelist return the SAME string', () {
       // Identity check (`identical`) proves the cache is hot — the
       // builder isn't running on every call.  This is what makes the
       // Anthropic prefix cache stay warm.
@@ -608,8 +666,7 @@ Done.
       // omitted entirely so the model isn't tempted to emit USE_SKILL
       // markers for something it can't reach.  (Mirrors Cursor's
       // policy: never advertise a tool the agent cannot use.)
-      final prompt =
-          LlmService.systemPromptFor(enabledSkillIds: <String>{});
+      final prompt = LlmService.systemPromptFor(enabledSkillIds: <String>{});
       expect(prompt.contains('<agent_skills>'), isFalse);
       expect(prompt.contains('<available_skills'), isFalse);
       expect(prompt.contains('[USE_SKILL'), isFalse);
@@ -620,15 +677,18 @@ Done.
       // cannot fire — the model would emit the marker and the agent
       // loop would have to refuse mid-loop.
       final prompt = LlmService.systemPromptFor(
-          enabledSkillIds: <String>{}, webSearchEnabled: false);
+        enabledSkillIds: <String>{},
+        webSearchEnabled: false,
+      );
       expect(prompt.contains('<web_search_tool>'), isFalse);
       expect(prompt.contains('[WEB_SEARCH'), isFalse);
     });
 
-    test('webSearchEnabled=true injects <web_search_tool> with the marker',
-        () {
+    test('webSearchEnabled=true injects <web_search_tool> with the marker', () {
       final prompt = LlmService.systemPromptFor(
-          enabledSkillIds: <String>{}, webSearchEnabled: true);
+        enabledSkillIds: <String>{},
+        webSearchEnabled: true,
+      );
       expect(prompt.contains('<web_search_tool>'), isTrue);
       // Marker advertised in the prompt so the model knows the exact
       // syntax to emit — no guessing.
@@ -640,20 +700,28 @@ Done.
 
     test('toggling webSearchEnabled invalidates the cache once', () {
       final a = LlmService.systemPromptFor(
-          enabledSkillIds: null, webSearchEnabled: false);
+        enabledSkillIds: null,
+        webSearchEnabled: false,
+      );
       final b = LlmService.systemPromptFor(
-          enabledSkillIds: null, webSearchEnabled: true);
+        enabledSkillIds: null,
+        webSearchEnabled: true,
+      );
       // Different bytes → not identical.
       expect(identical(a, b), isFalse);
       // But repeated call with the new key IS cached.
       final c = LlmService.systemPromptFor(
-          enabledSkillIds: null, webSearchEnabled: true);
+        enabledSkillIds: null,
+        webSearchEnabled: true,
+      );
       expect(identical(b, c), isTrue);
     });
 
     test('fileWriteEnabled=false omits <file_write_tool> and the marker', () {
       final prompt = LlmService.systemPromptFor(
-          enabledSkillIds: <String>{}, fileWriteEnabled: false);
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: false,
+      );
       // Never advertise a tool we can't fire — same rule as skills /
       // web search.  Without this the model would emit
       // [WRITE_FILE_BEGIN] and the agent loop would have to refuse
@@ -662,10 +730,11 @@ Done.
       expect(prompt.contains('[WRITE_FILE_BEGIN'), isFalse);
     });
 
-    test('fileWriteEnabled=true injects <file_write_tool> with the marker',
-        () {
+    test('fileWriteEnabled=true injects <file_write_tool> with the marker', () {
       final prompt = LlmService.systemPromptFor(
-          enabledSkillIds: <String>{}, fileWriteEnabled: true);
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: true,
+      );
       expect(prompt.contains('<file_write_tool>'), isTrue);
       // Both halves of the marker pair must be in the prompt — the
       // model needs to know how to OPEN AND CLOSE the block.
@@ -677,12 +746,18 @@ Done.
 
     test('toggling fileWriteEnabled invalidates the cache once', () {
       final a = LlmService.systemPromptFor(
-          enabledSkillIds: null, fileWriteEnabled: false);
+        enabledSkillIds: null,
+        fileWriteEnabled: false,
+      );
       final b = LlmService.systemPromptFor(
-          enabledSkillIds: null, fileWriteEnabled: true);
+        enabledSkillIds: null,
+        fileWriteEnabled: true,
+      );
       expect(identical(a, b), isFalse);
       final c = LlmService.systemPromptFor(
-          enabledSkillIds: null, fileWriteEnabled: true);
+        enabledSkillIds: null,
+        fileWriteEnabled: true,
+      );
       expect(identical(b, c), isTrue);
     });
 
@@ -692,17 +767,20 @@ Done.
       // into the other's cache slot.
       LlmService.refreshSystemPrompt();
       final webOnFileOn = LlmService.systemPromptFor(
-          enabledSkillIds: null,
-          webSearchEnabled: true,
-          fileWriteEnabled: true);
+        enabledSkillIds: null,
+        webSearchEnabled: true,
+        fileWriteEnabled: true,
+      );
       final webOffFileOn = LlmService.systemPromptFor(
-          enabledSkillIds: null,
-          webSearchEnabled: false,
-          fileWriteEnabled: true);
+        enabledSkillIds: null,
+        webSearchEnabled: false,
+        fileWriteEnabled: true,
+      );
       final webOnFileOff = LlmService.systemPromptFor(
-          enabledSkillIds: null,
-          webSearchEnabled: true,
-          fileWriteEnabled: false);
+        enabledSkillIds: null,
+        webSearchEnabled: true,
+        fileWriteEnabled: false,
+      );
       expect(identical(webOnFileOn, webOffFileOn), isFalse);
       expect(identical(webOnFileOn, webOnFileOff), isFalse);
       expect(identical(webOffFileOn, webOnFileOff), isFalse);
@@ -713,57 +791,56 @@ Done.
     setUp(() async {
       BundledSkillRegistry.debugReset();
       SkillService.debugUserSkillsDirOverride = null;
-      BundledSkillRegistry.register(BundledSkillDef(
-        id: 'alpha',
-        description: 'do the alpha thing',
-        buildBody: () async => 'alpha body',
-      ));
-      BundledSkillRegistry.register(BundledSkillDef(
-        id: 'beta',
-        description: 'do the beta thing',
-        buildBody: () async => 'beta body',
-      ));
+      BundledSkillRegistry.register(
+        BundledSkillDef(
+          id: 'alpha',
+          description: 'do the alpha thing',
+          buildBody: () async => 'alpha body',
+        ),
+      );
+      BundledSkillRegistry.register(
+        BundledSkillDef(
+          id: 'beta',
+          description: 'do the beta thing',
+          buildBody: () async => 'beta body',
+        ),
+      );
       await SkillService.init();
       LlmService.refreshSystemPrompt();
     });
 
-    test('emits one <agent_skill id=… path=…>desc</agent_skill> per skill',
-        () {
+    test('emits one <agent_skill id=… path=…>desc</agent_skill> per skill', () {
       final out = SkillService.buildPromptCatalogue();
       // Both bundled skills should appear with the synthetic `bundled://`
       // path scheme — that's how the Skill model surfaces dynamic-body
       // skills without an on-disk file.
-      expect(
-        out,
-        contains('<agent_skill id="alpha" path="bundled://alpha">'),
-      );
+      expect(out, contains('<agent_skill id="alpha" path="bundled://alpha">'));
       expect(out, contains('do the alpha thing</agent_skill>'));
-      expect(
-        out,
-        contains('<agent_skill id="beta" path="bundled://beta">'),
-      );
+      expect(out, contains('<agent_skill id="beta" path="bundled://beta">'));
       // Stable id-sorted order — alpha must come before beta so the
       // bytes stay identical across runs (prompt-cache stability).
       expect(out.indexOf('id="alpha"'), lessThan(out.indexOf('id="beta"')));
     });
 
-    test('system prompt embeds the <agent_skills> block with policy + listing',
-        () {
-      final prompt = LlmService.systemPromptFor(enabledSkillIds: null);
-      // Cursor-style outer wrapper.
-      expect(prompt.contains('<agent_skills>'), isTrue);
-      expect(prompt.contains('</agent_skills>'), isTrue);
-      // Policy directives mirror Cursor's voice ("IMMEDIATELY", "NEVER").
-      expect(prompt.contains('IMMEDIATELY'), isTrue);
-      expect(prompt.contains('NEVER just announce'), isTrue);
-      // The actual catalogue entries.
-      expect(prompt.contains('<available_skills'), isTrue);
-      expect(prompt.contains('<agent_skill id="alpha"'), isTrue);
-      // Old per-turn-injection vocabulary must be gone — there's no
-      // separate `<system-reminder>` catalogue anymore.
-      expect(prompt.contains('<skills_protocol>'), isFalse);
-      expect(prompt.contains('<system-reminder>'), isFalse);
-    });
+    test(
+      'system prompt embeds the <agent_skills> block with policy + listing',
+      () {
+        final prompt = LlmService.systemPromptFor(enabledSkillIds: null);
+        // Cursor-style outer wrapper.
+        expect(prompt.contains('<agent_skills>'), isTrue);
+        expect(prompt.contains('</agent_skills>'), isTrue);
+        // Policy directives mirror Cursor's voice ("IMMEDIATELY", "NEVER").
+        expect(prompt.contains('IMMEDIATELY'), isTrue);
+        expect(prompt.contains('NEVER just announce'), isTrue);
+        // The actual catalogue entries.
+        expect(prompt.contains('<available_skills'), isTrue);
+        expect(prompt.contains('<agent_skill id="alpha"'), isTrue);
+        // Old per-turn-injection vocabulary must be gone — there's no
+        // separate `<system-reminder>` catalogue anymore.
+        expect(prompt.contains('<skills_protocol>'), isFalse);
+        expect(prompt.contains('<system-reminder>'), isFalse);
+      },
+    );
 
     test('escapes `"` inside path attribute', () {
       // Defensive: a wildly-named user skill folder must not be able to
@@ -782,7 +859,8 @@ Done.
       // the public catalogue with a one-shot registry.  Direct-attr
       // assertion: any literal `"` inside the path attribute would
       // close the attribute prematurely, so check for the escape.
-      final raw = '<agent_skill id="${s.id}" path="${s.fullPath.replaceAll('"', '&quot;')}">${s.description}</agent_skill>';
+      final raw =
+          '<agent_skill id="${s.id}" path="${s.fullPath.replaceAll('"', '&quot;')}">${s.description}</agent_skill>';
       expect(raw.contains('path="a/&quot;b&quot;/SKILL.md"'), isTrue);
       // Sanity: the asserted line is the same shape buildPromptCatalogue
       // would emit (modulo body truncation), so a regression in the
@@ -792,9 +870,7 @@ Done.
 
   group('LlmService skills + AgentConfig wiring', () {
     test('AgentConfig.enabledSkills round-trips through JSON', () {
-      final cfg = AgentConfig(
-        enabledSkills: {'git-bisect', 'verify-fix'},
-      );
+      final cfg = AgentConfig(enabledSkills: {'git-bisect', 'verify-fix'});
       final json = cfg.toJson();
       // Sorted-list serialisation keeps the on-disk diff stable when
       // unrelated settings change — verify the order here so a future
@@ -810,15 +886,13 @@ Done.
       expect(cfg.toJson().containsKey('enabledSkills'), isFalse);
     });
 
-    test('copyWith(resetEnabledSkills: true) restores the null sentinel',
-        () {
+    test('copyWith(resetEnabledSkills: true) restores the null sentinel', () {
       final cfg = AgentConfig(enabledSkills: {'git-bisect'});
       final reset = cfg.copyWith(resetEnabledSkills: true);
       expect(reset.enabledSkills, isNull);
       // The explicit value should NOT survive when reset is requested,
       // even if both are passed (reset takes precedence).
-      final both =
-          cfg.copyWith(enabledSkills: {'x'}, resetEnabledSkills: true);
+      final both = cfg.copyWith(enabledSkills: {'x'}, resetEnabledSkills: true);
       expect(both.enabledSkills, isNull);
     });
 
@@ -829,37 +903,43 @@ Done.
       SkillService.debugUserSkillsDirOverride = '/tmp/my-test-skills';
       expect(SkillService.userSkillsDirPath, equals('/tmp/my-test-skills'));
       SkillService.debugUserSkillsDirOverride = null;
-      expect(SkillService.userSkillsDirPath.endsWith('/.ssterm/skills'),
-          isTrue);
+      expect(
+        SkillService.userSkillsDirPath.endsWith('/.ssterm/skills'),
+        isTrue,
+      );
     });
   });
 
   group('Ollama provider registration', () {
-    test('LlmProvider.ollama is wired into the enum (id + display + fromId)',
-        () {
-      expect(LlmProvider.ollama.id, equals('ollama'));
-      expect(LlmProvider.ollama.displayName, contains('Ollama'));
-      expect(LlmProvider.fromId('ollama'), equals(LlmProvider.ollama));
-    });
+    test(
+      'LlmProvider.ollama is wired into the enum (id + display + fromId)',
+      () {
+        expect(LlmProvider.ollama.id, equals('ollama'));
+        expect(LlmProvider.ollama.displayName, contains('Ollama'));
+        expect(LlmProvider.fromId('ollama'), equals(LlmProvider.ollama));
+      },
+    );
 
-    test('ProviderConfig.ollama() defaults are sane (local URL, no API key)',
-        () {
-      final p = ProviderConfig.ollama();
-      expect(p.id, equals('ollama'));
-      // Loopback bind that ships out of the box — users running the
-      // daemon on another host MUST be able to override this from the
-      // Settings UI, hence the explicit (non-null) default rather than
-      // a `?? null` shrug.
-      expect(p.baseUrl, equals('http://localhost:11434'));
-      // The whole point of adding the `requiresApiKey` flag is this
-      // line — Ollama is auth-less and the dispatcher relies on it.
-      expect(p.requiresApiKey, isFalse);
-      // Model list MUST be empty — we have no way to know what the user
-      // has `ollama pull`ed.  Shipping phantom defaults like `llama3.2`
-      // would 404 on first dispatch for users who only pulled, say,
-      // `qwen2.5-coder`.  Blank dropdown forces the right next action.
-      expect(p.models, isEmpty);
-    });
+    test(
+      'ProviderConfig.ollama() defaults are sane (local URL, no API key)',
+      () {
+        final p = ProviderConfig.ollama();
+        expect(p.id, equals('ollama'));
+        // Loopback bind that ships out of the box — users running the
+        // daemon on another host MUST be able to override this from the
+        // Settings UI, hence the explicit (non-null) default rather than
+        // a `?? null` shrug.
+        expect(p.baseUrl, equals('http://localhost:11434'));
+        // The whole point of adding the `requiresApiKey` flag is this
+        // line — Ollama is auth-less and the dispatcher relies on it.
+        expect(p.requiresApiKey, isFalse);
+        // Model list MUST be empty — we have no way to know what the user
+        // has `ollama pull`ed.  Shipping phantom defaults like `llama3.2`
+        // would 404 on first dispatch for users who only pulled, say,
+        // `qwen2.5-coder`.  Blank dropdown forces the right next action.
+        expect(p.models, isEmpty);
+      },
+    );
 
     test('Cloud providers still require an API key (regression guard)', () {
       expect(ProviderConfig.chatgpt().requiresApiKey, isTrue);
@@ -874,40 +954,42 @@ Done.
       expect(ids, contains('ollama'));
     });
 
-    test('ProviderConfig.ollama() round-trips through JSON (incl. requiresApiKey)',
-        () {
-      final original = ProviderConfig.ollama()
-        ..enabled = true
-        ..baseUrl = 'http://10.0.0.5:11434';
-      final decoded = ProviderConfig.fromJson(original.toJson());
-      expect(decoded.id, equals('ollama'));
-      expect(decoded.requiresApiKey, isFalse);
-      expect(decoded.baseUrl, equals('http://10.0.0.5:11434'));
-      expect(decoded.enabled, isTrue);
-    });
+    test(
+      'ProviderConfig.ollama() round-trips through JSON (incl. requiresApiKey)',
+      () {
+        final original = ProviderConfig.ollama()
+          ..enabled = true
+          ..baseUrl = 'http://10.0.0.5:11434';
+        final decoded = ProviderConfig.fromJson(original.toJson());
+        expect(decoded.id, equals('ollama'));
+        expect(decoded.requiresApiKey, isFalse);
+        expect(decoded.baseUrl, equals('http://10.0.0.5:11434'));
+        expect(decoded.enabled, isTrue);
+      },
+    );
 
     test(
-        'legacy JSON without requiresApiKey falls back to the factory default',
-        () {
-      // Simulate a config saved by an older build that predates the
-      // requiresApiKey field — the loader must still recognise Ollama
-      // as auth-less, not silently flip it to "needs a key" and then
-      // block dispatch.
-      final legacyJson = {
-        'id': 'ollama',
-        'displayName': 'Ollama (local)',
-        'enabled': true,
-        'baseUrl': 'http://localhost:11434',
-        'models': ['llama3.2'],
-        // requiresApiKey intentionally omitted
-      };
-      final decoded = ProviderConfig.tryFromJson(legacyJson);
-      expect(decoded, isNotNull);
-      expect(decoded!.requiresApiKey, isFalse);
-    });
+      'legacy JSON without requiresApiKey falls back to the factory default',
+      () {
+        // Simulate a config saved by an older build that predates the
+        // requiresApiKey field — the loader must still recognise Ollama
+        // as auth-less, not silently flip it to "needs a key" and then
+        // block dispatch.
+        final legacyJson = {
+          'id': 'ollama',
+          'displayName': 'Ollama (local)',
+          'enabled': true,
+          'baseUrl': 'http://localhost:11434',
+          'models': ['llama3.2'],
+          // requiresApiKey intentionally omitted
+        };
+        final decoded = ProviderConfig.tryFromJson(legacyJson);
+        expect(decoded, isNotNull);
+        expect(decoded!.requiresApiKey, isFalse);
+      },
+    );
 
-    test(
-        'AgentConfig.fromJson back-fills new built-in providers missing from '
+    test('AgentConfig.fromJson back-fills new built-in providers missing from '
         'older saved configs (regression: Ollama added post-launch)', () {
       // Simulate a config saved by a build that predates Ollama — only
       // the four cloud providers appear in the JSON.  Without the
@@ -926,7 +1008,10 @@ Done.
       // All originals preserved IN ORDER (we mustn't reshuffle existing
       // entries — that would surprise users who'd dragged things around
       // mentally), with Ollama appended at the tail.
-      expect(ids, equals(['chatgpt', 'claude', 'gemini', 'deepseek', 'ollama']));
+      expect(
+        ids,
+        equals(['chatgpt', 'claude', 'gemini', 'deepseek', 'ollama']),
+      );
       // The back-filled Ollama entry must inherit factory defaults
       // (including the no-key flag) — otherwise the dispatcher would
       // refuse to fire it.
@@ -935,8 +1020,7 @@ Done.
       expect(ollama.baseUrl, equals('http://localhost:11434'));
     });
 
-    test(
-        'unknown provider id without requiresApiKey falls back to the safe '
+    test('unknown provider id without requiresApiKey falls back to the safe '
         'default (true)', () {
       // Conservative default for third-party / typo'd ids — we'd rather
       // nag the user to set a key for a real cloud provider than

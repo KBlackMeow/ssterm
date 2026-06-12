@@ -353,6 +353,10 @@ static void start_read_thread(HANDLE fd, Dart_Port port, HANDLE mutex, BOOL ackR
     {
         free(options);
     }
+    else
+    {
+        CloseHandle(thread);
+    }
 }
 
 typedef struct WaitExitOptions
@@ -379,6 +383,7 @@ static DWORD WINAPI wait_exit_thread(LPVOID arg)
 
     Dart_PostInteger_DL(options->port, exit_code);
 
+    free(options);
     return 0;
 }
 
@@ -398,13 +403,17 @@ static void start_wait_exit_thread(HANDLE pid, Dart_Port port, HANDLE mutex)
     {
         free(options);
     }
+    else
+    {
+        CloseHandle(thread);
+    }
 }
 
 typedef struct PtyHandle
 {
-    PHANDLE inputWriteSide;
+    HANDLE inputWriteSide;
 
-    PHANDLE outputReadSide;
+    HANDLE outputReadSide;
 
     HPCON hPty;
 
@@ -532,9 +541,11 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
         return NULL;
     }
 
-    // free(startupInfo.lpAttributeList);
-
-    // CloseHandle(processInfo.hThread);
+    DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
+    free(startupInfo.lpAttributeList);
+    CloseHandle(processInfo.hThread);
+    CloseHandle(inputReadSide);
+    CloseHandle(outputWriteSide);
 
     HANDLE mutex = CreateSemaphore(
         NULL, // default security attributes
@@ -562,6 +573,19 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     pty->hMutex = mutex;
 
     return pty;
+}
+
+FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
+{
+    if (handle == NULL)
+    {
+        return;
+    }
+
+    CloseHandle(handle->inputWriteSide);
+    CloseHandle(handle->outputReadSide);
+    ClosePseudoConsole(handle->hPty);
+    free(handle);
 }
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)
