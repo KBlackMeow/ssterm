@@ -266,7 +266,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
 
   // Returns the terminal body widget (used inside _TerminalPage).
   Widget _buildTerminalArea() {
-    if (_tabs.isEmpty) return const SizedBox.expand();
+    if (_tabs.isEmpty) return _buildChromeBackgroundFill();
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTap: () {
@@ -281,11 +281,21 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   // ── Shared tab-body builders ───────────────────────────────────────────────
 
   Widget _buildBody() {
-    if (_tabs.isEmpty) return const SizedBox.expand();
+    if (_tabs.isEmpty) return _buildChromeBackgroundFill();
     return IndexedStack(
       index: _active,
       sizing: StackFit.expand,
-      children: [for (final tab in _tabs) _buildTabBody(tab)],
+      children: [
+        for (final tab in _tabs)
+          RepaintBoundary(key: ObjectKey(tab), child: _buildTabBody(tab)),
+      ],
+    );
+  }
+
+  Widget _buildChromeBackgroundFill() {
+    return ColoredBox(
+      color: _config.terminal.chromeBackground,
+      child: const SizedBox.expand(),
     );
   }
 

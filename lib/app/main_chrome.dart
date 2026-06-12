@@ -623,34 +623,23 @@ class _TabChipState extends State<_TabChip> {
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
+        child: Container(
           height: 28,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-                  color: isActive
-                      ? widget.tabSelectedColor
-                      : _hover
-                          ? widget.tabUnselectedColor
-                          : Colors.transparent,
-                  borderRadius: BorderRadius.circular(_kTabRadius),
-                  border: Border.all(
-                    color: isActive
-                        ? fgActive.withValues(alpha: 0.20)
-                        : Colors.transparent,
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: isActive
-                          ? const Color(0x30000000)
-                          : Colors.transparent,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
+            color: isActive
+                ? widget.tabSelectedColor
+                : _hover
+                ? widget.tabUnselectedColor
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(_kTabRadius),
+            border: Border.all(
+              color: isActive
+                  ? fgActive.withValues(alpha: 0.20)
+                  : Colors.transparent,
+              width: 1,
+            ),
+          ),
           child: Row(
             children: [
               Icon(

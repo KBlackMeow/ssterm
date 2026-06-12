@@ -540,7 +540,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
   void _closeTab(int i) {
     if (i < 0 || i >= _tabs.length) return;
-    _tabs[i].dispose();
+    final removed = _tabs[i];
     setState(() {
       _tabs.removeAt(i);
       if (_tabs.isNotEmpty) {
@@ -554,6 +554,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       }
     });
     if (_tabs.isNotEmpty) _activateTab(_active);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      removed.dispose();
+    });
   }
 
   void _selectTab(int i) {
