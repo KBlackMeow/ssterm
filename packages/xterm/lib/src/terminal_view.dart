@@ -380,6 +380,16 @@ class TerminalViewState extends State<TerminalView> {
     _customTextEditKey.currentState?.closeKeyboard();
   }
 
+  /// Releases platform text input and focus before this view is removed.
+  ///
+  /// Desktop IMEs, especially macOS IMK, can keep native state tied to the
+  /// focused text client. Closing it before tab teardown avoids racing the
+  /// platform text input channel with render/controller disposal.
+  void releaseInput() {
+    closeKeyboard();
+    _focusNode.unfocus();
+  }
+
   Rect get cursorRect {
     return renderTerminal.cursorOffset & renderTerminal.cellSize;
   }

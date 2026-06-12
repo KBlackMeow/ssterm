@@ -92,11 +92,24 @@ class TerminalController with ChangeNotifier {
 
   /// Clears the current selection.
   void clearSelection() {
+    _clearSelectionAnchors();
+    notifyListeners();
+  }
+
+  /// Clears selection ownership without notifying listeners.
+  ///
+  /// This is intended for teardown paths where the render tree is about to be
+  /// removed and scheduling another repaint/layout for the old selection can
+  /// race with widget disposal.
+  void disposeSelection() {
+    _clearSelectionAnchors();
+  }
+
+  void _clearSelectionAnchors() {
     _selectionBase?.dispose();
     _selectionBase = null;
     _selectionExtent?.dispose();
     _selectionExtent = null;
-    notifyListeners();
   }
 
   // Select which type of pointer events are send to the terminal.
@@ -145,6 +158,16 @@ class TerminalController with ChangeNotifier {
 
     return highlight;
   }
+
+  @override
+  void dispose() {
+    disposeSelection();
+    for (final highlight in List<TerminalHighlight>.of(_highlights)) {
+      highlight._disposeFromOwner();
+    }
+    _highlights.clear();
+    super.dispose();
+  }
 }
 
 class TerminalHighlight with Disposable {
@@ -170,5 +193,17 @@ class TerminalHighlight with Disposable {
       return null;
     }
     return BufferRangeLine(p1.offset, p2.offset);
+  }
+
+  @override
+  void dispose() {
+    p1.dispose();
+    p2.dispose();
+    super.dispose();
+  }
+
+  void _disposeFromOwner() {
+    p1.dispose();
+    p2.dispose();
   }
 }

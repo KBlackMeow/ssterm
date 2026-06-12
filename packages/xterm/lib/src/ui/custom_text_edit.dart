@@ -115,9 +115,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   }
 
   void closeKeyboard() {
-    if (hasInputConnection) {
-      _connection?.close();
-    }
+    _closeInputConnectionIfNeeded();
   }
 
   void setEditingState(TextEditingValue value) {

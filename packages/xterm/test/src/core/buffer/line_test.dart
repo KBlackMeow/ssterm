@@ -126,5 +126,20 @@ void main() {
       expect(line.attached, false);
       expect(anchor.attached, false);
     });
+
+    test('line dispose detaches all anchors', () {
+      final line = BufferLine(10);
+      final anchors = [
+        line.createAnchor(1),
+        line.createAnchor(3),
+        line.createAnchor(5),
+      ];
+
+      line.dispose();
+
+      for (final anchor in anchors) {
+        expect(anchor.attached, false);
+      }
+    });
   });
 }

@@ -574,6 +574,10 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   void _closeTab(int i) {
     if (i < 0 || i >= _tabs.length) return;
     final removed = _tabs[i];
+    removed.terminalViewKey.currentState?.releaseInput();
+    removed.splitViewKey.currentState?.releaseInput();
+    removed.terminalController.disposeSelection();
+    removed.splitTerminalController.disposeSelection();
     setState(() {
       _tabs.removeAt(i);
       if (_tabs.isNotEmpty) {

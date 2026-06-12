@@ -227,12 +227,22 @@ class TerminalPainter {
     // arrow tip / right edge is preserved. The next cell's content may
     // visually overlap by a fraction of a pixel, which is acceptable since
     // the common pattern is `➜ ` (symbol + space).
+    final isItalic = cellData.flags & CellFlags.italic != 0;
     final cellClip = _cellSize.width * (charWidth >= 2 ? 2 : 1);
     final glyphWidth = paragraph.maxIntrinsicWidth;
-    final clipWidth = glyphWidth > cellClip ? glyphWidth : cellClip;
+    final italicBleedX =
+        isItalic ? (_cellSize.width * 0.20).ceilToDouble() : 0.0;
+    final italicBleedTop = isItalic ? 1.0 : 0.0;
+    final clipWidth =
+        (glyphWidth > cellClip ? glyphWidth : cellClip) + italicBleedX;
     canvas.save();
     canvas.clipRect(
-      Rect.fromLTWH(offset.dx, offset.dy, clipWidth, _cellSize.height),
+      Rect.fromLTWH(
+        offset.dx,
+        offset.dy - italicBleedTop,
+        clipWidth,
+        _cellSize.height + italicBleedTop,
+      ),
     );
     canvas.drawParagraph(paragraph, offset);
     canvas.restore();

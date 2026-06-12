@@ -144,7 +144,7 @@ class Pty {
       throw StateError('Failed to create PTY: ${_getPtyError()}');
     }
 
-    _exitPort.first.then(_onExitCode);
+    _exitSubscription = _exitPort.listen(_onExitCode);
   }
 
   final _stdoutPort = ReceivePort();
@@ -152,6 +152,8 @@ class Pty {
   final _exitPort = ReceivePort();
 
   final _exitCodeCompleter = Completer<int>();
+
+  StreamSubscription<dynamic>? _exitSubscription;
 
   late final Pointer<PtyHandle> _handle;
 
@@ -222,6 +224,8 @@ class Pty {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _exitSubscription?.cancel();
+    _exitSubscription = null;
     _bindings.pty_destroy(_handle);
     _stdoutPort.close();
     _exitPort.close();
@@ -237,6 +241,8 @@ class Pty {
   void _onExitCode(dynamic exitCode) {
     if (_disposed) return;
     _disposed = true;
+    _exitSubscription?.cancel();
+    _exitSubscription = null;
     _stdoutPort.close();
     _exitPort.close();
     _bindings.pty_destroy(_handle);
