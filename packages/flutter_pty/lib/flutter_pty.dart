@@ -226,9 +226,14 @@ class Pty {
     _disposed = true;
     _exitSubscription?.cancel();
     _exitSubscription = null;
-    _bindings.pty_destroy(_handle);
+    // Close Dart receive ports FIRST so any in-flight read() on the IO thread
+    // is cancelled before we close the underlying file descriptors.  Reversing
+    // this order causes a kernel-level deadlock: the IO thread holds an
+    // internal PTY lock inside read(), and the main thread's close() inside
+    // pty_destroy blocks forever waiting for it.
     _stdoutPort.close();
     _exitPort.close();
+    _bindings.pty_destroy(_handle);
   }
 
   /// indicates that a data chunk has been processed.

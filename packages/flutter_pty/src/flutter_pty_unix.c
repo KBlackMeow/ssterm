@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <pthread.h>
+#include <signal.h>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -225,7 +226,17 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         return;
     }
 
+    // Kill the shell process with SIGKILL before closing the PTY master.
+    // SIGTERM (sent by Dart-side Pty.kill()) is catchable/ignorable — if the
+    // shell ignores it, the PTY slave stays open, the read_loop thread stays
+    // blocked in read(), and the main-thread close() below would block forever
+    // waiting for that read to drain (macOS kernel behaviour).  SIGKILL cannot
+    // be caught; the slave closes immediately, read() returns EOF, and the
+    // close() completes without blocking.
+    kill(handle->pid, SIGKILL);
+
     close(handle->ptm);
+    pthread_mutex_destroy(&handle->mutex);
     free(handle);
 }
 
