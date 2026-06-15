@@ -146,10 +146,19 @@ class LocalShellDiscovery {
   static LocalShellOption defaultShell(List<LocalShellOption> shells) {
     if (shells.isEmpty) return fallback();
 
-    final envShell = Platform.isWindows
-        ? Platform.environment['COMSPEC']
-        : Platform.environment['SHELL'];
+    if (Platform.isWindows) {
+      // On Windows, prefer PowerShell over CMD regardless of COMSPEC.
+      // COMSPEC always points to cmd.exe, so it's not useful as a default
+      // shell selector for a modern terminal.
+      for (final id in const ['pwsh', 'powershell']) {
+        for (final shell in shells) {
+          if (shell.id == id) return shell;
+        }
+      }
+      return shells.first;
+    }
 
+    final envShell = Platform.environment['SHELL'];
     if (envShell != null) {
       final normalized = _normalizePath(envShell);
       for (final shell in shells) {

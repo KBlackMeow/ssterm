@@ -21,6 +21,8 @@ Map<String, String> buildWslEnvironment({
       systemRoot,
       '$systemRoot\\System32\\Wbem',
       '$systemRoot\\System32\\WindowsPowerShell\\v1.0',
+      if (Platform.environment.containsKey('PATH'))
+        Platform.environment['PATH']!,
     ].join(';'),
   };
 
@@ -71,6 +73,8 @@ Map<String, String> buildGitBashEnvironment({
     ],
     '$systemRoot\\System32',
     systemRoot,
+    if (Platform.environment.containsKey('PATH'))
+      Platform.environment['PATH']!,
   ].join(';');
 
   final env = <String, String>{
