@@ -34,6 +34,86 @@ void _ensureInitialized() {
   }
 }
 
+/// Exception thrown when [Pty.start] fails or times out.
+class PtyStartException implements Exception {
+  final String message;
+  const PtyStartException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// Runs [pty_create] inside a background isolate so the main isolate never
+/// blocks on the FFI call.  Returns the raw pointer address on success or -1
+/// on failure (caller reads [pty_error] for the message).
+@pragma('vm:entry-point')
+int _ptyCreateInIsolate({
+  required int stdoutPort,
+  required int exitPort,
+  required String executable,
+  required List<String> arguments,
+  String? workingDirectory,
+  required List<String> envPairs,
+  required int rows,
+  required int columns,
+  required bool ackRead,
+}) {
+  _ensureInitialized(); // per-isolate Dart API DL init
+
+  final executableNative = executable.toNativeUtf8();
+  final workingDirectoryNative = workingDirectory?.toNativeUtf8();
+
+  final argv = calloc<Pointer<Utf8>>(arguments.length + 2);
+  argv[0] = executable.toNativeUtf8();
+  for (var i = 0; i < arguments.length; i++) {
+    argv[i + 1] = arguments[i].toNativeUtf8();
+  }
+  argv[arguments.length + 1] = nullptr;
+
+  final envp = calloc<Pointer<Utf8>>(envPairs.length + 1);
+  for (var i = 0; i < envPairs.length; i++) {
+    envp[i] = envPairs[i].toNativeUtf8();
+  }
+  envp[envPairs.length] = nullptr;
+
+  final options = calloc<PtyOptions>();
+  options.ref.rows = rows;
+  options.ref.cols = columns;
+  options.ref.executable = executableNative.cast();
+  options.ref.arguments = argv.cast();
+  options.ref.environment = envp.cast();
+  options.ref.stdout_port = stdoutPort;
+  options.ref.exit_port = exitPort;
+  options.ref.ackRead = ackRead;
+
+  if (workingDirectory != null) {
+    options.ref.working_directory = workingDirectoryNative!.cast();
+  } else {
+    options.ref.working_directory = nullptr;
+  }
+
+  final Pointer<PtyHandle> handle;
+  try {
+    handle = _bindings.pty_create(options);
+  } finally {
+    calloc.free(options);
+    malloc.free(executableNative);
+    if (workingDirectoryNative != null) {
+      malloc.free(workingDirectoryNative);
+    }
+    for (var i = 0; i < arguments.length + 1; i++) {
+      malloc.free(argv[i]);
+    }
+    calloc.free(argv);
+    for (var i = 0; i < envPairs.length; i++) {
+      malloc.free(envp[i]);
+    }
+    calloc.free(envp);
+  }
+
+  if (handle == nullptr) return -1;
+  return handle.address;
+}
+
 /// Pty represents a process running in a pseudo-terminal.
 ///
 /// To create a Pty, use [Pty.start].
@@ -42,18 +122,46 @@ class Pty {
 
   final List<String> arguments;
 
-  /// Spawns a process in a pseudo-terminal. The arguments have the same meaning
-  /// as in [Process.start].
-  /// [ackRead] indicates if the pty should wait for a call to [Pty.ackRead] before sending the next data.
-  Pty.start(
-    this.executable, {
-    this.arguments = const [],
+  final ReceivePort _stdoutPort;
+
+  final ReceivePort _exitPort;
+
+  final _exitCodeCompleter = Completer<int>();
+
+  StreamSubscription<dynamic>? _exitSubscription;
+
+  late final Pointer<PtyHandle> _handle;
+
+  var _disposed = false;
+
+  Pty._({
+    required this.executable,
+    required this.arguments,
+    required Pointer<PtyHandle> handle,
+    required ReceivePort stdoutPort,
+    required ReceivePort exitPort,
+  }) : _handle = handle,
+       _stdoutPort = stdoutPort,
+       _exitPort = exitPort {
+    _exitSubscription = _exitPort.listen(_onExitCode);
+  }
+
+  /// Spawns a process in a pseudo-terminal inside a background isolate so the
+  /// main isolate never blocks on [pty_create].  The arguments have the same
+  /// meaning as in [Process.start].
+  ///
+  /// Has a 30-second timeout; throws [PtyStartException] on timeout.
+  /// [ackRead] indicates if the pty should wait for a call to [Pty.ackRead]
+  /// before sending the next data.
+  static Future<Pty> start(
+    String executable, {
+    List<String> arguments = const [],
     String? workingDirectory,
     Map<String, String>? environment,
     int rows = 25,
     int columns = 80,
     bool ackRead = false,
-  }) {
+  }) async {
     _ensureInitialized();
 
     final effectiveEnv = <String, String>{};
@@ -87,77 +195,64 @@ class Pty {
       }
     }
 
-    final executableNative = executable.toNativeUtf8();
-    final workingDirectoryNative = workingDirectory?.toNativeUtf8();
+    final envPairs = effectiveEnv.entries
+        .map((e) => '${e.key}=${e.value}')
+        .toList();
 
-    // build argv
-    final argv = calloc<Pointer<Utf8>>(arguments.length + 2);
-    argv[0] = executable.toNativeUtf8();
-    for (var i = 0; i < arguments.length; i++) {
-      argv[i + 1] = arguments[i].toNativeUtf8();
-    }
-    argv[arguments.length + 1] = nullptr;
+    // Create ReceivePorts on the MAIN isolate so their nativePort IDs are
+    // known before we launch the background isolate.  The C read_loop thread
+    // posts to these ports via process-global Dart_PostCObject_DL — this
+    // works across isolates because port IDs are process-global.
+    final stdoutPort = ReceivePort();
+    final exitPort = ReceivePort();
 
-    //build env
-    final envp = calloc<Pointer<Utf8>>(effectiveEnv.length + 1);
-    for (var i = 0; i < effectiveEnv.length; i++) {
-      final entry = effectiveEnv.entries.elementAt(i);
-      envp[i] = '${entry.key}=${entry.value}'.toNativeUtf8();
-    }
-    envp[effectiveEnv.length] = nullptr;
-
-    final options = calloc<PtyOptions>();
-    options.ref.rows = rows;
-    options.ref.cols = columns;
-    options.ref.executable = executableNative.cast();
-    options.ref.arguments = argv.cast();
-    options.ref.environment = envp.cast();
-    options.ref.stdout_port = _stdoutPort.sendPort.nativePort;
-    options.ref.exit_port = _exitPort.sendPort.nativePort;
-    options.ref.ackRead = ackRead;
-
-    if (workingDirectory != null) {
-      options.ref.working_directory = workingDirectoryNative!.cast();
-    } else {
-      options.ref.working_directory = nullptr;
-    }
+    // Extract native port IDs BEFORE the Isolate.run closure so the closure
+    // captures only ints, not the unsendable ReceivePort objects.
+    final stdoutPortId = stdoutPort.sendPort.nativePort;
+    final exitPortId = exitPort.sendPort.nativePort;
 
     try {
-      _handle = _bindings.pty_create(options);
-    } finally {
-      calloc.free(options);
-      malloc.free(executableNative);
-      if (workingDirectoryNative != null) {
-        malloc.free(workingDirectoryNative);
-      }
-      for (var i = 0; i < arguments.length + 1; i++) {
-        malloc.free(argv[i]);
-      }
-      calloc.free(argv);
-      for (var i = 0; i < effectiveEnv.length; i++) {
-        malloc.free(envp[i]);
-      }
-      calloc.free(envp);
-    }
+      final handleAddr = await Isolate.run(() => _ptyCreateInIsolate(
+            stdoutPort: stdoutPortId,
+            exitPort: exitPortId,
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            envPairs: envPairs,
+            rows: rows,
+            columns: columns,
+            ackRead: ackRead,
+          ))
+          .timeout(const Duration(seconds: 30));
 
-    if (_handle == nullptr) {
-      throw StateError('Failed to create PTY: ${_getPtyError()}');
-    }
+      if (handleAddr == -1) {
+        final err = _getPtyError();
+        throw PtyStartException(
+          err != null ? 'Failed to create PTY: $err' : 'Failed to create PTY',
+        );
+      }
 
-    _exitSubscription = _exitPort.listen(_onExitCode);
+      final handle = Pointer<PtyHandle>.fromAddress(handleAddr);
+      return Pty._(
+        executable: executable,
+        arguments: arguments,
+        handle: handle,
+        stdoutPort: stdoutPort,
+        exitPort: exitPort,
+      );
+    } on TimeoutException {
+      stdoutPort.close();
+      exitPort.close();
+      throw PtyStartException(
+        'Terminal creation timed out after 30 seconds. '
+        'The shell process (e.g., WSL) may be hung.',
+      );
+    } catch (e) {
+      stdoutPort.close();
+      exitPort.close();
+      rethrow;
+    }
   }
-
-  final _stdoutPort = ReceivePort();
-
-  final _exitPort = ReceivePort();
-
-  final _exitCodeCompleter = Completer<int>();
-
-  StreamSubscription<dynamic>? _exitSubscription;
-
-  late final Pointer<PtyHandle> _handle;
-
-  var _disposed = false;
 
   /// The output stream from the pseudo-terminal. Note that pseudo-terminals
   /// do not distinguish between stdout and stderr.

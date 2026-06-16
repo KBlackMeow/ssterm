@@ -431,39 +431,48 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 {
     HANDLE inputReadSide = NULL;
     HANDLE inputWriteSide = NULL;
-
     HANDLE outputReadSide = NULL;
     HANDLE outputWriteSide = NULL;
+    HPCON hPty = NULL;
+    PPROC_THREAD_ATTRIBUTE_LIST lpAttributeList = NULL;
+    HANDLE mutex = NULL;
+    PtyHandle *pty = NULL;
 
+    PROCESS_INFORMATION processInfo;
+    ZeroMemory(&processInfo, sizeof(processInfo));
+
+    LPWSTR command = NULL;
+    LPWSTR environment_block = NULL;
+    LPWSTR working_directory = NULL;
+
+    // --- create pipes ---
     if (!CreatePipe(&inputReadSide, &inputWriteSide, NULL, 0))
     {
         error_message = "Failed to create input pipe";
-        return NULL;
+        goto cleanup;
     }
 
     if (!CreatePipe(&outputReadSide, &outputWriteSide, NULL, 0))
     {
         error_message = "Failed to create output pipe";
-        return NULL;
+        goto cleanup;
     }
 
+    // --- create pseudo console ---
     COORD size;
-
     size.X = options->cols;
     size.Y = options->rows;
-
-    HPCON hPty;
 
     HRESULT result = CreatePseudoConsole(size, inputReadSide, outputWriteSide, 0, &hPty);
 
     if (FAILED(result))
     {
         error_message = "Failed to create pseudo console";
-        return NULL;
+        goto cleanup;
     }
 
+    // --- proc thread attribute list ---
     STARTUPINFOEX startupInfo;
-
     ZeroMemory(&startupInfo, sizeof(startupInfo));
     startupInfo.StartupInfo.cb = sizeof(startupInfo);
 
@@ -474,95 +483,81 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 
     SIZE_T bytesRequired;
     InitializeProcThreadAttributeList(NULL, 1, 0, &bytesRequired);
-    startupInfo.lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(bytesRequired);
+    lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(bytesRequired);
 
-    BOOL ok = InitializeProcThreadAttributeList(startupInfo.lpAttributeList, 1, 0, &bytesRequired);
-
-    if (!ok)
+    if (!InitializeProcThreadAttributeList(lpAttributeList, 1, 0, &bytesRequired))
     {
         error_message = "Failed to initialize proc thread attribute list";
-        return NULL;
+        goto cleanup;
     }
+    startupInfo.lpAttributeList = lpAttributeList;
 
-    ok = UpdateProcThreadAttribute(startupInfo.lpAttributeList,
+    if (!UpdateProcThreadAttribute(lpAttributeList,
                                    0,
                                    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
                                    hPty,
                                    sizeof(hPty),
                                    NULL,
-                                   NULL);
-
-    if (!ok)
+                                   NULL))
     {
         error_message = "Failed to update proc thread attribute list";
-        return NULL;
+        goto cleanup;
     }
 
-    LPWSTR command = build_command(options->executable, options->arguments);
+    // --- build command / env / cwd strings ---
+    command = build_command(options->executable, options->arguments);
+    environment_block = build_environment(options->environment);
+    working_directory = build_working_directory(options->working_directory);
 
-    LPWSTR environment_block = build_environment(options->environment);
+    // --- create process ---
+    BOOL ok = CreateProcessW(NULL,
+                             command,
+                             NULL,
+                             NULL,
+                             FALSE,
+                             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                             environment_block,
+                             working_directory,
+                             &startupInfo.StartupInfo,
+                             &processInfo);
 
-    LPWSTR working_directory = build_working_directory(options->working_directory);
-
-    PROCESS_INFORMATION processInfo;
-    ZeroMemory(&processInfo, sizeof(processInfo));
-
-    ok = CreateProcessW(NULL,
-                        command,
-                        NULL,
-                        NULL,
-                        FALSE,
-                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-                        environment_block,
-                        working_directory,
-                        &startupInfo.StartupInfo,
-                        &processInfo);
-
-    if (command != NULL)
-    {
-        free(command);
-    }
-
-    if (environment_block != NULL)
-    {
-        free(environment_block);
-    }
-
-    if (working_directory != NULL)
-    {
-        free(working_directory);
-    }
+    free(command);
+    command = NULL;
+    free(environment_block);
+    environment_block = NULL;
+    free(working_directory);
+    working_directory = NULL;
 
     if (!ok)
     {
         error_message = "Failed to create process";
         DWORD error = GetLastError();
         printf("error no: %d\n", error);
-        return NULL;
+        goto cleanup;
     }
 
-    DeleteProcThreadAttributeList(startupInfo.lpAttributeList);
-    free(startupInfo.lpAttributeList);
+    // --- success path: wire up read/wait threads ---
+    DeleteProcThreadAttributeList(lpAttributeList);
+    free(lpAttributeList);
+    lpAttributeList = NULL;
     CloseHandle(processInfo.hThread);
+    processInfo.hThread = NULL;
     CloseHandle(inputReadSide);
+    inputReadSide = NULL;
     CloseHandle(outputWriteSide);
+    outputWriteSide = NULL;
 
-    HANDLE mutex = CreateSemaphore(
-        NULL, // default security attributes
-        1,    // initial count
-        1,    // maximum count
-        NULL);
+    mutex = CreateSemaphore(NULL, 1, 1, NULL);
 
     start_read_thread(outputReadSide, options->stdout_port, mutex, options->ackRead);
-
     start_wait_exit_thread(processInfo.hProcess, options->exit_port, mutex);
 
-    PtyHandle *pty = malloc(sizeof(PtyHandle));
+    pty = malloc(sizeof(PtyHandle));
 
     if (pty == NULL)
     {
         error_message = "Failed to allocate pty handle";
-        return NULL;
+        goto cleanup;
     }
 
     pty->inputWriteSide = inputWriteSide;
@@ -573,6 +568,29 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     pty->hMutex = mutex;
 
     return pty;
+
+cleanup:
+    // Close all resources that were successfully created and not yet
+    // transferred to the PtyHandle.  Handles that were closed and NULL-ed
+    // on the success path are skipped by the NULL checks below.
+    if (inputReadSide != NULL)   CloseHandle(inputReadSide);
+    if (inputWriteSide != NULL)  CloseHandle(inputWriteSide);
+    if (outputReadSide != NULL)  CloseHandle(outputReadSide);
+    if (outputWriteSide != NULL) CloseHandle(outputWriteSide);
+    if (hPty != NULL)            ClosePseudoConsole(hPty);
+    if (lpAttributeList != NULL)
+    {
+        DeleteProcThreadAttributeList(lpAttributeList);
+        free(lpAttributeList);
+    }
+    if (processInfo.hThread != NULL)  CloseHandle(processInfo.hThread);
+    if (processInfo.hProcess != NULL) CloseHandle(processInfo.hProcess);
+    if (mutex != NULL)                CloseHandle(mutex);
+    free(command);
+    free(environment_block);
+    free(working_directory);
+    // pty is NULL here so nothing to free
+    return NULL;
 }
 
 FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)

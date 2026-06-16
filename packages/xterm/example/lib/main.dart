@@ -48,21 +48,21 @@ class _HomeState extends State<Home> {
 
   final terminalController = TerminalController();
 
-  late final Pty pty;
+  late Pty pty;
 
   @override
   void initState() {
     super.initState();
 
     WidgetsBinding.instance.endOfFrame.then(
-      (_) {
-        if (mounted) _startPty();
+      (_) async {
+        if (mounted) await _startPty();
       },
     );
   }
 
-  void _startPty() {
-    pty = Pty.start(
+  Future<void> _startPty() async {
+    pty = await Pty.start(
       shell,
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
