@@ -59,7 +59,7 @@ class _HomeState extends State<Home> {
 
   final suggestionOverlay = SuggestionPortalController();
 
-  late final Pty pty;
+  late Pty pty;
 
   @override
   void initState() {
@@ -67,8 +67,8 @@ class _HomeState extends State<Home> {
     terminal.addListener(_handleTerminalChanged);
 
     WidgetsBinding.instance.endOfFrame.then(
-      (_) {
-        if (mounted) _startPty();
+      (_) async {
+        if (mounted) await _startPty();
       },
     );
   }
@@ -79,8 +79,8 @@ class _HomeState extends State<Home> {
     terminal.removeListener(_handleTerminalChanged);
   }
 
-  void _startPty() {
-    pty = Pty.start(
+  Future<void> _startPty() async {
+    pty = await Pty.start(
       shell,
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,

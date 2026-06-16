@@ -12,3 +12,16 @@ PRODUCT_BUNDLE_IDENTIFIER = com.example.ssterm
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+
+// Suppress ld warnings about missing Metal toolchain Swift search paths.
+// macOS cryptex mounts Metal.xctoolchain without usr/lib/swift/macosx,
+// causing harmless "search path ... not found" warnings from ld.
+OTHER_LDFLAGS = $(inherited) -Xlinker -w
+
+// Disable Xcode 16+ "Debug Dylib Support" (SwiftUI Live Preview stub
+// executor + __preview.dylib). Those auxiliary link steps don't inherit
+// OTHER_LDFLAGS, so -Xlinker -w can't reach them, and they're the
+// source of the residual "Metal.xctoolchain/usr/lib/swift/macosx not
+// found" warnings. Flutter doesn't use SwiftUI previews, so turning
+// this off is safe and produces a cleaner, single-link build.
+ENABLE_DEBUG_DYLIB = NO

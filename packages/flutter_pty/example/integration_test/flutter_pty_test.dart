@@ -61,7 +61,7 @@ class OutputCollector {
 
 void main() {
   test('Pty works', () async {
-    final pty = Pty.start(shell);
+    final pty = await Pty.start(shell);
     pty.write('random input'.toUtf8());
 
     expect(await pty.output.first, isNotEmpty);
@@ -70,7 +70,7 @@ void main() {
   });
 
   test('Pty.kill works', () async {
-    final pty = Pty.start(shell);
+    final pty = await Pty.start(shell);
     pty.write('random input'.toUtf8());
 
     pty.kill();
@@ -80,7 +80,7 @@ void main() {
   test('Pty.start can set working directory', () async {
     final tempDir = await Directory.systemTemp.createTemp('flutter_pty_test');
 
-    final pty = Pty.start(shell, workingDirectory: tempDir.path);
+    final pty = await Pty.start(shell, workingDirectory: tempDir.path);
 
     if (Platform.isWindows) {
       pty.write('cd$nl'.toUtf8());
@@ -95,7 +95,7 @@ void main() {
   });
 
   test('Pty.start can set environment variables', () async {
-    final pty = Pty.start(shell, environment: {'TEST_ENV': 'test'});
+    final pty = await Pty.start(shell, environment: {'TEST_ENV': 'test'});
 
     if (Platform.isWindows) {
       pty.write('echo %TEST_ENV%$nl'.toUtf8());
@@ -111,7 +111,7 @@ void main() {
   });
 
   test('Pty.start can set multiple environment variables', () async {
-    final pty = Pty.start(
+    final pty = await Pty.start(
       shell,
       environment: {
         'TEST_ENV1': 'test1',
@@ -133,7 +133,7 @@ void main() {
   });
 
   test('Pty.start can set ack read mode', () async {
-    final pty = Pty.start(
+    final pty = await Pty.start(
       shell,
       ackRead: true,
       environment: {'TEST_ENV': 'some random text'},

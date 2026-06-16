@@ -144,7 +144,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           tab.localShell ?? LocalShellDiscovery.defaultShell(_localShells);
       final cwd = tab.localPath?.value;
       final home = userHomeDir();
-      _spawnLocalPty(
+      await _spawnLocalPty(
         tab: tab,
         terminal: terminal,
         shell: shell,
@@ -199,7 +199,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     _setPaneSessionEnded(tab, paneNow, true);
   }
 
-  void _spawnLocalPty({
+  Future<void> _spawnLocalPty({
     required _Tab tab,
     required Terminal terminal,
     required LocalShellOption shell,
@@ -208,7 +208,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     String? workingDirectory,
     required int pane,
     bool showExitMessage = true,
-  }) {
+  }) async {
     if (columns < 1 || rows < 1) return;
 
     final isSplit = pane == 1;
@@ -217,31 +217,41 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
 
     final Pty pty;
-    if (useUnixWrapper) {
-      // On iOS login-shell flag (-l) causes /bin/sh to source system profile
-      // files that don't exist in the iOS sandbox, hanging the shell startup.
-      final shArgs = Platform.isIOS
-          ? ['-c', _interactiveLocalShellWrapperCommand()]
-          : ['-lc', _interactiveLocalShellWrapperCommand()];
-      pty = Pty.start(
-        '/bin/sh',
-        arguments: shArgs,
-        columns: columns,
-        rows: rows,
-        environment: env,
-        workingDirectory: workingDirectory ?? home,
+    try {
+      if (useUnixWrapper) {
+        // On iOS login-shell flag (-l) causes /bin/sh to source system profile
+        // files that don't exist in the iOS sandbox, hanging the shell startup.
+        final shArgs = Platform.isIOS
+            ? ['-c', _interactiveLocalShellWrapperCommand()]
+            : ['-lc', _interactiveLocalShellWrapperCommand()];
+        pty = await Pty.start(
+          '/bin/sh',
+          arguments: shArgs,
+          columns: columns,
+          rows: rows,
+          environment: env,
+          workingDirectory: workingDirectory ?? home,
+        );
+      } else {
+        pty = await Pty.start(
+          shell.executable,
+          arguments: shell.arguments,
+          columns: columns,
+          rows: rows,
+          environment: env,
+          workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      terminal.write(
+        '\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt',
       );
-    } else {
-      pty = Pty.start(
-        shell.executable,
-        arguments: shell.arguments,
-        columns: columns,
-        rows: rows,
-        environment: env,
-        workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
-      );
+      _setPaneSessionEnded(tab, pane, true);
+      return;
     }
 
+    // Only kill/dispose the old PTY after the new one is confirmed working.
     if (isSplit) {
       tab.splitPty?.kill();
       tab.splitPty?.dispose();
@@ -307,7 +317,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final pane = _paneIndexOf(tab, terminal) ?? (isSplit ? 1 : 0);
       final activePty = pane == 1 ? tab.splitPty : tab.pty;
       if (activePty == null && !_paneSessionEnded(tab, pane)) {
-        _spawnLocalPty(
+        // Use unawaited since onResize is a synchronous void callback.
+        // _spawnLocalPty handles its own errors via internal try/catch.
+        unawaited(_spawnLocalPty(
           tab: tab,
           terminal: terminal,
           shell: shell,
@@ -316,7 +328,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           workingDirectory: workingDirectory,
           pane: pane,
           showExitMessage: showExitMessage,
-        );
+        ));
       } else if (activePty != null) {
         activePty.resize(h, w);
       }

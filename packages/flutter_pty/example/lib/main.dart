@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -24,13 +25,17 @@ class _MyAppState extends State<MyApp> {
 
   final focusNode = FocusNode();
 
-  late final Pty pty;
+  late Pty pty;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_initPty());
+  }
 
-    pty = Pty.start(shell);
+  Future<void> _initPty() async {
+    pty = await Pty.start(shell);
+    if (!mounted) return;
 
     pty.output.cast<List<int>>().transform(const Utf8Decoder()).listen((text) {
       ptyOutout.write(text);
