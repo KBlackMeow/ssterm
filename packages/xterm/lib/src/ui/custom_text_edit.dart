@@ -54,6 +54,7 @@ class CustomTextEdit extends StatefulWidget {
 class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   TextInputConnection? _connection;
   int? _viewId;
+  bool _teardown = false;
 
   @override
   void initState() {
@@ -118,6 +119,15 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     _closeInputConnectionIfNeeded();
   }
 
+  /// Stops reconnecting the Windows/Linux TextInput client during tab teardown.
+  /// Call before [closeKeyboard] so [connectionClosed] does not respawn a client
+  /// that is being removed from the tree.
+  void beginTeardown() {
+    if (_teardown) return;
+    _teardown = true;
+    _closeInputConnectionIfNeeded();
+  }
+
   void setEditingState(TextEditingValue value) {
     _currentEditingState = value;
     _safeSetEditingState(value);
@@ -151,11 +161,15 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   void _handleDeadConnection() {
     _connection = null;
     _composingActive = false;
+    if (_teardown) return;
     _scheduleReconnectInput();
   }
 
   void _scheduleReconnectInput() {
-    if (!mounted || !widget.focusNode.hasFocus || !_shouldCreateInputConnection) {
+    if (_teardown ||
+        !mounted ||
+        !widget.focusNode.hasFocus ||
+        !_shouldCreateInputConnection) {
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -425,6 +439,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   @override
   void connectionClosed() {
     _connection = null;
+    if (_teardown) return;
     _scheduleReconnectInput();
   }
 

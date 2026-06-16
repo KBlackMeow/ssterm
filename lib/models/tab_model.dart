@@ -164,6 +164,23 @@ class AppTab {
     splitSessionEnded = false;
   }
 
+  /// Detach live I/O callbacks before the tab widget is removed from the tree.
+  /// PTY/SSH teardown still happens in [dispose], which is deferred so the
+  /// surviving tab can reclaim keyboard focus first (critical on Windows).
+  void prepareForRemoval() {
+    manuallyDisconnected = true;
+    keepaliveTimer?.cancel();
+    keepaliveTimer = null;
+    terminal?.onOutput = null;
+    terminal?.onResize = null;
+    splitTerminal?.onOutput = null;
+    splitTerminal?.onResize = null;
+    pipe?.dispose();
+    pipe = null;
+    splitPipe?.dispose();
+    splitPipe = null;
+  }
+
   void dispose() {
     manuallyDisconnected = true;
     keepaliveTimer?.cancel();
