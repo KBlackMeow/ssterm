@@ -38,5 +38,28 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+    # Suppress harmless ld "search path not found" warnings from
+    # the Metal cryptex toolchain on macOS 26 / Xcode 26
+    # (Metal.xctoolchain ships without usr/lib/swift/macosx).
+    target.build_configurations.each do |config|
+      existing = config.build_settings['OTHER_LDFLAGS'] || '$(inherited)'
+      config.build_settings['OTHER_LDFLAGS'] = "#{existing} -Xlinker -w"
+    end
+  end
+
+  # Pods-Runner.<config>.xcconfig is regenerated on every `pod install`
+  # without our LDFLAGS tweak, so patch it on disk after generation.
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.xcconfigs.each do |config_name, _config|
+      xcconfig_path = aggregate_target.xcconfig_path(config_name)
+      next unless File.exist?(xcconfig_path)
+      contents = File.read(xcconfig_path)
+      next if contents.include?('-Xlinker -w')
+      patched = contents.sub(
+        /^OTHER_LDFLAGS = (.*)$/,
+        'OTHER_LDFLAGS = \1 -Xlinker -w'
+      )
+      File.write(xcconfig_path, patched) if patched != contents
+    end
   end
 end
