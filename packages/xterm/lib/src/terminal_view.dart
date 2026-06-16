@@ -386,6 +386,7 @@ class TerminalViewState extends State<TerminalView> {
   /// focused text client. Closing it before tab teardown avoids racing the
   /// platform text input channel with render/controller disposal.
   void releaseInput() {
+    _customTextEditKey.currentState?.beginTeardown();
     closeKeyboard();
     _focusNode.unfocus();
   }

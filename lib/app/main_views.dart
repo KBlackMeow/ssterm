@@ -288,8 +288,14 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       index: _active,
       sizing: StackFit.expand,
       children: [
-        for (final tab in _tabs)
-          RepaintBoundary(key: ObjectKey(tab), child: _buildTabBody(tab)),
+        for (var i = 0; i < _tabs.length; i++)
+          ExcludeFocus(
+            excluding: i != _active,
+            child: RepaintBoundary(
+              key: ObjectKey(_tabs[i]),
+              child: _buildTabBody(_tabs[i]),
+            ),
+          ),
       ],
     );
   }

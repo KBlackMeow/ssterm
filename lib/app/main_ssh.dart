@@ -574,6 +574,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   void _closeTab(int i) {
     if (i < 0 || i >= _tabs.length) return;
     final removed = _tabs[i];
+    removed.prepareForRemoval();
     removed.terminalViewKey.currentState?.releaseInput();
     removed.splitViewKey.currentState?.releaseInput();
     removed.terminalController.disposeSelection();
@@ -591,14 +592,14 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       }
     });
     if (_tabs.isNotEmpty) _activateTab(_active);
-    // Defer PTY teardown until after the surviving tab reclaims keyboard
-    // focus.  syncAfterShown schedules its own post-frame callback, so one
-    // frame is not enough.  On Windows, pty_destroy (ClosePseudoConsole) is
-    // synchronous and can block the UI thread — running it in the same frame
-    // as focus handoff left the window frozen with no input target.
+    // Three frames: (1) rebuild without the closed tab, (2) surviving tab
+    // syncAfterShown / requestKeyboard, (3) native PTY teardown.  Windows
+    // TextInput and ClosePseudoConsole both need the UI thread unblocked.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        removed.dispose();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          removed.dispose();
+        });
       });
     });
   }
@@ -616,7 +617,15 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   void _activateTab(int i) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || i < 0 || i >= _tabs.length) return;
+      for (var t = 0; t < _tabs.length; t++) {
+        if (t == i) continue;
+        _tabs[t].terminalViewKey.currentState?.releaseInput();
+        _tabs[t].splitViewKey.currentState?.releaseInput();
+      }
       _tabs[i].terminalViewKey.currentState?.syncAfterShown();
+      if (_tabs[i].isSplit) {
+        _tabs[i].splitViewKey.currentState?.syncAfterShown();
+      }
     });
   }
 
