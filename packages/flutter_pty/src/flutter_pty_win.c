@@ -601,7 +601,22 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
     }
 
     CloseHandle(handle->inputWriteSide);
+
+    // Unblock read_loop's ReadFile before tearing down the console.
     CloseHandle(handle->outputReadSide);
+
+    // Terminate the shell before ClosePseudoConsole.  Dart-side Pty.kill()
+    // usually does this first, but if the process is still alive
+    // ClosePseudoConsole blocks the calling thread until every attached
+    // process exits — freezing the Flutter UI on Windows.
+    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, handle->dwProcessId);
+    if (hProcess != NULL)
+    {
+        TerminateProcess(hProcess, 1);
+        WaitForSingleObject(hProcess, 5000);
+        CloseHandle(hProcess);
+    }
+
     ClosePseudoConsole(handle->hPty);
     free(handle);
 }

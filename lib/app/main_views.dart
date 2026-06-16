@@ -609,7 +609,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       viewKey: viewKey,
       contextMenu: contextMenu,
       includeWallpaper: false,
-      autofocus: sshPane == 0,
+      autofocus: sshPane == 0 && _tabs.indexOf(tab) == _active,
     );
 
     if (tab.isSplit) {

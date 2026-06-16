@@ -591,13 +591,23 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       }
     });
     if (_tabs.isNotEmpty) _activateTab(_active);
+    // Defer PTY teardown until after the surviving tab reclaims keyboard
+    // focus.  syncAfterShown schedules its own post-frame callback, so one
+    // frame is not enough.  On Windows, pty_destroy (ClosePseudoConsole) is
+    // synchronous and can block the UI thread — running it in the same frame
+    // as focus handoff left the window frozen with no input target.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      removed.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        removed.dispose();
+      });
     });
   }
 
   void _selectTab(int i) {
     if (i == _active) return;
+    final prev = _active;
+    _tabs[prev].terminalViewKey.currentState?.releaseInput();
+    _tabs[prev].splitViewKey.currentState?.releaseInput();
     setState(() => _active = i);
     _activateTab(i);
   }
