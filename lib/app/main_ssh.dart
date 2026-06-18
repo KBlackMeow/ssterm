@@ -479,9 +479,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
       oldSftp?.close();
       oldTransferManager?.dispose();
-      oldSession?.close();
-      oldClient?.close();
-      oldJump?.close();
+      if (oldSession != null) safeSshTeardown(() => oldSession.close());
+      if (oldClient != null) safeSshTeardown(() => oldClient.close());
+      if (oldJump != null) safeSshTeardown(() => oldJump.close());
 
       if (profile.forwardRules.isNotEmpty) {
         final fwdService = PortForwardService();
@@ -529,6 +529,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
+      tab.clearDeadSshTransport();
       tab.terminal?.write(
         '[Reconnect failed: $e]\r\n${_TerminalHomeLocalMethods._kRestartPrompt}',
       );

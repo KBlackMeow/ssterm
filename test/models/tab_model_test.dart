@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/models/ssh_host.dart';
 import 'package:ssterm/models/tab_model.dart';
 import 'package:xterm/xterm.dart';
 
@@ -122,6 +124,30 @@ void main() {
       final tab = AppTab.local(title: 'x');
       tab.splitTerminal = Terminal();
       expect(tab.isSplit, isTrue);
+    });
+  });
+
+  group('safeSshTeardown', () {
+    test('swallows SSHStateError from dead transport', () {
+      expect(
+        () => safeSshTeardown(() => throw SSHStateError('Transport is closed')),
+        returnsNormally,
+      );
+    });
+  });
+
+  group('AppTab.clearDeadSshTransport', () {
+    test('clears transport slots but keeps sshProfile for reconnect', () {
+      const profile = SshHost(alias: 'srv', hostname: '10.0.0.1');
+      final tab = AppTab.ssh(title: 'srv', profile: profile);
+
+      tab.clearDeadSshTransport();
+
+      expect(tab.sshClient, isNull);
+      expect(tab.jumpClient, isNull);
+      expect(tab.sshSession, isNull);
+      expect(tab.sftp, isNull);
+      expect(tab.sshProfile, same(profile));
     });
   });
 
