@@ -13,6 +13,15 @@ import 'transfer_task.dart';
 
 enum AppTabKind { local, ssh, sshConnecting, sshError, settings }
 
+/// Best-effort SSH teardown; must not throw when the transport is already dead.
+void safeSshTeardown(void Function() close) {
+  try {
+    close();
+  } on SSHStateError {
+    // Transport or channel already closed (e.g. VPN drop).
+  } catch (_) {}
+}
+
 class AppTab {
   AppTabKind kind;
   String title;
@@ -164,6 +173,44 @@ class AppTab {
     splitSessionEnded = false;
   }
 
+  /// Closes SSH objects whose transport can no longer accept new sessions
+  /// (e.g. after VPN switch). Keeps [sshProfile] so a full reconnect can run.
+  void clearDeadSshTransport() {
+    keepaliveTimer?.cancel();
+    keepaliveTimer = null;
+    forwardService?.stopAll();
+    forwardService = null;
+
+    // Stop resize callbacks from touching a dead session channel.
+    terminal?.onResize = null;
+    splitTerminal?.onResize = null;
+
+    pipe?.dispose();
+    pipe = null;
+    splitPipe?.dispose();
+    splitPipe = null;
+
+    final splitSession = splitSshSession;
+    if (splitSession != null) safeSshTeardown(() => splitSession.close());
+    splitSshSession = null;
+
+    final session = sshSession;
+    if (session != null) safeSshTeardown(() => session.close());
+    sshSession = null;
+
+    final sftpClient = sftp;
+    if (sftpClient != null) safeSshTeardown(() => sftpClient.close());
+    sftp = null;
+
+    final client = sshClient;
+    if (client != null) safeSshTeardown(() => client.close());
+    sshClient = null;
+
+    final jump = jumpClient;
+    if (jump != null) safeSshTeardown(() => jump.close());
+    jumpClient = null;
+  }
+
   /// Detach live I/O callbacks before the tab widget is removed from the tree.
   /// PTY/SSH teardown still happens in [dispose], which is deferred so the
   /// surviving tab can reclaim keyboard focus first (critical on Windows).
@@ -192,9 +239,15 @@ class AppTab {
     forwardService?.stopAll();
     pty?.kill();
     pty?.dispose();
-    sshSession?.close();
-    sshClient?.close();
-    jumpClient?.close();
+    final session = sshSession;
+    if (session != null) safeSshTeardown(() => session.close());
+    sshSession = null;
+    final client = sshClient;
+    if (client != null) safeSshTeardown(() => client.close());
+    sshClient = null;
+    final jump = jumpClient;
+    if (jump != null) safeSshTeardown(() => jump.close());
+    jumpClient = null;
     terminalController.dispose();
     splitTerminalController.dispose();
     transferManager?.dispose();

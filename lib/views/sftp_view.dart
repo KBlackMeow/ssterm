@@ -156,6 +156,21 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(SftpView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // SSH reconnect replaces [SftpClient]; refresh so we don't keep using a
+    // dead transport or show a stale listing from before the disconnect.
+    if (!identical(oldWidget.sftp, widget.sftp)) {
+      final path = widget.remotePath?.value;
+      if (path != null && path.isNotEmpty) {
+        _listDir(path);
+      } else {
+        _listDir(_path);
+      }
+    }
+  }
+
   void _onRemotePathChanged() {
     final newPath = widget.remotePath?.value;
     if (newPath == null || newPath.isEmpty || newPath == _path) return;

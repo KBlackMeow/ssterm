@@ -172,14 +172,20 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.splitPty = null;
       tab.splitPipe?.dispose();
       tab.splitPipe = null;
-      tab.splitSshSession?.close();
+      final splitSession = tab.splitSshSession;
+      if (splitSession != null) safeSshTeardown(() => splitSession.close());
       tab.splitSshSession = null;
     } else {
       tab.pty = null;
       tab.pipe?.dispose();
       tab.pipe = null;
-      tab.sshSession?.close();
+      final session = tab.sshSession;
+      if (session != null) safeSshTeardown(() => session.close());
       tab.sshSession = null;
+    }
+
+    if (ssh) {
+      terminal.onResize = null;
     }
 
     if (showExitMessage && exitCode != null && !ssh) {
@@ -351,15 +357,22 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final prof = profile ?? tab.sshProfile;
 
     if (pane == 0 && tab.isSplit) {
-      tab.sshSession?.close();
-      tab.sshSession = null;
       tab.pipe?.dispose();
       tab.pipe = null;
+      final session = tab.sshSession;
+      if (session != null) safeSshTeardown(() => session.close());
+      tab.sshSession = null;
       _handlePaneExited(tab, terminal: terminal, pane: 0, ssh: true);
       return;
     }
 
     if (pane == 0 && prof != null && prof.autoReconnect) {
+      terminal.onResize = null;
+      tab.pipe?.dispose();
+      tab.pipe = null;
+      final session = tab.sshSession;
+      if (session != null) safeSshTeardown(() => session.close());
+      tab.sshSession = null;
       terminal.write('\r\n[SSH connection closed]\r\n');
       terminal.write('[Reconnecting in 3 seconds…]\r\n');
       await Future<void>.delayed(const Duration(seconds: 3));
@@ -369,18 +382,20 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     }
 
     if (tab.isSplit && pane == 1) {
-      tab.splitSshSession?.close();
-      tab.splitSshSession = null;
       tab.splitPipe?.dispose();
       tab.splitPipe = null;
+      final splitSession = tab.splitSshSession;
+      if (splitSession != null) safeSshTeardown(() => splitSession.close());
+      tab.splitSshSession = null;
       _handlePaneExited(tab, terminal: terminal, pane: 1, ssh: true);
       return;
     }
 
-    tab.sshSession?.close();
-    tab.sshSession = null;
     tab.pipe?.dispose();
     tab.pipe = null;
+    final session = tab.sshSession;
+    if (session != null) safeSshTeardown(() => session.close());
+    tab.sshSession = null;
     _handlePaneExited(tab, terminal: terminal, pane: pane, ssh: true);
   }
 
@@ -443,6 +458,19 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       session.done.then((_) => _handleSshSessionDone(tab, terminal, profile: tab.sshProfile));
     } catch (e) {
       if (!mounted) return;
+      // Transport died (VPN switch, etc.) but [sshClient] was still set —
+      // fall back to a full reconnect instead of reusing the dead client.
+      if (tab.sshProfile != null) {
+        tab.clearDeadSshTransport();
+        try {
+          await _reconnectTab(tab);
+        } catch (e2) {
+          if (!mounted) return;
+          terminal.write('[Reconnect failed: $e2]\r\n$_kRestartPrompt');
+          _setPaneSessionEnded(tab, pane, true);
+        }
+        return;
+      }
       terminal.write('[Reconnect failed: $e]\r\n$_kRestartPrompt');
       final paneNow = _paneIndexOf(tab, terminal) ?? pane;
       if (tab.isSplit) {
