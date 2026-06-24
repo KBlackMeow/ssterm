@@ -92,7 +92,12 @@ class TransferTask extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    unawaited(_writer?.abort());
+    // Only abort active transfers — the writer's completer may already
+    // be completed (by _complete / _fail), and dartssh2's abort()
+    // unconditionally calls _doneCompleter.complete().
+    if (isActive) {
+      unawaited(_writer?.abort());
+    }
     _writer = null;
     _downloadIsolate?.kill(priority: Isolate.immediate);
     _downloadIsolate = null;
