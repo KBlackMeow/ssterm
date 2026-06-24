@@ -35,7 +35,17 @@ class MainFlutterWindow: NSWindow {
     // directly and doesn't go through mouseDownCanMoveWindow.
     swizzleMouseDownCanMoveWindow()
 
-    disableDesktopDropOverlay(in: flutterViewController.view)
+    // The desktop_drop plugin adds a full-window DropTarget NSView to
+    // receive file drags, but that view sits on top of the Flutter view
+    // and intercepts mouse events — breaking title-bar click handling
+    // above.  Remove the view-level overlay…
+    removeDesktopDropOverlay(in: flutterViewController.view)
+
+    // …and instead handle file drags at the NSWindow level, which
+    // AppKit only consults when no view in the hierarchy accepts the
+    // drag.  NSWindow does not participate in hitTest, so mouse events
+    // are unaffected.
+    setupDesktopDrop(for: flutterViewController)
 
     makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
@@ -65,15 +75,119 @@ class MainFlutterWindow: NSWindow {
     method_exchangeImplementations(m1, m2)
   }
 
-  // MARK: - Drop overlay
+  // MARK: - Drop overlay — remove the view-level handler
 
-  private func disableDesktopDropOverlay(in rootView: NSView) {
+  /// The `desktop_drop` plugin registers a full-window DropTarget NSView
+  /// that receives drag events via NSDraggingDestination.  While convenient,
+  /// it sits on top of the Flutter view and intercepts *all* mouse events
+  /// (hitTest returns self for a plain NSView), which breaks title-bar
+  /// click handling.  Remove it — drags are handled at the NSWindow level
+  /// instead (see `setupDesktopDrop`).
+  private func removeDesktopDropOverlay(in rootView: NSView) {
     for subview in rootView.subviews {
-      disableDesktopDropOverlay(in: subview)
+      removeDesktopDropOverlay(in: subview)
       if NSStringFromClass(type(of: subview)).contains("desktop_drop.DropTarget") {
         subview.removeFromSuperview()
       }
     }
+  }
+
+  // MARK: - Window-level drag destination
+
+  private var desktopDropChannel: FlutterMethodChannel?
+
+  private lazy var dropDestinationURL: URL = {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("Drops")
+    try? FileManager.default.createDirectory(
+      at: url, withIntermediateDirectories: true)
+    return url
+  }()
+
+  private lazy var dropWorkQueue: OperationQueue = {
+    let q = OperationQueue()
+    q.qualityOfService = .userInitiated
+    return q
+  }()
+
+  private func setupDesktopDrop(for vc: FlutterViewController) {
+    desktopDropChannel = FlutterMethodChannel(
+      name: "desktop_drop",
+      binaryMessenger: vc.engine.binaryMessenger
+    )
+    registerForDraggedTypes(
+      NSFilePromiseReceiver.readableDraggedTypes.map {
+        NSPasteboard.PasteboardType($0)
+      }
+      + [NSPasteboard.PasteboardType.fileURL]
+    )
+  }
+
+  // MARK: NSDraggingDestination (window-level)
+
+  @objc func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    desktopDropChannel?.invokeMethod(
+      "entered", arguments: flippedPoint(for: sender))
+    return .copy
+  }
+
+  @objc func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    desktopDropChannel?.invokeMethod(
+      "updated", arguments: flippedPoint(for: sender))
+    return .copy
+  }
+
+  @objc func draggingExited(_ sender: NSDraggingInfo?) {
+    desktopDropChannel?.invokeMethod("exited", arguments: nil)
+  }
+
+  @objc func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    var urls = [String]()
+    let searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [
+      .urlReadingFileURLsOnly: true,
+    ]
+    let group = DispatchGroup()
+
+    sender.enumerateDraggingItems(
+      options: [], for: nil,
+      classes: [NSFilePromiseReceiver.self, NSURL.self],
+      searchOptions: searchOptions
+    ) { draggingItem, _, _ in
+      switch draggingItem.item {
+      case let filePromiseReceiver as NSFilePromiseReceiver:
+        group.enter()
+        filePromiseReceiver.receivePromisedFiles(
+          atDestination: self.dropDestinationURL,
+          options: [:],
+          operationQueue: self.dropWorkQueue
+        ) { fileURL, error in
+          if let error = error {
+            debugPrint("desktop_drop file promise error: \(error)")
+          } else {
+            urls.append(fileURL.path)
+          }
+          group.leave()
+        }
+      case let fileURL as URL:
+        urls.append(fileURL.path)
+      default:
+        break
+      }
+    }
+
+    group.notify(queue: .main) {
+      self.desktopDropChannel?.invokeMethod(
+        "performOperation", arguments: urls)
+    }
+    return true
+  }
+
+  /// Convert `sender.draggingLocation` (window coords, y=0 at bottom)
+  /// to Flutter coords (y=0 at top).
+  private func flippedPoint(for sender: NSDraggingInfo) -> [CGFloat] {
+    let p = sender.draggingLocation
+    let h = contentView?.bounds.height ?? 0
+    return [p.x, h - p.y]
   }
 
   #if DEBUG
