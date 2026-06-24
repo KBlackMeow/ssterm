@@ -1,66 +1,112 @@
 # SSTerm
 
-A cross-platform desktop terminal — local shell, SSH, and SFTP in a unified dark tabbed UI.
-
----
-
-## Features
-
-### Terminal
-
-- **Local shell** — PTY-backed with `xterm-256color`, TrueColor, and working directory tracking
-- **Auto shell discovery** — detects `zsh`, `bash`, `fish`, etc. on macOS/Linux; WSL distros and Git Bash on Windows
-- **Pre-raised FD limit** — bumps `RLIMIT_NOFILE` at startup so plugin-heavy zsh setups (autosuggestions, fast-syntax-highlighting) don't exhaust macOS's default 256 soft limit
-
-### SSH / SFTP
-
-- **SSH sessions** — powered by `dartssh2`, supports password and private-key (with optional passphrase) auth
-- **SFTP browser** — browse, upload, download, rename, mkdir, delete; concurrent transfers with a live progress panel
-- **`~/.ssh/config` import** — pick hosts directly from your existing config file
-- **Saved hosts** — credentials encrypted in the macOS Keychain; host-key TOFU verification via `~/.ssterm/known_hosts`
-- **Jump host / ProxyJump** — transparent single-hop bastion forwarding
-- **Port forwarding** — local, remote, and dynamic (SOCKS5) rules configured per host
-- **Keepalive + auto-reconnect** — configurable heartbeat interval with transparent reconnection on drop
-- **Session logs** — raw stream written to `~/.ssterm/logs/`, replayable with `cat`
-
-### Workspace
-
-- **Tabs and split panes** — each tab can be split horizontally or vertically for multiple concurrent sessions
-- **Command panel** — one-click command insertion from the toolbar; built-in official commands are read-only, users can freely add, edit, and delete custom commands
-- **Settings panel** — terminal themes (presets + custom colors), fonts (JetBrains Mono / SF Mono / Monaco with CJK fallback), cursor shape and blink, wallpaper (blur + opacity), frosted glass effects
-
-### AI Agent
-
-- **Terminal-aware agent panel** — chat with an AI assistant beside the active local or SSH terminal
-- **Session context on first turn** — fresh agent conversations include the active tab, local date/time, and current folder when available
-- **Command output capture** — commands run through the agent return their results to the conversation
-- **Auto-execute mode** — let the agent run shell commands and iterate on their results, or keep auto-execute off and run proposed commands manually
-- **Dangerous-command review gate** — destructive commands can pause for approval before execution, with configurable safety rules
-- **File-write proposals** — the agent can propose file writes with a diff preview; files are written only after user approval
-- **Optional web search** — the agent can request current web results when enabled in Settings
-- **Built-in skills** — operational skills can be enabled or disabled in Settings
-- **Conversation reset commands** — `/clear`, `/reset`, and `/new` wipe the current agent transcript and memory
-
----
-
-## Preview
+**A cross-platform desktop terminal with a built-in AI agent — local shell, SSH, and SFTP in a unified dark tabbed UI.**
 
 ![demo](video.gif)
 
-| Feature | Description |
-|---------|-------------|
-| Dark tab bar | Lightweight chrome with top tab strip and toolbar |
-| Split panes | Horizontal / vertical split within a single tab |
-| SFTP panel | Overlaid on the terminal, toggleable from the toolbar |
-| Frosted glass | SFTP panel, context menus, and command menu all support backdrop blur |
-| Wallpaper | Import any local image, adjust blur and opacity |
+---
+
+## ✨ Highlights
+
+- **🤖 AI Agent** — Chat with an AI assistant beside your terminal. Auto-execute commands, capture output, review dangerous operations, and let the agent write files — all with full terminal context.
+- **🔀 Split Panes** — Horizontal and vertical splits within every tab. Run a local shell and an SSH session side-by-side, or monitor logs while editing remotely.
+- **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Concurrent transfers with a live progress queue. Drag-and-drop upload support.
+- **🔐 Full SSH Client** — Password and private-key auth, `~/.ssh/config` import, jump host / ProxyJump, port forwarding (local, remote, SOCKS5), keepalive with auto-reconnect, and session logging.
+- **🎨 Deep Customization** — 9 terminal theme presets, custom colors, JetBrains Mono / SF Mono / Monaco with CJK fallback, cursor shape & blink, wallpaper with frosted glass blur and opacity.
+- **⚡ Local Shell** — PTY-backed with TrueColor, auto shell discovery (zsh, bash, fish, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
+- **🖥️ Cross-Platform** — macOS (primary), Windows, Linux. Mobile (iOS/Android) for SSH & SFTP.
 
 ---
 
-## Tech Stack
+## 🤖 AI Agent
 
-| Component | Package |
-|-----------|---------|
+The terminal-aware agent panel is the standout feature — converse with an AI assistant that sees your active terminal, executes commands, and iterates on results.
+
+| Capability | Description |
+|---|---|
+| **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local) |
+| **Session context** | Active tab, working directory, and date/time sent on first turn |
+| **Auto-execute mode** | Agent runs commands and iterates on captured output automatically |
+| **Manual mode** | Agent proposes commands; click **Exec** to run with safety checks |
+| **Dangerous-command gate** | 25+ built-in safety rules; destructive commands pause for approval |
+| **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
+| **Web search** | Brave Search integration for current web results (configurable) |
+| **Built-in skills** | `disk-space`, `git-bisect`, `port-conflict`, `verify-fix` — toggleable per skill |
+| **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
+
+---
+
+## 🔀 Split Panes & Tabs
+
+- **Tabs** — Create local shell, SSH, or settings tabs. Tab bar with horizontal scroll, keyboard shortcuts (Cmd+W / Ctrl+W to close).
+- **Splits** — Split any tab horizontally or vertically. Drag-to-resize dividers. Secondary pane supports local shell or SSH sessions.
+- **Toolbar** — One-click access to new tab, command picker, AI panel, SFTP panel, transfer queue, split controls, and settings.
+
+---
+
+## 📁 SFTP Browser
+
+| Feature | Description |
+|---|---|
+| **File operations** | Browse, upload, download, rename, mkdir, delete |
+| **Transfer queue** | Concurrent transfers with live progress, pause/resume/cancel per task |
+| **Drag & drop** | Drop files onto the terminal to upload |
+| **Panel docking** | Bottom or right side, persisted in config |
+| **Path sync** | SFTP directory follows the SSH terminal's working directory (OSC 7) |
+
+---
+
+## 🔐 SSH & Port Forwarding
+
+| Feature | Description |
+|---|---|
+| **Authentication** | Password, private key (with optional passphrase), default identity files |
+| **Host key** | TOFU verification via `~/.ssterm/known_hosts` |
+| **Config import** | Pick hosts from `~/.ssh/config` (Host, Hostname, Port, User, IdentityFile) |
+| **Saved hosts** | Credentials encrypted in macOS Keychain |
+| **Jump host** | Single-hop ProxyJump / bastion forwarding |
+| **Port forwarding** | Local (`-L`), remote (`-R`), and dynamic SOCKS5 (`-D`) with per-rule toggles |
+| **Keepalive** | Configurable heartbeat interval (15s / 30s / 60s) |
+| **Auto-reconnect** | Transparent reconnection on connection drop |
+| **Session logging** | Raw stream to `~/.ssterm/logs/`, replayable with `cat` |
+
+---
+
+## 🎨 Customization
+
+- **Themes** — 9 presets from VS Code, Windows Terminal, macOS Terminal, iTerm2, and GNOME Terminal, plus full custom color picker.
+- **Fonts** — JetBrains Mono, SF Mono Powerline, Monaco, plus system fonts. CJK fallback (Simplified/Traditional Chinese, Japanese).
+- **Cursor** — Block, underline, or vertical bar; configurable blink speed.
+- **Wallpaper** — Import any image, adjust Gaussian blur (frosted glass), opacity, and background fill.
+- **Commands** — Built-in command panel with one-click insertion. Add, edit, and delete custom commands.
+
+---
+
+## ⚡ Local Shell
+
+- PTY-backed with `xterm-256color` and TrueColor (24-bit).
+- Auto-detects zsh, bash, fish, tcsh, ksh, sh, dash on macOS/Linux; WSL distros, CMD, PowerShell, and Git Bash on Windows.
+- Shell integration via OSC 7 (working directory tracking) and OSC 133 (command boundary markers for the AI agent).
+- Pre-raises `RLIMIT_NOFILE` at startup to prevent fd exhaustion with plugin-heavy shells.
+
+---
+
+## 🖥️ Platform Support
+
+| Platform | Local Shell | SSH | SFTP | AI Agent |
+|---|---|---|---|---|
+| **macOS** | ✅ | ✅ | ✅ | ✅ |
+| **Windows** | ✅ WSL, CMD, PowerShell, Git Bash | ✅ | ✅ | ✅ |
+| **Linux** | ✅ | ✅ | ✅ | ✅ |
+| **iOS** | — | ✅ | ✅ | ✅ |
+| **Android** | — | ✅ | ✅ | ✅ |
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|---|---|
 | UI framework | [Flutter](https://flutter.dev) (Material 3 Dark) |
 | Terminal emulator | [xterm](packages/xterm) (vendored) |
 | Local PTY | [flutter_pty](packages/flutter_pty) (vendored) |
@@ -68,15 +114,7 @@ A cross-platform desktop terminal — local shell, SSH, and SFTP in a unified da
 
 ---
 
-## Requirements
-
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart `^3.11`, see `pubspec.yaml`)
-- macOS: Xcode command-line tools (`flutter run -d macos`)
-- SSH key auth: key files readable by the current user (same as OpenSSH)
-
----
-
-## Getting Started
+## 🚀 Getting Started
 
 ```bash
 git clone <repository-url>
@@ -93,41 +131,21 @@ flutter build macos
 
 Output: `build/macos/Build/Products/`
 
----
-
-## Usage
-
-1. **Local tab** — opens automatically on launch using `$SHELL`
-2. **New SSH / SFTP** — click **+** in the tab bar → **Connect…**, or pick from `~/.ssh/config` / saved hosts
-3. **SFTP** — toggle the panel from the toolbar; right-click entries to download (defaults to `~/Downloads`), rename, mkdir, or delete
-4. **Split** — toolbar split button (or right-click in the terminal) to split the active tab horizontally or vertically
-5. **Command panel** — toolbar terminal icon button; select a command to insert it directly into the terminal input; manage custom commands under Settings → Commands
-6. **AI agent** — open the AI panel, switch to **Agent**, configure a provider under Settings → Agent, and ask for help in natural language
-
-### Agent Usage Notes
-
-- Use **Auto-execute** when you want the agent to run commands and continue from captured results automatically.
-- Leave **Auto-execute** off when you want the agent to propose commands for manual review.
-- Click **Exec** on a proposed shell command to run it with the same safety checks and output feedback.
-- Use `/clear`, `/reset`, or `/new` to start a fresh agent conversation.
-- The agent automatically receives the active tab, current date/time, and current folder when available on the first turn of a fresh conversation.
-- Previous terminal output and commands run before opening the agent are not sent automatically; only commands executed through the agent are fed back into its conversation.
-- Enable web search and file writes under Settings → Agent if you want the corresponding tools available.
-- Configure destructive-command confirmation under Settings → Safety.
+**Requirements:** [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart `^3.11`), macOS with Xcode command-line tools.
 
 ---
 
-## Project Layout
+## 📂 Project Layout
 
 ```
 lib/
   main.dart          # App shell, tabs, local/SSH terminal state
   dialogs/           # Connect dialog (auth, port forwarding, jump host)
   models/            # SshHost, AppConfig, Command, PortForwardRule …
-  services/          # SSH connection, port forwarding, session logger, SFTP download …
+  services/          # SSH connection, port forwarding, session logger, LLM …
   utils/             # Helpers (FD limit, SSH fingerprint …)
   views/             # SFTP browser, SSH session view, settings panel
-  widgets/           # Terminal surface, split view, transfer panel, command picker …
+  widgets/           # Terminal surface, split view, transfer panel, AI panel …
 packages/
   flutter_pty/       # Native PTY plugin (vendored)
   xterm/             # Terminal emulator (vendored)
@@ -135,9 +153,7 @@ packages/
 
 ---
 
-## Roadmap
-
-The following are planned but not yet implemented:
+## 📋 Roadmap
 
 - **Attach terminal context** — manually attach recent terminal output or failed-command context to a fresh agent prompt
 - **Command blocks** — structured command history with selectable command/output blocks for agent context
@@ -145,6 +161,6 @@ The following are planned but not yet implemented:
 
 ---
 
-## License
+## 📄 License
 
-_Not yet specified._
+Apache 2.0
