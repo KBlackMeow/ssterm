@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/core.dart';
 
-/// Handles scrolling gestures in the alternate screen buffer. In alternate
-/// screen buffer, the terminal don't have a scrollback buffer, instead, the
-/// scroll gestures are converted to escape sequences based on the current
-/// report mode declared by the application.
+/// Handles scrolling in the alternate screen buffer.
+///
+/// When the active app has mouse reporting enabled (mouseMode.reportScroll),
+/// trackpad and mouse-wheel events are translated into terminal mouse-wheel
+/// escape sequences and forwarded to the PTY. This gives vim, less, and other
+/// TUI apps precise 1-event-per-N-lines control via their own scroll bindings.
+///
+/// When the app has no mouse reporting (mouseMode.none / clickOnly), this
+/// widget is a no-op and the parent [Scrollable] handles the gesture,
+/// scrolling through the main-buffer session history.
 class TerminalScrollGestureHandler extends StatefulWidget {
   const TerminalScrollGestureHandler({
     super.key,
@@ -21,21 +26,14 @@ class TerminalScrollGestureHandler extends StatefulWidget {
   });
 
   final Terminal terminal;
-
-  /// Returns the cell offset for the pixel offset.
   final CellOffset Function(Offset) getCellOffset;
-
-  /// Returns the pixel height of lines in the terminal.
   final double Function() getLineHeight;
 
-  /// Whether to simulate scroll events in the terminal when the application
-  /// doesn't declare it supports mouse wheel events. true by default as it
-  /// is the default behavior of most terminals.
+  /// Fall back to arrow-key simulation when the app does not handle mouse
+  /// wheel events. Enabled by default (matches xterm behaviour).
   final bool simulateScroll;
 
-  /// Called when the user starts interacting with the scroll view.
   final VoidCallback? onInteraction;
-
   final Widget child;
 
   @override
@@ -45,205 +43,197 @@ class TerminalScrollGestureHandler extends StatefulWidget {
 
 class _TerminalScrollGestureHandlerState
     extends State<TerminalScrollGestureHandler> {
-  /// Whether the application is in alternate screen buffer. If false, then this
-  /// widget does nothing.
-  var isAltBuffer = false;
+  var _isAltBuffer = false;
+  MouseMode _mouseMode = MouseMode.none;
 
-  /// Accumulated vertical scroll distance in pixels (trackpad / drag).
-  double _scrollPixelOffset = 0;
+  // Trackpad: sub-line accumulator for 0.3× rate limiting (xterm.js algorithm).
+  double _trackpadPartial = 0;
+  // Mouse wheel: sub-line accumulator (1:1 with scroll delta / lineHeight).
+  double _mousePartial = 0;
 
-  /// The variable that tracks the line offset in last scroll event. Used to
-  /// determine how many the scroll events should be sent to the terminal.
-  var lastLineOffset = 0;
-
-  /// Accumulated line delta not yet written to the PTY.
-  /// Flushed by [_flushScrollDelta] via a short timer so that all
-  /// PointerScrollEvents that land within the debounce window are coalesced
-  /// into one PTY write.  Without this, each event triggers a separate write
-  /// and vim redraws between keys, leaving DECRC-restored underline attrs on
-  /// newly drawn lines — visible as stripe artifacts at small font sizes on
-  /// local (zero-latency) PTYs.  SSH avoids this naturally because network
-  /// buffering already batches the writes at the server side.
   int _pendingLineDelta = 0;
-  Timer? _scrollFlushTimer;
+  Timer? _flushTimer;
 
-  /// This variable tracks the last offset where the scroll gesture started.
-  /// Used to calculate the cell offset of the terminal mouse event.
-  var lastPointerPosition = Offset.zero;
+  // Device pixel ratio: panDelta.dy is in physical px; divide to get logical px.
+  double _dpr = 1.0;
+
+  var _lastPointerPosition = Offset.zero;
+
+  // ── lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
-    widget.terminal.addListener(_onTerminalUpdated);
-    isAltBuffer = widget.terminal.isUsingAltBuffer;
     super.initState();
+    widget.terminal.addListener(_onTerminalChanged);
+    _isAltBuffer = widget.terminal.isUsingAltBuffer;
+    _mouseMode = widget.terminal.mouseMode;
   }
 
   @override
   void dispose() {
-    _scrollFlushTimer?.cancel();
-    widget.terminal.removeListener(_onTerminalUpdated);
+    _flushTimer?.cancel();
+    widget.terminal.removeListener(_onTerminalChanged);
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant TerminalScrollGestureHandler oldWidget) {
-    if (oldWidget.terminal != widget.terminal) {
-      oldWidget.terminal.removeListener(_onTerminalUpdated);
-      widget.terminal.addListener(_onTerminalUpdated);
-      isAltBuffer = widget.terminal.isUsingAltBuffer;
-    }
     super.didUpdateWidget(oldWidget);
-  }
-
-  void _resetScrollTracking() {
-    _scrollPixelOffset = 0;
-    lastLineOffset = 0;
-    _pendingLineDelta = 0;
-    _scrollFlushTimer?.cancel();
-    _scrollFlushTimer = null;
-  }
-
-  void _onTerminalUpdated() {
-    if (isAltBuffer != widget.terminal.isUsingAltBuffer) {
-      if (widget.terminal.isUsingAltBuffer) {
-        _resetScrollTracking();
-      }
-      isAltBuffer = widget.terminal.isUsingAltBuffer;
-      setState(() {});
+    if (oldWidget.terminal != widget.terminal) {
+      oldWidget.terminal.removeListener(_onTerminalChanged);
+      widget.terminal.addListener(_onTerminalChanged);
+      _isAltBuffer = widget.terminal.isUsingAltBuffer;
+      _mouseMode = widget.terminal.mouseMode;
     }
   }
 
-  /// Send a single scroll event to the terminal. If [simulateScroll] is true,
-  /// then if the application doesn't recognize mouse wheel events, this method
-  /// will simulate scroll events by sending up/down arrow keys.
-  void _applyLineDelta(int delta) {
-    if (delta == 0) return;
+  // ── terminal state tracking ────────────────────────────────────────────────
 
+  void _onTerminalChanged() {
+    final alt = widget.terminal.isUsingAltBuffer;
+    final mode = widget.terminal.mouseMode;
+    if (alt == _isAltBuffer && mode == _mouseMode) return;
+
+    // Reset scroll state when entering alt buffer (app is starting fresh).
+    if (alt && alt != _isAltBuffer) _resetAccumulators();
+
+    _isAltBuffer = alt;
+    _mouseMode = mode;
+    setState(() {});
+  }
+
+  void _resetAccumulators() {
+    _trackpadPartial = 0;
+    _mousePartial = 0;
+    _pendingLineDelta = 0;
+    _flushTimer?.cancel();
+    _flushTimer = null;
+  }
+
+  // ── scroll logic ───────────────────────────────────────────────────────────
+
+  /// Precision trackpad (PointerPanZoomUpdate).
+  void _handleTrackpad(double logicalDy) {
+    final lh = widget.getLineHeight();
+    if (lh <= 0 || logicalDy == 0) return;
+
+    _trackpadPartial += logicalDy / lh;
+    final lines = _trackpadPartial.truncate();
+    if (lines == 0) return;
+    _trackpadPartial -= lines;
+
+    _pendingLineDelta += lines;
+    _scheduleFlush();
+  }
+
+  /// Physical mouse wheel (PointerScrollEvent).
+  void _handleMouseWheel(double physicalDy) {
+    final lh = widget.getLineHeight();
+    if (lh <= 0 || physicalDy == 0) return;
+
+    _mousePartial += physicalDy / lh;
+    final lines = _mousePartial.truncate();
+    if (lines == 0) return;
+    _mousePartial -= lines;
+
+    _pendingLineDelta += lines;
+    _scheduleFlush();
+  }
+
+  void _scheduleFlush() {
+    final ms = widget.terminal.compat.altScrollDebounceMs;
+    if (ms <= 0) {
+      _flushPending();
+    } else {
+      _flushTimer ??= Timer(Duration(milliseconds: ms), _flushPending);
+    }
+  }
+
+  void _flushPending() {
+    _flushTimer = null;
+    final delta = _pendingLineDelta;
+    _pendingLineDelta = 0;
+    if (delta != 0) _applyDelta(delta);
+  }
+
+  /// Send [delta] scroll lines to the terminal.
+  ///
+  /// Tries mouse-wheel escape sequences first (preferred: lets the app map
+  /// the event to however many visual lines it likes). Falls back to arrow
+  /// keys only when the app has not enabled any mouse reporting — this
+  /// simulates scrolling for apps like `less` without mouse support.
+  void _applyDelta(int delta) {
     widget.onInteraction?.call();
 
     final up = delta < 0;
     final count = delta.abs();
-    final position = widget.getCellOffset(lastPointerPosition);
+    final pos = widget.getCellOffset(_lastPointerPosition);
 
-    final shift = HardwareKeyboard.instance.isShiftPressed;
-    final alt = HardwareKeyboard.instance.isAltPressed;
-    final ctrl = HardwareKeyboard.instance.isControlPressed;
-
+    // Mouse-wheel escape sequences (e.g. \e[<65;col;rowM in SGR mode).
     var mouseHandled = false;
     for (var i = 0; i < count; i++) {
       if (widget.terminal.mouseInput(
         up ? TerminalMouseButton.wheelUp : TerminalMouseButton.wheelDown,
         TerminalMouseButtonState.down,
-        position,
-        shift: shift,
-        alt: alt,
-        ctrl: ctrl,
+        pos,
       )) {
         mouseHandled = true;
       }
     }
+    if (mouseHandled || !widget.simulateScroll) return;
 
-    if (mouseHandled || !widget.simulateScroll) {
-      return;
-    }
-
-    // Coalesce arrow keys into one PTY write. Sending them separately (common
-    // on local PTY with fast trackpad input) makes vim redraw between keys and
-    // can leave DECRC-restored underline attrs on newly drawn lines. SSH is
-    // naturally throttled by latency so it rarely hit this.
+    // Arrow-key fallback for apps without mouse reporting (less, man, etc.).
     final handler = widget.terminal.inputHandler ?? defaultInputHandler;
-    final keys = <String>[];
     final key = up ? TerminalKey.arrowUp : TerminalKey.arrowDown;
+    final buf = StringBuffer();
     for (var i = 0; i < count; i++) {
-      final output = handler.call(
-        TerminalKeyboardEvent(
-          key: key,
-          shift: false,
-          ctrl: false,
-          alt: false,
-          state: widget.terminal,
-          altBuffer: widget.terminal.isUsingAltBuffer,
-          platform: widget.terminal.platform,
-        ),
-      );
-      if (output != null) {
-        keys.add(output);
-      }
+      final out = handler.call(TerminalKeyboardEvent(
+        key: key,
+        shift: false,
+        ctrl: false,
+        alt: false,
+        state: widget.terminal,
+        altBuffer: widget.terminal.isUsingAltBuffer,
+        platform: widget.terminal.platform,
+      ));
+      if (out != null) buf.write(out);
     }
-
-    if (keys.isNotEmpty) {
-      widget.terminal.onOutput?.call(keys.join());
-    }
+    if (buf.isNotEmpty) widget.terminal.onOutput?.call(buf.toString());
   }
 
-  void _handleScrollPixels(double deltaPixels) {
-    final lineHeight = widget.getLineHeight();
-    if (lineHeight <= 0 || deltaPixels == 0) return;
-
-    _scrollPixelOffset += deltaPixels;
-    // Use round() instead of ~/ (truncating division) so that a scroll delta
-    // smaller than one lineHeight still produces a non-zero line count.  On
-    // Windows the Flutter engine maps one mouse-wheel notch to ~20 logical
-    // pixels regardless of font size; with a 24 px line height `20 ~/ 24 = 0`
-    // silently drops every event.  round() fires at ≥ lineHeight/2, matching
-    // how Windows Terminal handles discrete wheel notches.
-    final currentLineOffset = (_scrollPixelOffset / lineHeight).round();
-    final lineDelta = currentLineOffset - lastLineOffset;
-    lastLineOffset = currentLineOffset;
-
-    if (lineDelta == 0) return;
-    _pendingLineDelta += lineDelta;
-
-    final debounceMs = widget.terminal.compat.altScrollDebounceMs;
-    if (debounceMs <= 0) {
-      _flushScrollDelta();
-      return;
-    }
-    _scrollFlushTimer ??=
-        Timer(Duration(milliseconds: debounceMs), _flushScrollDelta);
-  }
-
-  /// Writes the accumulated scroll delta to the PTY as a single string.
-  /// When [TerminalCompat.altScrollDebounceMs] is non-zero, coalesces rapid
-  /// wheel events into one PTY write so vim does not redraw between keys.
-  void _flushScrollDelta() {
-    _scrollFlushTimer = null;
-    final delta = _pendingLineDelta;
-    _pendingLineDelta = 0;
-    _applyLineDelta(delta);
-  }
+  // ── build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    if (!isAltBuffer) {
+    _dpr = MediaQuery.of(context).devicePixelRatio;
+
+    // Only intercept when in alt buffer AND the app has scroll reporting.
+    // For none / clickOnly: let the Scrollable show main-buffer history.
+    if (!_isAltBuffer || !_mouseMode.reportScroll) {
       return widget.child;
     }
 
-    // Do not wrap in a Scrollable here: translating the terminal widget while
-    // the buffer paint origin stays fixed misaligns rows so cell underlines
-    // appear on the wrong glyphs (especially in short panes).
-    //
-    // HitTestBehavior.opaque ensures this Listener is always in the hit test
-    // path on all platforms (including Windows) so PointerScrollEvents are
-    // reliably captured regardless of what the child Scrollable does.
+    // Listener fires before the gesture arena, so the inner Scrollable
+    // (NeverScrollableScrollPhysics) cannot consume events before we see them.
     return Listener(
-      behavior: HitTestBehavior.opaque,
       onPointerSignal: (event) {
         if (event is PointerScrollEvent) {
-          lastPointerPosition = event.position;
-          _handleScrollPixels(event.scrollDelta.dy);
+          _lastPointerPosition = event.localPosition;
+          _handleMouseWheel(event.scrollDelta.dy);
         }
       },
       onPointerDown: (event) {
-        lastPointerPosition = event.position;
+        _lastPointerPosition = event.localPosition;
       },
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onVerticalDragUpdate: (details) {
-          _handleScrollPixels(-details.delta.dy);
-        },
-        child: widget.child,
-      ),
+      onPointerPanZoomStart: (event) {
+        _lastPointerPosition = event.localPosition;
+        _trackpadPartial = 0;
+      },
+      onPointerPanZoomUpdate: (event) {
+        _lastPointerPosition = event.localPosition;
+        _handleTrackpad(-event.panDelta.dy / _dpr);
+      },
+      child: widget.child,
     );
   }
 }
