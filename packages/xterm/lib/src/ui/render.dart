@@ -200,11 +200,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final usingAlt = _terminal.isUsingAltBuffer;
     if (usingAlt != _wasUsingAltBuffer) {
       _wasUsingAltBuffer = usingAlt;
-      // Main-buffer scroll offset must not carry into the alt screen (vi, less,
-      // etc.). A stale offset misaligns rows and looks like stray underlines.
-      if (usingAlt && _offset.pixels != 0) {
-        _offset.jumpTo(0);
-      }
+      // Always snap to the bottom when switching buffers.
+      // Do NOT jumpTo(0) here: the new _effectiveScrollPixels logic makes the
+      // alt buffer render at the scroll-bottom (stickToBottom position), so a
+      // forced jump to 0 would briefly show the oldest main-buffer history.
       _stickToBottom = true;
     }
     // Show cursor at the new position immediately when typing/output arrives.
@@ -285,15 +284,32 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   /// Total height of the terminal in pixels. Includes scrollback buffer.
-  double get _terminalHeight =>
-      _terminal.buffer.lines.length * _painter.cellSize.height;
+  ///
+  /// When in alt buffer, we use the main buffer's line count so the Scrollable
+  /// has scrollable range for history (like xterm/tabby: scrolling while in
+  /// alt buffer shows the main-buffer session history).
+  double get _terminalHeight {
+    final buf = _terminal.isUsingAltBuffer
+        ? _terminal.mainBuffer
+        : _terminal.buffer;
+    return buf.lines.length * _painter.cellSize.height;
+  }
 
   /// Current scroll position in pixels (smooth sub-line scrolling).
   double get _scrollPixels => _offset.pixels;
 
-  /// Alt-screen apps have no scrollback; ignore outer scroll while active.
-  double get _effectiveScrollPixels =>
-      _terminal.isUsingAltBuffer ? 0.0 : _scrollPixels;
+  /// Effective scroll offset used for painting.
+  ///
+  /// When in alt buffer AND stuck to the bottom: return 0 so the alt buffer
+  /// content is rendered from its own line 0 (the TUI fills the viewport).
+  /// Otherwise (normal mode OR scrolled into main-buffer history): return the
+  /// real pixel offset so the correct main-buffer lines are painted.
+  double get _effectiveScrollPixels {
+    if (_terminal.isUsingAltBuffer && _stickToBottom) {
+      return 0.0;
+    }
+    return _scrollPixels;
+  }
 
   /// The height of a terminal line in pixels. This includes the line spacing.
   /// Height of the entire terminal is expected to be a multiple of this value.
@@ -523,7 +539,15 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   void _paint(PaintingContext context, Offset offset) {
     final canvas = context.canvas;
 
-    final lines = _terminal.buffer.lines;
+    // When the user has scrolled up from the alt-buffer bottom into main-buffer
+    // history, render the main buffer at the current scroll position instead of
+    // the alt buffer.  At stickToBottom (the default while in alt buffer),
+    // always render the alt buffer so the TUI app fills the viewport.
+    final isScrollingHistory = _terminal.isUsingAltBuffer && !_stickToBottom;
+    final lines = isScrollingHistory
+        ? _terminal.mainBuffer.lines
+        : _terminal.buffer.lines;
+
     final charHeight = _painter.cellSize.height;
 
     final firstLineOffset = _effectiveScrollPixels - _padding.top;
@@ -536,26 +560,28 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final effectFirstLine = firstLine.clamp(0, lines.length - 1);
     final effectLastLine = lastLine.clamp(0, lines.length - 1);
 
-    // Selection and search highlights go under glyphs so text colors stay visible.
-    if (_controller.selection != null) {
-      _paintSelection(
+    // Selection and highlights only apply to the active buffer view.
+    if (!isScrollingHistory) {
+      if (_controller.selection != null) {
+        _paintSelection(
+          context,
+          offset,
+          canvas,
+          _controller.selection!,
+          effectFirstLine,
+          effectLastLine,
+        );
+      }
+
+      _paintHighlights(
         context,
         offset,
         canvas,
-        _controller.selection!,
+        _controller.highlights,
         effectFirstLine,
         effectLastLine,
       );
     }
-
-    _paintHighlights(
-      context,
-      offset,
-      canvas,
-      _controller.highlights,
-      effectFirstLine,
-      effectLastLine,
-    );
 
     for (var i = effectFirstLine; i <= effectLastLine; i++) {
       _painter.paintLine(
@@ -565,19 +591,22 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       );
     }
 
-    if (_terminal.buffer.absoluteCursorY >= effectFirstLine &&
-        _terminal.buffer.absoluteCursorY <= effectLastLine) {
-      if (_isComposingText) {
-        _paintComposingText(canvas, offset + cursorOffset);
-      }
+    // Cursor and composing text only make sense when showing the active buffer.
+    if (!isScrollingHistory) {
+      if (_terminal.buffer.absoluteCursorY >= effectFirstLine &&
+          _terminal.buffer.absoluteCursorY <= effectLastLine) {
+        if (_isComposingText) {
+          _paintComposingText(canvas, offset + cursorOffset);
+        }
 
-      if (_paintCursorNow) {
-        _painter.paintCursor(
-          canvas,
-          offset + cursorOffset,
-          cursorType: _cursorType,
-          hasFocus: _focusNode.hasFocus,
-        );
+        if (_paintCursorNow) {
+          _painter.paintCursor(
+            canvas,
+            offset + cursorOffset,
+            cursorType: _cursorType,
+            hasFocus: _focusNode.hasFocus,
+          );
+        }
       }
     }
   }

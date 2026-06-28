@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/src/core/buffer/cell_offset.dart';
+import 'package:xterm/src/core/mouse/mode.dart';
 
 import 'package:xterm/src/core/input/keys.dart';
 import 'package:xterm/src/terminal.dart';
@@ -171,6 +172,12 @@ class TerminalViewState extends State<TerminalView> {
 
   bool _isAltBuffer = false;
 
+  /// Cached mouse mode. NeverScrollableScrollPhysics is applied only when
+  /// mouseMode == upDownScrollMove (\e[?1003h — vim with "set mouse=a").
+  /// All other modes (including upDownScroll used by claude CLI) get
+  /// ClampingScrollPhysics so the Scrollable can show main-buffer history.
+  MouseMode _mouseMode = MouseMode.none;
+
   late TerminalController _controller;
 
   late ScrollController _scrollController;
@@ -188,6 +195,7 @@ class TerminalViewState extends State<TerminalView> {
     );
     _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
     _isAltBuffer = _wasInAltBuffer;
+    _mouseMode = widget.terminal.mouseMode;
     widget.terminal.addListener(_onTerminalStateChange);
     _focusNode.addListener(_onFocusChanged);
     super.initState();
@@ -219,6 +227,7 @@ class TerminalViewState extends State<TerminalView> {
       oldWidget.terminal.removeListener(_onTerminalStateChange);
       _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
       _isAltBuffer = _wasInAltBuffer;
+      _mouseMode = widget.terminal.mouseMode;
       widget.terminal.addListener(_onTerminalStateChange);
     }
     _shortcutManager.shortcuts = widget.shortcuts ?? defaultTerminalShortcuts;
@@ -247,9 +256,12 @@ class TerminalViewState extends State<TerminalView> {
     Widget child = Scrollable(
       key: _scrollableKey,
       controller: _scrollController,
-      // In alt-screen (vi, less) the history scroll view must not move or rows
-      // paint misaligned; wheel → keys is handled in TerminalScrollGestureHandler.
-      physics: _isAltBuffer
+      // Lock the Scrollable when TerminalScrollGestureHandler is active
+      // (alt buffer + app has scroll mouse reporting). In that case the
+      // Listener intercepts all scroll events and forwards them to the PTY.
+      // Otherwise (no alt buffer, or no mouse reporting) allow ClampingScrollPhysics
+      // so the user can see main-buffer session history by scrolling.
+      physics: (_isAltBuffer && _mouseMode.reportScroll)
           ? const NeverScrollableScrollPhysics()
           : const ClampingScrollPhysics(),
       viewportBuilder: (context, offset) {
@@ -536,12 +548,13 @@ class TerminalViewState extends State<TerminalView> {
 
   void _onTerminalStateChange() {
     final isAlt = widget.terminal.isUsingAltBuffer;
-    if (isAlt != _wasInAltBuffer) {
-      if (isAlt) {
-        if (_scrollController.hasClients) {
-          _scrollController.jumpTo(0);
-        }
-      } else {
+    final mouseMode = widget.terminal.mouseMode;
+    final altChanged = isAlt != _wasInAltBuffer;
+    final mouseModeChanged = mouseMode != _mouseMode;
+
+    if (altChanged || mouseModeChanged) {
+      if (altChanged && !isAlt) {
+        // Exiting alt buffer: scroll to the bottom of main buffer history.
         _scrollToBottom();
         if (!widget.hardwareKeyboardOnly && _focusNode.hasFocus) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -549,9 +562,14 @@ class TerminalViewState extends State<TerminalView> {
           });
         }
       }
+      // Entering alt buffer: do NOT jumpTo(0). render.dart's _stickToBottom=true
+      // snaps the Scrollable to the correct bottom position in performLayout,
+      // where the alt buffer content is rendered at effectiveScrollPixels=0.
+
       if (mounted) {
         setState(() {
           _isAltBuffer = isAlt;
+          _mouseMode = mouseMode;
         });
       }
     }
