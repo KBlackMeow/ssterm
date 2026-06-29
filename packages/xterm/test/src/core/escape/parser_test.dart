@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -185,6 +187,90 @@ void main() {
           expect(terminal.buffer.lines[lineIdx].getAttributes(col), equals(0),
               reason: 'column $col of scrolled-in content must have no underline');
         }
+      });
+    });
+
+    group('XTERM_COMPAT features', () {
+      test('DECSCUSR sets cursor shape (block)', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[1 q');
+        expect(terminal.decscusrShape, equals(1));
+      });
+
+      test('DECSCUSR sets cursor shape (underline)', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[3 q');
+        expect(terminal.decscusrShape, equals(3));
+      });
+
+      test('DECSCUSR sets cursor shape (bar)', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[5 q');
+        expect(terminal.decscusrShape, equals(5));
+      });
+
+      test('DECSCUSR without space intermediate is ignored', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[1q');
+        expect(terminal.decscusrShape, equals(0));
+      });
+
+      test('OSC 7 sets working directory', () {
+        String? capturedUri;
+        final terminal = Terminal()
+          ..onWorkingDirectoryChange = (uri) => capturedUri = uri;
+        terminal.write('\x1b]7;file:///home/user\x07');
+        expect(capturedUri, equals('file:///home/user'));
+      });
+
+      test('OSC 52 clipboard write', () {
+        String? captured;
+        final terminal = Terminal()
+          ..onClipboardWrite = (data) => captured = data;
+        final encoded = base64.encode(utf8.encode('hello'));
+        terminal.write('\x1b]52;c;$encoded\x07');
+        expect(captured, equals('hello'));
+      });
+
+      test('OSC 52 clipboard request', () {
+        var requested = false;
+        final terminal = Terminal()..onClipboardRead = () => requested = true;
+        terminal.write('\x1b]52;c;?\x07');
+        expect(requested, isTrue);
+      });
+
+      test('DA2 response contains version 95', () {
+        final outputs = <String>[];
+        final terminal = Terminal()..onOutput = outputs.add;
+        // Write one char at a time to bypass the bulk-write DA throttle guard.
+        for (final char in '\x1b[>c'.split('')) {
+          terminal.write(char);
+        }
+        expect(outputs.join(), contains(';95;'));
+      });
+
+      test('focus mode sends focus-in on enable', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[?1004h');
+        expect(terminal.reportFocusMode, isTrue);
+      });
+
+      test('SGR 4:3 wavy underline stored in cell flags', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[4:3m');
+        terminal.write('X');
+        final attrs = terminal.buffer.lines[0].getAttributes(0);
+        expect((attrs >> 9) & 0x7, equals(3),
+            reason: 'underline style bits should be 3 (wavy)');
+      });
+
+      test('SGR 53 overline stored in cell flags', () {
+        final terminal = Terminal();
+        terminal.write('\x1b[53m');
+        terminal.write('X');
+        final attrs = terminal.buffer.lines[0].getAttributes(0);
+        expect(attrs & (1 << 8), isNot(equals(0)),
+            reason: 'overline bit should be set');
       });
     });
 

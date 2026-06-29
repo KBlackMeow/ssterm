@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' show max;
 
 import 'package:xterm/src/base/observable.dart';
@@ -47,6 +48,18 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// program. This is typically caused by user inputs from [textInput],
   /// [keyInput], [mouseInput], or [paste].
   void Function(String data)? onOutput;
+
+  /// OSC 7: called when the shell reports its current working directory URI.
+  void Function(String uri)? onWorkingDirectoryChange;
+
+  /// OSC 52 write: called when the program requests a clipboard write.
+  /// [data] is the decoded UTF-8 clipboard content.
+  void Function(String data)? onClipboardWrite;
+
+  /// OSC 52 read: called when the program queries clipboard contents.
+  /// The handler should respond via [onOutput] with
+  /// `\x1b]52;c;<base64data>\x07`.
+  void Function()? onClipboardRead;
 
   /// Function that is called when the dimensions of the terminal change.
   void Function(int width, int height, int pixelWidth, int pixelHeight)?
@@ -162,6 +175,13 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   bool _altBufferMouseScrollMode = false;
 
   bool _bracketedPasteMode = false;
+
+  /// DECSCUSR cursor shape: 0=default, 1=blink-block, 2=steady-block,
+  /// 3=blink-underline, 4=steady-underline, 5=blink-bar, 6=steady-bar.
+  int _decscusrShape = 0;
+
+  /// Raw DECSCUSR Ps value set by the application. 0 means "default / not set".
+  int get decscusrShape => _decscusrShape;
 
   /* State getters */
 
@@ -797,6 +817,14 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   }
 
   @override
+  void setCursorShape(int ps) {
+    if (_decscusrShape == ps) return;
+    _decscusrShape = ps;
+    // notifyListeners() is called at the end of write(); no explicit call needed
+    // here since this is only invoked from the parser during write().
+  }
+
+  @override
   void setMouseReportMode(MouseReportMode mode) {
     _mouseReportMode = mode;
   }
@@ -841,6 +869,11 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   @override
   void setCursorUnderline() {
     _cursorStyle.setUnderline();
+  }
+
+  @override
+  void setCursorUnderlineStyle(int style) {
+    _cursorStyle.setUnderlineStyle(style);
   }
 
   @override
@@ -963,5 +996,50 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   @override
   void unknownOSC(String ps, List<String> pt) {
     onPrivateOSC?.call(ps, pt);
+  }
+
+  @override
+  void setCursorOverline() {
+    _cursorStyle.setOverline();
+  }
+
+  @override
+  void unsetCursorOverline() {
+    _cursorStyle.unsetOverline();
+  }
+
+  @override
+  void setUnderlineColor256(int index) {
+    _cursorStyle.setUnderlineColor256(index);
+  }
+
+  @override
+  void setUnderlineColorRgb(int r, int g, int b) {
+    _cursorStyle.setUnderlineColorRgb(r, g, b);
+  }
+
+  @override
+  void resetUnderlineColor() {
+    _cursorStyle.resetUnderlineColor();
+  }
+
+  @override
+  void setWorkingDirectory(String uri) {
+    onWorkingDirectoryChange?.call(uri);
+  }
+
+  @override
+  void setClipboard(String data) {
+    try {
+      final decoded = utf8.decode(base64.decode(data));
+      onClipboardWrite?.call(decoded);
+    } catch (_) {
+      onClipboardWrite?.call(data);
+    }
+  }
+
+  @override
+  void requestClipboard() {
+    onClipboardRead?.call();
   }
 }

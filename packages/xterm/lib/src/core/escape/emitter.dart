@@ -7,7 +7,8 @@ class EscapeEmitter {
 
   String secondaryDeviceAttributes() {
     const model = 0;
-    const version = 0;
+    // Declare xterm-95 compatibility so tools enable advanced features.
+    const version = 95;
     return '\x1b[>$model;$version;0c';
   }
 

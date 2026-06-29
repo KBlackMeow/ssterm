@@ -193,6 +193,9 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _onFocusChange() {
+    if (_terminal.reportFocusMode) {
+      _terminal.onOutput?.call(_focusNode.hasFocus ? '\x1b[I' : '\x1b[O');
+    }
     markNeedsPaint();
   }
 

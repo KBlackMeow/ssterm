@@ -3,7 +3,7 @@ class TerminalCompat {
   const TerminalCompat({
     this.altDecScRcPositionOnly = true,
     this.altStripUnderlineOnWrite = true,
-    this.altScrollDebounceMs = 0,
+    this.altScrollDebounceMs = 8,
   });
 
   /// vim-friendly defaults: position-only DECSC/DECRC in the alt buffer, strip

@@ -7,7 +7,16 @@ class CursorStyle {
 
   int attrs;
 
-  CursorStyle({this.foreground = 0, this.background = 0, this.attrs = 0});
+  /// Encoded underline color (same CellColor encoding as [foreground]).
+  /// Zero means "use foreground color" (default).
+  int underlineColor;
+
+  CursorStyle({
+    this.foreground = 0,
+    this.background = 0,
+    this.attrs = 0,
+    this.underlineColor = 0,
+  });
 
   static final empty = CursorStyle();
 
@@ -25,6 +34,23 @@ class CursorStyle {
 
   void setUnderline() {
     attrs |= CellAttr.underline;
+    // Clear style sub-type; plain SGR 4 means single underline.
+    attrs = (attrs & ~CellAttr.underlineStyleMask) |
+        (1 << CellAttr.underlineStyleShift);
+  }
+
+  /// Set underline with explicit style sub-type.
+  ///
+  /// [style]: 0 = off, 1 = single, 2 = double, 3 = curly/wavy,
+  ///          4 = dotted, 5 = dashed.
+  void setUnderlineStyle(int style) {
+    if (style == 0) {
+      attrs &= ~(CellAttr.underline | CellAttr.underlineStyleMask);
+    } else {
+      attrs |= CellAttr.underline;
+      attrs = (attrs & ~CellAttr.underlineStyleMask) |
+          ((style & 0x7) << CellAttr.underlineStyleShift);
+    }
   }
 
   void setBlink() {
@@ -43,6 +69,10 @@ class CursorStyle {
     attrs |= CellAttr.strikethrough;
   }
 
+  void setOverline() {
+    attrs |= CellAttr.overline;
+  }
+
   void unsetBold() {
     attrs &= ~CellAttr.bold;
   }
@@ -56,7 +86,7 @@ class CursorStyle {
   }
 
   void unsetUnderline() {
-    attrs &= ~CellAttr.underline;
+    attrs &= ~(CellAttr.underline | CellAttr.underlineStyleMask);
   }
 
   void unsetBlink() {
@@ -75,6 +105,10 @@ class CursorStyle {
     attrs &= ~CellAttr.strikethrough;
   }
 
+  void unsetOverline() {
+    attrs &= ~CellAttr.overline;
+  }
+
   bool get isBold => (attrs & CellAttr.bold) != 0;
 
   bool get isFaint => (attrs & CellAttr.faint) != 0;
@@ -83,11 +117,16 @@ class CursorStyle {
 
   bool get isUnderline => (attrs & CellAttr.underline) != 0;
 
+  int get underlineStyle =>
+      (attrs & CellAttr.underlineStyleMask) >> CellAttr.underlineStyleShift;
+
   bool get isBlink => (attrs & CellAttr.blink) != 0;
 
   bool get isInverse => (attrs & CellAttr.inverse) != 0;
 
   bool get isInvisible => (attrs & CellAttr.invisible) != 0;
+
+  bool get isOverline => (attrs & CellAttr.overline) != 0;
 
   void setForegroundColor16(int color) {
     foreground = color | CellColor.named;
@@ -121,10 +160,23 @@ class CursorStyle {
     background = 0; // | CellColor.normal;
   }
 
+  void setUnderlineColor256(int color) {
+    underlineColor = color | CellColor.palette;
+  }
+
+  void setUnderlineColorRgb(int r, int g, int b) {
+    underlineColor = (r << 16) | (g << 8) | b | CellColor.rgb;
+  }
+
+  void resetUnderlineColor() {
+    underlineColor = 0;
+  }
+
   void reset() {
     foreground = 0;
     background = 0;
     attrs = 0;
+    underlineColor = 0;
   }
 }
 

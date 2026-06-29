@@ -106,6 +106,12 @@ abstract class EscapeHandler {
 
   void unknownCSI(int finalByte);
 
+  /// DECSCUSR — Set Cursor Style (CSI Ps SP q).
+  ///
+  /// [ps] is the raw parameter: 0/1 = blink block, 2 = steady block,
+  /// 3 = blink underline, 4 = steady underline, 5 = blink bar, 6 = steady bar.
+  void setCursorShape(int ps);
+
   /* Modes */
 
   void setInsertMode(bool enabled);
@@ -166,6 +172,12 @@ abstract class EscapeHandler {
 
   void setCursorUnderline();
 
+  /// Sets the underline style sub-type.
+  ///
+  /// [style]: 0 = default/off, 1 = single, 2 = double, 3 = curly/wavy,
+  ///          4 = dotted, 5 = dashed.
+  void setCursorUnderlineStyle(int style);
+
   void setCursorBlink();
 
   void setCursorInverse();
@@ -173,6 +185,8 @@ abstract class EscapeHandler {
   void setCursorInvisible();
 
   void setCursorStrikethrough();
+
+  void setCursorOverline();
 
   void unsetCursorBold();
 
@@ -190,6 +204,8 @@ abstract class EscapeHandler {
 
   void unsetCursorStrikethrough();
 
+  void unsetCursorOverline();
+
   void setForegroundColor16(int color);
 
   void setForegroundColor256(int index);
@@ -206,6 +222,15 @@ abstract class EscapeHandler {
 
   void resetBackground();
 
+  /// SGR 58: set underline color (256-color palette index).
+  void setUnderlineColor256(int index);
+
+  /// SGR 58: set underline color (24-bit RGB).
+  void setUnderlineColorRgb(int r, int g, int b);
+
+  /// SGR 59: reset underline color to default.
+  void resetUnderlineColor();
+
   void unsupportedStyle(int param);
 
   /* OSC */
@@ -213,6 +238,15 @@ abstract class EscapeHandler {
   void setTitle(String name);
 
   void setIconName(String name);
+
+  /// OSC 7: current working directory URI reported by the shell.
+  void setWorkingDirectory(String uri);
+
+  /// OSC 52 write: write [data] (base64-encoded) to the system clipboard.
+  void setClipboard(String data);
+
+  /// OSC 52 read: terminal should respond with current clipboard contents.
+  void requestClipboard();
 
   void unknownOSC(String code, List<String> args);
 }

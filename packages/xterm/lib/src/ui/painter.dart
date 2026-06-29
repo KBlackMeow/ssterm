@@ -335,34 +335,132 @@ class TerminalPainter {
     }
   }
 
-  /// Draws an underline at the bottom of the cell, below the glyph.
+  /// Draws an underline (or overline) for the cell, respecting underline style.
   @pragma('vm:prefer-inline')
   void paintCellUnderline(Canvas canvas, Offset offset, CellData cellData) {
-    if (cellData.flags & CellFlags.underline == 0) return;
+    final cellFlags = cellData.flags;
+    final hasUnderline = cellFlags & CellFlags.underline != 0;
+    final hasOverline = cellFlags & CellFlags.overline != 0;
+
+    if (!hasUnderline && !hasOverline) return;
 
     final charCode = cellData.content & CellContent.codepointMask;
     if (charCode == 0) return;
 
-    final cellFlags = cellData.flags;
     var color = cellFlags & CellFlags.inverse == 0
         ? resolveForegroundColor(cellData.foreground)
         : resolveBackgroundColor(cellData.background);
+
+    if (cellData.underlineColor != 0) {
+      color = _resolveUnderlineColor(cellData.underlineColor);
+    }
 
     if (cellFlags & CellFlags.faint != 0) {
       color = color.withValues(alpha: 0.5);
     }
 
     final doubleWidth = cellData.content >> CellContent.widthShift == 2;
-    final width = _cellSize.width * (doubleWidth ? 2 : 1);
-    final y = offset.dy + _cellSize.height - 1;
+    final lineWidth = _cellSize.width * (doubleWidth ? 2 : 1);
 
+    if (hasOverline) {
+      _drawStraightLine(canvas, offset.dx, offset.dy, lineWidth, color);
+    }
+
+    if (hasUnderline) {
+      final ulStyle =
+          (cellFlags & CellFlags.underlineStyleMask) >> CellFlags.underlineStyleShift;
+      final y = offset.dy + _cellSize.height - 1;
+      switch (ulStyle) {
+        case 2: // double underline
+          _drawStraightLine(canvas, offset.dx, y - 2, lineWidth, color);
+          _drawStraightLine(canvas, offset.dx, y, lineWidth, color);
+        case 3: // curly / wavy
+          _drawWavyLine(canvas, offset.dx, y - 1, lineWidth, color);
+        case 4: // dotted
+          _drawDottedLine(canvas, offset.dx, y, lineWidth, color);
+        case 5: // dashed
+          _drawDashedLine(canvas, offset.dx, y, lineWidth, color);
+        default: // 0, 1 — plain single underline
+          _drawStraightLine(canvas, offset.dx, y, lineWidth, color);
+      }
+    }
+  }
+
+  void _drawStraightLine(
+      Canvas canvas, double x, double y, double width, Color color) {
     canvas.drawLine(
-      Offset(offset.dx, y),
-      Offset(offset.dx + width, y),
+      Offset(x, y),
+      Offset(x + width, y),
       Paint()
         ..color = color
         ..strokeWidth = 1,
     );
+  }
+
+  /// Draws a wavy (sinusoidal) underline using quadratic bezier segments.
+  void _drawWavyLine(
+      Canvas canvas, double x, double y, double width, Color color) {
+    final amplitude = (_cellSize.height * 0.10).clamp(1.0, 2.0);
+    final period = (_cellSize.width * 2).clamp(4.0, 12.0);
+    final path = Path();
+    path.moveTo(x, y);
+    var cx = x;
+    var phase = true;
+    while (cx < x + width) {
+      final nextCx = (cx + period / 2).clamp(cx, x + width);
+      final cy = phase ? y - amplitude : y + amplitude;
+      path.quadraticBezierTo(cx + (nextCx - cx) / 2, cy, nextCx, y);
+      cx = nextCx;
+      phase = !phase;
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..strokeWidth = 1
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  void _drawDottedLine(
+      Canvas canvas, double x, double y, double width, Color color) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    const step = 2.0;
+    var cx = x + 0.5;
+    while (cx < x + width) {
+      canvas.drawCircle(Offset(cx, y), 0.5, paint);
+      cx += step;
+    }
+  }
+
+  void _drawDashedLine(
+      Canvas canvas, double x, double y, double width, Color color) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    final dashLen = _cellSize.width * 0.4;
+    final gapLen = _cellSize.width * 0.2;
+    var cx = x;
+    while (cx < x + width) {
+      final end = (cx + dashLen).clamp(cx, x + width);
+      canvas.drawLine(Offset(cx, y), Offset(end, y), paint);
+      cx += dashLen + gapLen;
+    }
+  }
+
+  Color _resolveUnderlineColor(int cellColor) {
+    final colorType = cellColor & CellColor.typeMask;
+    final colorValue = cellColor & CellColor.valueMask;
+    switch (colorType) {
+      case CellColor.named:
+      case CellColor.palette:
+        return _colorPalette[colorValue];
+      case CellColor.rgb:
+      default:
+        return Color(colorValue | 0xFF000000);
+    }
   }
 
   /// Paints the background of a cell represented by [cellData] to [canvas] at

@@ -6,6 +6,7 @@ class CellData {
     required this.background,
     required this.flags,
     required this.content,
+    this.underlineColor = 0,
   });
 
   factory CellData.empty() {
@@ -14,6 +15,7 @@ class CellData {
       background: 0,
       flags: 0,
       content: 0,
+      underlineColor: 0,
     );
   }
 
@@ -25,8 +27,12 @@ class CellData {
 
   int content;
 
+  /// Encoded underline color (same CellColor encoding as [foreground]).
+  /// Zero means "use foreground color" (default).
+  int underlineColor;
+
   int getHash() {
-    return hashValues(foreground, background, flags, content);
+    return hashValues(foreground, background, flags, content, underlineColor);
   }
 
   @override
@@ -44,6 +50,13 @@ abstract class CellAttr {
   static const inverse = 1 << 5;
   static const invisible = 1 << 6;
   static const strikethrough = 1 << 7;
+  static const overline = 1 << 8;
+
+  /// 3-bit underline style stored in bits 9-11.
+  /// 0 = single (default), 1 = single, 2 = double, 3 = curly/wavy,
+  /// 4 = dotted, 5 = dashed.
+  static const underlineStyleMask = 0x7 << 9;
+  static const underlineStyleShift = 9;
 }
 
 abstract class CellColor {

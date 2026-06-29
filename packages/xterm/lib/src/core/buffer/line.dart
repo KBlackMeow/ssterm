@@ -7,7 +7,7 @@ import 'package:xterm/src/core/cursor.dart';
 import 'package:xterm/src/utils/circular_buffer.dart';
 import 'package:xterm/src/utils/unicode_v11.dart';
 
-const _cellSize = 4;
+const _cellSize = 5;
 
 const _cellForeground = 0;
 
@@ -16,6 +16,8 @@ const _cellBackground = 1;
 const _cellAttributes = 2;
 
 const _cellContent = 3;
+
+const _cellUnderlineColor = 4;
 
 class BufferLine with IndexedItem {
   BufferLine(
@@ -67,6 +69,7 @@ class BufferLine with IndexedItem {
     cellData.background = _data[offset + _cellBackground];
     cellData.flags = _data[offset + _cellAttributes];
     cellData.content = _data[offset + _cellContent];
+    cellData.underlineColor = _data[offset + _cellUnderlineColor];
   }
 
   CellData createCellData(int index) {
@@ -76,6 +79,7 @@ class BufferLine with IndexedItem {
     _data[offset + _cellBackground] = cellData.background;
     _data[offset + _cellAttributes] = cellData.flags;
     _data[offset + _cellContent] = cellData.content;
+    _data[offset + _cellUnderlineColor] = cellData.underlineColor;
     return cellData;
   }
 
@@ -109,6 +113,7 @@ class BufferLine with IndexedItem {
     _data[offset + _cellBackground] = style.background;
     _data[offset + _cellAttributes] = style.attrs;
     _data[offset + _cellContent] = char | (witdh << CellContent.widthShift);
+    _data[offset + _cellUnderlineColor] = style.underlineColor;
   }
 
   void setCellData(int index, CellData cellData) {
@@ -117,6 +122,7 @@ class BufferLine with IndexedItem {
     _data[offset + _cellBackground] = cellData.background;
     _data[offset + _cellAttributes] = cellData.flags;
     _data[offset + _cellContent] = cellData.content;
+    _data[offset + _cellUnderlineColor] = cellData.underlineColor;
   }
 
   void eraseCell(int index, CursorStyle style) {
@@ -126,6 +132,7 @@ class BufferLine with IndexedItem {
     // VT spec: erase uses background colour only, not text attributes.
     _data[offset + _cellAttributes] = 0;
     _data[offset + _cellContent] = 0;
+    _data[offset + _cellUnderlineColor] = 0;
   }
 
   void resetCell(int index) {
@@ -134,6 +141,7 @@ class BufferLine with IndexedItem {
     _data[offset + _cellBackground] = 0;
     _data[offset + _cellAttributes] = 0;
     _data[offset + _cellContent] = 0;
+    _data[offset + _cellUnderlineColor] = 0;
   }
 
   /// Erase cells whose index satisfies [start] <= index < [end]. Erased cells
@@ -335,18 +343,11 @@ class BufferLine with IndexedItem {
       to = _length;
     }
 
-    // Trim trailing empty cells so copied lines don't end with trailing spaces,
-    // but preserve interior empty cells as spaces to match visual layout.
-    final trimmed = getTrimmedLength(to);
-    if (trimmed < to) to = trimmed;
-
     final builder = StringBuffer();
     for (var i = from; i < to; i++) {
       final codePoint = getCodePoint(i);
       final width = getWidth(i);
-      if (codePoint == 0) {
-        builder.writeCharCode(0x20); // empty cell → space to preserve visual spacing
-      } else if (i + width <= to) {
+      if (codePoint != 0 && i + width <= to) {
         builder.writeCharCode(codePoint);
       }
     }

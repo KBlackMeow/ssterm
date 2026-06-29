@@ -477,6 +477,11 @@ class _TerminalDebuggerHandler implements EscapeHandler {
   }
 
   @override
+  void setCursorUnderlineStyle(int style) {
+    onCommand('setCursorUnderlineStyle($style)');
+  }
+
+  @override
   void setCursorBlink() {
     onCommand('setCursorBlink');
   }
@@ -596,5 +601,50 @@ class _TerminalDebuggerHandler implements EscapeHandler {
   @override
   void unknownOSC(String code, List<String> args) {
     onCommand('unknownOSC($code, $args)', error: true);
+  }
+
+  @override
+  void setCursorShape(int ps) {
+    onCommand('setCursorShape($ps)');
+  }
+
+  @override
+  void setCursorOverline() {
+    onCommand('setCursorOverline');
+  }
+
+  @override
+  void unsetCursorOverline() {
+    onCommand('unsetCursorOverline');
+  }
+
+  @override
+  void setUnderlineColor256(int index) {
+    onCommand('setUnderlineColor256($index)');
+  }
+
+  @override
+  void setUnderlineColorRgb(int r, int g, int b) {
+    onCommand('setUnderlineColorRgb($r, $g, $b)');
+  }
+
+  @override
+  void resetUnderlineColor() {
+    onCommand('resetUnderlineColor');
+  }
+
+  @override
+  void setWorkingDirectory(String uri) {
+    onCommand('setWorkingDirectory($uri)');
+  }
+
+  @override
+  void setClipboard(String data) {
+    onCommand('setClipboard($data)');
+  }
+
+  @override
+  void requestClipboard() {
+    onCommand('requestClipboard');
   }
 }

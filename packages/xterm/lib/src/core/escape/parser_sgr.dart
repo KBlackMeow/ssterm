@@ -5,7 +5,12 @@ import 'package:xterm/src/core/escape/handler.dart';
 ///
 /// Extracted from `EscapeParser._csiHandleSgr` so the logic can be
 /// tested independently of the parser's internal state.
-void parseSgrParams(EscapeHandler handler, List<int> params) {
+///
+/// [paramSubs] is the parallel colon sub-parameter list produced by the
+/// CSI parser.  `paramSubs?[i]` is non-null when `params[i]` had colon-
+/// separated sub-params (e.g. `4:3` → params=[4], paramSubs=[[3]]).
+void parseSgrParams(EscapeHandler handler, List<int> params,
+    [List<List<int>?>? paramSubs]) {
   if (params.isEmpty) {
     return handler.resetCursorStyle();
   }
@@ -13,6 +18,7 @@ void parseSgrParams(EscapeHandler handler, List<int> params) {
   // ignore: dead_code
   for (var i = 0; i < params.length; i++) {
     final param = params[i];
+    final subs = paramSubs?[i];
     switch (param) {
       case 0:
         handler.resetCursorStyle();
@@ -27,7 +33,12 @@ void parseSgrParams(EscapeHandler handler, List<int> params) {
         handler.setCursorItalic();
         continue;
       case 4:
-        handler.setCursorUnderline();
+        // SGR 4:x — underline with sub-type (colon format).
+        if (subs != null && subs.isNotEmpty) {
+          handler.setCursorUnderlineStyle(subs[0]);
+        } else {
+          handler.setCursorUnderline();
+        }
         continue;
       case 5:
         handler.setCursorBlink();
@@ -92,20 +103,20 @@ void parseSgrParams(EscapeHandler handler, List<int> params) {
         handler.setForegroundColor16(NamedColor.white);
         continue;
       case 38:
-        final mode = params[i + 1];
-        switch (mode) {
-          case 2:
-            final r = params[i + 2];
-            final g = params[i + 3];
-            final b = params[i + 4];
-            handler.setForegroundColorRgb(r, g, b);
-            i += 4;
-            break;
-          case 5:
-            final index = params[i + 2];
-            handler.setForegroundColor256(index);
-            i += 2;
-            break;
+        if (subs != null && subs.length >= 4 && subs[0] == 2) {
+          // 38:2:r:g:b — colon sub-param format
+          handler.setForegroundColorRgb(subs[1], subs[2], subs[3]);
+        } else if (subs != null && subs.length >= 2 && subs[0] == 5) {
+          // 38:5:n — colon sub-param format
+          handler.setForegroundColor256(subs[1]);
+        } else if (i + 4 < params.length && params[i + 1] == 2) {
+          // 38;2;r;g;b — legacy semicolon format
+          handler.setForegroundColorRgb(params[i + 2], params[i + 3], params[i + 4]);
+          i += 4;
+        } else if (i + 2 < params.length && params[i + 1] == 5) {
+          // 38;5;n — legacy semicolon format
+          handler.setForegroundColor256(params[i + 2]);
+          i += 2;
         }
         continue;
       case 39:
@@ -137,24 +148,49 @@ void parseSgrParams(EscapeHandler handler, List<int> params) {
         handler.setBackgroundColor16(NamedColor.white);
         continue;
       case 48:
-        final mode = params[i + 1];
-        switch (mode) {
-          case 2:
-            final r = params[i + 2];
-            final g = params[i + 3];
-            final b = params[i + 4];
-            handler.setBackgroundColorRgb(r, g, b);
-            i += 4;
-            break;
-          case 5:
-            final index = params[i + 2];
-            handler.setBackgroundColor256(index);
-            i += 2;
-            break;
+        if (subs != null && subs.length >= 4 && subs[0] == 2) {
+          // 48:2:r:g:b
+          handler.setBackgroundColorRgb(subs[1], subs[2], subs[3]);
+        } else if (subs != null && subs.length >= 2 && subs[0] == 5) {
+          // 48:5:n
+          handler.setBackgroundColor256(subs[1]);
+        } else if (i + 4 < params.length && params[i + 1] == 2) {
+          handler.setBackgroundColorRgb(params[i + 2], params[i + 3], params[i + 4]);
+          i += 4;
+        } else if (i + 2 < params.length && params[i + 1] == 5) {
+          handler.setBackgroundColor256(params[i + 2]);
+          i += 2;
         }
         continue;
       case 49:
         handler.resetBackground();
+        continue;
+
+      case 53:
+        handler.setCursorOverline();
+        continue;
+      case 55:
+        handler.unsetCursorOverline();
+        continue;
+
+      case 58:
+        // SGR 58: underline color
+        if (subs != null && subs.length >= 4 && subs[0] == 2) {
+          // 58:2:r:g:b
+          handler.setUnderlineColorRgb(subs[1], subs[2], subs[3]);
+        } else if (subs != null && subs.length >= 2 && subs[0] == 5) {
+          // 58:5:n
+          handler.setUnderlineColor256(subs[1]);
+        } else if (i + 4 < params.length && params[i + 1] == 2) {
+          handler.setUnderlineColorRgb(params[i + 2], params[i + 3], params[i + 4]);
+          i += 4;
+        } else if (i + 2 < params.length && params[i + 1] == 5) {
+          handler.setUnderlineColor256(params[i + 2]);
+          i += 2;
+        }
+        continue;
+      case 59:
+        handler.resetUnderlineColor();
         continue;
 
       case 90:

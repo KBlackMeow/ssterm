@@ -178,6 +178,9 @@ class TerminalViewState extends State<TerminalView> {
   /// ClampingScrollPhysics so the Scrollable can show main-buffer history.
   MouseMode _mouseMode = MouseMode.none;
 
+  /// DECSCUSR-overridden cursor type. Null means use widget.cursorType.
+  TerminalCursorType? _decscusrCursorType;
+
   late TerminalController _controller;
 
   late ScrollController _scrollController;
@@ -196,6 +199,7 @@ class TerminalViewState extends State<TerminalView> {
     _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
     _isAltBuffer = _wasInAltBuffer;
     _mouseMode = widget.terminal.mouseMode;
+    _decscusrCursorType = _cursorTypeFromDecscusr(widget.terminal.decscusrShape);
     widget.terminal.addListener(_onTerminalStateChange);
     _focusNode.addListener(_onFocusChanged);
     super.initState();
@@ -228,6 +232,8 @@ class TerminalViewState extends State<TerminalView> {
       _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
       _isAltBuffer = _wasInAltBuffer;
       _mouseMode = widget.terminal.mouseMode;
+      _decscusrCursorType =
+          _cursorTypeFromDecscusr(widget.terminal.decscusrShape);
       widget.terminal.addListener(_onTerminalStateChange);
     }
     _shortcutManager.shortcuts = widget.shortcuts ?? defaultTerminalShortcuts;
@@ -278,7 +284,7 @@ class TerminalViewState extends State<TerminalView> {
           textScaler: widget.textScaler ?? MediaQuery.textScalerOf(context),
           theme: widget.theme,
           focusNode: _focusNode,
-          cursorType: widget.cursorType,
+          cursorType: _decscusrCursorType ?? widget.cursorType,
           alwaysShowCursor: widget.alwaysShowCursor,
           cursorBlink: widget.cursorBlink,
           cursorBlinkPeriodMs: widget.cursorBlinkPeriodMs,
@@ -546,13 +552,34 @@ class TerminalViewState extends State<TerminalView> {
     }
   }
 
+  /// Convert a raw DECSCUSR Ps value to [TerminalCursorType].
+  /// Returns null when ps == 0 (let widget.cursorType take effect).
+  static TerminalCursorType? _cursorTypeFromDecscusr(int ps) {
+    switch (ps) {
+      case 1:
+      case 2:
+        return TerminalCursorType.block;
+      case 3:
+      case 4:
+        return TerminalCursorType.underline;
+      case 5:
+      case 6:
+        return TerminalCursorType.verticalBar;
+      default:
+        return null;
+    }
+  }
+
   void _onTerminalStateChange() {
     final isAlt = widget.terminal.isUsingAltBuffer;
     final mouseMode = widget.terminal.mouseMode;
+    final newShape = widget.terminal.decscusrShape;
     final altChanged = isAlt != _wasInAltBuffer;
     final mouseModeChanged = mouseMode != _mouseMode;
+    final shapeChanged =
+        _cursorTypeFromDecscusr(newShape) != _decscusrCursorType;
 
-    if (altChanged || mouseModeChanged) {
+    if (altChanged || mouseModeChanged || shapeChanged) {
       if (altChanged && !isAlt) {
         // Exiting alt buffer: scroll to the bottom of main buffer history.
         _scrollToBottom();
@@ -570,6 +597,7 @@ class TerminalViewState extends State<TerminalView> {
         setState(() {
           _isAltBuffer = isAlt;
           _mouseMode = mouseMode;
+          _decscusrCursorType = _cursorTypeFromDecscusr(newShape);
         });
       }
     }

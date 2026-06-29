@@ -74,5 +74,76 @@ void main() {
       verify(h.setForegroundColor16(NamedColor.red)).called(1);
       verify(h.setCursorUnderline()).called(1);
     });
+
+    test('SGR 4:0 resets underline style', () {
+      parseSgrParams(h, const [4], [const [0]]);
+      verify(h.setCursorUnderlineStyle(0)).called(1);
+      verifyNever(h.setCursorUnderline());
+    });
+
+    test('SGR 4:1 sets straight underline style', () {
+      parseSgrParams(h, const [4], [const [1]]);
+      verify(h.setCursorUnderlineStyle(1)).called(1);
+    });
+
+    test('SGR 4:3 sets wavy underline style', () {
+      parseSgrParams(h, const [4], [const [3]]);
+      verify(h.setCursorUnderlineStyle(3)).called(1);
+    });
+
+    test('SGR 4 without sub-param sets plain underline', () {
+      parseSgrParams(h, const [4]);
+      verify(h.setCursorUnderline()).called(1);
+    });
+
+    test('SGR 38:2:r:g:b sets foreground RGB (colon sub-params)', () {
+      parseSgrParams(h, const [38], [const [2, 10, 20, 30]]);
+      verify(h.setForegroundColorRgb(10, 20, 30)).called(1);
+    });
+
+    test('SGR 38:5:index sets foreground 256-color (colon sub-params)', () {
+      parseSgrParams(h, const [38], [const [5, 200]]);
+      verify(h.setForegroundColor256(200)).called(1);
+    });
+
+    test('SGR 48:2:r:g:b sets background RGB (colon sub-params)', () {
+      parseSgrParams(h, const [48], [const [2, 1, 2, 3]]);
+      verify(h.setBackgroundColorRgb(1, 2, 3)).called(1);
+    });
+
+    test('SGR 53 sets overline', () {
+      parseSgrParams(h, const [53]);
+      verify(h.setCursorOverline()).called(1);
+    });
+
+    test('SGR 55 unsets overline', () {
+      parseSgrParams(h, const [55]);
+      verify(h.unsetCursorOverline()).called(1);
+    });
+
+    test('SGR 58:2:r:g:b sets underline color RGB (colon sub-params)', () {
+      parseSgrParams(h, const [58], [const [2, 100, 150, 200]]);
+      verify(h.setUnderlineColorRgb(100, 150, 200)).called(1);
+    });
+
+    test('SGR 58:5:index sets underline color 256 (colon sub-params)', () {
+      parseSgrParams(h, const [58], [const [5, 42]]);
+      verify(h.setUnderlineColor256(42)).called(1);
+    });
+
+    test('SGR 58;2;r;g;b sets underline color RGB (semicolon)', () {
+      parseSgrParams(h, const [58, 2, 10, 20, 30]);
+      verify(h.setUnderlineColorRgb(10, 20, 30)).called(1);
+    });
+
+    test('SGR 59 resets underline color', () {
+      parseSgrParams(h, const [59]);
+      verify(h.resetUnderlineColor()).called(1);
+    });
+
+    test('SGR 94 sets bright blue foreground (not brightBlack bug)', () {
+      parseSgrParams(h, const [94]);
+      verify(h.setForegroundColor16(NamedColor.brightBlue)).called(1);
+    });
   });
 }

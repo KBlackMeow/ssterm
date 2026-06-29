@@ -204,18 +204,27 @@ class EscapeParser {
     return true;
   }
 
-  /// The last parsed [_Csi]. This is a mutable singletion by design to reduce
+  /// The last parsed [_Csi]. This is a mutable singleton by design to reduce
   /// object allocations.
-  final _csi = _Csi(finalByte: 0, params: []);
+  final _csi = _Csi(finalByte: 0, params: [], paramSubs: []);
+
+  /// Reusable buffer for colon sub-parameters to avoid allocation per sequence.
+  final _tempSubParams = <int>[];
 
   /// Parse a CSI from the head of the queue. Return false if the CSI isn't
   /// complete. After a CSI is successfully parsed, [_csi] is updated.
+  ///
+  /// Colon-separated sub-parameters (e.g. `38:2:r:g:b`, `4:3`) are preserved
+  /// in [_Csi.paramSubs] so handlers can distinguish `4:3` (wavy underline)
+  /// from `4;3` (underline + italic).
   bool _consumeCsi() {
     if (_queue.isEmpty) {
       return false;
     }
 
     _csi.params.clear();
+    _csi.paramSubs.clear();
+    _csi.intermediate = null;
 
     // test whether the csi is a `CSI ? Ps ...` or `CSI Ps ...`
     final prefix = _queue.peek();
@@ -228,6 +237,9 @@ class EscapeParser {
 
     var param = 0;
     var hasParam = false;
+    var inSubParam = false;
+    var primaryParam = 0;
+
     while (true) {
       // The sequence isn't completed, just ignore it.
       if (_queue.isEmpty) {
@@ -236,34 +248,60 @@ class EscapeParser {
 
       final char = _queue.consume();
 
-      if (char == Ascii.semicolon) {
-        if (hasParam) {
-          _csi.params.add(param);
+      if (char == Ascii.colon) {
+        if (!inSubParam) {
+          // First colon: current accumulated value is the primary param.
+          primaryParam = hasParam ? param : 0;
+          inSubParam = true;
+          _tempSubParams.clear();
+        } else {
+          // Subsequent colon: flush current value into sub-params.
+          _tempSubParams.add(hasParam ? param : 0);
         }
         param = 0;
+        hasParam = false;
+        continue;
+      }
+
+      if (char == Ascii.semicolon) {
+        _flushCsiParam(inSubParam, primaryParam, hasParam, param);
+        param = 0;
+        hasParam = false;
+        inSubParam = false;
+        primaryParam = 0;
         continue;
       }
 
       if (char >= Ascii.num0 && char <= Ascii.num9) {
         hasParam = true;
-        param *= 10;
-        param += char - Ascii.num0;
+        param = param * 10 + (char - Ascii.num0);
         continue;
       }
 
       if (char > Ascii.NULL && char < Ascii.num0) {
-        // intermediates.add(char);
+        // Intermediate byte (e.g. SP = 0x20 before 'q' in DECSCUSR).
+        _csi.intermediate = char;
         continue;
       }
 
       if (char >= Ascii.atSign && char <= Ascii.tilde) {
-        if (hasParam) {
-          _csi.params.add(param);
-        }
-
+        _flushCsiParam(inSubParam, primaryParam, hasParam, param);
         _csi.finalByte = char;
         return true;
       }
+    }
+  }
+
+  void _flushCsiParam(
+      bool inSubParam, int primaryParam, bool hasParam, int param) {
+    if (inSubParam) {
+      _tempSubParams.add(hasParam ? param : 0);
+      _csi.params.add(primaryParam);
+      _csi.paramSubs.add(List.of(_tempSubParams));
+      _tempSubParams.clear();
+    } else if (hasParam) {
+      _csi.params.add(param);
+      _csi.paramSubs.add(null);
     }
   }
 
@@ -278,6 +316,7 @@ class EscapeParser {
     'l'.codeUnitAt(0): _csiHandleMode,
     'm'.codeUnitAt(0): _csiHandleSgr,
     'n'.codeUnitAt(0): _csiHandleDeviceStatusReport,
+    'q'.codeUnitAt(0): _csiHandleDecscusr,
     'r'.codeUnitAt(0): _csiHandleSetMargins,
     't'.codeUnitAt(0): _csiWindowManipulation,
     'A'.codeUnitAt(0): _csiHandleCursorUp,
@@ -407,7 +446,7 @@ class EscapeParser {
   /// `ESC [ [ Ps ] m` Select Graphic Rendition (SGR)
   ///
   /// https://terminalguide.namepad.de/seq/csi_sm/
-  void _csiHandleSgr() => parseSgrParams(handler, _csi.params);
+  void _csiHandleSgr() => parseSgrParams(handler, _csi.params, _csi.paramSubs);
 
   /// `ESC [ Ps n` Device Status Report [Dispatch] (DSR)
   ///
@@ -421,6 +460,17 @@ class EscapeParser {
       case 6:
         return handler.sendCursorPosition();
     }
+  }
+
+  /// `ESC [ Ps SP q` Set Cursor Style (DECSCUSR)
+  ///
+  /// https://terminalguide.namepad.de/seq/csi_sp_sq/
+  void _csiHandleDecscusr() {
+    // Intermediate byte must be SP (0x20); bare `q` without SP is ignored.
+    if (_csi.intermediate != Ascii.space) return;
+
+    final ps = _csi.params.isEmpty ? 0 : _csi.params[0];
+    handler.setCursorShape(ps);
   }
 
   /// `ESC [ Ps ; Ps r` Set Top and Bottom Margins (DECSTBM)
@@ -889,6 +939,20 @@ class EscapeParser {
         case '2':
           handler.setTitle(pt);
           return true;
+        case '7':
+          // OSC 7: current working directory URI (file:///path)
+          handler.setWorkingDirectory(pt);
+          return true;
+        case '52':
+          // OSC 52: clipboard access
+          // _osc[1] = selection target (usually "c"), _osc[2] = base64 data or "?"
+          final data = _osc.length >= 3 ? _osc[2] : pt;
+          if (data == '?') {
+            handler.requestClipboard();
+          } else {
+            handler.setClipboard(data);
+          }
+          return true;
       }
     }
 
@@ -945,16 +1009,24 @@ class EscapeParser {
 class _Csi {
   _Csi({
     required this.params,
+    required this.paramSubs,
     required this.finalByte,
-    // required this.intermediates,
   });
 
   int? prefix;
 
   List<int> params;
 
+  /// Colon sub-parameters for each entry in [params]. `paramSubs[i]` is null
+  /// when no colon was used for `params[i]`, or a non-empty list of the colon-
+  /// separated values that followed the primary param value.
+  List<List<int>?> paramSubs;
+
+  /// Last intermediate byte seen before the final byte (e.g. SP = 0x20 in
+  /// DECSCUSR `CSI Ps SP q`). Null if no intermediate byte was present.
+  int? intermediate;
+
   int finalByte;
-  // final List<int> intermediates;
 
   @override
   String toString() {
