@@ -188,6 +188,23 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal.onResize = null;
     }
 
+    // Reset terminal state that the exiting process may have left dirty.
+    // On Windows especially, processes (Claude Code, etc.) sometimes exit
+    // without sending cleanup sequences, leaving the terminal in alt-buffer
+    // mode, with SGR underline set, or with mouse/cursor modes active.
+    if (terminal.isUsingAltBuffer) {
+      terminal.write('\x1b[?1049l'); // exit alt buffer + restore cursor
+    }
+    terminal.write(
+      '\x1b[m'       // reset all SGR attributes (underline, bold, etc.)
+      '\x1b[?25h'    // show cursor (in case it was hidden)
+      '\x1b[?1l'     // normal cursor keys (not application mode)
+      '\x1b[?1000l'  // disable mouse reporting
+      '\x1b[?1002l'
+      '\x1b[?1003l'
+      '\x1b[?1006l'  // disable SGR mouse encoding
+    );
+
     if (showExitMessage && exitCode != null && !ssh) {
       terminal.write('\r\n[Process exited with code $exitCode]\r\n');
     }

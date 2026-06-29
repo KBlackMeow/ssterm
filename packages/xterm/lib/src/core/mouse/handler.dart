@@ -22,12 +22,23 @@ class TerminalMouseEvent {
   /// The platform of the terminal.
   final TerminalTargetPlatform platform;
 
+  final bool shift;
+  final bool alt;
+  final bool ctrl;
+
+  /// True when this is a pointer-motion event rather than a button press/release.
+  final bool motion;
+
   TerminalMouseEvent({
     required this.button,
     required this.buttonState,
     required this.position,
     required this.state,
     required this.platform,
+    this.shift = false,
+    this.alt = false,
+    this.ctrl = false,
+    this.motion = false,
   });
 }
 
@@ -66,14 +77,18 @@ class ClickMouseHandler implements TerminalMouseHandler {
   String? call(TerminalMouseEvent event) {
     switch (event.state.mouseMode) {
       case MouseMode.clickOnly:
-        // Only clicks and only the first 3 buttons are reported.
-        if (event.buttonState == TerminalMouseButtonState.down &&
-            (event.button.id < 3)) {
+        // Only button presses, only buttons 0-2 (not wheels, not none).
+        if (!event.motion &&
+            event.buttonState == TerminalMouseButtonState.down &&
+            event.button.id < 3) {
           return MouseReporter.report(
             event.button,
             event.buttonState,
             event.position,
             event.state.mouseReportMode,
+            shift: event.shift,
+            alt: event.alt,
+            ctrl: event.ctrl,
           );
         }
         return null;
@@ -96,9 +111,8 @@ class UpDownMouseHandler implements TerminalMouseHandler {
       case MouseMode.clickOnly:
         return null;
       case MouseMode.upDownScroll:
-      case MouseMode.upDownScrollDrag:
-      case MouseMode.upDownScrollMove:
-        // Up events are never reported for mouse wheel buttons.
+        // Basic mouse tracking: button press/release only, no motion.
+        if (event.motion) return null;
         if (event.button.isWheel &&
             event.buttonState == TerminalMouseButtonState.up) {
           return null;
@@ -108,6 +122,44 @@ class UpDownMouseHandler implements TerminalMouseHandler {
           event.buttonState,
           event.position,
           event.state.mouseReportMode,
+          shift: event.shift,
+          alt: event.alt,
+          ctrl: event.ctrl,
+        );
+      case MouseMode.upDownScrollDrag:
+        // Button events + drag motion; hover (none button) not reported.
+        if (event.motion && event.button == TerminalMouseButton.none) {
+          return null;
+        }
+        if (event.button.isWheel &&
+            event.buttonState == TerminalMouseButtonState.up) {
+          return null;
+        }
+        return MouseReporter.report(
+          event.button,
+          event.buttonState,
+          event.position,
+          event.state.mouseReportMode,
+          shift: event.shift,
+          alt: event.alt,
+          ctrl: event.ctrl,
+          motion: event.motion,
+        );
+      case MouseMode.upDownScrollMove:
+        // All events including hover.
+        if (event.button.isWheel &&
+            event.buttonState == TerminalMouseButtonState.up) {
+          return null;
+        }
+        return MouseReporter.report(
+          event.button,
+          event.buttonState,
+          event.position,
+          event.state.mouseReportMode,
+          shift: event.shift,
+          alt: event.alt,
+          ctrl: event.ctrl,
+          motion: event.motion,
         );
     }
   }

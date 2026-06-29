@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/core.dart';
 
@@ -124,12 +125,19 @@ class _TerminalScrollGestureHandlerState
     final count = delta.abs();
     final position = widget.getCellOffset(lastPointerPosition);
 
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    final alt = HardwareKeyboard.instance.isAltPressed;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+
     var mouseHandled = false;
     for (var i = 0; i < count; i++) {
       if (widget.terminal.mouseInput(
         up ? TerminalMouseButton.wheelUp : TerminalMouseButton.wheelDown,
         TerminalMouseButtonState.down,
         position,
+        shift: shift,
+        alt: alt,
+        ctrl: ctrl,
       )) {
         mouseHandled = true;
       }
@@ -173,7 +181,13 @@ class _TerminalScrollGestureHandlerState
     if (lineHeight <= 0 || deltaPixels == 0) return;
 
     _scrollPixelOffset += deltaPixels;
-    final currentLineOffset = _scrollPixelOffset ~/ lineHeight;
+    // Use round() instead of ~/ (truncating division) so that a scroll delta
+    // smaller than one lineHeight still produces a non-zero line count.  On
+    // Windows the Flutter engine maps one mouse-wheel notch to ~20 logical
+    // pixels regardless of font size; with a 24 px line height `20 ~/ 24 = 0`
+    // silently drops every event.  round() fires at ≥ lineHeight/2, matching
+    // how Windows Terminal handles discrete wheel notches.
+    final currentLineOffset = (_scrollPixelOffset / lineHeight).round();
     final lineDelta = currentLineOffset - lastLineOffset;
     lastLineOffset = currentLineOffset;
 
@@ -208,7 +222,12 @@ class _TerminalScrollGestureHandlerState
     // Do not wrap in a Scrollable here: translating the terminal widget while
     // the buffer paint origin stays fixed misaligns rows so cell underlines
     // appear on the wrong glyphs (especially in short panes).
+    //
+    // HitTestBehavior.opaque ensures this Listener is always in the hit test
+    // path on all platforms (including Windows) so PointerScrollEvents are
+    // reliably captured regardless of what the child Scrollable does.
     return Listener(
+      behavior: HitTestBehavior.opaque,
       onPointerSignal: (event) {
         if (event is PointerScrollEvent) {
           lastPointerPosition = event.position;

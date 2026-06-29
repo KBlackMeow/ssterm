@@ -189,16 +189,19 @@ class TerminalViewState extends State<TerminalView> {
     _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
     _isAltBuffer = _wasInAltBuffer;
     widget.terminal.addListener(_onTerminalStateChange);
+    _focusNode.addListener(_onFocusChanged);
     super.initState();
   }
 
   @override
   void didUpdateWidget(TerminalView oldWidget) {
     if (oldWidget.focusNode != widget.focusNode) {
+      _focusNode.removeListener(_onFocusChanged);
       if (oldWidget.focusNode == null) {
         _focusNode.dispose();
       }
       _focusNode = widget.focusNode ?? FocusNode();
+      _focusNode.addListener(_onFocusChanged);
     }
     if (oldWidget.controller != widget.controller) {
       if (oldWidget.controller == null) {
@@ -224,6 +227,7 @@ class TerminalViewState extends State<TerminalView> {
 
   @override
   void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
     widget.terminal.removeListener(_onTerminalStateChange);
     if (widget.focusNode == null) {
       _focusNode.dispose();
@@ -552,6 +556,11 @@ class TerminalViewState extends State<TerminalView> {
       }
     }
     _wasInAltBuffer = isAlt;
+  }
+
+  void _onFocusChanged() {
+    if (!widget.terminal.reportFocusMode) return;
+    widget.terminal.onOutput?.call(_focusNode.hasFocus ? '\x1b[I' : '\x1b[O');
   }
 
   void _onEditableRect(Rect rect, Rect caretRect) {

@@ -5,21 +5,25 @@ enum TerminalMouseButton {
 
   right(id: 2),
 
-  wheelUp(id: 64 + 4, isWheel: true),
+  // Used for ?1003h hover motion events (no button pressed).
+  // Normal: chr(32 + 3 + 32) = 'C'  SGR: \e[<35;x;yM  (3 = release code, 32 = motion bit)
+  none(id: 3),
 
-  wheelDown(id: 64 + 5, isWheel: true),
+  // xterm ctlseqs: wheel up/down/left/right are button codes 64/65/66/67.
+  // SGR:    ESC [ < 64 ; col ; row M  (wheel up)
+  // Normal: ESC [ M ` col row         (96 = 32+64)
+  wheelUp(id: 64, isWheel: true),
 
-  wheelLeft(id: 64 + 6, isWheel: true),
+  wheelDown(id: 65, isWheel: true),
 
-  wheelRight(id: 64 + 7, isWheel: true),
+  wheelLeft(id: 66, isWheel: true),
+
+  wheelRight(id: 67, isWheel: true),
   ;
 
   /// The id that is used to report a button press or release to the terminal.
   ///
-  /// Mouse wheel up / down use button IDs 4 = 0100 (binary) and 5 = 0101 (binary).
-  /// The bits three and four of the button are transposed by 64 and 128
-  /// respectively, when reporting the id of the button and have have to be
-  /// adjusted correspondingly.
+  /// Wheel buttons use xterm button codes 64–67 (not X11 button numbers 4–7).
   final int id;
 
   /// Whether this button is a mouse wheel button.

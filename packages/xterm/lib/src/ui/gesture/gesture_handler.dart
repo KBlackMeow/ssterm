@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/src/core/buffer/cell_offset.dart';
 import 'package:xterm/src/core/mouse/button.dart';
 import 'package:xterm/src/core/mouse/button_state.dart';
+import 'package:xterm/src/core/mouse/mode.dart';
 import 'package:xterm/src/terminal_view.dart';
 import 'package:xterm/src/ui/controller.dart';
 import 'package:xterm/src/ui/gesture/gesture_detector.dart';
@@ -72,6 +74,9 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
 
   Timer? _autoScrollTimer;
 
+  /// The mouse button currently held down, for motion-event tracking.
+  TerminalMouseButton? _heldButton;
+
   @override
   void dispose() {
     _stopAutoScroll(clearDragState: true);
@@ -80,25 +85,89 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
 
   @override
   Widget build(BuildContext context) {
-    return TerminalGestureDetector(
-      child: widget.child,
-      onTapUp: widget.onTapUp,
-      onSingleTapUp: onSingleTapUp,
-      onTapDown: onTapDown,
-      onSecondaryTapDown: onSecondaryTapDown,
-      onSecondaryTapUp: onSecondaryTapUp,
-      onTertiaryTapDown: onSecondaryTapDown,
-      onTertiaryTapUp: onSecondaryTapUp,
-      onLongPressStart: onLongPressStart,
-      onLongPressMoveUpdate: onLongPressMoveUpdate,
-      // onLongPressUp: onLongPressUp,
-      onDragStart: onDragStart,
-      onDragUpdate: onDragUpdate,
-      onDragEnd: (_) => _stopAutoScroll(clearDragState: true),
-      onDragCancel: () => _stopAutoScroll(clearDragState: true),
-      onDoubleTapDown: onDoubleTapDown,
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
+      onPointerMove: _onPointerMove,
+      onPointerHover: _onPointerHover,
+      child: TerminalGestureDetector(
+        child: widget.child,
+        onTapUp: widget.onTapUp,
+        onSingleTapUp: onSingleTapUp,
+        onTapDown: onTapDown,
+        onSecondaryTapDown: onSecondaryTapDown,
+        onSecondaryTapUp: onSecondaryTapUp,
+        onTertiaryTapDown: onSecondaryTapDown,
+        onTertiaryTapUp: onSecondaryTapUp,
+        onLongPressStart: onLongPressStart,
+        onLongPressMoveUpdate: onLongPressMoveUpdate,
+        onDragStart: onDragStart,
+        onDragUpdate: onDragUpdate,
+        onDragEnd: (_) => _stopAutoScroll(clearDragState: true),
+        onDragCancel: () => _stopAutoScroll(clearDragState: true),
+        onDoubleTapDown: onDoubleTapDown,
+      ),
     );
   }
+
+  // ── raw pointer tracking for motion events ────────────────────────────────
+
+  void _onPointerDown(PointerDownEvent event) {
+    _heldButton = _deviceButtonToTerminal(event.buttons);
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _heldButton = null;
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _heldButton = null;
+  }
+
+  /// Fired while a button is held and the pointer moves (?1002h / ?1003h).
+  void _onPointerMove(PointerMoveEvent event) {
+    final mode = widget.terminalView.widget.terminal.mouseMode;
+    if (mode != MouseMode.upDownScrollDrag &&
+        mode != MouseMode.upDownScrollMove) {
+      return;
+    }
+    final btn = _heldButton;
+    if (btn == null) return;
+    renderTerminal.mouseEvent(
+      btn,
+      TerminalMouseButtonState.down,
+      renderTerminal.globalToLocal(event.position),
+      shift: HardwareKeyboard.instance.isShiftPressed,
+      alt: HardwareKeyboard.instance.isAltPressed,
+      ctrl: HardwareKeyboard.instance.isControlPressed,
+      motion: true,
+    );
+  }
+
+  /// Fired when the pointer moves without any button held (?1003h only).
+  void _onPointerHover(PointerHoverEvent event) {
+    if (widget.terminalView.widget.terminal.mouseMode !=
+        MouseMode.upDownScrollMove) {
+      return;
+    }
+    renderTerminal.mouseEvent(
+      TerminalMouseButton.none,
+      TerminalMouseButtonState.down,
+      renderTerminal.globalToLocal(event.position),
+      motion: true,
+    );
+  }
+
+  static TerminalMouseButton? _deviceButtonToTerminal(int buttons) {
+    if (buttons & kPrimaryButton != 0) return TerminalMouseButton.left;
+    if (buttons & kMiddleMouseButton != 0) return TerminalMouseButton.middle;
+    if (buttons & kSecondaryButton != 0) return TerminalMouseButton.right;
+    return null;
+  }
+
+  // ── tap / click helpers ───────────────────────────────────────────────────
 
   bool get _shouldSendTapEvent =>
       !widget.readOnly &&
@@ -110,16 +179,17 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
     TerminalMouseButton button, {
     bool forceCallback = false,
   }) {
-    // Check if the terminal should and can handle the tap down event.
     var handled = false;
     if (_shouldSendTapEvent) {
       handled = renderTerminal.mouseEvent(
         button,
         TerminalMouseButtonState.down,
         details.localPosition,
+        shift: HardwareKeyboard.instance.isShiftPressed,
+        alt: HardwareKeyboard.instance.isAltPressed,
+        ctrl: HardwareKeyboard.instance.isControlPressed,
       );
     }
-    // If the event was not handled by the terminal, use the supplied callback.
     if (!handled || forceCallback) {
       callback?.call(details);
     }
@@ -131,24 +201,23 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
     TerminalMouseButton button, {
     bool forceCallback = false,
   }) {
-    // Check if the terminal should and can handle the tap up event.
     var handled = false;
     if (_shouldSendTapEvent) {
       handled = renderTerminal.mouseEvent(
         button,
         TerminalMouseButtonState.up,
         details.localPosition,
+        shift: HardwareKeyboard.instance.isShiftPressed,
+        alt: HardwareKeyboard.instance.isAltPressed,
+        ctrl: HardwareKeyboard.instance.isControlPressed,
       );
     }
-    // If the event was not handled by the terminal, use the supplied callback.
     if (!handled || forceCallback) {
       callback?.call(details);
     }
   }
 
   void onTapDown(TapDownDetails details) {
-    // onTapDown is special, as it will always call the supplied callback.
-    // The TerminalView depends on it to bring the terminal into focus.
     _tapDown(
       widget.onTapDown,
       details,
@@ -193,7 +262,7 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
     );
   }
 
-  // void onLongPressUp() {}
+  // ── drag / selection ──────────────────────────────────────────────────────
 
   void onDragStart(DragStartDetails details) {
     _lastDragGlobalPosition = details.globalPosition;

@@ -8,23 +8,29 @@ abstract class MouseReporter {
     TerminalMouseButton button,
     TerminalMouseButtonState state,
     CellOffset position,
-    MouseReportMode reportMode,
-  ) {
-    // x and y offsets have to be incremented by 1 as the offset if 0-based,
-    // The position has to be reported using 1-based coordinates.
+    MouseReportMode reportMode, {
+    bool shift = false,
+    bool alt = false,
+    bool ctrl = false,
+    bool motion = false,
+  }) {
+    // 1-based coordinates.
     final x = position.x + 1;
     final y = position.y + 1;
+
+    // Modifier bits: shift=4, alt=8, ctrl=16, motion=32.
+    int mods = 0;
+    if (shift) mods |= 4;
+    if (alt) mods |= 8;
+    if (ctrl) mods |= 16;
+    if (motion) mods |= 32;
+
     switch (reportMode) {
       case MouseReportMode.normal:
       case MouseReportMode.utf:
         // Button ID 3 is used to signal a button release.
         final buttonID = state == TerminalMouseButtonState.up ? 3 : button.id;
-        // The button ID is reported as shifted by 32 to produce a printable
-        // character.
-        final btn = String.fromCharCode(32 + buttonID);
-        // Normal mode only supports a maximum position of 223, while utf
-        // supports positions up to 2015. Both modes send a null byte if the
-        // position exceeds that limit.
+        final btn = String.fromCharCode(32 + buttonID + mods);
         final col = (reportMode == MouseReportMode.normal && x > 223) ||
                 (reportMode == MouseReportMode.utf && x > 2015)
             ? '\x00'
@@ -32,16 +38,17 @@ abstract class MouseReporter {
         final row = (reportMode == MouseReportMode.normal && y > 223) ||
                 (reportMode == MouseReportMode.utf && y > 2015)
             ? '\x00'
-            : String.fromCharCode(32 + y + 1);
+            : String.fromCharCode(32 + y);
         return "\x1b[M$btn$col$row";
       case MouseReportMode.sgr:
-        final buttonID = button.id;
-        final upDown = state == TerminalMouseButtonState.down ? 'M' : 'm';
+        final buttonID = button.id + mods;
+        // Motion events always use 'M'; button release uses 'm'.
+        final upDown =
+            (motion || state == TerminalMouseButtonState.down) ? 'M' : 'm';
         return "\x1b[<$buttonID;$x;$y$upDown";
       case MouseReportMode.urxvt:
-        // The button ID uses the same id as to report it as in normal mode.
         final buttonID =
-            32 + (state == TerminalMouseButtonState.up ? 3 : button.id);
+            32 + (state == TerminalMouseButtonState.up ? 3 : button.id) + mods;
         return "\x1b[$buttonID;$x;${y}M";
     }
   }

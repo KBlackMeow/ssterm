@@ -383,10 +383,22 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   bool mouseEvent(
     TerminalMouseButton button,
     TerminalMouseButtonState buttonState,
-    Offset offset,
-  ) {
+    Offset offset, {
+    bool shift = false,
+    bool alt = false,
+    bool ctrl = false,
+    bool motion = false,
+  }) {
     final position = getCellOffset(offset);
-    return _terminal.mouseInput(button, buttonState, position);
+    return _terminal.mouseInput(
+      button,
+      buttonState,
+      position,
+      shift: shift,
+      alt: alt,
+      ctrl: ctrl,
+      motion: motion,
+    );
   }
 
   /// [localToGlobal] must not run during layout; defer to after the frame.
