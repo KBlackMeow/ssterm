@@ -307,10 +307,36 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.pipe = pipe;
     }
 
+    // After ^C, some apps (notably Claude Code's initial trust prompt) leave
+    // SGR state and footer rows behind on Windows/ConPTY. Give PowerShell time
+    // to draw its prompt, then clear everything below that prompt. Full-screen
+    // apps are protected by the alt-buffer check.
+    Timer? ctrlCCleanupTimer;
+
     _bindTerminalInput(
       terminal,
       tab,
-      forward: (d) => pty.write(utf8.encode(d)),
+      forward: (d) {
+        if (d.contains('\x03')) {
+          ctrlCCleanupTimer?.cancel();
+          ctrlCCleanupTimer = Timer(const Duration(milliseconds: 300), () {
+            ctrlCCleanupTimer = null;
+            if (!mounted) return;
+            final recoverWindowsMainBuffer =
+                Platform.isWindows && !terminal.isUsingAltBuffer;
+            terminal.write(
+              '\x1b[m\x1b[?25h'
+              '${recoverWindowsMainBuffer ? '\x1b[J' : ''}',
+            );
+            if (recoverWindowsMainBuffer) {
+              // SGR 0 only fixes future writes. Claude/Ink may already have
+              // repainted older PowerShell rows with its leaked underline.
+              terminal.clearBufferTextAttributes(CellAttr.underline);
+            }
+          });
+        }
+        pty.write(utf8.encode(d));
+      },
     );
 
     pty.exitCode.then((code) {

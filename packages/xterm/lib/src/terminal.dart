@@ -247,6 +247,25 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     notifyListeners();
   }
 
+  /// Removes [attributes] from cells already stored in the active buffer.
+  ///
+  /// SGR reset sequences only affect future writes. This is intended for host
+  /// recovery when a misbehaving application has repainted existing cells
+  /// with a leaked text attribute before exiting.
+  void clearBufferTextAttributes(int attributes) {
+    if (attributes == 0) return;
+    for (var row = 0; row < _buffer.lines.length; row++) {
+      final line = _buffer.lines[row];
+      for (var column = 0; column < line.length; column++) {
+        final current = line.getAttributes(column);
+        if (current & attributes != 0) {
+          line.setAttributes(column, current & ~attributes);
+        }
+      }
+    }
+    notifyListeners();
+  }
+
   /// Sends a key event to the underlying program.
   ///
   /// See also:

@@ -435,6 +435,13 @@ class Buffer {
     for (int i = 0; i < viewHeight; i++) {
       lines.push(_newEmptyLine());
     }
+    // A freshly activated alternate screen starts at the home position.
+    // Keeping the cursor from the previous alternate-screen session makes
+    // applications that only redraw changed regions (Claude Code on ConPTY,
+    // for example) render their next frame from the middle of the screen.
+    _cursorX = 0;
+    _cursorY = 0;
+    resetVerticalMargins();
     resetSavedCursor();
   }
 
