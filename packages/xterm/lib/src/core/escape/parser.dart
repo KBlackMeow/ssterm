@@ -847,6 +847,11 @@ class EscapeParser {
         } else {
           handler.useMainBuffer();
           handler.restoreCursor();
+          // On Windows, ConPTY may truncate the app's post-exit \x1b[m, leaving
+          // SGR attributes (underline, color) from the saved cursor state active
+          // in the main buffer. Reset style unconditionally so Ctrl+C and clean
+          // exits both leave a clean main buffer.
+          handler.resetCursorStyle();
         }
         return;
       case 2004:
