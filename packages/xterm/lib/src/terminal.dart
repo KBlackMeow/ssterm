@@ -130,13 +130,13 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// sequences that repeat the last character.
   var _precedingCodepoint = 0;
 
-  // DA (Device Attributes) response guards.
-  // Binary content accidentally containing ESC[c floods the shell stdin with
-  // responses that appear as "1;2c" text. Two defences:
-  //   1. _inBulkWrite: suppress DA while processing >1-char output chunks
-  //      (command output), because interactive apps query one-by-one.
-  //   2. Rate-limit to at most one response per 500 ms regardless.
-  bool _inBulkWrite = false;
+  // DA (Device Attributes) response guard. PTYs are byte streams and may
+  // deliver a capability query either one byte at a time or as one chunk.
+  // Never use chunk size to distinguish a real query from command output:
+  // macOS commonly batches ESC[>c, and suppressing that response makes apps
+  // such as Claude Code downgrade from their alternate-screen renderer.
+  // Rate limiting still prevents accidental query-like binary data from
+  // flooding shell stdin.
   int _lastDaSentMs = 0;
   static const _daThrottleMs = 500;
 
@@ -261,9 +261,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// updates the states of the terminal and emits events such as [onBell] or
   /// [onTitleChange] when the escape sequences in [data] request it.
   void write(String data) {
-    _inBulkWrite = data.length > 1;
     _parser.write(data);
-    _inBulkWrite = false;
     notifyListeners();
   }
 
@@ -618,7 +616,6 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   }
 
   bool _daAllowed() {
-    if (_inBulkWrite) return false;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastDaSentMs < _daThrottleMs) return false;
     _lastDaSentMs = now;

@@ -35,8 +35,8 @@ void main() {
             reason: 'char written in alt buffer must have no underline');
 
         terminal.write('\x1b[?1049l');
-        expect(terminal.cursor.isUnderline, isTrue,
-            reason: 'shell cursor attrs must be restored on exit');
+        expect(terminal.cursor.isUnderline, isFalse,
+            reason: 'alt-buffer exit must not leak underline into the shell');
       });
 
       test('mode 47 resets cursor style (classic vi)', () {
@@ -242,10 +242,7 @@ void main() {
       test('DA2 response contains version 95', () {
         final outputs = <String>[];
         final terminal = Terminal()..onOutput = outputs.add;
-        // Write one char at a time to bypass the bulk-write DA throttle guard.
-        for (final char in '\x1b[>c'.split('')) {
-          terminal.write(char);
-        }
+        terminal.write('\x1b[>c');
         expect(outputs.join(), contains(';95;'));
       });
 
