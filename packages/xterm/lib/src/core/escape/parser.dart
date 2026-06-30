@@ -446,7 +446,23 @@ class EscapeParser {
   /// `ESC [ [ Ps ] m` Select Graphic Rendition (SGR)
   ///
   /// https://terminalguide.namepad.de/seq/csi_sm/
-  void _csiHandleSgr() => parseSgrParams(handler, _csi.params, _csi.paramSubs);
+  void _csiHandleSgr() {
+    // SGR is `CSI Pm m`. Forms with a real private-marker prefix `< = > ?`
+    // (0x3C–0x3F) such as `CSI > Ps m` (XTMODKEYS / modifyOtherKeys, emitted by
+    // Claude Code and ConPTY) share the `m` final byte but are NOT SGR. Treating
+    // them as SGR mis-sets attributes — e.g. `\x1b[>4m` was parsed as `SGR 4`
+    // (underline on) and leaked underline into the shell prompt and everything
+    // after it. Note the parser also captures a leading `:`/`;` (0x3A/0x3B) as a
+    // "prefix" — those are (malformed) empty parameters, NOT private markers, so
+    // they must still be handled as SGR.
+    final prefix = _csi.prefix;
+    if (prefix != null &&
+        prefix >= Ascii.lessThan &&
+        prefix <= Ascii.questionMark) {
+      return;
+    }
+    parseSgrParams(handler, _csi.params, _csi.paramSubs);
+  }
 
   /// `ESC [ Ps n` Device Status Report [Dispatch] (DSR)
   ///
