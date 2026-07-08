@@ -54,9 +54,6 @@ class _TerminalScrollGestureHandlerState
   int _pendingLineDelta = 0;
   Timer? _flushTimer;
 
-  // Device pixel ratio: panDelta.dy is in physical px; divide to get logical px.
-  double _dpr = 1.0;
-
   var _lastPointerPosition = Offset.zero;
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
@@ -205,8 +202,6 @@ class _TerminalScrollGestureHandlerState
 
   @override
   Widget build(BuildContext context) {
-    _dpr = MediaQuery.of(context).devicePixelRatio;
-
     // Only intercept when in alt buffer AND the app has scroll reporting.
     // For none / clickOnly: let the Scrollable show main-buffer history.
     if (!_isAltBuffer || !_mouseMode.reportScroll) {
@@ -231,7 +226,7 @@ class _TerminalScrollGestureHandlerState
       },
       onPointerPanZoomUpdate: (event) {
         _lastPointerPosition = event.localPosition;
-        _handleTrackpad(-event.panDelta.dy / _dpr);
+        _handleTrackpad(-event.panDelta.dy);
       },
       child: widget.child,
     );

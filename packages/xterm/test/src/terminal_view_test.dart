@@ -421,6 +421,34 @@ void main() {
   });
 
   group('TerminalView.simulateScroll', () {
+    testWidgets('trackpad pan delta is already in logical pixels',
+        (tester) async {
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final terminalOutput = <String>[];
+      final terminal = Terminal(onOutput: terminalOutput.add)
+        ..write('\x1b[?1049h\x1b[?1000h\x1b[?1006h');
+
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          textStyle: const TerminalStyle(fontSize: 16, height: 1),
+        ),
+      ));
+
+      final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+      const position = Offset(100, 100);
+      await tester.sendEventToBinding(pointer.panZoomStart(position));
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(position, pan: const Offset(0, -20)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(terminalOutput, hasLength(1));
+      expect(terminalOutput.single, contains('\x1b[<65;'));
+    });
+
     testWidgets('works', (tester) async {
       final terminalOutput = <String>[];
       final terminal = Terminal(onOutput: terminalOutput.add);
