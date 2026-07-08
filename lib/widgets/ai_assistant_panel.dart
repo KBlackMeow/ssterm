@@ -9,6 +9,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import '../io/output_pipe.dart' show CommandResult;
 import '../models/agent_config.dart';
 import '../models/skill.dart';
+import '../services/command_feedback_formatter.dart';
 import '../services/command_safety.dart';
 import '../services/llm_service.dart';
 import '../services/file_write_service.dart';
@@ -29,6 +30,7 @@ part 'ai_assistant_panel_widgets.dart';
 part 'ai_assistant_panel_content.dart';
 part 'ai_assistant_panel_write_card.dart';
 part 'ai_assistant_panel_danger_card.dart';
+part 'ai_assistant_panel_tooling.dart';
 part 'ai_assistant_panel_loop.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
@@ -67,13 +69,7 @@ const _maxLoopIterations = 15;
 /// conversation past [_maxHistoryTurns].
 const _kPinnedHeadMessages = 2;
 
-/// Cap per-command output we feed back to the LLM.  Real-world commands like
-/// `tail -n 1000 /var/log/...` blow the context window otherwise.  We keep
-/// the head + tail and elide the middle so the model still sees both the
-/// command's banner and its final lines (which usually carry the verdict).
-const _kMaxFeedbackBytes = 8 * 1024;
-const _kFeedbackHeadBytes = 4 * 1024;
-const _kFeedbackTailBytes = 4 * 1024;
+const _commandFeedbackFormatter = CommandFeedbackFormatter();
 
 enum AiPanelMode { command, agent }
 
