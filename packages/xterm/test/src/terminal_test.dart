@@ -86,6 +86,27 @@ void main() {
     });
   });
 
+  group('Terminal.dirtyRows', () {
+    test('takeDirtyRows returns changed rows and clears them', () {
+      final terminal = Terminal();
+      terminal.resize(5, 3);
+
+      terminal.write('A');
+
+      expect(terminal.takeDirtyRows(), [0]);
+      expect(terminal.takeDirtyRows(), isEmpty);
+    });
+
+    test('takeDirtyRows conservatively tracks scrolled viewport rows', () {
+      final terminal = Terminal();
+      terminal.resize(5, 3);
+
+      terminal.write('1\r\n2\r\n3\r\n4');
+
+      expect(terminal.takeDirtyRows(), [0, 1, 2]);
+    });
+  });
+
   group('Terminal.mouseInput', () {
     test('applys to the main buffer', () {
       final terminal = Terminal(

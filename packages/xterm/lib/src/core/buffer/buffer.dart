@@ -128,6 +128,7 @@ class Buffer {
       line.resize(terminal.viewWidth);
     }
     line.setCell(_cursorX, codePoint, cellWidth, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
 
     if (_cursorX < viewWidth) {
       _cursorX++;
@@ -141,6 +142,7 @@ class Buffer {
           line.resize(terminal.viewWidth);
         }
         line.setCell(_cursorX, 0, 0, _cellStyleForMutation());
+        terminal.markDirtyRow(_cursorY);
         _cursorX++;
       }
     }
@@ -172,6 +174,7 @@ class Buffer {
       line.isWrapped = false;
       line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
+    terminal.markDirtyRows(_cursorY, viewHeight - 1);
   }
 
   /// Erases the viewport from the top-left corner to the cursor, including the
@@ -184,6 +187,7 @@ class Buffer {
       line.isWrapped = false;
       line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
+    terminal.markDirtyRows(0, _cursorY);
   }
 
   /// Erases the whole viewport.
@@ -193,6 +197,7 @@ class Buffer {
       line.isWrapped = false;
       line.eraseRange(0, viewWidth, _cellStyleForMutation());
     }
+    terminal.markDirtyRows(0, viewHeight - 1);
   }
 
   /// Erases the line from the cursor to the end of the line, including the
@@ -200,6 +205,7 @@ class Buffer {
   void eraseLineFromCursor() {
     currentLine.isWrapped = false;
     currentLine.eraseRange(_cursorX, viewWidth, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   /// Erases the line from the start of the line to the cursor, including the
@@ -207,18 +213,21 @@ class Buffer {
   void eraseLineToCursor() {
     currentLine.isWrapped = false;
     currentLine.eraseRange(0, _cursorX, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   /// Erases the line at the current cursor position.
   void eraseLine() {
     currentLine.isWrapped = false;
     currentLine.eraseRange(0, viewWidth, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   /// Erases [count] cells starting at the cursor position.
   void eraseChars(int count) {
     final start = _cursorX;
     currentLine.eraseRange(start, start + count, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   void scrollDown(int lines) {
@@ -233,6 +242,7 @@ class Buffer {
     for (var i = 0; i < lines; i++) {
       this.lines[absoluteMarginTop + i] = _newEmptyLine();
     }
+    terminal.markDirtyRows(_marginTop, _marginBottom);
   }
 
   void scrollUp(int lines) {
@@ -247,6 +257,7 @@ class Buffer {
     for (var i = 0; i < lines; i++) {
       this.lines[absoluteMarginBottom - i] = _newEmptyLine();
     }
+    terminal.markDirtyRows(_marginTop, _marginBottom);
   }
 
   /// https://vt100.net/docs/vt100-ug/chapter3.html#IND IND – Index
@@ -261,6 +272,7 @@ class Buffer {
       if (_cursorY == _marginBottom) {
         if (marginTop == 0 && !isAltBuffer) {
           lines.insert(absoluteMarginBottom + 1, _newEmptyLine());
+          terminal.markDirtyRows(0, viewHeight - 1);
         } else {
           scrollUp(1);
         }
@@ -277,6 +289,7 @@ class Buffer {
         scrollUp(1);
       } else {
         lines.push(_newEmptyLine());
+        terminal.markDirtyRows(0, viewHeight - 1);
       }
     } else {
       // there're still lines so we simply move cursor down.
@@ -426,6 +439,7 @@ class Buffer {
     count = min(count, viewWidth - start);
     if (count <= 0 || start >= currentLine.length) return;
     currentLine.removeCells(start, count, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   /// Remove all lines above the top of the viewport.
@@ -435,6 +449,7 @@ class Buffer {
     }
 
     lines.trimStart(scrollBack);
+    terminal.markDirtyRows(0, viewHeight - 1);
   }
 
   /// Clears the viewport and scrollback buffer. Then fill with empty lines.
@@ -451,10 +466,12 @@ class Buffer {
     _cursorY = 0;
     resetVerticalMargins();
     resetSavedCursor();
+    terminal.markDirtyRows(0, viewHeight - 1);
   }
 
   void insertBlankChars(int count) {
     currentLine.insertCells(_cursorX, count, _cellStyleForMutation());
+    terminal.markDirtyRow(_cursorY);
   }
 
   void insertLines(int count) {
@@ -482,6 +499,7 @@ class Buffer {
     for (var i = linesToMove; i < linesToInsert; i++) {
       lines[absoluteCursorY + i] = _newEmptyLine();
     }
+    terminal.markDirtyRows(_cursorY, _marginBottom);
   }
 
   /// Remove [count] lines starting at the current cursor position. Lines below
@@ -506,6 +524,7 @@ class Buffer {
     for (var i = 0; i < count; i++) {
       lines[absoluteMarginBottom - i] = _newEmptyLine();
     }
+    terminal.markDirtyRows(_cursorY, _marginBottom);
   }
 
   void resize(int oldWidth, int oldHeight, int newWidth, int newHeight) {

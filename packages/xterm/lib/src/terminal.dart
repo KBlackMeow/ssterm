@@ -252,6 +252,30 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// Lines of the active buffer.
   IndexAwareCircularBuffer<BufferLine> get lines => _buffer.lines;
 
+  final _dirtyRows = <int>{};
+
+  @override
+  void markDirtyRow(int row) {
+    if (row < 0 || row >= viewHeight) return;
+    _dirtyRows.add(row);
+  }
+
+  @override
+  void markDirtyRows(int start, int end) {
+    final first = start.clamp(0, viewHeight - 1);
+    final last = end.clamp(0, viewHeight - 1);
+    if (first > last) return;
+    for (var row = first; row <= last; row++) {
+      _dirtyRows.add(row);
+    }
+  }
+
+  List<int> takeDirtyRows() {
+    final rows = _dirtyRows.toList()..sort();
+    _dirtyRows.clear();
+    return rows;
+  }
+
   /// Whether the terminal performs reflow when the viewport size changes or
   /// simply truncates lines. true by default.
   @override

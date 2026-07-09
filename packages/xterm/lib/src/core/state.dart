@@ -43,4 +43,8 @@ abstract class TerminalState {
   bool get altBufferMouseScrollMode;
 
   bool get bracketedPasteMode;
+
+  void markDirtyRow(int row);
+
+  void markDirtyRows(int start, int end);
 }
