@@ -136,6 +136,28 @@ void main() {
       expect(terminal.buffer.lines[8].toString(), 'line9');
       expect(terminal.buffer.lines[9].toString(), 'line10');
     });
+
+    test('keeps moved lines attached', () {
+      final terminal = Terminal();
+      terminal.resize(10, 10);
+
+      for (var i = 1; i <= 10; i++) {
+        terminal.write('line$i');
+
+        if (i < 10) {
+          terminal.write('\r\n');
+        }
+      }
+
+      terminal.setMargins(3, 7);
+      terminal.setCursor(0, 5);
+
+      terminal.buffer.deleteLines(1);
+
+      for (var i = 0; i < terminal.buffer.lines.length; i++) {
+        expect(terminal.buffer.lines[i].attached, isTrue, reason: 'line $i');
+      }
+    });
   });
 
   group('Buffer.insertLines()', () {
@@ -228,6 +250,72 @@ void main() {
     expect(terminal.buffer.lines[7].toString(), '');
     expect(terminal.buffer.lines[8].toString(), 'line9');
     expect(terminal.buffer.lines[9].toString(), 'line10');
+  });
+
+  group('Buffer scroll region movement', () {
+    test('scrollUp keeps moved lines attached', () {
+      final terminal = Terminal();
+      terminal.resize(10, 5);
+
+      for (var i = 1; i <= 5; i++) {
+        terminal.write('line$i');
+
+        if (i < 5) {
+          terminal.write('\r\n');
+        }
+      }
+
+      terminal.buffer.scrollUp(1);
+
+      expect(terminal.buffer.lines[0].toString(), 'line2');
+      expect(terminal.buffer.lines[3].toString(), 'line5');
+      expect(terminal.buffer.lines[4].toString(), '');
+
+      for (var i = 0; i < terminal.buffer.lines.length; i++) {
+        expect(terminal.buffer.lines[i].attached, isTrue, reason: 'line $i');
+      }
+    });
+
+    test('scrollDown keeps moved lines attached', () {
+      final terminal = Terminal();
+      terminal.resize(10, 5);
+
+      for (var i = 1; i <= 5; i++) {
+        terminal.write('line$i');
+
+        if (i < 5) {
+          terminal.write('\r\n');
+        }
+      }
+
+      terminal.buffer.scrollDown(1);
+
+      expect(terminal.buffer.lines[0].toString(), '');
+      expect(terminal.buffer.lines[1].toString(), 'line1');
+      expect(terminal.buffer.lines[4].toString(), 'line4');
+
+      for (var i = 0; i < terminal.buffer.lines.length; i++) {
+        expect(terminal.buffer.lines[i].attached, isTrue, reason: 'line $i');
+      }
+    });
+
+    test('scrollUp followed by scrollback insert does not detach moved lines',
+        () {
+      final terminal = Terminal(maxLines: 30);
+      terminal.resize(10, 5);
+
+      for (var i = 0; i < 12; i++) {
+        terminal.write('line$i\r\n');
+      }
+
+      terminal.buffer.scrollUp(1);
+
+      expect(() => terminal.write('after\r\n'), returnsNormally);
+
+      for (var i = 0; i < terminal.buffer.lines.length; i++) {
+        expect(terminal.buffer.lines[i].attached, isTrue, reason: 'line $i');
+      }
+    });
   });
 
   group('Buffer.eraseDisplayFromCursor()', () {

@@ -238,6 +238,67 @@ void main() {
 
       expect(output, isEmpty);
     });
+
+    testWidgets('does not send drag motion by default', (tester) async {
+      final output = <String>[];
+
+      final terminal = Terminal(onOutput: output.add);
+
+      terminal.write('\x1b[?1002h\x1b[?1006h');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalView(terminal),
+          ),
+        ),
+      );
+
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+
+      await tester.sendEventToBinding(pointer.down(const Offset(1, 1)));
+      await tester.pump();
+      output.clear();
+
+      await tester.sendEventToBinding(pointer.move(const Offset(40, 1)));
+      await tester.pump();
+
+      expect(output, isEmpty);
+    });
+
+    testWidgets('sends drag motion when enabled', (tester) async {
+      final output = <String>[];
+
+      final terminal = Terminal(onOutput: output.add);
+
+      terminal.write('\x1b[?1002h\x1b[?1006h');
+
+      final terminalView = TerminalController(
+        pointerInputs: PointerInputs.all(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TerminalView(
+              terminal,
+              controller: terminalView,
+            ),
+          ),
+        ),
+      );
+
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+
+      await tester.sendEventToBinding(pointer.down(const Offset(1, 1)));
+      await tester.pump();
+      output.clear();
+
+      await tester.sendEventToBinding(pointer.move(const Offset(40, 1)));
+      await tester.pump();
+
+      expect(output.join(), contains('\x1b[<32;'));
+    });
   });
 
   group('TerminalView.autofocus', () {
@@ -429,6 +490,67 @@ void main() {
       final terminalOutput = <String>[];
       final terminal = Terminal(onOutput: terminalOutput.add)
         ..write('\x1b[?1049h\x1b[?1000h\x1b[?1006h');
+
+      final controller = TerminalController(
+        pointerInputs: PointerInputs.all(),
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          controller: controller,
+          textStyle: const TerminalStyle(fontSize: 16, height: 1),
+        ),
+      ));
+
+      final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+      const position = Offset(100, 100);
+      await tester.sendEventToBinding(pointer.panZoomStart(position));
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(position, pan: const Offset(0, -20)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(terminalOutput, hasLength(1));
+      expect(terminalOutput.single, contains('\x1b[<65;'));
+    });
+
+    testWidgets('sends basic mouse wheel reporting by default',
+        (tester) async {
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final terminalOutput = <String>[];
+      final terminal = Terminal(onOutput: terminalOutput.add)
+        ..write('\x1b[?1049h\x1b[?1000h\x1b[?1006h');
+
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          textStyle: const TerminalStyle(fontSize: 16, height: 1),
+        ),
+      ));
+
+      final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+      const position = Offset(100, 100);
+      await tester.sendEventToBinding(pointer.panZoomStart(position));
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(position, pan: const Offset(0, -20)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(terminalOutput, hasLength(1));
+      expect(terminalOutput.single, contains('\x1b[<65;'));
+    });
+
+    testWidgets('sends mouse wheel in drag mouse mode by default',
+        (tester) async {
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final terminalOutput = <String>[];
+      final terminal = Terminal(onOutput: terminalOutput.add)
+        ..write('\x1b[?1049h\x1b[?1002h\x1b[?1006h');
 
       await tester.pumpWidget(MaterialApp(
         home: TerminalView(

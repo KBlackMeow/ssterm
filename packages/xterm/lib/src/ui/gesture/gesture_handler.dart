@@ -133,6 +133,9 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
         mode != MouseMode.upDownScrollMove) {
       return;
     }
+    if (!widget.terminalController.shouldSendPointerInput(PointerInput.drag)) {
+      return;
+    }
     final btn = _heldButton;
     if (btn == null) return;
     renderTerminal.mouseEvent(
@@ -150,6 +153,9 @@ class _TerminalGestureHandlerState extends State<TerminalGestureHandler> {
   void _onPointerHover(PointerHoverEvent event) {
     if (widget.terminalView.widget.terminal.mouseMode !=
         MouseMode.upDownScrollMove) {
+      return;
+    }
+    if (!widget.terminalController.shouldSendPointerInput(PointerInput.move)) {
       return;
     }
     renderTerminal.mouseEvent(
