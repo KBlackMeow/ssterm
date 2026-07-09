@@ -4,7 +4,7 @@ class TerminalCompat {
     this.altDecScRcPositionOnly = true,
     this.altStripUnderlineOnWrite = true,
     this.altScrollDebounceMs = 8,
-    this.ambiguousCharsAreWide = false,
+    this.ambiguousCharsAreWide = true,
   });
 
   /// vim-friendly defaults: position-only DECSC/DECRC in the alt buffer, strip
@@ -33,8 +33,8 @@ class TerminalCompat {
 
   /// Treat Unicode East Asian Ambiguous-width characters as fullwidth.
   ///
-  /// Some CJK fonts render symbols such as ℃, ①, and box-drawing characters
-  /// as fullwidth. Enable this only when the active font actually draws those
-  /// glyphs wide; otherwise it creates a narrow glyph followed by a blank cell.
+  /// CJK fallback fonts commonly render symbols such as ℃, ①, and box-drawing
+  /// characters as fullwidth. Enabling this keeps glyphs, cursor movement, and
+  /// following cells aligned in CJK-oriented terminals.
   final bool ambiguousCharsAreWide;
 }
