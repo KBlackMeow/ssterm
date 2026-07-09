@@ -43,6 +43,23 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     reflowEnabled: reflowEnabled,
   );
 
+  void _syncPaneAfterShown(_Tab tab, {required int pane}) {
+    if (pane == 1) {
+      tab.splitViewKey.currentState?.syncAfterShown();
+      tab.splitPipe?.releaseHeldOutput();
+      return;
+    }
+    tab.terminalViewKey.currentState?.syncAfterShown();
+    tab.pipe?.releaseHeldOutput();
+  }
+
+  void _scheduleSyncPaneAfterShown(_Tab tab, {required int pane}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncPaneAfterShown(tab, pane: pane);
+    });
+  }
+
   Map<String, String> _environmentForLocalShell(LocalShellOption shell) {
     if (shell.isWsl) {
       return buildWslEnvironment(
@@ -196,13 +213,13 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal.write('\x1b[?1049l'); // exit alt buffer + restore cursor
     }
     terminal.write(
-      '\x1b[m'       // reset all SGR attributes (underline, bold, etc.)
-      '\x1b[?25h'    // show cursor (in case it was hidden)
-      '\x1b[?1l'     // normal cursor keys (not application mode)
-      '\x1b[?1000l'  // disable mouse reporting
+      '\x1b[m' // reset all SGR attributes (underline, bold, etc.)
+      '\x1b[?25h' // show cursor (in case it was hidden)
+      '\x1b[?1l' // normal cursor keys (not application mode)
+      '\x1b[?1000l' // disable mouse reporting
       '\x1b[?1002l'
       '\x1b[?1003l'
-      '\x1b[?1006l'  // disable SGR mouse encoding
+      '\x1b[?1006l', // disable SGR mouse encoding
     );
 
     if (showExitMessage && exitCode != null && !ssh) {
@@ -254,6 +271,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           rows: rows,
           environment: env,
           workingDirectory: workingDirectory ?? home,
+          ackRead: true,
         );
       } else {
         pty = await Pty.start(
@@ -263,13 +281,12 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           rows: rows,
           environment: env,
           workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
+          ackRead: true,
         );
       }
     } catch (e) {
       if (!mounted) return;
-      terminal.write(
-        '\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt',
-      );
+      terminal.write('\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt');
       _setPaneSessionEnded(tab, pane, true);
       return;
     }
@@ -288,6 +305,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final cwdParser = RemoteCwdParser();
     final pipe = OutputPipe(
       terminal,
+      holdOutputUntilRelease: true,
+      onBytesAccepted: (_) => pty.ackRead(),
       transform: (bytes) {
         final parsed = cwdParser.process(bytes);
         if (parsed.cwd != null &&
@@ -306,6 +325,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.pipe?.dispose();
       tab.pipe = pipe;
     }
+    _scheduleSyncPaneAfterShown(tab, pane: pane);
 
     // After ^C, some apps (notably Claude Code's initial trust prompt) leave
     // SGR state and footer rows behind on Windows/ConPTY. Give PowerShell time
@@ -368,16 +388,18 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       if (activePty == null && !_paneSessionEnded(tab, pane)) {
         // Use unawaited since onResize is a synchronous void callback.
         // _spawnLocalPty handles its own errors via internal try/catch.
-        unawaited(_spawnLocalPty(
-          tab: tab,
-          terminal: terminal,
-          shell: shell,
-          columns: w,
-          rows: h,
-          workingDirectory: workingDirectory,
-          pane: pane,
-          showExitMessage: showExitMessage,
-        ));
+        unawaited(
+          _spawnLocalPty(
+            tab: tab,
+            terminal: terminal,
+            shell: shell,
+            columns: w,
+            rows: h,
+            workingDirectory: workingDirectory,
+            pane: pane,
+            showExitMessage: showExitMessage,
+          ),
+        );
       } else if (activePty != null) {
         activePty.resize(h, w);
       }
@@ -473,6 +495,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final cwdParser = RemoteCwdParser();
       final pipe = OutputPipe(
         terminal,
+        holdOutputUntilRelease: true,
         transform: _sshOutputTransform(tab, pane, cwdParser),
       );
 
@@ -497,8 +520,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab.pipe?.dispose();
         tab.pipe = pipe;
       }
+      _scheduleSyncPaneAfterShown(tab, pane: pane);
 
-      session.done.then((_) => _handleSshSessionDone(tab, terminal, profile: tab.sshProfile));
+      session.done.then(
+        (_) => _handleSshSessionDone(tab, terminal, profile: tab.sshProfile),
+      );
     } catch (e) {
       if (!mounted) return;
       // Transport died (VPN switch, etc.) but [sshClient] was still set —
@@ -533,7 +559,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     if (paneIndex == 1) {
       setState(() => tab.clearSplit());
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        tab.terminalViewKey.currentState?.syncAfterShown();
+        if (!mounted) return;
+        _syncPaneAfterShown(tab, pane: 0);
       });
       return;
     }
@@ -552,7 +579,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         forward: (d) => tab.pty!.write(utf8.encode(d)),
       );
       terminal.onResize = (w, h, pw, ph) {
-        if (w >= 1 && h >= 1) tab.pty!.resize(h, w);
+        if (w >= 1 && h >= 1) {
+          tab.pty!.resize(h, w);
+        }
       };
     } else if (tab.sshSession != null) {
       _bindTerminalInput(
@@ -565,7 +594,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      tab.terminalViewKey.currentState?.syncAfterShown();
+      if (!mounted) return;
+      _syncPaneAfterShown(tab, pane: 0);
     });
   }
 

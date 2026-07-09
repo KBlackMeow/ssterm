@@ -114,6 +114,148 @@ void main() {
       });
     });
 
+    test('decodes UTF-8 characters split across flush boundaries', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        // U+4F60 "你" split before the final byte.
+        ctrl.add([0xE4, 0xBD]);
+        fake.elapse(const Duration(milliseconds: 20));
+        expect(terminal.buffer.lines[0].getText().trim(), isEmpty);
+
+        ctrl.add([0xA0]);
+        fake.elapse(const Duration(milliseconds: 20));
+
+        expect(terminal.buffer.lines[0].getText(), contains('你'));
+        expect(terminal.buffer.lines[0].getText(), isNot(contains('�')));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
+    test(
+      'pauses streams above high watermark and resumes below low watermark',
+      () {
+        fakeAsync((fake) {
+          final terminal = Terminal();
+          var pauseCount = 0;
+          var resumeCount = 0;
+          final ctrl = StreamController<List<int>>(
+            onPause: () => pauseCount++,
+            onResume: () => resumeCount++,
+          );
+          final pipe = OutputPipe(
+            terminal,
+            maxBytesPerWrite: 8,
+            queueHighWatermarkBytes: 10,
+            queueLowWatermarkBytes: 4,
+          );
+          pipe.bind(ctrl.stream);
+
+          ctrl.add(List.filled(12, 65));
+          fake.flushMicrotasks();
+
+          expect(pauseCount, equals(1));
+          expect(resumeCount, equals(0));
+
+          fake.elapse(const Duration(milliseconds: 20));
+
+          expect(resumeCount, equals(1));
+          expect(terminal.buffer.lines[0].getText(), contains('AAAAAAAA'));
+
+          pipe.dispose();
+          ctrl.close();
+        });
+      },
+    );
+
+    test(
+      'holds initial output until release and accepts bytes after release',
+      () {
+        fakeAsync((fake) {
+          final terminal = Terminal();
+          var accepted = 0;
+          final pipe = OutputPipe(
+            terminal,
+            holdOutputUntilRelease: true,
+            onBytesAccepted: (count) => accepted += count,
+          );
+          final ctrl = StreamController<List<int>>();
+          pipe.bind(ctrl.stream);
+
+          ctrl.add([72, 101, 108, 108, 111]); // "Hello"
+          fake.elapse(const Duration(milliseconds: 40));
+
+          expect(terminal.buffer.lines[0].getText().trim(), isEmpty);
+          expect(accepted, equals(0));
+
+          pipe.releaseHeldOutput();
+          fake.flushMicrotasks();
+          expect(accepted, equals(5));
+
+          fake.elapse(const Duration(milliseconds: 20));
+
+          expect(terminal.buffer.lines[0].getText(), contains('Hello'));
+
+          pipe.dispose();
+          ctrl.close();
+        });
+      },
+    );
+
+    test('delays accepting bytes while high-water paused', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final accepted = <int>[];
+        final pipe = OutputPipe(
+          terminal,
+          maxBytesPerWrite: 8,
+          queueHighWatermarkBytes: 10,
+          queueLowWatermarkBytes: 4,
+          onBytesAccepted: accepted.add,
+        );
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add(List.filled(12, 65));
+        fake.flushMicrotasks();
+
+        expect(accepted, isEmpty);
+
+        fake.elapse(const Duration(milliseconds: 20));
+
+        expect(accepted, equals([12]));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
+    test('flushSync drains pending output immediately', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add([78, 111, 119]); // "Now"
+        fake.flushMicrotasks();
+
+        expect(terminal.buffer.lines[0].getText().trim(), isEmpty);
+
+        pipe.flushSync();
+
+        expect(terminal.buffer.lines[0].getText(), contains('Now'));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
     test('dispose cancels pending flush — no write after dispose', () {
       fakeAsync((fake) {
         final terminal = Terminal();
@@ -150,9 +292,7 @@ void main() {
         0x1B, 0x5B, 0x30, 0x6D, // ESC[0m
       ];
       // ESC ] 133 ; D ; 7 BEL → output end, exit code 7
-      const dEnd = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x37, 0x07,
-      ];
+      const dEnd = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x37, 0x07];
 
       final pending = pipe.awaitNextCommand(
         timeout: const Duration(seconds: 2),
@@ -180,9 +320,7 @@ void main() {
       pipe.bind(ctrl.stream);
 
       const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
-      const dEnd = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07,
-      ];
+      const dEnd = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07];
       // 300 KB of 'A' bytes — exceeds the 256 KB cap.
       final huge = Uint8List(300 * 1024)..fillRange(0, 300 * 1024, 0x41);
 
@@ -202,8 +340,11 @@ void main() {
       final result = await pending;
       expect(result, isNotNull);
       expect(result!.exitCode, 0);
-      expect(result.truncated, isTrue,
-          reason: 'should flag truncation when shell output exceeds cap');
+      expect(
+        result.truncated,
+        isTrue,
+        reason: 'should flag truncation when shell output exceeds cap',
+      );
       // Captured output should be ≤ cap and consist of 'A's only.
       expect(result.output.length, lessThanOrEqualTo(256 * 1024));
 
@@ -211,135 +352,162 @@ void main() {
       await ctrl.close();
     });
 
-    test('abandoned capture (timeout) drops the late D — next awaiter sees the right command', () async {
-      final terminal = Terminal();
-      final pipe = OutputPipe(terminal);
-      final ctrl = StreamController<List<int>>();
-      pipe.bind(ctrl.stream);
+    test(
+      'abandoned capture (timeout) drops the late D — next awaiter sees the right command',
+      () async {
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
 
-      const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
-      const dEnd1 = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x37, 0x07, // exit=7
-      ];
-      const dEnd0 = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07, // exit=0
-      ];
-      const body1 = [0x6F, 0x6C, 0x64]; // "old"
-      const body2 = [0x6E, 0x65, 0x77]; // "new"
+        const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
+        const dEnd1 = [
+          0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x37, 0x07, // exit=7
+        ];
+        const dEnd0 = [
+          0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07, // exit=0
+        ];
+        const body1 = [0x6F, 0x6C, 0x64]; // "old"
+        const body2 = [0x6E, 0x65, 0x77]; // "new"
 
-      // Round 1: caller times out FAST.  The shell never finished, so we
-      // open the C and stop there before sending D.
-      final pending1 = pipe.awaitNextCommand(
-        timeout: const Duration(milliseconds: 50),
-      );
-      ctrl.add(cStart);
-      ctrl.add(body1);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      // No D yet — let the timeout fire.
-      final result1 = await pending1;
-      expect(result1, isNull, reason: 'first call should time out');
+        // Round 1: caller times out FAST.  The shell never finished, so we
+        // open the C and stop there before sending D.
+        final pending1 = pipe.awaitNextCommand(
+          timeout: const Duration(milliseconds: 50),
+        );
+        ctrl.add(cStart);
+        ctrl.add(body1);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        // No D yet — let the timeout fire.
+        final result1 = await pending1;
+        expect(result1, isNull, reason: 'first call should time out');
 
-      // Now the SHELL eventually finishes the abandoned command and emits
-      // its D (with the wrong exit code from the agent's perspective).
-      ctrl.add(dEnd1);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+        // Now the SHELL eventually finishes the abandoned command and emits
+        // its D (with the wrong exit code from the agent's perspective).
+        ctrl.add(dEnd1);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      // Round 2: a fresh awaiter for a NEW command.  The bytes for the
-      // previous (abandoned) command must NOT bleed into this result.
-      final pending2 = pipe.awaitNextCommand(
-        timeout: const Duration(seconds: 2),
-      );
-      ctrl.add(cStart);
-      ctrl.add(body2);
-      ctrl.add(dEnd0);
+        // Round 2: a fresh awaiter for a NEW command.  The bytes for the
+        // previous (abandoned) command must NOT bleed into this result.
+        final pending2 = pipe.awaitNextCommand(
+          timeout: const Duration(seconds: 2),
+        );
+        ctrl.add(cStart);
+        ctrl.add(body2);
+        ctrl.add(dEnd0);
 
-      final result2 = await pending2;
-      expect(result2, isNotNull);
-      expect(result2!.exitCode, 0,
-          reason: 'must reflect the NEW command, not the abandoned one');
-      expect(result2.output, equals('new'),
-          reason: 'must contain only the new command\'s bytes');
+        final result2 = await pending2;
+        expect(result2, isNotNull);
+        expect(
+          result2!.exitCode,
+          0,
+          reason: 'must reflect the NEW command, not the abandoned one',
+        );
+        expect(
+          result2.output,
+          equals('new'),
+          reason: 'must contain only the new command\'s bytes',
+        );
 
-      pipe.dispose();
-      await ctrl.close();
-    });
+        pipe.dispose();
+        await ctrl.close();
+      },
+    );
 
-    test('startup D without C is silently dropped — first awaiter still gets the real C/D pair', () async {
-      // Reproduces the misalignment bug: zsh/bash run their `precmd` hook
-      // once before the first prompt, so OutputPipe sees a stray
-      // `OSC 133;D;0` *before* any real command.  If we emitted a phantom
-      // CommandResult for it, every subsequent agent command would receive
-      // the *previous* command's D — output and exit codes would all shift
-      // by one.
-      final terminal = Terminal();
-      final pipe = OutputPipe(terminal);
-      final ctrl = StreamController<List<int>>();
-      pipe.bind(ctrl.stream);
+    test(
+      'startup D without C is silently dropped — first awaiter still gets the real C/D pair',
+      () async {
+        // Reproduces the misalignment bug: zsh/bash run their `precmd` hook
+        // once before the first prompt, so OutputPipe sees a stray
+        // `OSC 133;D;0` *before* any real command.  If we emitted a phantom
+        // CommandResult for it, every subsequent agent command would receive
+        // the *previous* command's D — output and exit codes would all shift
+        // by one.
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
 
-      const startupD = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07, // exit=0
-      ];
-      const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
-      const body = [0x6F, 0x6B]; // "ok"
-      const dEnd = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x35, 0x07, // exit=5
-      ];
+        const startupD = [
+          0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07, // exit=0
+        ];
+        const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
+        const body = [0x6F, 0x6B]; // "ok"
+        const dEnd = [
+          0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x35, 0x07, // exit=5
+        ];
 
-      // Phase 1: shell starts up, emits the startup D before anyone listens.
-      ctrl.add(startupD);
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      // The pipe should have learned the shell speaks OSC 133, but NOT
-      // produced any CommandResult.
-      expect(pipe.hasOsc133, isTrue);
+        // Phase 1: shell starts up, emits the startup D before anyone listens.
+        ctrl.add(startupD);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        // The pipe should have learned the shell speaks OSC 133, but NOT
+        // produced any CommandResult.
+        expect(pipe.hasOsc133, isTrue);
 
-      // Phase 2: the first agent command registers its awaiter, then the
-      // shell does a real C/body/D round-trip.  The awaiter MUST receive
-      // exit=5 (the real command) — not exit=0 (the startup D).
-      final pending = pipe.awaitNextCommand(
-        timeout: const Duration(seconds: 2),
-      );
-      ctrl.add([...cStart, ...body, ...dEnd]);
+        // Phase 2: the first agent command registers its awaiter, then the
+        // shell does a real C/body/D round-trip.  The awaiter MUST receive
+        // exit=5 (the real command) — not exit=0 (the startup D).
+        final pending = pipe.awaitNextCommand(
+          timeout: const Duration(seconds: 2),
+        );
+        ctrl.add([...cStart, ...body, ...dEnd]);
 
-      final result = await pending;
-      expect(result, isNotNull);
-      expect(result!.exitCode, 5,
-          reason: 'must reflect the real command, not the startup D');
-      expect(result.output, equals('ok'));
+        final result = await pending;
+        expect(result, isNotNull);
+        expect(
+          result!.exitCode,
+          5,
+          reason: 'must reflect the real command, not the startup D',
+        );
+        expect(result.output, equals('ok'));
 
-      pipe.dispose();
-      await ctrl.close();
-    });
+        pipe.dispose();
+        await ctrl.close();
+      },
+    );
 
-    test('OSC 133 capture survives chunk boundaries inside the marker', () async {
-      final terminal = Terminal();
-      final pipe = OutputPipe(terminal);
-      final ctrl = StreamController<List<int>>();
-      pipe.bind(ctrl.stream);
+    test(
+      'OSC 133 capture survives chunk boundaries inside the marker',
+      () async {
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
 
-      const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
-      const body = [0x6F, 0x6B, 0x0A]; // "ok\n"
-      const dEnd = [
-        0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x44, 0x3B, 0x30, 0x07,
-      ];
+        const cStart = [0x1B, 0x5D, 0x31, 0x33, 0x33, 0x3B, 0x43, 0x07];
+        const body = [0x6F, 0x6B, 0x0A]; // "ok\n"
+        const dEnd = [
+          0x1B,
+          0x5D,
+          0x31,
+          0x33,
+          0x33,
+          0x3B,
+          0x44,
+          0x3B,
+          0x30,
+          0x07,
+        ];
 
-      final pending = pipe.awaitNextCommand(
-        timeout: const Duration(seconds: 2),
-      );
+        final pending = pipe.awaitNextCommand(
+          timeout: const Duration(seconds: 2),
+        );
 
-      // Send the C marker straddling a flush boundary: first chunk has the
-      // first 4 bytes, second chunk has the rest plus the body and D.
-      ctrl.add(cStart.sublist(0, 4));
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      ctrl.add([...cStart.sublist(4), ...body, ...dEnd]);
+        // Send the C marker straddling a flush boundary: first chunk has the
+        // first 4 bytes, second chunk has the rest plus the body and D.
+        ctrl.add(cStart.sublist(0, 4));
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        ctrl.add([...cStart.sublist(4), ...body, ...dEnd]);
 
-      final result = await pending;
-      expect(result, isNotNull);
-      expect(result!.exitCode, 0);
-      expect(result.output, equals('ok'));
+        final result = await pending;
+        expect(result, isNotNull);
+        expect(result!.exitCode, 0);
+        expect(result.output, equals('ok'));
 
-      pipe.dispose();
-      await ctrl.close();
-    });
+        pipe.dispose();
+        await ctrl.close();
+      },
+    );
 
     test('bind multiple streams — all chunks reach terminal', () {
       fakeAsync((fake) {

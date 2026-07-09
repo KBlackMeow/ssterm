@@ -199,7 +199,8 @@ class TerminalViewState extends State<TerminalView> {
     _wasInAltBuffer = widget.terminal.isUsingAltBuffer;
     _isAltBuffer = _wasInAltBuffer;
     _mouseMode = widget.terminal.mouseMode;
-    _decscusrCursorType = _cursorTypeFromDecscusr(widget.terminal.decscusrShape);
+    _decscusrCursorType =
+        _cursorTypeFromDecscusr(widget.terminal.decscusrShape);
     widget.terminal.addListener(_onTerminalStateChange);
     _focusNode.addListener(_onFocusChanged);
     super.initState();
@@ -262,14 +263,14 @@ class TerminalViewState extends State<TerminalView> {
     Widget child = Scrollable(
       key: _scrollableKey,
       controller: _scrollController,
-      // Lock the Scrollable when TerminalScrollGestureHandler is active
-      // (alt buffer + app has scroll mouse reporting). In that case the
-      // Listener intercepts all scroll events and forwards them to the PTY.
-      // Otherwise (no alt buffer, or no mouse reporting) allow ClampingScrollPhysics
-      // so the user can see main-buffer session history by scrolling.
-      physics: (_isAltBuffer && _mouseMode.reportScroll)
-          ? const NeverScrollableScrollPhysics()
-          : const ClampingScrollPhysics(),
+      // Lock the Scrollable when TerminalScrollGestureHandler is active in
+      // the alternate buffer. It forwards scroll to the PTY either as mouse
+      // wheel reports or simulated arrow keys. In the main buffer, scrolling
+      // still shows session history.
+      physics:
+          (_isAltBuffer && (_mouseMode.reportScroll || widget.simulateScroll))
+              ? const NeverScrollableScrollPhysics()
+              : const ClampingScrollPhysics(),
       viewportBuilder: (context, offset) {
         return _TerminalView(
           key: _viewportKey,

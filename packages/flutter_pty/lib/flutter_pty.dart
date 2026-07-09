@@ -151,9 +151,9 @@ class Pty {
     required Pointer<PtyHandle> handle,
     required ReceivePort stdoutPort,
     required ReceivePort exitPort,
-  }) : _handle = handle,
-       _stdoutPort = stdoutPort,
-       _exitPort = exitPort {
+  })  : _handle = handle,
+        _stdoutPort = stdoutPort,
+        _exitPort = exitPort {
     _exitSubscription = _exitPort.listen(_onExitCode);
   }
 
@@ -206,9 +206,8 @@ class Pty {
       }
     }
 
-    final envPairs = effectiveEnv.entries
-        .map((e) => '${e.key}=${e.value}')
-        .toList();
+    final envPairs =
+        effectiveEnv.entries.map((e) => '${e.key}=${e.value}').toList();
 
     // Create ReceivePorts on the MAIN isolate so their nativePort IDs are
     // known before we launch the background isolate.  The C read_loop thread
@@ -233,8 +232,7 @@ class Pty {
             rows: rows,
             columns: columns,
             ackRead: ackRead,
-          ))
-          .timeout(const Duration(seconds: 30));
+          )).timeout(const Duration(seconds: 30));
 
       if (handleAddr == -1) {
         final err = _getPtyError();
@@ -254,7 +252,7 @@ class Pty {
     } on TimeoutException {
       stdoutPort.close();
       exitPort.close();
-      throw PtyStartException(
+      throw const PtyStartException(
         'Terminal creation timed out after 30 seconds. '
         'The shell process (e.g., WSL) may be hung.',
       );

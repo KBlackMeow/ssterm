@@ -156,6 +156,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final pipe = OutputPipe(
       terminal,
       logSink: logger,
+      holdOutputUntilRelease: true,
       transform: _sshOutputTransform(tab, 0, cwdParser),
     );
 
@@ -321,6 +322,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final cwdParser = RemoteCwdParser();
     final pipe = OutputPipe(
       splitTerminal,
+      holdOutputUntilRelease: true,
       transform: _sshOutputTransform(tab, 1, cwdParser),
     );
 
@@ -344,7 +346,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      tab.splitViewKey.currentState?.syncAfterShown();
+      if (!mounted) return;
+      _syncPaneAfterShown(tab, pane: 1);
     });
   }
 
@@ -369,7 +372,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      tab.splitViewKey.currentState?.syncAfterShown();
+      if (!mounted) return;
+      _syncPaneAfterShown(tab, pane: 1);
     });
   }
 
@@ -448,6 +452,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       final pipe = OutputPipe(
         tab.terminal!,
         logSink: logger,
+        holdOutputUntilRelease: true,
         transform: _sshOutputTransform(tab, 0, cwdParser),
       );
 
@@ -468,6 +473,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
       tab.pipe?.dispose();
       tab.pipe = pipe;
+      _scheduleSyncPaneAfterShown(tab, pane: 0);
       tab.sshSession = session;
       tab.sshClient = result.client;
       tab.jumpClient = result.jumpClient;
@@ -623,9 +629,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         _tabs[t].terminalViewKey.currentState?.releaseInput();
         _tabs[t].splitViewKey.currentState?.releaseInput();
       }
-      _tabs[i].terminalViewKey.currentState?.syncAfterShown();
+      _syncPaneAfterShown(_tabs[i], pane: 0);
       if (_tabs[i].isSplit) {
-        _tabs[i].splitViewKey.currentState?.syncAfterShown();
+        _syncPaneAfterShown(_tabs[i], pane: 1);
       }
     });
   }
@@ -634,9 +640,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final tab in _tabs) {
-        tab.terminalViewKey.currentState?.syncAfterShown();
+        _syncPaneAfterShown(tab, pane: 0);
         if (tab.isSplit) {
-          tab.splitViewKey.currentState?.syncAfterShown();
+          _syncPaneAfterShown(tab, pane: 1);
         }
       }
     });

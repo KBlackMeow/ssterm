@@ -515,8 +515,7 @@ void main() {
       expect(terminalOutput.single, contains('\x1b[<65;'));
     });
 
-    testWidgets('sends basic mouse wheel reporting by default',
-        (tester) async {
+    testWidgets('sends basic mouse wheel reporting by default', (tester) async {
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.resetDevicePixelRatio);
 
@@ -582,6 +581,32 @@ void main() {
 
       await tester.drag(find.byType(TerminalView), const Offset(0, -100));
       // Scroll keys are flushed after an 8 ms debounce in scroll_handler.
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(terminalOutput.join(), contains('\x1B[B'));
+    });
+
+    testWidgets('trackpad scroll simulates arrow keys without mouse reporting',
+        (tester) async {
+      final terminalOutput = <String>[];
+      final terminal = Terminal(onOutput: terminalOutput.add);
+      terminal.useAltBuffer();
+
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          autofocus: true,
+          simulateScroll: true,
+          textStyle: const TerminalStyle(fontSize: 16, height: 1),
+        ),
+      ));
+
+      final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+      const position = Offset(100, 100);
+      await tester.sendEventToBinding(pointer.panZoomStart(position));
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(position, pan: const Offset(0, -20)),
+      );
       await tester.pump(const Duration(milliseconds: 16));
 
       expect(terminalOutput.join(), contains('\x1B[B'));

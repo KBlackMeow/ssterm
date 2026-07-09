@@ -53,15 +53,46 @@ class OutputPipe {
     this._terminal, {
     this.transform,
     this.logSink,
-  });
+    this.onBytesConsumed,
+    this.onBytesAccepted,
+    this.holdOutputUntilRelease = false,
+    int? maxBytesPerWrite,
+    int? queueHighWatermarkBytes,
+    int? queueLowWatermarkBytes,
+  }) : _maxBytesPerWrite = maxBytesPerWrite ?? _kDefaultMaxBytesPerWrite,
+       _queueHighWatermarkBytes =
+           queueHighWatermarkBytes ?? _kDefaultQueueHighWatermarkBytes,
+       _queueLowWatermarkBytes =
+           queueLowWatermarkBytes ?? _kDefaultQueueLowWatermarkBytes {
+    if (_queueLowWatermarkBytes > _queueHighWatermarkBytes) {
+      throw ArgumentError.value(
+        _queueLowWatermarkBytes,
+        'queueLowWatermarkBytes',
+        'must be <= queueHighWatermarkBytes',
+      );
+    }
+    _utf8Sink = const Utf8Decoder(
+      allowMalformed: true,
+    ).startChunkedConversion(StringConversionSink.fromStringSink(_textSink));
+  }
 
   final Terminal _terminal;
   final List<int> Function(List<int>)? transform;
   final LogSink? logSink;
+  final void Function(int bytes)? onBytesConsumed;
+  final void Function(int bytes)? onBytesAccepted;
+  bool holdOutputUntilRelease;
 
   final _buf = BytesBuilder(copy: false);
   Timer? _timer;
   final _subs = <StreamSubscription<List<int>>>[];
+  var _streamsPaused = false;
+  final int _maxBytesPerWrite;
+  final int _queueHighWatermarkBytes;
+  final int _queueLowWatermarkBytes;
+  final _textSink = _TakeableStringSink();
+  late final ByteConversionSink _utf8Sink;
+  var _pendingAcceptedBytes = 0;
 
   /// Fires with the exit code whenever an OSC 133 ; D sequence is detected.
   final _commandFinishedCtrl = StreamController<int>.broadcast();
@@ -95,8 +126,10 @@ class OutputPipe {
   final _tailBytes = <int>[];
   static const _kOscTailKeep = 32;
 
-  static const _kMaxBytesPerWrite = 65536; // 64 KB
+  static const _kDefaultMaxBytesPerWrite = 65536; // 64 KB
   static const _kFlushInterval = Duration(milliseconds: 16); // ~60 fps
+  static const _kDefaultQueueHighWatermarkBytes = 512 * 1024;
+  static const _kDefaultQueueLowWatermarkBytes = 128 * 1024;
 
   void bind(Stream<List<int>> stream) {
     _subs.add(stream.listen(_onChunk));
@@ -104,19 +137,53 @@ class OutputPipe {
 
   void _onChunk(List<int> chunk) {
     _buf.add(chunk);
+    _pendingAcceptedBytes += chunk.length;
+    _applyBackpressure();
+    _acceptPendingBytesIfReady();
+    _scheduleFlush();
+  }
+
+  void _scheduleFlush() {
+    if (holdOutputUntilRelease) return;
     _timer ??= Timer(_kFlushInterval, _flush);
+  }
+
+  void releaseHeldOutput() {
+    if (!holdOutputUntilRelease) return;
+    holdOutputUntilRelease = false;
+    _applyBackpressure();
+    _acceptPendingBytesIfReady();
+    if (_buf.isNotEmpty) {
+      _scheduleFlush();
+    }
+  }
+
+  void holdOutput() {
+    holdOutputUntilRelease = true;
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  void flushSync() {
+    if (holdOutputUntilRelease) return;
+    _timer?.cancel();
+    _timer = null;
+    while (_buf.isNotEmpty) {
+      _flush();
+    }
   }
 
   void _flush() {
     _timer = null;
+    if (holdOutputUntilRelease) return;
     final all = _buf.takeBytes();
     if (all.isEmpty) return;
 
     final Uint8List toWrite;
-    if (all.length > _kMaxBytesPerWrite) {
-      toWrite = Uint8List.sublistView(all, 0, _kMaxBytesPerWrite);
-      _buf.add(Uint8List.sublistView(all, _kMaxBytesPerWrite));
-      _timer = Timer(_kFlushInterval, _flush);
+    if (all.length > _maxBytesPerWrite) {
+      toWrite = Uint8List.sublistView(all, 0, _maxBytesPerWrite);
+      _buf.add(Uint8List.sublistView(all, _maxBytesPerWrite));
+      _scheduleFlush();
     } else {
       toWrite = all;
     }
@@ -137,10 +204,13 @@ class OutputPipe {
     // last fully-processed marker.  Otherwise the same marker would be
     // re-discovered next flush and — worse — re-trigger its side effects
     // (re-emit a CommandResult, re-decrement _dropNextDs, etc.).
-    final unconsumedStart =
-        consumedInScanBuf > scanBuf.length ? scanBuf.length : consumedInScanBuf;
+    final unconsumedStart = consumedInScanBuf > scanBuf.length
+        ? scanBuf.length
+        : consumedInScanBuf;
     final unconsumedLen = scanBuf.length - unconsumedStart;
-    final keepLen = unconsumedLen > _kOscTailKeep ? _kOscTailKeep : unconsumedLen;
+    final keepLen = unconsumedLen > _kOscTailKeep
+        ? _kOscTailKeep
+        : unconsumedLen;
     if (keepLen > 0) {
       _tailBytes.addAll(
         Uint8List.sublistView(scanBuf, scanBuf.length - keepLen),
@@ -154,8 +224,45 @@ class OutputPipe {
       out = Uint8List.fromList(transform!(toWrite));
     }
     if (out.isNotEmpty) {
-      _terminal.write(utf8.decode(out, allowMalformed: true));
+      _utf8Sink.add(out);
+      final text = _textSink.take();
+      if (text.isNotEmpty) {
+        _terminal.write(text);
+      }
     }
+    onBytesConsumed?.call(toWrite.length);
+    _applyBackpressure();
+  }
+
+  void _applyBackpressure() {
+    if (_streamsPaused) {
+      if (!holdOutputUntilRelease && _buf.length <= _queueLowWatermarkBytes) {
+        for (final sub in _subs) {
+          sub.resume();
+        }
+        _streamsPaused = false;
+        _acceptPendingBytesIfReady();
+      }
+      return;
+    }
+
+    if (_buf.length > _queueHighWatermarkBytes) {
+      for (final sub in _subs) {
+        sub.pause();
+      }
+      _streamsPaused = true;
+    }
+  }
+
+  void _acceptPendingBytesIfReady() {
+    if (holdOutputUntilRelease ||
+        _streamsPaused ||
+        _pendingAcceptedBytes == 0) {
+      return;
+    }
+    final bytes = _pendingAcceptedBytes;
+    _pendingAcceptedBytes = 0;
+    onBytesAccepted?.call(bytes);
   }
 
   /// Walks every OSC 133 marker in [scanBuf] and slices the surrounding bytes
@@ -209,7 +316,10 @@ class OutputPipe {
         }
         if (_capturing) {
           final wasCapped = _capturedOutput.length >= _kMaxCaptureBytes;
-          final raw = utf8.decode(_capturedOutput.takeBytes(), allowMalformed: true);
+          final raw = utf8.decode(
+            _capturedOutput.takeBytes(),
+            allowMalformed: true,
+          );
           final clean = stripAnsi(raw).trim();
           _capturing = false;
           if (!_commandResultsCtrl.isClosed) {
@@ -313,8 +423,32 @@ class OutputPipe {
     for (final s in _subs) {
       s.cancel();
     }
+    _utf8Sink.close();
     _commandFinishedCtrl.close();
     _commandResultsCtrl.close();
     logSink?.close();
   }
+}
+
+class _TakeableStringSink implements StringSink {
+  final _buffer = StringBuffer();
+
+  String take() {
+    final text = _buffer.toString();
+    _buffer.clear();
+    return text;
+  }
+
+  @override
+  void write(Object? obj) => _buffer.write(obj);
+
+  @override
+  void writeAll(Iterable<dynamic> objects, [String separator = '']) =>
+      _buffer.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _buffer.writeCharCode(charCode);
+
+  @override
+  void writeln([Object? obj = '']) => _buffer.writeln(obj);
 }

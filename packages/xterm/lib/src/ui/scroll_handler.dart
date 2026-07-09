@@ -12,8 +12,9 @@ import 'package:xterm/core.dart';
 /// TUI apps precise 1-event-per-N-lines control via their own scroll bindings.
 ///
 /// When the app has no mouse reporting (mouseMode.none / clickOnly), this
-/// widget is a no-op and the parent [Scrollable] handles the gesture,
-/// scrolling through the main-buffer session history.
+/// widget can fall back to arrow-key simulation in the alternate buffer for
+/// apps like `less`. Outside the alternate buffer, the parent [Scrollable]
+/// handles the gesture and scrolls through main-buffer session history.
 class TerminalScrollGestureHandler extends StatefulWidget {
   const TerminalScrollGestureHandler({
     super.key,
@@ -202,9 +203,9 @@ class _TerminalScrollGestureHandlerState
 
   @override
   Widget build(BuildContext context) {
-    // Only intercept when in alt buffer AND the app has scroll reporting.
-    // For none / clickOnly: let the Scrollable show main-buffer history.
-    if (!_isAltBuffer || !_mouseMode.reportScroll) {
+    // Intercept alternate-buffer scroll either for real mouse reporting or
+    // for arrow-key simulation. In the main buffer, let Scrollable show history.
+    if (!_isAltBuffer || (!_mouseMode.reportScroll && !widget.simulateScroll)) {
       return widget.child;
     }
 
