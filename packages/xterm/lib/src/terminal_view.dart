@@ -389,6 +389,7 @@ class TerminalViewState extends State<TerminalView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
+        renderTerminal.syncViewportSize(forceResize: true);
         renderTerminal.markNeedsLayout();
       } catch (_) {}
       if (widget.hardwareKeyboardOnly) {

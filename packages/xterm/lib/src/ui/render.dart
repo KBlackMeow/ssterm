@@ -292,9 +292,8 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// has scrollable range for history (like xterm/tabby: scrolling while in
   /// alt buffer shows the main-buffer session history).
   double get _terminalHeight {
-    final buf = _terminal.isUsingAltBuffer
-        ? _terminal.mainBuffer
-        : _terminal.buffer;
+    final buf =
+        _terminal.isUsingAltBuffer ? _terminal.mainBuffer : _terminal.buffer;
     return buf.lines.length * _painter.cellSize.height;
   }
 
@@ -451,6 +450,12 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   /// Update the viewport size in cells based on the current widget size in
   /// pixels.
   void _updateViewportSize() {
+    syncViewportSize();
+  }
+
+  /// Recomputes the current viewport size and optionally re-sends it to the
+  /// terminal even when the cell dimensions are unchanged.
+  void syncViewportSize({bool forceResize = false}) {
     if (size <= _painter.cellSize) {
       return;
     }
@@ -460,8 +465,10 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       _viewportHeight ~/ _painter.cellSize.height,
     );
 
-    if (_viewportSize != viewportSize) {
-      _viewportSize = viewportSize;
+    final sizeChanged = _viewportSize != viewportSize;
+    _viewportSize = viewportSize;
+
+    if (sizeChanged || forceResize) {
       _resizeTerminalIfNeeded();
     }
   }

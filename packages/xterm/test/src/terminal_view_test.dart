@@ -172,6 +172,57 @@ void main() {
 
       expect(() => focusNode.addListener(() {}), returnsNormally);
     });
+
+    testWidgets(
+      'syncAfterShown re-sends resize even when viewport size is unchanged',
+      (tester) async {
+        final resizeEvents =
+            <(int width, int height, int pixelWidth, int pixelHeight)>[];
+        final terminal = Terminal()
+          ..onResize = (width, height, pixelWidth, pixelHeight) {
+            resizeEvents.add((width, height, pixelWidth, pixelHeight));
+          };
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 800,
+                height: 600,
+                child: TerminalView(
+                  terminal,
+                  hardwareKeyboardOnly: true,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(resizeEvents, isNotEmpty);
+        resizeEvents.clear();
+
+        final state =
+            tester.state<TerminalViewState>(find.byType(TerminalView));
+        state.syncAfterShown();
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          resizeEvents,
+          isNotEmpty,
+          reason:
+              're-shown terminals need to push the current viewport size to newly attached sessions',
+        );
+        expect(
+          resizeEvents.single.$1,
+          terminal.viewWidth,
+        );
+        expect(
+          resizeEvents.single.$2,
+          terminal.viewHeight,
+        );
+      },
+    );
   });
 
   group('TerminalController.pointerInputs', () {
