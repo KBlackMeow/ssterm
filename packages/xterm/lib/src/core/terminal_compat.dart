@@ -4,6 +4,7 @@ class TerminalCompat {
     this.altDecScRcPositionOnly = true,
     this.altStripUnderlineOnWrite = true,
     this.altScrollDebounceMs = 8,
+    this.ambiguousCharsAreWide = true,
   });
 
   /// vim-friendly defaults: position-only DECSC/DECRC in the alt buffer, strip
@@ -15,6 +16,7 @@ class TerminalCompat {
     altDecScRcPositionOnly: false,
     altStripUnderlineOnWrite: false,
     altScrollDebounceMs: 0,
+    ambiguousCharsAreWide: false,
   );
 
   /// In the alt buffer, [Buffer.saveCursor]/[restoreCursor] only move the
@@ -28,4 +30,11 @@ class TerminalCompat {
   /// Milliseconds to coalesce alt-buffer wheel/drag scroll before one PTY write.
   /// Zero flushes immediately (strict / low-latency).
   final int altScrollDebounceMs;
+
+  /// Treat Unicode East Asian Ambiguous-width characters as fullwidth.
+  ///
+  /// CJK fallback fonts commonly render symbols such as ℃, ①, and box-drawing
+  /// characters as fullwidth. Enabling this keeps glyphs, cursor movement, and
+  /// following cells aligned in CJK-oriented terminals.
+  final bool ambiguousCharsAreWide;
 }

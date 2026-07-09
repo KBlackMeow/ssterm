@@ -110,7 +110,10 @@ class Buffer {
   void writeChar(int codePoint) {
     codePoint = charset.translate(codePoint);
 
-    final cellWidth = unicodeV11.wcwidth(codePoint);
+    final cellWidth = unicodeV11.wcwidth(
+      codePoint,
+      ambiguousAsWide: terminal.compat.ambiguousCharsAreWide,
+    );
     if (cellWidth == 0) return;
 
     if (_cursorX >= terminal.viewWidth) {
