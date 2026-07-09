@@ -235,6 +235,31 @@ void main() {
       });
     });
 
+    test('metrics expose queue and backpressure state', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final pipe = OutputPipe(
+          terminal,
+          holdOutputUntilRelease: true,
+          queueHighWatermarkBytes: 10,
+          queueLowWatermarkBytes: 4,
+        );
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add(List.filled(12, 65));
+        fake.flushMicrotasks();
+
+        expect(pipe.metrics.queuedBytes, 12);
+        expect(pipe.metrics.streamsPaused, isTrue);
+        expect(pipe.metrics.pendingAcceptedBytes, 12);
+        expect(pipe.metrics.holdOutputUntilRelease, isTrue);
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
     test('flushSync drains pending output immediately', () {
       fakeAsync((fake) {
         final terminal = Terminal();

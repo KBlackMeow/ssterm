@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:xterm/xterm.dart';
 
+import 'output_pipe_metrics.dart';
 import '../services/shell_integration.dart';
 
 /// Minimal interface for session logging.
@@ -82,6 +83,13 @@ class OutputPipe {
   final void Function(int bytes)? onBytesConsumed;
   final void Function(int bytes)? onBytesAccepted;
   bool holdOutputUntilRelease;
+
+  OutputPipeMetrics get metrics => OutputPipeMetrics(
+    queuedBytes: _buf.length,
+    streamsPaused: _streamsPaused,
+    pendingAcceptedBytes: _pendingAcceptedBytes,
+    holdOutputUntilRelease: holdOutputUntilRelease,
+  );
 
   final _buf = BytesBuilder(copy: false);
   Timer? _timer;
