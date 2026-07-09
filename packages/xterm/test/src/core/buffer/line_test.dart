@@ -16,29 +16,6 @@ void main() {
       expect(terminal.buffer.lines[0].getText(), equals(text));
     });
 
-    test('East Asian Ambiguous symbols occupy two cells by default', () {
-      final terminal = Terminal();
-      terminal.write('A℃℉①─B');
-
-      final line = terminal.buffer.lines[0];
-      expect(line.getText(0, 10), 'A℃℉①─B');
-      expect(line.getWidth(1), 2);
-      expect(line.getWidth(3), 2);
-      expect(line.getWidth(5), 2);
-      expect(line.getWidth(7), 2);
-      expect(line.getCodePoint(9), 'B'.codeUnitAt(0));
-    });
-
-    test('strict compatibility keeps ambiguous symbols single-cell', () {
-      final terminal = Terminal(compat: TerminalCompat.strict);
-      terminal.write('A℃B');
-
-      final line = terminal.buffer.lines[0];
-      expect(line.getText(0, 3), 'A℃B');
-      expect(line.getWidth(1), 1);
-      expect(line.getCodePoint(2), 'B'.codeUnitAt(0));
-    });
-
     test('can specify a range', () {
       final terminal = Terminal();
       terminal.write('Hello World');
