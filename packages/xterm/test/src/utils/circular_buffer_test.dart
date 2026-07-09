@@ -315,6 +315,24 @@ void main() {
       expect(cl[4], 9.indexed);
     });
 
+    test("trim start detaches removed items", () {
+      final cl = IndexAwareCircularBuffer<IndexedValue<int>>(10);
+      final items = List<int>.generate(10, (index) => index)
+          .map(IndexedValue.new)
+          .toList();
+      cl.pushAll(items);
+
+      cl.trimStart(5);
+
+      for (var i = 0; i < 5; i++) {
+        expect(items[i].attached, isFalse, reason: 'item $i');
+      }
+      for (var i = 5; i < 10; i++) {
+        expect(items[i].attached, isTrue, reason: 'item $i');
+        expect(items[i].index, i - 5, reason: 'item $i');
+      }
+    });
+
     test("trim start with more than length works", () {
       final cl = IndexAwareCircularBuffer<IndexedValue<int>>(10);
       cl.pushAll(
