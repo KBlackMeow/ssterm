@@ -31,7 +31,7 @@ SshHostKeyVerifier createHostKeyVerifier(
     );
     if (conflict != null) {
       if (!context.mounted) return false;
-      await showHostKeyChangedDialog(
+      final updated = await showHostKeyChangedDialog(
         context,
         hostname: hostname,
         port: port,
@@ -39,7 +39,10 @@ SshHostKeyVerifier createHostKeyVerifier(
         keyType: keyType,
         fingerprint: fp,
       );
-      return false;
+      if (updated) {
+        await TrustedHostKeys.trust(hostname, port, keyType, fp);
+      }
+      return updated;
     }
 
     if (!context.mounted) return false;

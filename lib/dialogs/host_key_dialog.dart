@@ -86,7 +86,7 @@ Future<bool> showHostKeyConfirmDialog(
   ).then((v) => v ?? false);
 }
 
-Future<void> showHostKeyChangedDialog(
+Future<bool> showHostKeyChangedDialog(
   BuildContext context, {
   required String hostname,
   required int port,
@@ -98,7 +98,7 @@ Future<void> showHostKeyChangedDialog(
   final oldFp = formatMd5FingerprintFromStored(existing.fingerprint);
   final newFp = formatMd5FingerprintFromStored(fingerprint);
 
-  return showDialog<void>(
+  return showDialog<bool>(
     context: context,
     useRootNavigator: true,
     barrierDismissible: false,
@@ -124,8 +124,9 @@ Future<void> showHostKeyChangedDialog(
               Text(
                 'WARNING: The remote host key for $host has changed. '
                 'This may indicate a man-in-the-middle attack.\n'
-                'Connection aborted. If you are sure the server key was replaced, '
-                'remove the entry from ~/.ssh/known_hosts or ~/.ssterm/known_hosts.json and retry.',
+                'Only continue if you have verified through another channel '
+                'that this change is expected (e.g. the server was '
+                'reinstalled or its key was rotated).',
                 style: const TextStyle(
                   color: Color(0xFF8E8E8E),
                   fontSize: 12,
@@ -146,23 +147,39 @@ Future<void> showHostKeyChangedDialog(
               const SizedBox(height: 6),
               _FingerprintBlock(keyType: keyType, fingerprint: newFp),
               const SizedBox(height: 20),
-              Align(
-                alignment: Alignment.centerRight,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3A3A3A),
-                    foregroundColor: Colors.white,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Color(0xFF8E8E8E))),
                   ),
-                  child: const Text('Close'),
-                ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6E67),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Update Key and Connect'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Confirming replaces the fingerprint in '
+                '~/.ssterm/known_hosts.json only. ~/.ssh/known_hosts is '
+                'not modified.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
               ),
             ],
           ),
         )),    // PopupSurface + Padding
       ),       // SizedBox
     ),         // Dialog
-  );
+  ).then((v) => v ?? false);
 }
 
 String formatMd5FingerprintFromStored(String stored) {
