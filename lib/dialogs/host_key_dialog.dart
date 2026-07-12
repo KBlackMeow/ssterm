@@ -106,7 +106,7 @@ Future<bool> showHostKeyChangedDialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: PopupSurface(color: FrostedGlassStyle.dialogFill, child: Padding(
+        child: PopupSurface(color: FrostedGlassStyle.dialogFill, child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -147,15 +147,17 @@ Future<bool> showHostKeyChangedDialog(
               const SizedBox(height: 6),
               _FingerprintBlock(keyType: keyType, fingerprint: newFp),
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(ctx).pop(false),
                     child: const Text('Cancel',
                         style: TextStyle(color: Color(0xFF8E8E8E))),
                   ),
-                  const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: () => Navigator.of(ctx).pop(true),
                     style: ElevatedButton.styleFrom(
@@ -176,7 +178,7 @@ Future<bool> showHostKeyChangedDialog(
               ),
             ],
           ),
-        )),    // PopupSurface + Padding
+        )),    // PopupSurface + SingleChildScrollView
       ),       // SizedBox
     ),         // Dialog
   ).then((v) => v ?? false);
