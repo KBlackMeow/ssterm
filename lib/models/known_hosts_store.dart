@@ -36,9 +36,14 @@ class KnownHostEntry {
 
 /// Trusted SSH server host keys (~/.ssterm/known_hosts.json).
 class KnownHostsStore {
+  /// Overrides the directory used for the known-hosts file. Test-only —
+  /// mirrors [SkillService.debugUserSkillsDirOverride] so tests don't
+  /// read/write the real ~/.ssterm directory.
+  static String? debugDirOverride;
+
   static Future<File> _file() async {
-    final dir = await appDataDir();
-    return File('${dir.path}/known_hosts.json');
+    final dirPath = debugDirOverride ?? (await appDataDir()).path;
+    return File('$dirPath/known_hosts.json');
   }
 
   static Future<List<KnownHostEntry>> load() async {
