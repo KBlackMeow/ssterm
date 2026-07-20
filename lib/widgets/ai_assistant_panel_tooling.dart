@@ -523,4 +523,51 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         'Either propose a different approach or ask the user to '
         'clarify what they actually want changed.';
   }
+
+  /// Resolve a [_QuestionProposal] when the user taps an option button
+  /// OR (for "Other") submits free text via the main chat input — see
+  /// `_send()`'s pending-question short-circuit in
+  /// `ai_assistant_panel.dart`.  Idempotent (a second call after the
+  /// first is a no-op) and stale-conversation-safe: answering a
+  /// proposal from an abandoned generation resolves it as [stale]
+  /// without touching the new conversation's history — same shape as
+  /// [_decideDangerProposal].
+  void _decideQuestionProposal(
+    _QuestionProposal proposal, {
+    required String answer,
+  }) {
+    if (proposal.decision.isCompleted) return;
+
+    if (proposal.agentGeneration != _generation) {
+      setState(() => proposal.state = _QuestionProposalState.stale);
+      _logAgent(
+        'ask_user_question_stale header=${_logQuote(proposal.header)}',
+      );
+      proposal.decision.complete(null);
+      return;
+    }
+
+    setState(() {
+      proposal.state = _QuestionProposalState.answered;
+      proposal.answerText = answer;
+      if (identical(_pendingQuestionProposal, proposal)) {
+        _pendingQuestionProposal = null;
+      }
+    });
+    proposal.decision.complete(answer);
+  }
+
+  /// User tapped "Other" on a pending [_QuestionProposal].  Does NOT
+  /// complete `proposal.decision` — just flips the card to its
+  /// "answering below" hint state and hands focus to the main chat
+  /// input.  The actual completion happens when `_send()` sees
+  /// `_pendingQuestionProposal` still set and calls
+  /// [_decideQuestionProposal] with whatever the user typed.
+  void _beginCustomQuestionAnswer(_QuestionProposal proposal) {
+    if (proposal.decision.isCompleted) return;
+    setState(() => proposal.state = _QuestionProposalState.awaitingCustom);
+    if (mounted) {
+      FocusScope.of(context).requestFocus(_agentInputFocusNode);
+    }
+  }
 }
