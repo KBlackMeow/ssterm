@@ -323,13 +323,15 @@ extension _AgentSettingsExt on _SettingsPageState {
             const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         dense: true,
         title: const Text(
-          'Enable file write',
+          'Enable file write & edit',
           style: TextStyle(color: _kFg, fontSize: 13),
         ),
         subtitle: const Text(
-          'Lets the agent propose `[WRITE_FILE_BEGIN]` markers. Every '
-          'proposed write shows up as a chat card with a diff preview '
-          'and requires you to click Apply — auto-execute does NOT '
+          'Lets the agent propose full-file writes (`write_file`) and '
+          'targeted search/replace edits (`edit_file`). Every proposal '
+          'shows up as a chat card — a diff preview for edits, a '
+          'content preview for writes — and requires you to click '
+          'Apply before anything hits disk; auto-execute does NOT '
           'auto-write. Local writes use atomic temp+rename; SSH writes '
           'go through the active SFTP session.',
           style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),

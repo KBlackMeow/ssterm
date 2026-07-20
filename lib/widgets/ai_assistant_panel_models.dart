@@ -74,6 +74,12 @@ class _ChatMessage {
   /// objects safe across class shape changes.
   _WriteProposal? writeProposal;
 
+  /// For "file edit proposal" messages: the pending edit_file call the
+  /// user must Apply or Reject before the agent loop resumes.  Same
+  /// nullable / hot-reload rationale as [writeProposal].  Null for
+  /// every other message kind.
+  _EditProposal? editProposal;
+
   /// For "dangerous command proposal" messages: the pending agent-emitted
   /// command the user must Approve or Reject before `_executeAndCapture`
   /// is allowed to forward it to the shell.  Same nullable / hot-reload
@@ -97,6 +103,7 @@ class _ChatMessage {
     this.commandRun,
     this.commandExitCode,
     this.writeProposal,
+    this.editProposal,
     this.dangerProposal,
     this.questionProposal,
   });
@@ -142,6 +149,12 @@ class _ChatMessage {
   /// the mutable state machine driving the card.
   factory _ChatMessage.writeProposal(_WriteProposal proposal) =>
       _ChatMessage._(text: '', isUser: false, writeProposal: proposal);
+
+  /// "File edit proposal" card.  Rendered as a distinct Apply/Reject
+  /// card with a line-level diff by `_buildAgentMessage`; the contained
+  /// [_EditProposal] holds the mutable state machine driving the card.
+  factory _ChatMessage.editProposal(_EditProposal proposal) =>
+      _ChatMessage._(text: '', isUser: false, editProposal: proposal);
 
   /// "Dangerous command proposal" card.  Rendered by
   /// `_buildAgentMessage` as a distinct Approve/Reject card with the
@@ -226,6 +239,91 @@ class _WriteProposal {
     required this.resolvedPath,
     required this.content,
     required this.preview,
+    required this.agentGeneration,
+  });
+}
+
+// ── File-edit proposal (Apply/Reject card state machine) ──────────────────
+
+/// Disposition the agent loop should take after `_proposeFileEdit`
+/// processes an `edit_file` tool call.  Mirrors [_WriteProposalOutcome]
+/// one-for-one but kept as its own enum so the two proposal kinds never
+/// get mixed up at a call site.
+enum _EditProposalOutcome {
+  /// A failure / disabled / no-match / ambiguous-match envelope is
+  /// already in conversation history.  Loop should keep iterating so
+  /// the model can react.
+  injectedAndContinue,
+
+  /// Match succeeded; a diff card is displayed; loop should pause.
+  /// Resume happens on Apply / Reject via `_decideEditProposal`.
+  waitingForUser,
+}
+
+/// Lifecycle states for an [_EditProposal].  Mirrors
+/// [_WriteProposalState] one-for-one.
+enum _EditProposalState {
+  pending,
+  applying,
+  applied,
+  rejected,
+  failed,
+}
+
+/// Per-proposal record for a pending `edit_file` tool call.  Unlike
+/// [_WriteProposal] (which carries the full new file body), this holds
+/// the matched `old_string`/`new_string` PLUS both full-text snapshots
+/// so the chat card can render a line-level diff via
+/// `computeLineDiff(currentContent, newContent)`.
+class _EditProposal {
+  /// Path as emitted by the model — preserved verbatim for display.
+  final String requestedPath;
+
+  /// Adapter-resolved absolute path.  What `commit` will write to.
+  final String resolvedPath;
+
+  final String oldString;
+  final String newString;
+
+  /// Full file content BEFORE the edit — read via
+  /// `FileSystemAdapter.readContent` at proposal time.
+  final String currentContent;
+
+  /// Full file content AFTER applying the edit — computed by
+  /// `FileEditService.applyEdit` at proposal time (i.e. BEFORE Apply is
+  /// clicked), so the diff card can render immediately.
+  final String newContent;
+
+  /// How many occurrences of [oldString] were replaced — 1 for a
+  /// non-`replace_all` edit, N for `replace_all`.
+  final int matchCount;
+
+  /// mtime captured at proposal time — passed to `commit` as the
+  /// concurrency token, same as [_WriteProposal.preview]'s mtime.
+  final DateTime? mtime;
+
+  /// Generation counter snapshot — same staleness convention as
+  /// [_WriteProposal.agentGeneration].
+  final int agentGeneration;
+
+  _EditProposalState state = _EditProposalState.pending;
+
+  /// Free-form short message surfaced in the card after a terminal
+  /// state (exception message or reject reason).
+  String? outcomeMessage;
+
+  /// Set on successful commit.
+  FileWriteResult? result;
+
+  _EditProposal({
+    required this.requestedPath,
+    required this.resolvedPath,
+    required this.oldString,
+    required this.newString,
+    required this.currentContent,
+    required this.newContent,
+    required this.matchCount,
+    required this.mtime,
     required this.agentGeneration,
   });
 }

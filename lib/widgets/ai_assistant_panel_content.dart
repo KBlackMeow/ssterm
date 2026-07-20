@@ -32,6 +32,7 @@ class _AiPanelContent extends StatelessWidget {
     this.terminalBackground,
     this.terminalLineHeight,
     this.onWriteProposalDecision,
+    this.onEditProposalDecision,
     this.onDangerProposalDecision,
     this.onQuestionProposalDecision,
     this.onQuestionProposalOther,
@@ -94,6 +95,17 @@ class _AiPanelContent extends StatelessWidget {
     String? reason,
   })?
   onWriteProposalDecision;
+
+  /// Handler the [_EditProposalCard] calls when the user clicks Apply
+  /// or Reject.  Same pattern as [onWriteProposalDecision] — the panel
+  /// stays a pure view, the state machine lives in
+  /// [_AiAssistantOverlayState._decideEditProposal].
+  final void Function(
+    _EditProposal proposal, {
+    required bool apply,
+    String? reason,
+  })?
+  onEditProposalDecision;
 
   /// Handler the [_DangerProposalCard] calls when the user clicks
   /// Approve or Reject.  Same pattern as [onWriteProposalDecision] —
@@ -605,6 +617,27 @@ class _AiPanelContent extends StatelessWidget {
               ? ({String? reason}) {}
               : ({String? reason}) =>
                     decide(proposal, apply: false, reason: reason),
+        ),
+      );
+    }
+
+    // File-edit proposal: same Apply/Reject shell as the write-proposal
+    // card, but the body renders a line-level diff instead of a flat
+    // content preview — see `_EditProposalCard`.
+    final editProposal = msg.editProposal;
+    if (editProposal != null) {
+      final decide = onEditProposalDecision;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _EditProposalCard(
+          proposal: editProposal,
+          onApply: decide == null
+              ? () {}
+              : () => decide(editProposal, apply: true),
+          onReject: decide == null
+              ? ({String? reason}) {}
+              : ({String? reason}) =>
+                    decide(editProposal, apply: false, reason: reason),
         ),
       );
     }

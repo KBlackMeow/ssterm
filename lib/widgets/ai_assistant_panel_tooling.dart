@@ -457,6 +457,243 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     await _continueAgentLoop(_generation, config);
   }
 
+  Future<_EditProposalOutcome> _proposeFileEdit({
+    required int gen,
+    required int iter,
+    required String path,
+    required String oldString,
+    required String newString,
+    required bool replaceAll,
+    required bool enabled,
+    int? turnId,
+  }) async {
+    final tp = turnId == null ? '' : 't=$turnId ';
+    if (!enabled) {
+      _logAgent(
+        '${tp}iter=$iter file_edit_skip reason=disabled path=${_logQuote(path)}',
+      );
+      _conversationHistory.add({
+        'role': 'user',
+        'content':
+            '[File edit failed]\n'
+            'path: $path\n'
+            'reason: disabled\n'
+            'message: File write tool is disabled in Settings.\n\n'
+            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without edit_file. Do NOT retry the same edit_file tool call.',
+      });
+      return _EditProposalOutcome.injectedAndContinue;
+    }
+    final adapter = widget.fileSystemAdapter;
+    if (adapter == null || !adapter.isAvailable) {
+      _logAgent(
+        '${tp}iter=$iter file_edit_skip reason=no_adapter path=${_logQuote(path)}',
+      );
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(
+          path,
+          const FileWriteException(
+            FileWriteErrorKind.notSupported,
+            'No filesystem adapter is available for this tab (likely a non-terminal tab or an SSH session that hasn\'t finished handshaking yet).',
+          ),
+        ),
+      });
+      return _EditProposalOutcome.injectedAndContinue;
+    }
+
+    setState(() => _agentLoopStatus = 'Reading: $path (${adapter.label})');
+    _scrollToBottom();
+
+    FileWritePreview preview;
+    String current;
+    try {
+      preview = await adapter.preview(path);
+      current = await adapter.readContent(path);
+    } on FileWriteException catch (e) {
+      if (!mounted || gen != _generation) {
+        return _EditProposalOutcome.injectedAndContinue;
+      }
+      _logAgent(
+        '${tp}iter=$iter file_edit_read_err kind=${e.kind.name} path=${_logQuote(path)}',
+      );
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(path, e),
+      });
+      return _EditProposalOutcome.injectedAndContinue;
+    } catch (e) {
+      if (!mounted || gen != _generation) {
+        return _EditProposalOutcome.injectedAndContinue;
+      }
+      _logAgent(
+        '${tp}iter=$iter file_edit_read_crash type=${e.runtimeType} path=${_logQuote(path)} msg=${_logQuote('$e')}',
+      );
+      _conversationHistory.add({
+        'role': 'user',
+        'content': FileWriteService.formatErrorForLlm(
+          path,
+          FileWriteException(FileWriteErrorKind.io, '$e'),
+        ),
+      });
+      return _EditProposalOutcome.injectedAndContinue;
+    }
+
+    final EditMatchResult matchResult;
+    try {
+      matchResult = FileEditService.applyEdit(
+        current: current,
+        oldString: oldString,
+        newString: newString,
+        replaceAll: replaceAll,
+      );
+    } on EditMatchException catch (e) {
+      if (!mounted || gen != _generation) {
+        return _EditProposalOutcome.injectedAndContinue;
+      }
+      final envelope = e.kind == EditMatchErrorKind.noMatch
+          ? FileEditService.formatNoMatchForLlm(path, oldString)
+          : FileEditService.formatAmbiguousForLlm(
+              path, oldString, e.matchCount);
+      _logAgent(
+        '${tp}iter=$iter file_edit_match_err kind=${e.kind.name} '
+        'count=${e.matchCount} path=${_logQuote(path)}',
+      );
+      _conversationHistory.add({'role': 'user', 'content': envelope});
+      return _EditProposalOutcome.injectedAndContinue;
+    }
+
+    final proposal = _EditProposal(
+      requestedPath: path,
+      resolvedPath: preview.resolvedPath,
+      oldString: oldString,
+      newString: newString,
+      currentContent: current,
+      newContent: matchResult.newContent,
+      matchCount: matchResult.matchCount,
+      mtime: preview.mtime,
+      agentGeneration: gen,
+    );
+    setState(() {
+      _messages.add(_ChatMessage.editProposal(proposal));
+      _agentLoopStatus = 'Awaiting Apply for edit to ${preview.resolvedPath}';
+    });
+    _scrollToBottom();
+    _logAgent(
+      '${tp}iter=$iter file_edit_proposed matches=${matchResult.matchCount} '
+      'path=${_logQuote(preview.resolvedPath)}',
+    );
+    return _EditProposalOutcome.waitingForUser;
+  }
+
+  Future<void> _decideEditProposal(
+    _EditProposal proposal, {
+    required bool apply,
+    String? reason,
+  }) async {
+    if (proposal.state != _EditProposalState.pending) return;
+
+    if (proposal.agentGeneration != _generation) {
+      setState(() {
+        proposal.state = _EditProposalState.rejected;
+        proposal.outcomeMessage =
+            'Cancelled — newer conversation started before decision.';
+      });
+      return;
+    }
+
+    final config = widget.agentConfig;
+    if (config == null) {
+      setState(() {
+        proposal.state = _EditProposalState.failed;
+        proposal.outcomeMessage = 'Agent is not configured.';
+      });
+      return;
+    }
+
+    String envelope;
+    if (!apply) {
+      setState(() {
+        proposal.state = _EditProposalState.rejected;
+        proposal.outcomeMessage = reason;
+      });
+      envelope = FileEditService.formatRejectionForLlm(
+        proposal.requestedPath,
+        reason: reason,
+      );
+      _logAgent('file_edit_rejected path=${_logQuote(proposal.resolvedPath)}');
+    } else {
+      final adapter = widget.fileSystemAdapter;
+      if (adapter == null || !adapter.isAvailable) {
+        setState(() {
+          proposal.state = _EditProposalState.failed;
+          proposal.outcomeMessage =
+              'Filesystem adapter is no longer available (tab may have changed).';
+        });
+        envelope = FileWriteService.formatErrorForLlm(
+          proposal.requestedPath,
+          const FileWriteException(
+            FileWriteErrorKind.notSupported,
+            'Filesystem adapter became unavailable between proposal and apply.',
+          ),
+        );
+      } else {
+        setState(() => proposal.state = _EditProposalState.applying);
+        try {
+          final result = await adapter.commit(
+            proposal.requestedPath,
+            proposal.newContent,
+            expectedMtime: proposal.mtime,
+          );
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _EditProposalState.applied;
+            proposal.result = result;
+          });
+          envelope = FileEditService.formatSuccessForLlm(
+            proposal.matchCount,
+            result,
+          );
+          _logAgent(
+            'file_edit_applied matches=${proposal.matchCount} '
+            'path=${_logQuote(result.resolvedPath)}',
+          );
+        } on FileWriteException catch (e) {
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _EditProposalState.failed;
+            proposal.outcomeMessage = e.message;
+          });
+          envelope = FileWriteService.formatErrorForLlm(
+            proposal.requestedPath,
+            e,
+          );
+          _logAgent(
+            'file_edit_commit_err kind=${e.kind.name} '
+            'path=${_logQuote(proposal.resolvedPath)}',
+          );
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            proposal.state = _EditProposalState.failed;
+            proposal.outcomeMessage = '$e';
+          });
+          envelope = FileWriteService.formatErrorForLlm(
+            proposal.requestedPath,
+            FileWriteException(FileWriteErrorKind.io, '$e'),
+          );
+          _logAgent(
+            'file_edit_commit_crash type=${e.runtimeType} '
+            'path=${_logQuote(proposal.resolvedPath)}',
+          );
+        }
+      }
+    }
+
+    _conversationHistory.add({'role': 'user', 'content': envelope});
+    _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
+    await _continueAgentLoop(_generation, config);
+  }
+
   /// Resolve a dangerous-command [_DangerProposal] when the user
   /// clicks Approve / Reject.  Unlike [_decideWriteProposal] this is
   /// fire-and-forget from the UI's perspective: the agent loop is

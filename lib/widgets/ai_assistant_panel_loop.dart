@@ -266,6 +266,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       ToolCall? useSkillTool;
       ToolCall? webSearchTool;
       ToolCall? writeFileTool;
+      ToolCall? editFileTool;
       ToolCall? askUserQuestionTool;
       for (final call in toolCalls) {
         if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
@@ -279,6 +280,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             call.path != null &&
             call.content != null) {
           writeFileTool = call;
+        }
+        if (editFileTool == null &&
+            call.isEditFile &&
+            call.path != null &&
+            call.oldString != null &&
+            call.newString != null &&
+            call.oldString != call.newString) {
+          editFileTool = call;
         }
         if (askUserQuestionTool == null &&
             call.isAskUserQuestion &&
@@ -310,7 +319,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                                   ? 'web_search'
                                   : (writeFile != null
                                         ? 'write_file'
-                                        : 'none')))));
+                                        : (editFileTool != null
+                                              ? 'edit_file'
+                                              : 'none'))))));
       logIter(
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
@@ -458,6 +469,34 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             // `_continueAgentLoop`'s finally fires and unlocks the
             // terminal / clears _agentBusy; the Apply / Reject click
             // will call _continueAgentLoop again to resume.
+            return;
+        }
+      }
+
+      // ── File-edit proposal ─────────────────────────────────────────
+      // Same intercept-before-execute, pause-for-Apply pattern as
+      // write_file — see that section's comment above for the
+      // rationale. Match validation (no_match / ambiguous_match)
+      // happens INSIDE `_proposeFileEdit`, before any card is shown, so
+      // the user never sees a diff card for an edit that's already
+      // known to fail.
+      if (editFileTool != null) {
+        final pauseOutcome = await _proposeFileEdit(
+          gen: gen,
+          iter: loopIterations,
+          turnId: turnId,
+          path: editFileTool.path!,
+          oldString: editFileTool.oldString!,
+          newString: editFileTool.newString!,
+          replaceAll: editFileTool.replaceAll,
+          enabled: config.fileWriteEnabled,
+        );
+        if (!mounted || gen != _generation) return;
+        switch (pauseOutcome) {
+          case _EditProposalOutcome.injectedAndContinue:
+            setState(() => _agentLoopStatus = null);
+            continue;
+          case _EditProposalOutcome.waitingForUser:
             return;
         }
       }

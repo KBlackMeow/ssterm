@@ -13,6 +13,8 @@ import '../services/command_feedback_formatter.dart';
 import '../services/command_safety.dart';
 import '../services/llm_service.dart';
 import '../services/file_write_service.dart';
+import '../services/file_edit_service.dart';
+import '../utils/line_diff.dart';
 import '../services/session_context.dart';
 import '../services/skill_service.dart';
 import '../services/web_search_service.dart';
@@ -31,6 +33,7 @@ part 'ai_assistant_panel_content.dart';
 part 'ai_assistant_panel_write_card.dart';
 part 'ai_assistant_panel_danger_card.dart';
 part 'ai_assistant_panel_question_card.dart';
+part 'ai_assistant_panel_edit_card.dart';
 part 'ai_assistant_panel_tooling.dart';
 part 'ai_assistant_panel_loop.dart';
 
@@ -564,6 +567,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             terminalBackground: widget.terminalBackground,
             terminalLineHeight: widget.terminalLineHeight,
             onWriteProposalDecision: _decideWriteProposal,
+            onEditProposalDecision: _decideEditProposal,
             onDangerProposalDecision: _decideDangerProposal,
             onQuestionProposalDecision: _decideQuestionProposal,
             onQuestionProposalOther: _beginCustomQuestionAnswer,
