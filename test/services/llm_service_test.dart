@@ -1071,6 +1071,44 @@ Done.
       expect(identical(b, c), isTrue);
     });
 
+    test('fileWriteEnabled=false omits <file_edit_tool> and the tool', () {
+      final prompt = LlmService.systemPromptFor(
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: false,
+      );
+      expect(prompt.contains('<file_edit_tool>'), isFalse);
+      expect(prompt.contains('"name":"edit_file"'), isFalse);
+    });
+
+    test('fileWriteEnabled=true injects <file_edit_tool> with tool_call', () {
+      final prompt = LlmService.systemPromptFor(
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: true,
+      );
+      expect(prompt.contains('<file_edit_tool>'), isTrue);
+      expect(prompt.contains('"name":"edit_file"'), isTrue);
+      // The critical "must have actually seen this text" rule is the
+      // single most important behavioural constraint — pin it so a
+      // future prompt rewrite can't silently drop it.
+      expect(prompt.contains('old_string'), isTrue);
+      expect(prompt.contains('ambiguous_match'), isTrue);
+    });
+
+    test('<file_write_tool> turn-shape rule also names edit_file', () {
+      // The two file tools must be mutually exclusive within one turn —
+      // regression guard for the turn-shape rule text in
+      // _buildFileWriteBlock.
+      final prompt = LlmService.systemPromptFor(
+        enabledSkillIds: <String>{},
+        fileWriteEnabled: true,
+      );
+      final writeBlockStart = prompt.indexOf('<file_write_tool>');
+      final writeBlockEnd = prompt.indexOf('</file_write_tool>');
+      final writeBlock =
+          prompt.substring(writeBlockStart, writeBlockEnd);
+      expect(writeBlock.contains('edit_file'), isTrue);
+    });
+
     test('fileWrite key is independent of webSearch key', () {
       // Pin orthogonality — both keys must contribute to cache
       // invalidation independently, so flipping one doesn't bleed

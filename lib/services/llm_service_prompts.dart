@@ -19,7 +19,10 @@ String _buildSystemPrompt({
   final enabled = SkillService.filterEnabled(enabledSkillIds);
   if (enabled.isNotEmpty) parts.add(_buildSkillsBlock());
   if (webSearchEnabled) parts.add(_buildWebSearchBlock());
-  if (fileWriteEnabled) parts.add(_buildFileWriteBlock());
+  if (fileWriteEnabled) {
+    parts.add(_buildFileWriteBlock());
+    parts.add(_buildFileEditBlock());
+  }
   parts.add(_buildHostBlock());
   return parts.join('\n\n');
 }
@@ -175,7 +178,7 @@ When NOT to use the tool (these are the ONLY exceptions):
 Hard rules:
 - Path resolution: absolute (`/etc/x`) is always safe. `~/…` expands to the active session's HOME (local AND SSH — ssterm resolves it for you over SFTP). Relative paths (e.g. `foo.sh`, `src/main.py`, `./bar`) resolve against the active terminal pane's working directory (PWD). If the user's first message includes a `<session_context>` block, it tells you exactly what PWD, HOME, and the current local date/time are for this session — quote them when in doubt instead of guessing (especially "today's date" — the block's clock is authoritative; do NOT fall back to training-data assumptions).
 - ONE write proposal per turn. The Apply card needs an individual decision per file.
-- A `write_file` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, `use_skill`, or `web_search` — the agent loop intercepts the write BEFORE running anything, so combining silently drops later actions.
+- A `write_file` tool call turn MUST NOT also contain a shell `tool_call`, `edit_file`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, `use_skill`, or `web_search` — the agent loop intercepts the write BEFORE running anything, so combining silently drops later actions.
 - After a `[File write rejected by user]` envelope, DO NOT re-emit the same write for the same path. Either ask the user what to change, propose a different path, or abandon the write.
 - After a `[File write failed]` envelope, follow the recovery hint inside it — usually `mkdir -p` first via bash, then re-emit `write_file`.
 
@@ -191,6 +194,59 @@ Counter-example (WRONG — DO NOT do this when the file-write tool is available)
   ```
 The above is exactly the anti-pattern this tool replaces. Use `write_file` for the write, then a SEPARATE shell tool call for `chmod +x`.
 </file_write_tool>''';
+}
+
+/// Returns the `<file_edit_tool>` block for the system prompt, or an
+/// empty string when the master switch is off.  Gated by the SAME
+/// `fileWriteEnabled` toggle as `<file_write_tool>` — both are disk
+/// writes and share one Settings switch (see `_buildFileWriteSection`
+/// in `settings_sheet_agent.dart`).
+///
+/// Unlike `write_file`, this tool does NOT take the new file body — it
+/// takes an `old_string`/`new_string` pair and ssterm locates + replaces
+/// it locally, so the model never has to retransmit the unchanged parts
+/// of a file for a small change.
+String _buildFileEditBlock() {
+  return '''
+<file_edit_tool>
+You have a file-edit tool for making a targeted, in-place change to an EXISTING file — a precise search/replace, not a full rewrite. To propose an edit, emit one structured tool call and STOP:
+
+```tool_call
+{"id":"call_<short_unique_id>","name":"edit_file","arguments":{"path":"<absolute-path>","old_string":"<exact text currently in the file>","new_string":"<replacement text>","replace_all":false}}
+```
+
+Then STOP — the user is shown a chat card with a line-level diff and MUST click Apply before the bytes hit disk. The outcome arrives as a user-role message in your NEXT turn, in one of these shapes:
+
+[File edited]                     [File edit rejected by user]      [File edit failed]
+path: …                           path: …                           path: …
+edits: <count>                    reason: <free-form>                reason: no_match | ambiguous_match
+bytes: …                                                             message: …
+mtime: <iso8601>                                                     <recovery hint>
+
+CRITICAL — `old_string` MUST be text you have ACTUALLY SEEN in this conversation (via `cat`, `sed -n`, `grep -n`, or an earlier tool result). Never guess or reconstruct it from memory/training data — an inexact match fails with `no_match`, and a match that occurs more than once (when you didn't set `replace_all`) fails with `ambiguous_match`. Include enough surrounding context in `old_string` to make it unique, or set `"replace_all": true` when you deliberately want every occurrence replaced.
+
+MANDATORY — use `edit_file` for:
+- A small, precisely-located change to an existing file (a few lines, a config value, a function body) where you already know the exact current text.
+- ANY time you would otherwise reach for `sed -i`, `perl -pi -e`, or similar in-place-edit shell tricks — those are fragile with escaping and give the user no preview.
+
+When NOT to use it (use `write_file` instead):
+- Creating a new file.
+- A rewrite that touches most of the file, or you don't have the exact current text to anchor on.
+
+Hard rules:
+- Path resolution: same rules as `write_file` — absolute paths, `~/…`, or a path relative to the session's PWD (see `<session_context>` if present).
+- ONE `edit_file` proposal per turn.
+- An `edit_file` tool call turn MUST NOT also contain a shell `tool_call`, `write_file`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, `use_skill`, or `web_search` — the agent loop intercepts the edit BEFORE running anything, so combining silently drops later actions.
+- After a `[File edit rejected by user]` envelope, DO NOT re-emit the same edit for the same path.
+- After a `[File edit failed]` envelope with `reason: no_match`, re-read the file to confirm the exact current text before retrying — do NOT resend the same `old_string` unchanged.
+- After `reason: ambiguous_match`, either widen `old_string` with more context or add `"replace_all": true`.
+
+Example INVESTIGATE-then-EDIT turn:
+  I'll bump the timeout from 30 to 60 seconds.
+  ```tool_call
+  {"id":"call_bump_timeout","name":"edit_file","arguments":{"path":"/etc/myapp/config.yaml","old_string":"timeout_seconds: 30","new_string":"timeout_seconds: 60","replace_all":false}}
+  ```
+</file_edit_tool>''';
 }
 
 /// Returns the `<agent_skills>` block for the system prompt, or an
