@@ -221,7 +221,7 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
           ),
           _CloseTabIntent: CallbackAction<_CloseTabIntent>(
             onInvoke: (_) {
-              _closeTab(_active);
+              _requestCloseTab(_active);
               return null;
             },
           ),

@@ -294,12 +294,13 @@ class AppTab {
   }
 
   void dispose() {
-    // NOTE: editorDirty/editorViewKey need no explicit cleanup here —
-    // ValueNotifier.dispose() is skipped deliberately (see below); the
-    // GlobalKey has no disposable resource of its own. editorSftp is a
-    // BORROWED reference (see its doc comment above) and must NOT be
-    // closed here — that would tear down the source SSH tab's live
-    // connection out from under it.
+    // NOTE: editorViewKey needs no explicit cleanup here — a GlobalKey
+    // has no disposable resource of its own. editorDirty IS disposed,
+    // just further down alongside the other ValueNotifier/Controller
+    // .dispose() calls, not here at the top. editorSftp is a BORROWED
+    // reference (see its doc comment above) and must NOT be closed
+    // here — that would tear down the source SSH tab's live connection
+    // out from under it.
     manuallyDisconnected = true;
     keepaliveTimer?.cancel();
     keepaliveTimer = null;
