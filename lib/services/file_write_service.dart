@@ -7,6 +7,11 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../utils/app_dir.dart';
 
+/// Files larger than this are refused by [FileSystemAdapter.readContent]
+/// — `edit_file` needs the full content in memory to locate `old_string`
+/// and diff it; anything bigger should go through `sed`/`awk` instead.
+const _maxEditableSize = 4 * 1024 * 1024;
+
 /// Error categories surfaced by [FileSystemAdapter].  Mapped to a
 /// stable user-facing message in [FileWriteService.formatErrorForLlm]
 /// so the agent loop doesn't have to re-derive "what went wrong" from
@@ -39,6 +44,11 @@ enum FileWriteErrorKind {
   /// adapter when the tab is remote.  Translated into a "use bash
   /// heredoc as a fallback" hint for the model.
   notSupported,
+
+  /// File exceeds [_maxEditableSize] — too large to safely load into
+  /// memory for an `edit_file` match/replace.  The model is told to
+  /// fall back to `sed`/`awk` via bash.
+  tooLarge,
 }
 
 class FileWriteException implements Exception {
@@ -185,6 +195,19 @@ abstract class FileSystemAdapter {
     String content, {
     DateTime? expectedMtime,
   });
+
+  /// Read the full current content of [path] as UTF-8 text.  Used by
+  /// `edit_file` to locate `old_string` before computing a replacement
+  /// — unlike [preview], which only reports metadata (size/mtime/line
+  /// count), this returns the actual bytes.
+  ///
+  /// Throws [FileWriteException] with:
+  ///   - [FileWriteErrorKind.notSupported]: adapter unavailable (mirrors
+  ///     [preview]/[commit]).
+  ///   - [FileWriteErrorKind.invalidPath] / [FileWriteErrorKind.io]: same
+  ///     path-resolution and existence failures as [preview].
+  ///   - [FileWriteErrorKind.tooLarge]: file exceeds [_maxEditableSize].
+  Future<String> readContent(String path);
 }
 
 /// dart:io-backed adapter.  Used for LOCAL terminal tabs.  Atomic
@@ -260,6 +283,34 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       existingSize: stat.size,
       existingLines: lines,
     );
+  }
+
+  @override
+  Future<String> readContent(String path) async {
+    final resolved = _resolvePath(path);
+    final f = File(resolved);
+    if (!await f.exists()) {
+      throw FileWriteException(
+        FileWriteErrorKind.io,
+        'File does not exist: $resolved',
+      );
+    }
+    final stat = await f.stat();
+    if (stat.size > _maxEditableSize) {
+      throw FileWriteException(
+        FileWriteErrorKind.tooLarge,
+        'File is ${stat.size} bytes, exceeds the $_maxEditableSize byte '
+        'edit limit: $resolved',
+      );
+    }
+    try {
+      return await f.readAsString();
+    } on FileSystemException {
+      throw FileWriteException(
+        FileWriteErrorKind.io,
+        'File is not valid UTF-8 text, cannot edit in place: $resolved',
+      );
+    }
   }
 
   @override
@@ -560,6 +611,55 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   }
 
   @override
+  Future<String> readContent(String path) async {
+    final client = sftp;
+    if (client == null) {
+      throw const FileWriteException(
+        FileWriteErrorKind.notSupported,
+        'SSH session is not connected yet.',
+      );
+    }
+    final resolved = await _resolveRemotePath(path);
+    SftpFileAttrs attrs;
+    try {
+      attrs = await client.stat(resolved);
+    } on SftpStatusError catch (e) {
+      if (e.code == 2) {
+        throw FileWriteException(
+          FileWriteErrorKind.io,
+          'File does not exist on the remote: $resolved',
+        );
+      }
+      throw FileWriteException(
+        FileWriteErrorKind.io,
+        'SFTP stat failed: ${e.message}',
+      );
+    }
+    final size = attrs.size ?? 0;
+    if (size > _maxEditableSize) {
+      throw FileWriteException(
+        FileWriteErrorKind.tooLarge,
+        'File is $size bytes, exceeds the $_maxEditableSize byte edit '
+        'limit: $resolved',
+      );
+    }
+    final remote = await client.open(resolved);
+    try {
+      final bytes = await remote.readBytes();
+      try {
+        return utf8.decode(bytes);
+      } on FormatException {
+        throw FileWriteException(
+          FileWriteErrorKind.io,
+          'File is not valid UTF-8 text, cannot edit in place: $resolved',
+        );
+      }
+    } finally {
+      await remote.close();
+    }
+  }
+
+  @override
   Future<FileWriteResult> commit(
     String path,
     String content, {
@@ -802,6 +902,8 @@ class FileWriteService {
         'I/O failed. You may retry ONCE; if it fails again, fall back to `cat <<EOF > path` via bash.',
       FileWriteErrorKind.notSupported =>
         'This adapter cannot handle the write (the SSH session may not be ready, or the path scheme is unsupported). Fall back to `cat <<EOF > path` via bash.',
+      FileWriteErrorKind.tooLarge =>
+        'File too large to edit in-place (> 4 MB). Use `sed`/`awk` via bash for large files, or read a smaller slice with `head`/`grep -n`/`sed -n` to confirm the exact old_string before retrying with a NARROWER match.',
     };
     return '[File write failed]\n'
         'path: $path\n'

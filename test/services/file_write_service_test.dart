@@ -193,6 +193,61 @@ void main() {
     });
   });
 
+  group('LocalFileSystemAdapter.readContent', () {
+    late Directory tempRoot;
+    late LocalFileSystemAdapter adapter;
+
+    setUp(() async {
+      tempRoot = await Directory.systemTemp.createTemp('ssterm-fw-read-');
+      adapter = const LocalFileSystemAdapter();
+    });
+
+    tearDown(() async {
+      if (await tempRoot.exists()) {
+        await tempRoot.delete(recursive: true);
+      }
+    });
+
+    test('reads back exactly what was written', () async {
+      final path = '${tempRoot.path}/x.txt';
+      File(path).writeAsStringSync('line1\nline2\n');
+      expect(await adapter.readContent(path), equals('line1\nline2\n'));
+    });
+
+    test('throws io when the file does not exist', () async {
+      await expectLater(
+        () => adapter.readContent('${tempRoot.path}/missing.txt'),
+        throwsA(isA<FileWriteException>()
+            .having((e) => e.kind, 'kind', equals(FileWriteErrorKind.io))),
+      );
+    });
+
+    test('throws tooLarge above the 4 MB edit limit', () async {
+      final path = '${tempRoot.path}/big.txt';
+      // One byte over 4 MiB — cheap to allocate, no need to actually
+      // hit a realistic multi-MB text file.
+      File(path).writeAsBytesSync(List.filled(4 * 1024 * 1024 + 1, 65));
+      await expectLater(
+        () => adapter.readContent(path),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind,
+          'kind',
+          equals(FileWriteErrorKind.tooLarge),
+        )),
+      );
+    });
+
+    test('throws io for non-UTF-8 binary content', () async {
+      final path = '${tempRoot.path}/binary.dat';
+      File(path).writeAsBytesSync([0xFF, 0xFE, 0x00, 0xD8, 0x00, 0x00]);
+      await expectLater(
+        () => adapter.readContent(path),
+        throwsA(isA<FileWriteException>()
+            .having((e) => e.kind, 'kind', equals(FileWriteErrorKind.io))),
+      );
+    });
+  });
+
   group('SftpFileSystemAdapter availability', () {
     test('isAvailable is false when sftp is null', () {
       final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
@@ -215,6 +270,18 @@ void main() {
       final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.commit('/etc/hosts', 'x'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind,
+          'kind',
+          equals(FileWriteErrorKind.notSupported),
+        )),
+      );
+    });
+
+    test('readContent throws notSupported when sftp is null', () async {
+      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
+      await expectLater(
+        () => adapter.readContent('/etc/hosts'),
         throwsA(isA<FileWriteException>().having(
           (e) => e.kind,
           'kind',
@@ -413,6 +480,14 @@ void main() {
             FileWriteErrorKind.parentMissing, 'missing'),
       );
       expect(out, contains('mkdir -p'));
+    });
+
+    test('tooLarge recovery points at sed/awk (concrete fallback)', () {
+      final out = FileWriteService.formatErrorForLlm(
+        '/a/big.log',
+        const FileWriteException(FileWriteErrorKind.tooLarge, 'too big'),
+      );
+      expect(out, contains('sed'));
     });
   });
 }
