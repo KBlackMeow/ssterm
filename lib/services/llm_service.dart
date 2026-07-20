@@ -69,6 +69,9 @@ class ToolCall {
   bool get isWriteFile =>
       name == 'write_file' || name == 'file_write' || name == 'fs.write';
 
+  bool get isEditFile =>
+      name == 'edit_file' || name == 'file_edit' || name == 'fs.edit';
+
   String? get skillId {
     final value = arguments['skill_id'] ?? arguments['id'] ?? arguments['name'];
     return value is String && value.trim().isNotEmpty
@@ -90,6 +93,29 @@ class ToolCall {
     final value = arguments['content'] ?? arguments['text'];
     return value is String ? value : null;
   }
+
+  /// `old_string` for an `edit_file` call. Non-null only when the
+  /// argument is a String that is non-empty AFTER trimming — a
+  /// whitespace-only search target is almost certainly a mistake and
+  /// would match too broadly to be useful. The RETURNED value is the
+  /// raw (untrimmed) string, though: leading/trailing whitespace can be
+  /// exactly what makes a match unique.
+  String? get oldString {
+    final value = arguments['old_string'];
+    return value is String && value.trim().isNotEmpty ? value : null;
+  }
+
+  /// `new_string` for an `edit_file` call. Unlike [oldString], an empty
+  /// string IS a valid replacement (it means "delete old_string") — so
+  /// this only checks that the argument is present and is a String.
+  String? get newString {
+    final value = arguments['new_string'];
+    return value is String ? value : null;
+  }
+
+  /// `replace_all` for an `edit_file` call — defaults to false (require
+  /// an unambiguous single match) when omitted or not a bool.
+  bool get replaceAll => arguments['replace_all'] == true;
 
   bool get isAskUserQuestion =>
       name == 'ask_user_question' || name == 'ask_question';
@@ -704,6 +730,12 @@ class LlmService {
     if (call.isUseSkill) return call.skillId != null;
     if (call.isWebSearch) return call.query != null;
     if (call.isWriteFile) return call.path != null && call.content != null;
+    if (call.isEditFile) {
+      return call.path != null &&
+          call.oldString != null &&
+          call.newString != null &&
+          call.oldString != call.newString;
+    }
     if (call.isAskUserQuestion) {
       return call.question != null &&
           call.header != null &&
@@ -795,6 +827,11 @@ class LlmService {
         'write_file' ||
         'file_write' ||
         'fs.write' => '${call.name}\n${call.path}\n${call.content}',
+        'edit_file' ||
+        'file_edit' ||
+        'fs.edit' =>
+          '${call.name}\n${call.path}\n${call.oldString}\n'
+          '${call.newString}\n${call.replaceAll}',
         _ => '${call.name}\n${jsonEncode(call.arguments)}',
       };
       if (seen.add(key)) out.add(call);

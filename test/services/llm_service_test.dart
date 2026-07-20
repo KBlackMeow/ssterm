@@ -291,6 +291,79 @@ Now the real call:
       expect(LlmService.extractCommands(input), isEmpty);
     });
 
+    test('extracts structured edit_file calls', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"foo","new_string":"bar","replace_all":true}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.isEditFile, isTrue);
+      expect(calls.single.path, equals('/tmp/a.txt'));
+      expect(calls.single.oldString, equals('foo'));
+      expect(calls.single.newString, equals('bar'));
+      expect(calls.single.replaceAll, isTrue);
+      expect(LlmService.extractCommands(input), isEmpty);
+    });
+
+    test('edit_file replace_all defaults to false when omitted', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"foo","new_string":"bar"}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.replaceAll, isFalse);
+    });
+
+    test('edit_file missing old_string is rejected', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","new_string":"bar"}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('edit_file missing new_string is rejected', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"foo"}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('edit_file with old_string == new_string is rejected (no-op edit)',
+        () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"same","new_string":"same"}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('edit_file new_string may be empty (a deletion edit)', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"remove-me","new_string":""}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.isEditFile, isTrue);
+      expect(calls.single.newString, equals(''));
+    });
+
+    test('edit_file with whitespace-only old_string is rejected', () {
+      const input = r'''
+```tool_call
+{"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"   ","new_string":"x"}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
     test('extracts structured ask_user_question calls', () {
       const input = '''
 ```tool_call
