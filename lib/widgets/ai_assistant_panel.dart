@@ -284,6 +284,17 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     setState(() {
       _agentBusy = false;
       _agentLoopStatus = null;
+      // A pending ask_user_question card's `await` would otherwise
+      // leak forever once the loop that owns it has been abandoned —
+      // force it to its stale terminal state here, same idea as the
+      // lazy staleness check `_decideQuestionProposal` runs when a
+      // card IS clicked after the fact, just done eagerly on cancel.
+      final pendingQuestion = _pendingQuestionProposal;
+      if (pendingQuestion != null && !pendingQuestion.decision.isCompleted) {
+        pendingQuestion.state = _QuestionProposalState.stale;
+        pendingQuestion.decision.complete(null);
+      }
+      _pendingQuestionProposal = null;
     });
     _setTerminalLocked(false);
   }
@@ -291,6 +302,22 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   void _send() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
+
+    // If a question-proposal card is waiting on an answer (option tap
+    // OR the "Other" custom-text path), whatever the user just typed
+    // IS that answer — route it to the pending proposal instead of
+    // falling through to slash commands or a brand-new agent turn.
+    // `_pendingQuestionProposal` is only ever non-null while a card is
+    // genuinely pending or awaiting custom text (see
+    // `_decideQuestionProposal`, which clears it the moment an answer
+    // is recorded), so no extra state check is needed here.
+    final pendingQuestion = _pendingQuestionProposal;
+    if (pendingQuestion != null) {
+      _textController.clear();
+      _decideQuestionProposal(pendingQuestion, answer: text);
+      _scrollToBottom();
+      return;
+    }
 
     // Intercept slash-commands BEFORE the LLM / shell receives anything.
     // Returning true means "fully handled — do not fall through to send".
@@ -520,6 +547,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             loopStatus: _agentLoopStatus,
             messages: _messages,
             textController: _textController,
+            agentInputFocusNode: _agentInputFocusNode,
             scrollController: _scrollController,
             onSend: _send,
             onCancel: _cancelAgent,
@@ -537,6 +565,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             terminalLineHeight: widget.terminalLineHeight,
             onWriteProposalDecision: _decideWriteProposal,
             onDangerProposalDecision: _decideDangerProposal,
+            onQuestionProposalDecision: _decideQuestionProposal,
+            onQuestionProposalOther: _beginCustomQuestionAnswer,
             position: _position,
             onPositionToggle: _togglePosition,
           ),

@@ -19,6 +19,7 @@ class _AiPanelContent extends StatelessWidget {
     this.loopStatus,
     required this.messages,
     required this.textController,
+    this.agentInputFocusNode,
     required this.scrollController,
     required this.onSend,
     required this.onCancel,
@@ -32,6 +33,8 @@ class _AiPanelContent extends StatelessWidget {
     this.terminalLineHeight,
     this.onWriteProposalDecision,
     this.onDangerProposalDecision,
+    this.onQuestionProposalDecision,
+    this.onQuestionProposalOther,
     required this.position,
     this.onPositionToggle,
   });
@@ -42,6 +45,11 @@ class _AiPanelContent extends StatelessWidget {
   final String? loopStatus;
   final List<_ChatMessage> messages;
   final TextEditingController textController;
+
+  /// Focus target for the agent-mode chat `TextField`.  Programmatically
+  /// focused when the user taps "Other" on a pending question card —
+  /// see `_AiAssistantOverlayState._beginCustomQuestionAnswer`.
+  final FocusNode? agentInputFocusNode;
   final ScrollController scrollController;
   final VoidCallback onSend;
   final VoidCallback onCancel;
@@ -92,6 +100,18 @@ class _AiPanelContent extends StatelessWidget {
   /// [_AiAssistantOverlayState._decideDangerProposal].
   final void Function(_DangerProposal proposal, {required bool approve})?
   onDangerProposalDecision;
+
+  /// Handler the [_QuestionProposalCard] calls when the user taps a
+  /// regular option row (with that option's `label`).  Same pattern as
+  /// [onDangerProposalDecision] — the state machine lives in
+  /// [_AiAssistantOverlayState._decideQuestionProposal].
+  final void Function(_QuestionProposal proposal, {required String answer})?
+  onQuestionProposalDecision;
+
+  /// Handler the [_QuestionProposalCard] calls when the user taps
+  /// "Other" — does NOT resolve the proposal, just hands focus to the
+  /// main input.  See [_AiAssistantOverlayState._beginCustomQuestionAnswer].
+  final void Function(_QuestionProposal proposal)? onQuestionProposalOther;
 
   /// Current dock side — drives the icon shown on the position toggle
   /// button so it reads "switch to the OTHER side".
@@ -274,6 +294,7 @@ class _AiPanelContent extends StatelessWidget {
                           Expanded(
                             child: TextField(
                               controller: textController,
+                              focusNode: agentInputFocusNode,
                               textInputAction: TextInputAction.send,
                               style: TextStyle(
                                 color:
@@ -580,6 +601,25 @@ class _AiPanelContent extends StatelessWidget {
           onReject: decide == null
               ? () {}
               : () => decide(danger, approve: false),
+        ),
+      );
+    }
+
+    // Ask-user question: multiple-choice card, structured sibling of
+    // the plain `[ASK_USER]` free-text prompt.  Same null-callback
+    // no-op fallback as the two cards above.
+    final question = msg.questionProposal;
+    if (question != null) {
+      final decide = onQuestionProposalDecision;
+      final other = onQuestionProposalOther;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _QuestionProposalCard(
+          proposal: question,
+          onOptionSelected: decide == null
+              ? (_) {}
+              : (label) => decide(question, answer: label),
+          onOther: other == null ? () {} : () => other(question),
         ),
       );
     }
