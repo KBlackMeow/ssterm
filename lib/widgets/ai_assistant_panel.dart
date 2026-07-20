@@ -30,6 +30,7 @@ part 'ai_assistant_panel_widgets.dart';
 part 'ai_assistant_panel_content.dart';
 part 'ai_assistant_panel_write_card.dart';
 part 'ai_assistant_panel_danger_card.dart';
+part 'ai_assistant_panel_question_card.dart';
 part 'ai_assistant_panel_tooling.dart';
 part 'ai_assistant_panel_loop.dart';
 
