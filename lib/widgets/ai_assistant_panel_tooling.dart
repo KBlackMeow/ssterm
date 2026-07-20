@@ -474,12 +474,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       );
       _conversationHistory.add({
         'role': 'user',
-        'content':
-            '[File edit failed]\n'
-            'path: $path\n'
-            'reason: disabled\n'
-            'message: File write tool is disabled in Settings.\n\n'
-            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without edit_file. Do NOT retry the same edit_file tool call.',
+        'content': FileEditService.formatDisabledForLlm(path),
       });
       return _EditProposalOutcome.injectedAndContinue;
     }

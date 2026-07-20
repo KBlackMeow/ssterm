@@ -141,11 +141,29 @@ class FileEditService {
   /// [FileSystemAdapter]. Rewrites the shared formatter's
   /// `[File write failed]` header to `[File edit failed]` so the
   /// envelope matches what `<file_edit_tool>` in the system prompt
-  /// promises — the `reason:`/`message:`/recovery-hint body is
-  /// otherwise untouched, since that content is accurate for either
-  /// tool.
+  /// promises. Also rewrites recovery-hint tool references from
+  /// `write_file` to `edit_file` so the model knows to retry with the
+  /// right tool after an mtime-conflict or other concurrency issue.
   static String formatAdapterErrorForLlm(String path, FileWriteException e) {
     final base = FileWriteService.formatErrorForLlm(path, e);
-    return base.replaceFirst('[File write failed]', '[File edit failed]');
+    return base
+        .replaceFirst('[File write failed]', '[File edit failed]')
+        .replaceFirst(
+          'issue a NEW write_file tool call',
+          'issue a NEW edit_file tool call',
+        )
+        .replaceFirst('then retry write_file', 'then retry edit_file');
+  }
+
+  /// Envelope for a proposed edit_file call when the tool is disabled in
+  /// Settings. Kept as its own formatter (rather than an inline literal
+  /// at the call site) so this envelope can't drift out of sync with
+  /// the other edit_file envelope shapes.
+  static String formatDisabledForLlm(String path) {
+    return '[File edit failed]\n'
+        'path: $path\n'
+        'reason: disabled\n'
+        'message: File write tool is disabled in Settings.\n\n'
+        'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without edit_file. Do NOT retry the same edit_file tool call.';
   }
 }

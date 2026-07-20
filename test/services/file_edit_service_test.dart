@@ -147,5 +147,35 @@ void main() {
       expect(out, contains('reason: permission'));
       expect(out, contains('denied'));
     });
+
+    test('formatAdapterErrorForLlm redirects mtimeMismatch recovery to '
+        'edit_file, not write_file', () {
+      final out = FileEditService.formatAdapterErrorForLlm(
+        '/tmp/x',
+        const FileWriteException(
+          FileWriteErrorKind.mtimeMismatch,
+          'changed',
+        ),
+      );
+      expect(out, contains('issue a NEW edit_file tool call'));
+      expect(out, isNot(contains('write_file tool call')));
+    });
+
+    test('formatAdapterErrorForLlm does not mangle a path that contains '
+        'the substring "write_file"', () {
+      final out = FileEditService.formatAdapterErrorForLlm(
+        '/tmp/write_file_notes.txt',
+        const FileWriteException(FileWriteErrorKind.io, 'boom'),
+      );
+      expect(out, contains('path: /tmp/write_file_notes.txt'));
+    });
+
+    test('formatDisabledForLlm matches the other edit_file envelopes\' '
+        'header', () {
+      final out = FileEditService.formatDisabledForLlm('/tmp/x');
+      expect(out, contains('[File edit failed]'));
+      expect(out, contains('reason: disabled'));
+      expect(out, contains('Do NOT retry the same edit_file tool call'));
+    });
   });
 }
