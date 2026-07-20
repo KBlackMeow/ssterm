@@ -26,5 +26,6 @@ packages/*/example/pubspec.lock
 
 # Local tooling
 .claude/
+.superpowers/
 dist/SSTerm-1.0.0.dmg
 dist
