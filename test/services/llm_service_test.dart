@@ -291,6 +291,79 @@ Now the real call:
       expect(LlmService.extractCommands(input), isEmpty);
     });
 
+    test('extracts structured ask_user_question calls', () {
+      const input = '''
+```tool_call
+{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Which lockfile should I use?","header":"Lockfile","options":[{"label":"package-lock.json","description":"npm lockfile at repo root"},{"label":"pnpm-lock.yaml","description":"pnpm lockfile at repo root"}]}}
+```
+''';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.isAskUserQuestion, isTrue);
+      expect(calls.single.question, equals('Which lockfile should I use?'));
+      expect(calls.single.header, equals('Lockfile'));
+      expect(calls.single.options, hasLength(2));
+      expect(calls.single.options.first.label, equals('package-lock.json'));
+      expect(
+        calls.single.options.first.description,
+        equals('npm lockfile at repo root'),
+      );
+      expect(LlmService.extractCommands(input), isEmpty);
+    });
+
+    test('ask_user_question with only 1 option is rejected', () {
+      const input = '''
+```tool_call
+{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Proceed?","header":"Confirm","options":[{"label":"Yes","description":"Go ahead"}]}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('ask_user_question with 7 options is rejected', () {
+      final options = List.generate(
+        7,
+        (i) => '{"label":"opt$i","description":"desc$i"}',
+      ).join(',');
+      final input =
+          '```tool_call\n'
+          '{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Pick one","header":"Pick","options":[$options]}}\n'
+          '```\n';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('ask_user_question with 6 options is accepted (upper bound)', () {
+      final options = List.generate(
+        6,
+        (i) => '{"label":"opt$i","description":"desc$i"}',
+      ).join(',');
+      final input =
+          '```tool_call\n'
+          '{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Pick one","header":"Pick","options":[$options]}}\n'
+          '```\n';
+      final calls = LlmService.extractToolCalls(input);
+      expect(calls.single.options, hasLength(6));
+    });
+
+    test('ask_user_question missing header is rejected', () {
+      const input = '''
+```tool_call
+{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Proceed?","options":[{"label":"Yes","description":"Go ahead"},{"label":"No","description":"Stop"}]}}
+```
+''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
+    test('ask_user_question option missing description is dropped from the list', () {
+      const input = '''
+```tool_call
+{"id":"call_ask","name":"ask_user_question","arguments":{"question":"Proceed?","header":"Confirm","options":[{"label":"Yes"},{"label":"No","description":"Stop"}]}}
+```
+''';
+      // Only 1 of the 2 declared options survives parsing (missing
+      // description) -> below the 2-option floor -> whole call rejected.
+      expect(LlmService.extractToolCalls(input), isEmpty);
+    });
+
     test('extracts a tool_calls array with mixed supported tools', () {
       const input = '''
 ```tool_call

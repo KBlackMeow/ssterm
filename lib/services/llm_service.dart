@@ -90,6 +90,45 @@ class ToolCall {
     final value = arguments['content'] ?? arguments['text'];
     return value is String ? value : null;
   }
+
+  bool get isAskUserQuestion =>
+      name == 'ask_user_question' || name == 'ask_question';
+
+  String? get question {
+    final value = arguments['question'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
+  String? get header {
+    final value = arguments['header'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
+  /// Candidate answers for [isAskUserQuestion] calls.  Returns a plain
+  /// record (not a widget-layer type) because `ToolCall` lives in this
+  /// library and must not depend on the private `_QuestionOption` class
+  /// defined in `ai_assistant_panel_models.dart` — callers there map
+  /// this into their own type.  Entries missing either `label` or
+  /// `description` are silently dropped; [_isSupportedToolCall] then
+  /// checks the post-filter count against the 2-6 bound.
+  List<({String label, String description})> get options {
+    final value = arguments['options'];
+    if (value is! List) return const [];
+    final out = <({String label, String description})>[];
+    for (final item in value) {
+      if (item is! Map) continue;
+      final map = item.cast<String, Object?>();
+      final label = map['label'];
+      final description = map['description'];
+      if (label is String &&
+          label.trim().isNotEmpty &&
+          description is String &&
+          description.trim().isNotEmpty) {
+        out.add((label: label.trim(), description: description.trim()));
+      }
+    }
+    return out;
+  }
 }
 
 /// Minimal LLM service that routes requests to the configured provider.
@@ -665,6 +704,12 @@ class LlmService {
     if (call.isUseSkill) return call.skillId != null;
     if (call.isWebSearch) return call.query != null;
     if (call.isWriteFile) return call.path != null && call.content != null;
+    if (call.isAskUserQuestion) {
+      return call.question != null &&
+          call.header != null &&
+          call.options.length >= 2 &&
+          call.options.length <= 6;
+    }
     return false;
   }
 
