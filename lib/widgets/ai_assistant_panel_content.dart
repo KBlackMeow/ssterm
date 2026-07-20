@@ -25,7 +25,6 @@ class _AiPanelContent extends StatelessWidget {
     this.onAutoExecuteChanged,
     required this.onInsert,
     required this.onSendToTerminal,
-    required this.onRunManualCommand,
     required this.onModeChanged,
     this.shellIntegrationActive,
     required this.markdownEnabled,
@@ -54,12 +53,6 @@ class _AiPanelContent extends StatelessWidget {
   /// agent.  This is intentionally separate from the agent execution path.
   final ValueChanged<String>? onSendToTerminal;
 
-  /// Agent-mode "Exec" button on an AI message card.  Routes through the
-  /// same OSC 133 capture pipeline used by the auto-execute loop, so the
-  /// agent always sees a consistent view of the world regardless of whether
-  /// the user clicked the button manually or `auto-execute` was on.
-  final Future<void> Function(String cmd)? onRunManualCommand;
-
   final ValueChanged<AiPanelMode> onModeChanged;
 
   /// `true` → OSC 133 shell integration is active on the current pane.
@@ -86,15 +79,19 @@ class _AiPanelContent extends StatelessWidget {
   /// in the state above — kept as a callback (instead of reaching into
   /// the state directly) so the panel content stays a pure stateless
   /// view, the same shape every other interactive control here uses.
-  final void Function(_WriteProposal proposal,
-      {required bool apply, String? reason})? onWriteProposalDecision;
+  final void Function(
+    _WriteProposal proposal, {
+    required bool apply,
+    String? reason,
+  })?
+  onWriteProposalDecision;
 
   /// Handler the [_DangerProposalCard] calls when the user clicks
   /// Approve or Reject.  Same pattern as [onWriteProposalDecision] —
   /// the panel stays a pure view, the state machine lives in
   /// [_AiAssistantOverlayState._decideDangerProposal].
   final void Function(_DangerProposal proposal, {required bool approve})?
-      onDangerProposalDecision;
+  onDangerProposalDecision;
 
   /// Current dock side — drives the icon shown on the position toggle
   /// button so it reads "switch to the OTHER side".
@@ -179,7 +176,9 @@ class _AiPanelContent extends StatelessWidget {
                       expands: true,
                       textAlignVertical: TextAlignVertical.top,
                       style: TextStyle(
-                        color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                        color:
+                            AppColors.maybeOf(context)?.foreground ??
+                            _kFgActive,
                         fontSize: 13,
                         fontFamily: 'JetBrainsMono',
                         height: 1.4,
@@ -187,8 +186,10 @@ class _AiPanelContent extends StatelessWidget {
                       decoration: InputDecoration(
                         hintText: 'Type your command (multi-line supported)…',
                         hintStyle: TextStyle(
-                          color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
-                              .withValues(alpha: 0.5),
+                          color:
+                              (AppColors.maybeOf(context)?.foregroundDim ??
+                                      _kFgInactive)
+                                  .withValues(alpha: 0.5),
                           fontSize: 13,
                         ),
                         border: InputBorder.none,
@@ -210,7 +211,11 @@ class _AiPanelContent extends StatelessWidget {
                           color: const Color(0xFF2472C8),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Icon(Icons.send_rounded, size: 15, color: Colors.white),
+                        child: const Icon(
+                          Icons.send_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
@@ -242,8 +247,10 @@ class _AiPanelContent extends StatelessWidget {
                 color: popupColor,
                 border: Border(
                   top: BorderSide(
-                    color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
-                        .withValues(alpha: 0.15),
+                    color:
+                        (AppColors.maybeOf(context)?.foregroundDim ??
+                                _kFgInactive)
+                            .withValues(alpha: 0.15),
                   ),
                 ),
               ),
@@ -269,7 +276,9 @@ class _AiPanelContent extends StatelessWidget {
                               controller: textController,
                               textInputAction: TextInputAction.send,
                               style: TextStyle(
-                                color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                                color:
+                                    AppColors.maybeOf(context)?.foreground ??
+                                    _kFgActive,
                                 fontSize: 13,
                                 height: 1.2,
                               ),
@@ -280,7 +289,12 @@ class _AiPanelContent extends StatelessWidget {
                                   fontSize: 13,
                                 ),
                                 border: InputBorder.none,
-                                contentPadding: EdgeInsets.fromLTRB(12, 0, 8, 0),
+                                contentPadding: EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  8,
+                                  0,
+                                ),
                                 isDense: true,
                               ),
                               onSubmitted: (_) => onSend(),
@@ -288,20 +302,29 @@ class _AiPanelContent extends StatelessWidget {
                           ),
                           // Compact auto-execute chip inside the input field row
                           GestureDetector(
-                            onTap: () => onAutoExecuteChanged?.call(!autoExecute),
+                            onTap: () =>
+                                onAutoExecuteChanged?.call(!autoExecute),
                             child: Container(
                               height: 20,
                               margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: autoExecute
-                                    ? const Color(0xFF2E7D32).withValues(alpha: 0.3)
+                                    ? const Color(
+                                        0xFF2E7D32,
+                                      ).withValues(alpha: 0.3)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(4),
                                 border: Border.all(
                                   color: autoExecute
-                                      ? const Color(0xFF2E7D32).withValues(alpha: 0.5)
-                                      : dimColor(context).withValues(alpha: 0.25),
+                                      ? const Color(
+                                          0xFF2E7D32,
+                                        ).withValues(alpha: 0.5)
+                                      : dimColor(
+                                          context,
+                                        ).withValues(alpha: 0.25),
                                   width: 1,
                                 ),
                               ),
@@ -338,7 +361,9 @@ class _AiPanelContent extends StatelessWidget {
                               margin: const EdgeInsets.only(right: 4),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: busy ? const Color(0xFFFF6E67) : const Color(0xFF2472C8),
+                                color: busy
+                                    ? const Color(0xFFFF6E67)
+                                    : const Color(0xFF2472C8),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Icon(
@@ -362,7 +387,9 @@ class _AiPanelContent extends StatelessWidget {
   }
 
   Color dimColor(BuildContext context) =>
-      (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6);
+      (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(
+        alpha: 0.6,
+      );
 
   Widget _loopStatusIndicator(BuildContext context, String status) {
     final dim = dimColor(context);
@@ -379,7 +406,11 @@ class _AiPanelContent extends StatelessWidget {
           Expanded(
             child: Text(
               status,
-              style: TextStyle(color: dim, fontSize: 11, fontStyle: FontStyle.italic),
+              style: TextStyle(
+                color: dim,
+                fontSize: 11,
+                fontStyle: FontStyle.italic,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -389,7 +420,8 @@ class _AiPanelContent extends StatelessWidget {
   }
 
   Widget _agentEmptyState(BuildContext context) {
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.5);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.5);
     final dimmer = dim.withValues(alpha: 0.6);
     return Center(
       child: Column(
@@ -488,11 +520,12 @@ class _AiPanelContent extends StatelessWidget {
     );
   }
 
-Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
+  Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
     final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
-    final dim =
-        (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6);
-    final surface = AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.6);
+    final surface =
+        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
 
     if (msg.isSystem) {
       return Padding(
@@ -521,13 +554,11 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
         padding: const EdgeInsets.only(bottom: 12, left: 32),
         child: _WriteProposalCard(
           proposal: proposal,
-          onApply: decide == null
-              ? () {}
-              : () => decide(proposal, apply: true),
+          onApply: decide == null ? () {} : () => decide(proposal, apply: true),
           onReject: decide == null
               ? ({String? reason}) {}
               : ({String? reason}) =>
-                  decide(proposal, apply: false, reason: reason),
+                    decide(proposal, apply: false, reason: reason),
         ),
       );
     }
@@ -576,9 +607,7 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
             children: [
               Icon(Icons.info_outline, size: 14, color: noticeFg),
               const SizedBox(width: 8),
-              Expanded(
-                child: _buildMarkdown(context, msg.text, noticeFg),
-              ),
+              Expanded(child: _buildMarkdown(context, msg.text, noticeFg)),
             ],
           ),
         ),
@@ -599,7 +628,11 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
                 color: const Color(0xFF2472C8).withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Icon(Icons.person_outline, size: 14, color: const Color(0xFF2472C8)),
+              child: Icon(
+                Icons.person_outline,
+                size: 14,
+                color: const Color(0xFF2472C8),
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -613,7 +646,6 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
       );
     }
 
-    final cmds = msg.commands ?? <String>[];
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -635,118 +667,30 @@ Widget _buildAgentMessage(BuildContext context, _ChatMessage msg) {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (msg.error != null)
-                  Text(msg.error!, style: const TextStyle(color: Color(0xFFFF6E67), fontSize: 13, height: 1.5))
+                  Text(
+                    msg.error!,
+                    style: const TextStyle(
+                      color: Color(0xFFFF6E67),
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
+                  )
                 else ...[
                   if (msg.reasoning != null)
                     _ReasoningSection(reasoning: msg.reasoning!),
                   if (markdownEnabled && msg.text.isNotEmpty)
                     _buildMarkdown(context, msg.text, fg)
                   else
-                    Text(msg.text,
-                        style: TextStyle(color: fg, fontSize: 13, height: 1.5)),
-                ],
-                // Per-command UI rules:
-                //   markdown ON  + auto-execute ON  → skip entirely; the
-                //       command is already shown by GptMarkdown's code
-                //       block above and Layer 3 (the result card) confirms
-                //       what ran.
-                //   markdown ON  + auto-execute OFF → render only a compact
-                //       Exec button (no command text — markdown already
-                //       shows it).
-                //   markdown OFF + auto-execute ON  → keep the monospaced
-                //       preview box so users can spot what the loop is
-                //       running, but no button.
-                //   markdown OFF + auto-execute OFF → preview box + Exec
-                //       button, the original layout.
-                if (cmds.isNotEmpty &&
-                    onRunManualCommand != null &&
-                    !(markdownEnabled && autoExecute)) ...[
-                  const SizedBox(height: 8),
-                  for (var i = 0; i < cmds.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 6),
-                    if (markdownEnabled)
-                      // Compact button-only row — no preview, the markdown
-                      // code block above is the source of truth.
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: GestureDetector(
-                          onTap: () => onRunManualCommand?.call(cmds[i]),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2E7D32),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.play_arrow,
-                                    size: 12, color: Colors.white),
-                                SizedBox(width: 4),
-                                Text('Exec',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: surface,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: dim.withValues(alpha: 0.2)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              cmds[i],
-                              style: TextStyle(
-                                color: fg,
-                                fontSize: 13,
-                                fontFamily: 'JetBrainsMono',
-                                height: 1.4,
-                              ),
-                            ),
-                            if (!autoExecute) ...[
-                              const SizedBox(height: 8),
-                              GestureDetector(
-                                onTap: () => onRunManualCommand?.call(cmds[i]),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF2E7D32),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.play_arrow,
-                                          size: 12, color: Colors.white),
-                                      SizedBox(width: 4),
-                                      Text('Exec',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                    Text(
+                      msg.text,
+                      style: TextStyle(color: fg, fontSize: 13, height: 1.5),
                     ),
-                  ],
                 ],
+                // Proposed commands no longer render here at all — every
+                // command (dangerous or not) now surfaces as its own
+                // `_DangerProposal` card (see ai_assistant_panel_loop.dart's
+                // per-command confirmation gate), inserted as a separate
+                // message right after this one.
               ],
             ),
           ),

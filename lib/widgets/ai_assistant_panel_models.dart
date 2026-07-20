@@ -54,7 +54,6 @@ class _ChatMessage {
   /// (and to any future deserialization paths that omit the field).
   final bool? isNotice;
 
-  List<String>? commands;
   final String? error;
 
   /// For system "command card" messages: the command that was executed.
@@ -87,7 +86,6 @@ class _ChatMessage {
     required this.isUser,
     this.isSystem = false,
     this.isNotice = false,
-    this.commands,
     this.error,
     this.commandRun,
     this.commandExitCode,
@@ -95,10 +93,19 @@ class _ChatMessage {
     this.dangerProposal,
   });
 
-  factory _ChatMessage.user(String text) => _ChatMessage._(text: text, isUser: true);
+  factory _ChatMessage.user(String text) =>
+      _ChatMessage._(text: text, isUser: true);
 
-  factory _ChatMessage.ai({required String text, String? reasoning, List<String>? commands, String? error}) =>
-      _ChatMessage._(text: text, reasoning: reasoning, isUser: false, commands: commands, error: error);
+  factory _ChatMessage.ai({
+    required String text,
+    String? reasoning,
+    String? error,
+  }) => _ChatMessage._(
+    text: text,
+    reasoning: reasoning,
+    isUser: false,
+    error: error,
+  );
 
   /// Inline "command card" inserted into the chat after the agent loop runs
   /// a command.  [text] is the captured output (already cleaned of ANSI by
@@ -119,32 +126,21 @@ class _ChatMessage {
   /// Client-side notice (slash-command output, status hints, etc.).
   /// [text] supports markdown — it's piped through `_buildMarkdown` for
   /// `**bold**` and ``inline code`` rendering.
-  factory _ChatMessage.notice(String text) => _ChatMessage._(
-    text: text,
-    isUser: false,
-    isNotice: true,
-  );
+  factory _ChatMessage.notice(String text) =>
+      _ChatMessage._(text: text, isUser: false, isNotice: true);
 
   /// "File write proposal" card.  Rendered as a distinct Apply/Reject
   /// card by `_buildAgentMessage`; the contained [_WriteProposal] holds
   /// the mutable state machine driving the card.
   factory _ChatMessage.writeProposal(_WriteProposal proposal) =>
-      _ChatMessage._(
-        text: '',
-        isUser: false,
-        writeProposal: proposal,
-      );
+      _ChatMessage._(text: '', isUser: false, writeProposal: proposal);
 
   /// "Dangerous command proposal" card.  Rendered by
   /// `_buildAgentMessage` as a distinct Approve/Reject card with the
   /// rule label + command snippet; the contained [_DangerProposal]
   /// holds the mutable state machine driving the buttons.
   factory _ChatMessage.dangerProposal(_DangerProposal proposal) =>
-      _ChatMessage._(
-        text: '',
-        isUser: false,
-        dangerProposal: proposal,
-      );
+      _ChatMessage._(text: '', isUser: false, dangerProposal: proposal);
 }
 
 // ── File-write proposal (Apply/Reject card state machine) ──────────────────
@@ -218,7 +214,19 @@ class _WriteProposal {
   });
 }
 
-// ── Dangerous-command proposal (Approve/Reject card state machine) ─────────
+// ── Command proposal (Approve/Reject card state machine) ───────────────────
+//
+// Despite the name, [_DangerProposal] now backs TWO kinds of cards:
+//   • verdict != null — a command `CommandSafety.danger()` flagged; card
+//     shows the matched rule and always pauses regardless of auto-execute.
+//   • verdict == null — an ordinary command proposed while auto-execute
+//     is OFF; card shows a neutral "run this command?" prompt.  This is
+//     what replaced the old bare "Exec" button — every manual command
+//     now pauses for an explicit Approve/Reject, same mechanism as
+//     dangerous commands always used.
+// Kept as one type (rather than a new sibling class) because the two
+// only ever differ in verdict-presence and card color — a parallel
+// class would just duplicate the whole state machine.
 
 /// Lifecycle states for a [_DangerProposal].  Mirrors
 /// [_WriteProposalState] one-for-one (the agent loop's pause/resume
@@ -257,10 +265,12 @@ class _DangerProposal {
   /// scripts expand on tap).
   final String command;
 
-  /// Verdict from `CommandSafety.danger(...)`.  Carries the rule id
+  /// Verdict from `CommandSafety.danger(...)`, or `null` when this card
+  /// is an ordinary (non-dangerous) manual-mode confirmation — see the
+  /// section comment above [_DangerProposalState].  Carries the rule id
   /// (for logs) and the one-line human label (shown as the card's
   /// subtitle, e.g. "Recursive force-delete of / (root filesystem)").
-  final DangerVerdict verdict;
+  final DangerVerdict? verdict;
 
   /// Generation counter snapshot.  Same staleness check as
   /// [_WriteProposal.agentGeneration]: if the user starts a fresh

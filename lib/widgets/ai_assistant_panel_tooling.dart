@@ -479,7 +479,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       // reject, complete the future as false so the original loop's
       // staleness check fires and bails out cleanly.
       setState(() => proposal.state = _DangerProposalState.rejected);
-      _logAgent('danger_stale rule=${proposal.verdict.patternId}');
+      _logAgent('danger_stale rule=${proposal.verdict?.patternId ?? 'none'}');
       proposal.decision.complete(false);
       return;
     }
@@ -489,10 +489,11 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           ? _DangerProposalState.running
           : _DangerProposalState.rejected;
     });
+    final ruleTag = proposal.verdict != null
+        ? 'rule=${proposal.verdict!.patternId}'
+        : 'rule=none';
     _logAgent(
-      approve
-          ? 'danger_approved rule=${proposal.verdict.patternId}'
-          : 'danger_rejected rule=${proposal.verdict.patternId}',
+      approve ? 'danger_approved $ruleTag' : 'danger_rejected $ruleTag',
     );
     proposal.decision.complete(approve);
   }
@@ -508,6 +509,18 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         'Matched safety rule: ${verdict.label} (${verdict.patternId})\n'
         'Do NOT retry this command verbatim. '
         'Either propose a safer alternative or ask the user to '
+        'clarify what they actually want changed.';
+  }
+
+  /// Structured envelope handed back to the LLM when the user rejects
+  /// an ORDINARY (non-dangerous) command proposed while auto-execute is
+  /// off.  Same shape as [_formatDangerRejection] minus the rule fields,
+  /// since there's no matched safety rule to report.
+  String _formatCommandRejection(String cmd) {
+    return '[Command rejected by user]\n'
+        'Command: $cmd\n'
+        'Do NOT retry this command verbatim. '
+        'Either propose a different approach or ask the user to '
         'clarify what they actually want changed.';
   }
 }

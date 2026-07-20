@@ -17,9 +17,10 @@ part of 'ai_assistant_panel.dart';
 //
 // What lives here:
 //   • Command feedback envelope formatters (LLM-facing).
-//   • The user-typed `_agentRespond` and Exec-button `_runManualCommand`
-//     entry points.
-//   • `_continueAgentLoop`/`_continueAgentLoopBody` — the actual loop.
+//   • The user-typed `_agentRespond` entry point.
+//   • `_continueAgentLoop`/`_continueAgentLoopBody` — the actual loop,
+//     including the per-command confirm/execute gate every proposed
+//     command goes through (dangerous or not, auto-execute or manual).
 //
 // What stays in the main file:
 //   • Panel widget construction and small UI helpers.
@@ -127,158 +128,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       home: home,
       now: DateTime.now(),
     );
-  }
-
-  Future<void> _runManualCommand(String cmd) async {
-    final config = widget.agentConfig;
-    if (config == null || widget.onExecuteAsync == null) return;
-
-    if (_agentBusy) _cancelAgent();
-    final int gen = ++_generation;
-    // Lock terminal during the manual-exec round-trip — same protection as
-    // the auto-execute path.  _continueAgentLoop unlocks on completion.
-    _markAgentBusy(autoExecuteLockTerminal: true);
-
-    _logAgent('manual_exec cmd=${_logQuote(cmd)}');
-
-    // ── Dangerous-command gate ─────────────────────────────────────────
-    //
-    // Manual execution goes through the SAME danger gate as the auto-
-    // loop path in [_continueAgentLoop]: the command was proposed by
-    // the LLM, the user only chose WHEN to run it — clicking Execute
-    // is not a safety review.  Without this check, turning auto-
-    // execute OFF would silently DOWNGRADE safety, the opposite of
-    // what the toggle's name implies.  One knob (`agentConfirmEnabled`)
-    // gates both paths so the policy can't drift between them.
-    //
-    // Tagged `side=agent mode=manual` so log greps stay disambiguated
-    // from the auto path's `side=agent iter=N` without breaking
-    // existing `side=agent` queries.
-    final dangerPolicy = config.dangerousPolicy;
-    DangerVerdict? verdict;
-    if (dangerPolicy.agentConfirmEnabled) {
-      verdict = CommandSafety.danger(cmd, dangerPolicy);
-    }
-
-    _DangerProposal? dangerProposal;
-    var approved = true;
-    if (verdict != null) {
-      dangerProposal = _DangerProposal(
-        command: cmd,
-        verdict: verdict,
-        agentGeneration: gen,
-      );
-      setState(() {
-        _messages.add(_ChatMessage.dangerProposal(dangerProposal!));
-        _agentLoopStatus = 'Awaiting approval: ${verdict!.label}';
-      });
-      _scrollToBottom();
-      _logSafety(
-        'danger_detected side=agent mode=manual '
-        'rule=${verdict.patternId} '
-        'source=${verdict.source.name}',
-      );
-      approved = await dangerProposal.decision.future;
-      if (!mounted || gen != _generation) {
-        _logAgent('manual_exec exit stale_generation');
-        return;
-      }
-    }
-
-    CommandResult? result;
-    var loopHandedOff = false;
-    try {
-      if (!approved) {
-        // No shell call.  Mirror the auto path: skip the system card,
-        // feed a `[Dangerous command rejected]` envelope back so the
-        // LLM sees what happened and can react on the next turn.
-        _logSafety(
-          'danger_rejected side=agent mode=manual '
-          'rule=${verdict!.patternId} '
-          'source=${verdict.source.name}',
-        );
-        _conversationHistory.add({
-          'role': 'user',
-          'content': _formatDangerRejection(cmd, verdict),
-        });
-        setState(() => _agentLoopStatus = 'Feedback sent, AI thinking…');
-        loopHandedOff = true;
-        await _continueAgentLoop(gen, config);
-        return;
-      }
-      if (verdict != null) {
-        _logSafety(
-          'danger_approved side=agent mode=manual '
-          'rule=${verdict.patternId} '
-          'source=${verdict.source.name}',
-        );
-      }
-
-      setState(() => _agentLoopStatus = 'Executing: $cmd');
-      _scrollToBottom();
-
-      result = await widget.onExecuteAsync!(
-        cmd,
-        isCancelled: () => gen != _generation,
-      );
-      if (!mounted || gen != _generation) return;
-
-      // Flip the danger card to its terminal `ran` state so the chat
-      // hierarchy shows: card (approved) → system card (output) →
-      // next.  Skipped silently when there was no danger card.
-      if (dangerProposal != null) {
-        setState(() => dangerProposal!.state = _DangerProposalState.ran);
-      }
-
-      setState(() {
-        _messages.add(
-          _ChatMessage.system(
-            text: result?.output ?? '',
-            commandRun: cmd,
-            commandExitCode: result?.exitCode,
-          ),
-        );
-      });
-      _scrollToBottom();
-
-      _conversationHistory.add({
-        'role': 'user',
-        'content': _formatCommandFeedback(cmd, result),
-      });
-      setState(() => _agentLoopStatus = 'Feedback sent, AI thinking…');
-
-      // Hand off to the loop; ITS finally clause will unlock the UI.
-      loopHandedOff = true;
-      await _continueAgentLoop(gen, config);
-    } catch (e, st) {
-      // SSH session torn down mid-execution, network drop, etc.  Without
-      // this guard the future propagates unhandled and _agentBusy /
-      // _terminalLocked stick on forever — the user's only escape is a
-      // manual cancel button.
-      _logAgent(
-        'error scope=manual_exec type=${e.runtimeType} msg=${_logQuote('$e')}',
-      );
-      stdout.writeln(st);
-      if (mounted && gen == _generation) {
-        setState(() {
-          _messages.add(
-            _ChatMessage.ai(text: '', error: 'Execution failed: $e'),
-          );
-        });
-      }
-    } finally {
-      // Only unlock here if we never reached _continueAgentLoop (which
-      // owns its own unlock path).  Double-unlocking is harmless but
-      // unnecessary; this also prevents a race where the loop's setState
-      // fires AFTER our finally already unlocked.
-      if (!loopHandedOff && mounted && gen == _generation) {
-        setState(() {
-          _agentBusy = false;
-          _agentLoopStatus = null;
-        });
-        _setTerminalLocked(false);
-      }
-    }
   }
 
   void _markAgentBusy({required bool autoExecuteLockTerminal}) {
@@ -409,9 +258,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       _conversationHistory.add({'role': 'assistant', 'content': protocolText});
       final displayText = LlmService.stripCompletionMarkers(protocolText);
       aiMsg.text = displayText;
-      setState(() {
-        aiMsg.commands = commands.isNotEmpty ? commands : null;
-      });
+      setState(() {});
       _scrollToBottom();
 
       final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
@@ -608,24 +455,28 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // here — the `reply … marker=…` line emitted moments earlier
       // already carries the reason on its `marker=` field, so a
       // separate `stop reason=task_complete` is pure duplication.  We
-      // DO still emit a `stop` line for the abnormal termini below
-      // (`auto_execute_off`, `no_executor`), because those don't
-      // appear in the marker — they are config / environment facts
-      // the user needs in the log to make sense of why the loop
-      // halted with runnable commands sitting on the chat card.
+      // DO still emit a `stop` line for the abnormal terminus below
+      // (`no_executor`), because it doesn't appear in the marker — it's
+      // an environment fact the user needs in the log to make sense of
+      // why the loop halted with runnable commands sitting on the chat
+      // card.
       if (taskComplete) break;
       if (askUser) break;
       if (commands.isEmpty) break;
-      if (!_autoExecute) {
-        stopIter(loopIterations, 'auto_execute_off');
-        break;
-      }
       if (widget.onExecuteAsync == null) {
         stopIter(loopIterations, 'no_executor');
         break;
       }
 
-      // --- Auto-execute commands ---
+      // --- Execute proposed commands ---
+      // Runs every proposed command through the same per-command gate
+      // regardless of `_autoExecute` — the toggle no longer decides
+      // WHETHER this loop runs, only whether an ORDINARY (non-dangerous)
+      // command pauses for confirmation.  Dangerous commands always
+      // pause; with auto-execute off, EVERY command pauses (this is
+      // what replaced the old bare "Exec" button — see the
+      // [_DangerProposal] section comment in ai_assistant_panel_models.dart).
+      //
       // Collect every command's structured feedback into ONE user-role
       // message so we never emit consecutive 'user' messages — Anthropic's
       // /v1/messages rejects that with `messages must alternate`.
@@ -638,50 +489,61 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       for (var i = 0; i < shellToolCalls.length; i++) {
         final toolCall = shellToolCalls[i];
         final command = toolCall.command!.trim();
-        // ── Dangerous-command gate ─────────────────────────────────
+        // ── Confirmation gate ────────────────────────────────────────
         //
         // Runs BEFORE `onExecuteAsync` so a rejected command never
-        // touches the shell.  Only fires when:
-        //   • The policy enables agent confirmation (default true), AND
-        //   • `CommandSafety.danger(...)` returns a verdict.
+        // touches the shell.  Pauses (shows a card, awaits a decision)
+        // when EITHER is true:
+        //   • `CommandSafety.danger(...)` flagged the command (only
+        //     checked when the policy enables agent confirmation), OR
+        //   • auto-execute is off — every manual command gets an
+        //     explicit confirm now, not just the dangerous ones.
         //
-        // On match we pause this iteration by awaiting a Completer
-        // attached to the proposal — much simpler than the
-        // file-write pattern of "tear down loop / re-enter on click"
-        // because we're mid-for-loop with N remaining commands to
-        // process.  When the user clicks Approve/Reject,
-        // [_decideDangerProposal] completes the future and the loop
-        // resumes in place.
+        // On pause we await a Completer attached to the proposal — much
+        // simpler than the file-write pattern of "tear down loop /
+        // re-enter on click" because we're mid-for-loop with N
+        // remaining commands to process.  When the user clicks
+        // Approve/Reject, [_decideDangerProposal] completes the future
+        // and the loop resumes in place.
         //
         // Skipping a rejected command synthesises a structured
-        // `[Dangerous command rejected]` feedback line — the LLM sees
-        // it on the next turn and can decide what to do (typically
-        // pick a less destructive alternative or ask the user).
+        // rejection feedback line — the LLM sees it on the next turn
+        // and can decide what to do (typically pick a different
+        // approach or ask the user).
         final dangerPolicy = config.dangerousPolicy;
         DangerVerdict? verdict;
         if (dangerPolicy.agentConfirmEnabled) {
           verdict = CommandSafety.danger(command, dangerPolicy);
         }
+        final needsConfirm = verdict != null || !_autoExecute;
 
         bool approved = true;
-        _DangerProposal? dangerProposal;
-        if (verdict != null) {
-          dangerProposal = _DangerProposal(
+        _DangerProposal? proposal;
+        if (needsConfirm) {
+          proposal = _DangerProposal(
             command: command,
             verdict: verdict,
             agentGeneration: gen,
           );
           setState(() {
-            _messages.add(_ChatMessage.dangerProposal(dangerProposal!));
-            _agentLoopStatus = 'Awaiting approval: ${verdict!.label}';
+            _messages.add(_ChatMessage.dangerProposal(proposal!));
+            _agentLoopStatus = verdict != null
+                ? 'Awaiting approval: ${verdict.label}'
+                : 'Awaiting confirmation to run command';
           });
           _scrollToBottom();
-          _logSafety(
-            't=$turnId danger_detected side=agent iter=$loopIterations '
-            'rule=${verdict.patternId} '
-            'source=${verdict.source.name}',
-          );
-          approved = await dangerProposal.decision.future;
+          if (verdict != null) {
+            _logSafety(
+              't=$turnId danger_detected side=agent iter=$loopIterations '
+              'rule=${verdict.patternId} '
+              'source=${verdict.source.name}',
+            );
+          } else {
+            logIter(
+              'iter=$loopIterations confirm_pending cmd=${_logQuote(command)}',
+            );
+          }
+          approved = await proposal.decision.future;
           // Generation may have flipped while the user was deciding —
           // bail out exactly like the post-execute staleness check
           // below.
@@ -692,16 +554,25 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
 
         if (!approved) {
-          // No shell call.  The "system" command-card is NOT inserted
-          // (no command was actually run); the chat history keeps
-          // only the danger-proposal card flipped to its rejected
-          // state, which is the visible transcript of what happened.
-          feedbacks.add(_formatDangerRejection(command, verdict!));
-          _logSafety(
-            't=$turnId danger_rejected side=agent iter=$loopIterations '
-            'rule=${verdict.patternId} '
-            'source=${verdict.source.name}',
+          // No shell call.  The proposal card stays in the transcript,
+          // flipped to its rejected state — that's the visible record
+          // of what happened; no separate "system" card is added.
+          feedbacks.add(
+            verdict != null
+                ? _formatDangerRejection(command, verdict)
+                : _formatCommandRejection(command),
           );
+          if (verdict != null) {
+            _logSafety(
+              't=$turnId danger_rejected side=agent iter=$loopIterations '
+              'rule=${verdict.patternId} '
+              'source=${verdict.source.name}',
+            );
+          } else {
+            logIter(
+              'iter=$loopIterations confirm_rejected cmd=${_logQuote(command)}',
+            );
+          }
           continue;
         }
         if (verdict != null) {
@@ -724,13 +595,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           return;
         }
 
-        // Flip the danger card to its terminal `ran` state so the
+        // Flip the proposal card to its terminal `ran` state so the
         // chat-card hierarchy shows: card (approved) → system card
         // (output) → next.  Without this the card would visually
         // remain in `running` forever even though the command has
         // long finished.
-        if (dangerProposal != null) {
-          setState(() => dangerProposal!.state = _DangerProposalState.ran);
+        if (proposal != null) {
+          setState(() => proposal!.state = _DangerProposalState.ran);
         }
 
         setState(() {

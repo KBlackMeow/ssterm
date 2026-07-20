@@ -44,7 +44,7 @@ const _kAccent = Color(0xFF2472C8);
 ///   • At 240 px wide the right panel keeps the markdown code blocks from
 ///     wrapping every shell command across multiple lines.
 const _kPanelMinExtent = 240.0;
-const _kPanelDefaultFraction = 0.35;
+const _kPanelDefaultFraction = 0.42; // 0.35 + 20%
 const _kPanelMaxFraction = 0.6;
 
 /// Outer gap between the AI panel card and the surrounding chrome — matches
@@ -110,7 +110,11 @@ class AiAssistantOverlay extends StatefulWidget {
   /// (for the auto-execute agent loop).  The host application captures via
   /// OSC 133 shell integration when available, falling back to an
   /// echo-sentinel poll for shells without hooks installed.
-  final Future<CommandResult?> Function(String cmd, {bool Function()? isCancelled})? onExecuteAsync;
+  final Future<CommandResult?> Function(
+    String cmd, {
+    bool Function()? isCancelled,
+  })?
+  onExecuteAsync;
 
   /// Agent provider configuration.
   final AgentConfig? agentConfig;
@@ -175,8 +179,7 @@ class AiAssistantOverlay extends StatefulWidget {
   /// side via the toggle button.  Hosts wire this to
   /// [AppConfig.aiPosition] / [AppConfig.aiSize] + `save()` so the
   /// layout sticks across launches.
-  final void Function(AiPanelPosition position, double? size)?
-      onLayoutChanged;
+  final void Function(AiPanelPosition position, double? size)? onLayoutChanged;
 
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
@@ -382,7 +385,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _scrollToBottom();
   }
 
-
   /// Unfocus the primary focused widget if the terminal is currently locked.
   /// Called when locking starts and also from build() as a safety net.
   void _unfocusTerminalIfLocked() {
@@ -418,18 +420,19 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     final total = _position == AiPanelPosition.right
         ? constraints.maxWidth
         : constraints.maxHeight;
-    final maxSide =
-        (total * _kPanelMaxFraction).clamp(_kPanelMinExtent, double.infinity);
+    final maxSide = (total * _kPanelMaxFraction).clamp(
+      _kPanelMinExtent,
+      double.infinity,
+    );
     if (_customPanelSize != null) {
       return _customPanelSize!.clamp(_kPanelMinExtent, maxSide);
     }
-    return (total * _kPanelDefaultFraction)
-        .clamp(_kPanelMinExtent, maxSide);
+    return (total * _kPanelDefaultFraction).clamp(_kPanelMinExtent, maxSide);
   }
 
   /// Flip dock side and clear the custom size so the new orientation
-  /// starts at its default fraction (a width that fits 35 % of the
-  /// window often makes a poor height, and vice versa — picking a fresh
+  /// starts at its default fraction (a width that fits the default % of
+  /// the window often makes a poor height, and vice versa — picking a fresh
   /// default avoids the "thin slit" failure mode on rotation).
   void _togglePosition() {
     setState(() {
@@ -466,7 +469,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // default.  `terminalBackground` is null on tabs without a live
     // terminal (Settings, connecting, …), where popup is a fine
     // tinted default.
-    final panelBg = widget.terminalBackground ??
+    final panelBg =
+        widget.terminalBackground ??
         AppColors.maybeOf(context)?.popup ??
         FrostedGlassStyle.panelFillFrosted;
 
@@ -507,18 +511,13 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
             onInsert: widget.onInsert,
             onSendToTerminal: widget.onExecute,
-            onRunManualCommand: widget.onExecuteAsync != null
-                ? _runManualCommand
-                : null,
             onModeChanged: (m) => setState(() => _mode = m),
-            shellIntegrationActive:
-                widget.onGetShellIntegrationActive?.call(),
+            shellIntegrationActive: widget.onGetShellIntegrationActive?.call(),
             // Mirror `AgentConfig.markdownEnabled`'s true default so the
             // very first frame (before agentConfig has been wired in)
             // doesn't flash plain-text rendering and then "snap" to
             // markdown on the next rebuild.
-            markdownEnabled:
-                widget.agentConfig?.markdownEnabled ?? true,
+            markdownEnabled: widget.agentConfig?.markdownEnabled ?? true,
             terminalBackground: widget.terminalBackground,
             terminalLineHeight: widget.terminalLineHeight,
             onWriteProposalDecision: _decideWriteProposal,
@@ -543,8 +542,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
                   ? constraints.maxWidth
                   : constraints.maxHeight;
               final maxSide = total * _kPanelMaxFraction;
-              _customPanelSize =
-                  (panelExtent - d).clamp(_kPanelMinExtent, maxSide);
+              _customPanelSize = (panelExtent - d).clamp(
+                _kPanelMinExtent,
+                maxSide,
+              );
             });
             widget.onLayoutChanged?.call(_position, _customPanelSize);
           },
@@ -560,8 +561,18 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         final panelArea = ColoredBox(
           color: panelBg,
           child: dockRight
-              ? Row(children: [handle, Expanded(child: panelCard)])
-              : Column(children: [handle, Expanded(child: panelCard)]),
+              ? Row(
+                  children: [
+                    handle,
+                    Expanded(child: panelCard),
+                  ],
+                )
+              : Column(
+                  children: [
+                    handle,
+                    Expanded(child: panelCard),
+                  ],
+                ),
         );
 
         if (dockRight) {
