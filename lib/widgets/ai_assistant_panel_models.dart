@@ -80,6 +80,13 @@ class _ChatMessage {
   /// rationale as [writeProposal].  Null for every other message kind.
   _DangerProposal? dangerProposal;
 
+  /// For "ask-user question" messages: the pending multiple-choice
+  /// question the user must answer (by tapping an option or typing a
+  /// custom reply) before the agent loop resumes.  Same nullable /
+  /// hot-reload rationale as [writeProposal].  Null for every other
+  /// message kind.
+  _QuestionProposal? questionProposal;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -91,6 +98,7 @@ class _ChatMessage {
     this.commandExitCode,
     this.writeProposal,
     this.dangerProposal,
+    this.questionProposal,
   });
 
   factory _ChatMessage.user(String text) =>
@@ -141,6 +149,14 @@ class _ChatMessage {
   /// holds the mutable state machine driving the buttons.
   factory _ChatMessage.dangerProposal(_DangerProposal proposal) =>
       _ChatMessage._(text: '', isUser: false, dangerProposal: proposal);
+
+  /// "Ask-user question" card — the structured sibling of the bare
+  /// `[ASK_USER]` marker.  Rendered by `_buildAgentMessage` as a
+  /// tappable option list (see `_QuestionProposalCard`); the contained
+  /// [_QuestionProposal] holds the mutable state machine + the
+  /// `Completer` the agent loop awaits.
+  factory _ChatMessage.questionProposal(_QuestionProposal proposal) =>
+      _ChatMessage._(text: '', isUser: false, questionProposal: proposal);
 }
 
 // ── File-write proposal (Apply/Reject card state machine) ──────────────────
@@ -292,6 +308,83 @@ class _DangerProposal {
   _DangerProposal({
     required this.command,
     required this.verdict,
+    required this.agentGeneration,
+  });
+}
+
+// ── Ask-user question proposal (multiple-choice card state machine) ───────
+
+/// One candidate answer inside an [_QuestionProposal].  Plain data
+/// holder — no behaviour, mirrors how [ToolCall.options] in
+/// `llm_service.dart` returns an anonymous record instead of this type
+/// (that library can't see this private class, so the mapping happens
+/// where the proposal is constructed — see `ai_assistant_panel_loop.dart`).
+class _QuestionOption {
+  final String label;
+  final String description;
+
+  const _QuestionOption({required this.label, required this.description});
+}
+
+/// Lifecycle states for a [_QuestionProposal].
+enum _QuestionProposalState {
+  /// Waiting for the user to tap an option or tap "Other".
+  pending,
+
+  /// User tapped "Other" — card shows an "answering below" hint and
+  /// the main chat input is focused.  Still waiting on [decision].
+  awaitingCustom,
+
+  /// A final answer was recorded (option tap OR custom text submit)
+  /// and [decision] has completed with it.
+  answered,
+
+  /// A newer agent generation started before this proposal was
+  /// answered — same "stale" semantics as `_DangerProposalState` /
+  /// `_WriteProposalState`.  [decision] completed with `null`.
+  stale,
+}
+
+/// Per-proposal record for a pending `ask_user_question` tool call,
+/// threaded through the chat-card UI and the agent loop's await point.
+/// Mutable on purpose — the card listens for state changes via plain
+/// `setState` calls from the panel, exactly like [_WriteProposal] /
+/// [_DangerProposal].
+class _QuestionProposal {
+  /// The question text, verbatim from the model's `question` argument.
+  final String question;
+
+  /// Short chip label shown at the top of the card, verbatim from the
+  /// model's `header` argument.
+  final String header;
+
+  /// Candidate answers, verbatim from the model — does NOT include the
+  /// "Other" choice, which the card UI appends itself.
+  final List<_QuestionOption> options;
+
+  /// Generation counter snapshot.  If the user fires off a new agent
+  /// request (or cancels) before answering, `_generation` bumps and
+  /// this proposal becomes stale — same staleness convention as
+  /// [_WriteProposal.agentGeneration] / [_DangerProposal.agentGeneration].
+  final int agentGeneration;
+
+  _QuestionProposalState state = _QuestionProposalState.pending;
+
+  /// Set once [state] reaches [_QuestionProposalState.answered] — the
+  /// exact text that was fed back to the LLM (an option's `label`, or
+  /// whatever free text the user typed for "Other").
+  String? answerText;
+
+  /// Completer the agent loop awaits in place (mirrors
+  /// [_DangerProposal.decision]).  Completes with the answer text on a
+  /// real answer, or `null` when the proposal goes stale (cancelled /
+  /// superseded) before one arrives.
+  final Completer<String?> decision = Completer<String?>();
+
+  _QuestionProposal({
+    required this.question,
+    required this.header,
+    required this.options,
     required this.agentGeneration,
   });
 }
