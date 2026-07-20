@@ -35,6 +35,7 @@ class _AiPanelContent extends StatelessWidget {
     this.onDangerProposalDecision,
     this.onQuestionProposalDecision,
     this.onQuestionProposalOther,
+    this.hasPendingQuestion = false,
     required this.position,
     this.onPositionToggle,
   });
@@ -113,6 +114,22 @@ class _AiPanelContent extends StatelessWidget {
   /// main input.  See [_AiAssistantOverlayState._beginCustomQuestionAnswer].
   final void Function(_QuestionProposal proposal)? onQuestionProposalOther;
 
+  /// `true` while a [_QuestionProposal] is pending/awaiting a custom
+  /// answer — i.e. `_pendingQuestionProposal != null` in the state above.
+  ///
+  /// The pause-in-place design deliberately keeps [busy] `true` for the
+  /// entire time a question card is on screen (including while the user
+  /// types a custom "Other" answer), so the terminal stays locked and the
+  /// loop stays suspended in place. But the single shared send/cancel
+  /// button below must NOT show as a red "Stop" affordance in that state:
+  /// tapping Stop there would call [onCancel], marking the question stale
+  /// and discarding whatever the user just typed, directly contradicting
+  /// the question card's own "send it" instruction. This flag lets the
+  /// button distinguish "busy because waiting on the user" from "busy
+  /// because the LLM/shell is actively working" without touching the
+  /// meaning of [busy] itself.
+  final bool hasPendingQuestion;
+
   /// Current dock side — drives the icon shown on the position toggle
   /// button so it reads "switch to the OTHER side".
   final AiPanelPosition position;
@@ -121,6 +138,12 @@ class _AiPanelContent extends StatelessWidget {
   /// hides the button (used in tests / hosts that don't persist
   /// layout).
   final VoidCallback? onPositionToggle;
+
+  /// `true` when the input bar's send/cancel button should render as the
+  /// red "Stop" affordance — i.e. genuinely busy AND not just paused on a
+  /// pending question.  See [hasPendingQuestion] doc for why the two
+  /// must be distinguished.
+  bool get showStopButton => busy && !hasPendingQuestion;
 
   @override
   Widget build(BuildContext context) {
@@ -375,20 +398,22 @@ class _AiPanelContent extends StatelessWidget {
                             ),
                           ),
                           GestureDetector(
-                            onTap: busy ? onCancel : onSend,
+                            onTap: showStopButton ? onCancel : onSend,
                             child: Container(
                               width: 26,
                               height: 26,
                               margin: const EdgeInsets.only(right: 4),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: busy
+                                color: showStopButton
                                     ? const Color(0xFFFF6E67)
                                     : const Color(0xFF2472C8),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Icon(
-                                busy ? Icons.stop_rounded : Icons.send_rounded,
+                                showStopButton
+                                    ? Icons.stop_rounded
+                                    : Icons.send_rounded,
                                 size: 13,
                                 color: Colors.white,
                               ),

@@ -567,6 +567,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onDangerProposalDecision: _decideDangerProposal,
             onQuestionProposalDecision: _decideQuestionProposal,
             onQuestionProposalOther: _beginCustomQuestionAnswer,
+            hasPendingQuestion: _pendingQuestionProposal != null,
             position: _position,
             onPositionToggle: _togglePosition,
           ),
