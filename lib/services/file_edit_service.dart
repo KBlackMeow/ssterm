@@ -134,4 +134,18 @@ class FileEditService {
         'tool call for the same path. Either ask the user what to change, '
         'propose a different edit, or proceed without it.';
   }
+
+  /// Wraps [FileWriteService.formatErrorForLlm] for adapter-level
+  /// failures (disabled/no-adapter/io/permission/mtime-mismatch/etc.)
+  /// that `edit_file` shares with `write_file`'s underlying
+  /// [FileSystemAdapter]. Rewrites the shared formatter's
+  /// `[File write failed]` header to `[File edit failed]` so the
+  /// envelope matches what `<file_edit_tool>` in the system prompt
+  /// promises — the `reason:`/`message:`/recovery-hint body is
+  /// otherwise untouched, since that content is accurate for either
+  /// tool.
+  static String formatAdapterErrorForLlm(String path, FileWriteException e) {
+    final base = FileWriteService.formatErrorForLlm(path, e);
+    return base.replaceFirst('[File write failed]', '[File edit failed]');
+  }
 }

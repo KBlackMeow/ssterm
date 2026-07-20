@@ -133,5 +133,19 @@ void main() {
       expect(out, contains('wrong file'));
       expect(out, contains('Do NOT re-emit'));
     });
+
+    test('formatAdapterErrorForLlm rewrites the write_file header to '
+        'edit_file\'s own', () {
+      final out = FileEditService.formatAdapterErrorForLlm(
+        '/tmp/x',
+        const FileWriteException(FileWriteErrorKind.permission, 'denied'),
+      );
+      expect(out, contains('[File edit failed]'));
+      expect(out, isNot(contains('[File write failed]')));
+      // Body content (reason/message/recovery hint) must be preserved —
+      // only the header line changes.
+      expect(out, contains('reason: permission'));
+      expect(out, contains('denied'));
+    });
   });
 }

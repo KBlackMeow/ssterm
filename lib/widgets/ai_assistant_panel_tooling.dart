@@ -490,7 +490,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       );
       _conversationHistory.add({
         'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(
+        'content': FileEditService.formatAdapterErrorForLlm(
           path,
           const FileWriteException(
             FileWriteErrorKind.notSupported,
@@ -518,7 +518,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       );
       _conversationHistory.add({
         'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(path, e),
+        'content': FileEditService.formatAdapterErrorForLlm(path, e),
       });
       return _EditProposalOutcome.injectedAndContinue;
     } catch (e) {
@@ -530,7 +530,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       );
       _conversationHistory.add({
         'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(
+        'content': FileEditService.formatAdapterErrorForLlm(
           path,
           FileWriteException(FileWriteErrorKind.io, '$e'),
         ),
@@ -629,7 +629,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           proposal.outcomeMessage =
               'Filesystem adapter is no longer available (tab may have changed).';
         });
-        envelope = FileWriteService.formatErrorForLlm(
+        envelope = FileEditService.formatAdapterErrorForLlm(
           proposal.requestedPath,
           const FileWriteException(
             FileWriteErrorKind.notSupported,
@@ -663,7 +663,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
             proposal.state = _EditProposalState.failed;
             proposal.outcomeMessage = e.message;
           });
-          envelope = FileWriteService.formatErrorForLlm(
+          envelope = FileEditService.formatAdapterErrorForLlm(
             proposal.requestedPath,
             e,
           );
@@ -677,7 +677,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
             proposal.state = _EditProposalState.failed;
             proposal.outcomeMessage = '$e';
           });
-          envelope = FileWriteService.formatErrorForLlm(
+          envelope = FileEditService.formatAdapterErrorForLlm(
             proposal.requestedPath,
             FileWriteException(FileWriteErrorKind.io, '$e'),
           );
