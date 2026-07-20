@@ -11,6 +11,7 @@ mixin _SftpMenusMixin on State<SftpView> {
   String get _path;
   Future<void> _listDir(String path);
   Future<void> _download(SftpName entry);
+  Future<void> _openInEditor(SftpName entry);
   Future<void> _rename(SftpName entry);
   Future<void> _delete(SftpName entry);
 
@@ -109,6 +110,18 @@ mixin _SftpMenusMixin on State<SftpView> {
                   )),
             ),
           ),
+        if (!isDir)
+          PopupMenuItem(
+            value: 'edit',
+            height: 36,
+            child: Builder(
+              builder: (ctx) => Text('Edit',
+                  style: TextStyle(
+                    color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
+                    fontSize: 13,
+                  )),
+            ),
+          ),
         PopupMenuItem(
           value: 'rename',
           height: 36,
@@ -132,6 +145,8 @@ mixin _SftpMenusMixin on State<SftpView> {
     switch (action) {
       case 'download':
         await _download(e);
+      case 'edit':
+        await _openInEditor(e);
       case 'rename':
         await _rename(e);
       case 'delete':

@@ -10,6 +10,7 @@ import '../models/transfer_task.dart';
 import '../services/file_picker_service.dart';
 import '../utils/app_dir.dart';
 import '../widgets/frosted_glass.dart';
+import '../services/file_write_service.dart';
 import 'ssh_session_view.dart' show SftpPanelPosition;
 
 part 'sftp_view_menus.dart';
@@ -91,6 +92,7 @@ class SftpView extends StatefulWidget {
     this.panelPosition,
     this.onPanelPositionChanged,
     this.onClose,
+    this.onOpenEditorTab,
     this.showToolbar = true,
     this.chromeBackground = const Color(0xFF1E1E2A),
   });
@@ -105,6 +107,19 @@ class SftpView extends StatefulWidget {
   final SftpPanelPosition? panelPosition;
   final ValueChanged<SftpPanelPosition>? onPanelPositionChanged;
   final VoidCallback? onClose;
+
+  /// Called after the user opens a file in the editor (double-click, or
+  /// the "Edit" context-menu item) AND its content has already been
+  /// successfully read. The host is responsible for turning this into a
+  /// new `AppTabKind.editor` tab — this widget knows nothing about tabs.
+  /// Null on hosts that don't support opening an editor tab (there are
+  /// none today, but the callback stays optional for symmetry with
+  /// [onClose]/[onPanelPositionChanged]).
+  final void Function({
+    required String path,
+    required String initialContent,
+    required DateTime? mtime,
+  })? onOpenEditorTab;
 
   /// Set to false to hide the compact toolbar (use in full-screen page mode).
   final bool showToolbar;
@@ -431,6 +446,57 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
     }
     final isSel = _selected?.filename == e.filename;
     setState(() => _selected = isSel ? null : e);
+  }
+
+  /// Opens [entry] in a new editor tab. No-ops on directories and on
+  /// symlinks that resolve to a directory (same resolution check
+  /// `_navigateEntry` already does). Validates size (4 MB cap, same
+  /// threshold `FileSystemAdapter.readContent` enforces) and reads the
+  /// content BEFORE calling `widget.onOpenEditorTab` — a failure here
+  /// shows a [SnackBar] and never creates a tab, matching the design's
+  /// "a doomed open never reaches the UI" rule (same shape as the AI
+  /// agent's edit_file match-validation-before-card rule).
+  @override
+  Future<void> _openInEditor(SftpName entry) async {
+    if (entry.attr.isDirectory) return;
+    if (entry.attr.isSymbolicLink) {
+      try {
+        final targetPath = sftpJoin(_path, entry.filename);
+        final stat = await widget.sftp.stat(targetPath);
+        if (stat.isDirectory) return;
+      } catch (_) {}
+    }
+    final onOpen = widget.onOpenEditorTab;
+    if (onOpen == null) return;
+
+    final path = sftpJoin(_path, entry.filename);
+    final adapter = SftpFileSystemAdapter(sftp: widget.sftp, label: widget.host);
+    try {
+      final preview = await adapter.preview(path);
+      if (preview.existingSize > 4 * 1024 * 1024) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('File is too large to edit (over 4 MB).'),
+            ),
+          );
+        }
+        return;
+      }
+      final content = await adapter.readContent(path);
+      onOpen(path: path, initialContent: content, mtime: preview.mtime);
+    } on FileWriteException catch (e) {
+      if (!mounted) return;
+      final message = e.kind == FileWriteErrorKind.io
+          ? 'Not a text file — cannot edit.'
+          : 'Could not open file: ${e.message}';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open file: $e')));
+    }
   }
 
   Future<void> _tapMobileSymlink(SftpName e) async {
@@ -869,6 +935,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
               _showDesktopContextMenu(e, d.globalPosition),
           child: InkWell(
             onTap: () => _navigateEntry(e),
+            onDoubleTap: () => _openInEditor(e),
             child: Container(
               height: 26,
               color: isSel ? _kAccent.withAlpha(70) : null,
