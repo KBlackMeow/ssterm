@@ -266,6 +266,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       ToolCall? useSkillTool;
       ToolCall? webSearchTool;
       ToolCall? writeFileTool;
+      ToolCall? askUserQuestionTool;
       for (final call in toolCalls) {
         if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
           useSkillTool = call;
@@ -278,6 +279,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             call.path != null &&
             call.content != null) {
           writeFileTool = call;
+        }
+        if (askUserQuestionTool == null &&
+            call.isAskUserQuestion &&
+            call.question != null &&
+            call.header != null &&
+            call.options.length >= 2) {
+          askUserQuestionTool = call;
         }
       }
       final useSkill =
@@ -294,11 +302,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           ? 'task_complete'
           : (askUser
                 ? 'ask_user'
-                : (useSkill != null
-                      ? 'use_skill:$useSkill'
-                      : (webQuery != null
-                            ? 'web_search'
-                            : (writeFile != null ? 'write_file' : 'none'))));
+                : (askUserQuestionTool != null
+                      ? 'ask_user_question'
+                      : (useSkill != null
+                            ? 'use_skill:$useSkill'
+                            : (webQuery != null
+                                  ? 'web_search'
+                                  : (writeFile != null
+                                        ? 'write_file'
+                                        : 'none')))));
       logIter(
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
@@ -448,6 +460,62 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             // will call _continueAgentLoop again to resume.
             return;
         }
+      }
+
+      // ── Ask-user question (multiple-choice) ─────────────────────────
+      // Structured sibling of the bare [ASK_USER] marker: the model
+      // supplies concrete candidate answers, we show them as a card,
+      // and — unlike write_file/web_search/use_skill — we do NOT end
+      // the turn.  We await the user's answer in place (mirrors how
+      // `_DangerProposal.decision` is awaited inside the command loop
+      // below) so the whole exchange stays inside ONE `turnId`: no
+      // `_agentBusy` flicker, no terminal unlock/relock, and the loop
+      // calls the LLM again automatically the instant an answer lands.
+      if (askUserQuestionTool != null) {
+        final proposal = _QuestionProposal(
+          question: askUserQuestionTool.question!,
+          header: askUserQuestionTool.header!,
+          options: askUserQuestionTool.options
+              .map(
+                (o) => _QuestionOption(
+                  label: o.label,
+                  description: o.description,
+                ),
+              )
+              .toList(),
+          agentGeneration: gen,
+        );
+        setState(() {
+          _messages.add(_ChatMessage.questionProposal(proposal));
+          _pendingQuestionProposal = proposal;
+          _agentLoopStatus = 'Awaiting answer: ${proposal.header}';
+        });
+        _scrollToBottom();
+        logIter(
+          'iter=$loopIterations ask_user_question_shown '
+          'header=${_logQuote(proposal.header)} '
+          'options=${proposal.options.length}',
+        );
+        final answer = await proposal.decision.future;
+        if (!mounted || gen != _generation) {
+          logIter('iter=$loopIterations exit stale_generation');
+          return;
+        }
+        if (answer == null) {
+          // Cancelled while awaiting — bail without touching history,
+          // mirrors the `webQuery` cancellation-during-fetch path above.
+          return;
+        }
+        setState(() {
+          _messages.add(_ChatMessage.user(answer));
+          _agentLoopStatus = null;
+        });
+        _conversationHistory.add({'role': 'user', 'content': answer});
+        logIter(
+          'iter=$loopIterations ask_user_question_answered chars=${answer.length}',
+        );
+        _scrollToBottom();
+        continue;
       }
 
       // Terminus handling.  Model-driven termini (`task_complete`,
