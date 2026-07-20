@@ -1,9 +1,19 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/ssh_host.dart';
 import 'package:ssterm/models/tab_model.dart';
 import 'package:xterm/xterm.dart';
+
+/// Minimal no-op stand-in — `AppTab.editor` only stores the reference,
+/// it never calls any method on it, so a real [SftpClient] (which
+/// requires a live SSH transport to construct) isn't needed here.
+class FakeSftpClient implements SftpClient {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
 
 void main() {
   // GlobalKey requires a binding to be initialized.
@@ -158,6 +168,53 @@ void main() {
 
     test('ssh tab has lock icon', () {
       expect(AppTab.ssh(title: 'x').icon.codePoint, isNonZero);
+    });
+  });
+
+  group('AppTab.editor', () {
+    test('factory sets kind, path, sftp, label, mtime, and initial content', () {
+      final mtime = DateTime.utc(2026, 1, 1);
+      final tab = AppTab.editor(
+        path: '/etc/hosts',
+        sftp: FakeSftpClient(),
+        label: 'ssh: prod-db',
+        mtime: mtime,
+        initialContent: 'localhost 127.0.0.1',
+      );
+      expect(tab.kind, equals(AppTabKind.editor));
+      expect(tab.editorPath, equals('/etc/hosts'));
+      expect(tab.editorSftp, isNotNull);
+      expect(tab.editorLabel, equals('ssh: prod-db'));
+      expect(tab.editorMtime, equals(mtime));
+      expect(tab.editorInitialContent, equals('localhost 127.0.0.1'));
+      expect(tab.title, equals('/etc/hosts'));
+    });
+
+    test('starts not dirty', () {
+      final tab = AppTab.editor(
+        path: '/tmp/x',
+        sftp: FakeSftpClient(),
+        label: 'ssh: x',
+        mtime: null,
+        initialContent: '',
+      );
+      expect(tab.editorDirty.value, isFalse);
+    });
+
+    test('editorViewKey is a fresh GlobalKey per tab', () {
+      final a = AppTab.editor(
+          path: '/a', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+      final b = AppTab.editor(
+          path: '/b', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+      expect(identical(a.editorViewKey, b.editorViewKey), isFalse);
+    });
+  });
+
+  group('AppTab.icon', () {
+    test('editor tab has edit icon', () {
+      final tab = AppTab.editor(
+          path: '/a', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+      expect(tab.icon, equals(Icons.edit_note));
     });
   });
 }

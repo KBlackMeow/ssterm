@@ -8,10 +8,11 @@ import 'package:xterm/xterm.dart';
 import '../io/output_pipe.dart';
 import '../services/local_shell_discovery.dart';
 import '../services/port_forward_service.dart';
+import '../views/file_editor_view.dart';
 import 'ssh_host.dart';
 import 'transfer_task.dart';
 
-enum AppTabKind { local, ssh, sshConnecting, sshError, settings }
+enum AppTabKind { local, ssh, sshConnecting, sshError, settings, editor }
 
 /// Best-effort SSH teardown; must not throw when the transport is already dead.
 void safeSshTeardown(void Function() close) {
@@ -61,6 +62,53 @@ class AppTab {
   bool sftpPanelVisible = false;
   bool aiPanelVisible = false;
   TransferManager? transferManager;
+
+  // ── Editor-tab-only state (AppTabKind.editor) ────────────────────────────
+  // Populated only when `kind == AppTabKind.editor`. Kept as a separate,
+  // clearly-labelled group rather than mixed into the pane-0 fields above
+  // because an editor tab has no terminal/PTY/split state at all — it's a
+  // lightweight tab like `settings`, not a terminal session.
+
+  /// Remote absolute path this tab is editing.
+  String? editorPath;
+
+  /// SFTP client BORROWED from the source SSH tab at open time — this tab
+  /// does not own it and must never close it. If the source SSH tab
+  /// reconnects (getting a new client) or disconnects (closing this one),
+  /// this reference goes stale; `FileEditorView` surfaces that as an
+  /// ordinary save error rather than trying to follow the reconnect.
+  SftpClient? editorSftp;
+
+  /// Display label for the source SSH tab, e.g. "ssh: prod-db" — shown in
+  /// error messages so the user knows which connection is involved.
+  String? editorLabel;
+
+  /// mtime captured at open time (or the most recent successful
+  /// save/reload) — passed to `FileSystemAdapter.commit` as the
+  /// concurrency token.
+  DateTime? editorMtime;
+
+  /// Content read by the SFTP panel at open time. Consumed EXACTLY ONCE
+  /// by `FileEditorView.initState` (via `_buildPrimaryContent`'s
+  /// construction in `main_views.dart`, Task 4) to seed its
+  /// `TextEditingController` — `_buildPrimaryContent` runs on every
+  /// rebuild, but `initState` only runs once per widget lifetime, so
+  /// after the first build this field is stale/unused and the
+  /// widget's own controller is the sole source of truth.
+  String? editorInitialContent;
+
+  /// True while the editor's buffer differs from the last-saved/loaded
+  /// content. Written by `FileEditorView`, read by the tab-close
+  /// confirmation gate — kept on `AppTab` (not buried inside the widget's
+  /// State) so the close handler can check it even before/without
+  /// querying the widget itself.
+  final ValueNotifier<bool> editorDirty = ValueNotifier(false);
+
+  /// Reach-into-the-widget handle, same pattern as [terminalViewKey]
+  /// below — lets the tab-close confirmation flow (which runs outside
+  /// `FileEditorView`'s own widget tree) call `.save()` on the live
+  /// editor state when the user chooses "Save" from the close dialog.
+  final editorViewKey = GlobalKey<FileEditorViewState>();
 
   /// `true` while the AI agent is auto-executing commands.  Drives an
   /// `AbsorbPointer` around the terminal pane so a stray keypress can't
@@ -115,6 +163,23 @@ class AppTab {
   /// Convenience factory used in tests and SSH-tab creation.
   factory AppTab.ssh({required String title, SshHost? profile}) =>
       AppTab._(kind: AppTabKind.ssh, title: title, sshProfile: profile);
+
+  /// Convenience factory used in tests and when the user opens a remote
+  /// file from the SFTP panel. [title] is the path itself — editor tabs
+  /// don't have a separate short display name, the full path IS the
+  /// identity of the tab.
+  factory AppTab.editor({
+    required String path,
+    required SftpClient sftp,
+    required String label,
+    required DateTime? mtime,
+    required String initialContent,
+  }) => AppTab._(kind: AppTabKind.editor, title: path)
+    ..editorPath = path
+    ..editorSftp = sftp
+    ..editorLabel = label
+    ..editorMtime = mtime
+    ..editorInitialContent = initialContent;
 
   // ── Pane lifecycle ───────────────────────────────────────────────────────────
 
@@ -229,6 +294,12 @@ class AppTab {
   }
 
   void dispose() {
+    // NOTE: editorDirty/editorViewKey need no explicit cleanup here —
+    // ValueNotifier.dispose() is skipped deliberately (see below); the
+    // GlobalKey has no disposable resource of its own. editorSftp is a
+    // BORROWED reference (see its doc comment above) and must NOT be
+    // closed here — that would tear down the source SSH tab's live
+    // connection out from under it.
     manuallyDisconnected = true;
     keepaliveTimer?.cancel();
     keepaliveTimer = null;
@@ -252,6 +323,7 @@ class AppTab {
     splitTerminalController.dispose();
     transferManager?.dispose();
     terminalLocked.dispose();
+    editorDirty.dispose();
   }
 
   IconData get icon => switch (kind) {
@@ -260,5 +332,6 @@ class AppTab {
     AppTabKind.sshConnecting => Icons.lock_outline,
     AppTabKind.sshError => Icons.error_outline,
     AppTabKind.settings => Icons.settings_outlined,
+    AppTabKind.editor => Icons.edit_note,
   };
 }

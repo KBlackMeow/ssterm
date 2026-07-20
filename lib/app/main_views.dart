@@ -484,6 +484,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           _config.save();
         },
       ),
+      _TabKind.editor => const SizedBox.shrink(), // Placeholder — replaced in Task 2
     };
   }
 
