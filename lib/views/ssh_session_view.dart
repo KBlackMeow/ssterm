@@ -23,6 +23,7 @@ class SshSessionView extends StatefulWidget {
     this.initialPosition = SftpPanelPosition.bottom,
     this.initialSize,
     this.onLayoutChanged,
+    this.onOpenEditorTab,
   });
 
   /// Default SFTP panel share of the session area (2/5 of width or height).
@@ -38,6 +39,14 @@ class SshSessionView extends StatefulWidget {
   final SftpPanelPosition initialPosition;
   final double? initialSize;
   final void Function(SftpPanelPosition position, double? size)? onLayoutChanged;
+
+  /// Forwarded straight through to the embedded [SftpView] — see its
+  /// doc comment for the contract.
+  final void Function({
+    required String path,
+    required String initialContent,
+    required DateTime? mtime,
+  })? onOpenEditorTab;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -89,6 +98,7 @@ class _SshSessionViewState extends State<SshSessionView> {
             widget.onLayoutChanged?.call(_position, null);
           }),
           onClose: widget.onToggleSftp,
+          onOpenEditorTab: widget.onOpenEditorTab,
         );
 
         final panel = _position == SftpPanelPosition.right

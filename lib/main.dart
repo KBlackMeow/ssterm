@@ -38,6 +38,7 @@ import 'services/wallpaper_storage.dart';
 import 'utils/app_dir.dart';
 import 'utils/fd_limit.dart';
 import 'utils/ssh_error_messages.dart';
+import 'views/file_editor_view.dart';
 import 'views/settings/settings_sheet.dart' show SettingsPage;
 import 'widgets/cmd_picker_button.dart';
 import 'widgets/ai_assistant_panel.dart';

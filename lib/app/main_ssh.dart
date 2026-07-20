@@ -611,6 +611,64 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     });
   }
 
+  /// Opens a new editor tab for a file read from [sourceTab]'s SFTP
+  /// panel. Inserted and activated the same way `_newLocalTab` inserts a
+  /// fresh local tab (append + activate) — see `main_local.dart`.
+  void _openEditorTab({
+    required _Tab sourceTab,
+    required String path,
+    required String initialContent,
+    required DateTime? mtime,
+  }) {
+    final sftp = sourceTab.sftp;
+    if (sftp == null) return; // source tab's SFTP session isn't live
+    setState(() {
+      _tabs.add(_Tab.editor(
+        path: path,
+        sftp: sftp,
+        label: 'ssh: ${sourceTab.title}',
+        mtime: mtime,
+        initialContent: initialContent,
+      ));
+      _active = _tabs.length - 1;
+    });
+    _activateTab(_active);
+  }
+
+  /// Gate in front of [_closeTab] for tabs that may have unsaved
+  /// changes. Every non-editor tab, and every editor tab that ISN'T
+  /// dirty, behaves exactly like the old direct `onClose: _closeTab`
+  /// wiring — this only adds a confirmation step for the one new case.
+  Future<void> _requestCloseTab(int i) async {
+    if (i < 0 || i >= _tabs.length) return;
+    final tab = _tabs[i];
+    if (tab.kind != _TabKind.editor || !tab.editorDirty.value) {
+      _closeTab(i);
+      return;
+    }
+
+    final colors = AppColors.maybeOf(context);
+    final decision = await showDialog<_UnsavedChangesDecision>(
+      context: context,
+      builder: (ctx) => Theme(
+        data: Theme.of(context)
+            .copyWith(extensions: colors != null ? {colors} : null),
+        child: const _UnsavedChangesDialog(),
+      ),
+    );
+    if (!mounted || decision == null || decision == _UnsavedChangesDecision.cancel) {
+      return;
+    }
+    if (decision == _UnsavedChangesDecision.discard) {
+      _closeTab(i);
+      return;
+    }
+    // decision == save
+    final saved = await tab.editorViewKey.currentState?.save() ?? false;
+    if (!mounted || !saved) return;
+    _closeTab(i);
+  }
+
   void _selectTab(int i) {
     if (i == _active) return;
     final prev = _active;
@@ -762,5 +820,80 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       _tabs.add(_Tab.settings());
       _active = _tabs.length - 1;
     });
+  }
+}
+
+enum _UnsavedChangesDecision { save, discard, cancel }
+
+class _UnsavedChangesDialog extends StatelessWidget {
+  const _UnsavedChangesDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final fill = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final fg = colors?.foreground ?? const Color(0xFFD4D4D4);
+    final fgDim = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: SizedBox(
+        width: 380,
+        child: PopupSurface(
+          color: fill,
+          backdropBlur: 20,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Unsaved changes',
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'This file has unsaved changes. Save before closing?',
+                  style: TextStyle(color: fgDim, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(
+                          context, _UnsavedChangesDecision.cancel),
+                      child: Text('Cancel', style: TextStyle(color: fgDim)),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(
+                          context, _UnsavedChangesDecision.discard),
+                      child: const Text(
+                        "Don't Save",
+                        style: TextStyle(color: Color(0xFFFF6E67)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(
+                          context, _UnsavedChangesDecision.save),
+                      child: const Text(
+                        'Save',
+                        style: TextStyle(color: Color(0xFF2472C8)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

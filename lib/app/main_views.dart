@@ -41,7 +41,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
               tabSelectedColor: ts.chromeTabSelected,
               tabUnselectedColor: ts.chromeTabUnselected,
               onSelect: _selectTab,
-              onClose: _closeTab,
+              onClose: _requestCloseTab,
               onNewLocal: _newLocalTab,
               localShells: _localShells,
               onRefreshLocalShells: _refreshLocalShellsIfChanged,
@@ -374,6 +374,13 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           _config.sftpSize = size;
           _config.save();
         },
+        onOpenEditorTab: ({required path, required initialContent, required mtime}) =>
+            _openEditorTab(
+              sourceTab: tab,
+              path: path,
+              initialContent: initialContent,
+              mtime: mtime,
+            ),
         child: body,
       );
     }
@@ -484,7 +491,15 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           _config.save();
         },
       ),
-      _TabKind.editor => const SizedBox.shrink(), // Placeholder — replaced in Task 2
+      _TabKind.editor => FileEditorView(
+        key: tab.editorViewKey,
+        path: tab.editorPath!,
+        sftp: tab.editorSftp!,
+        label: tab.editorLabel!,
+        initialContent: tab.editorInitialContent ?? '',
+        initialMtime: tab.editorMtime,
+        dirty: tab.editorDirty,
+      ),
     };
   }
 
