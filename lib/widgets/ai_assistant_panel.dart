@@ -214,6 +214,19 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   void Function()? _cancelStream;
   int _generation = 0;
 
+  /// The `_QuestionProposal` currently awaiting an answer (option tap OR
+  /// custom "Other" text via the main chat input), or null when no
+  /// `ask_user_question` card is pending.  Set when the card appears
+  /// (see `ai_assistant_panel_loop.dart`'s `ask_user_question`
+  /// interception) and cleared the moment it's answered or goes stale
+  /// (see `_decideQuestionProposal` in `ai_assistant_panel_tooling.dart`).
+  _QuestionProposal? _pendingQuestionProposal;
+
+  /// Focus target for the agent-mode chat `TextField`, used ONLY to
+  /// hand focus back to the input when the user taps "Other" on a
+  /// pending question card — see `_beginCustomQuestionAnswer`.
+  final _agentInputFocusNode = FocusNode();
+
   /// Monotonic counter for the user-message-driven agent turns within
   /// this process.  Used as the `t=N` prefix on every `[agent] iter=…`
   /// log line so consecutive turns are visually distinguishable in
@@ -260,6 +273,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _cmdController.dispose();
     _agentController.dispose();
     _scrollController.dispose();
+    _agentInputFocusNode.dispose();
     super.dispose();
   }
 
