@@ -15,13 +15,57 @@ String _buildSystemPrompt({
   bool webSearchEnabled = false,
   bool fileWriteEnabled = false,
 }) {
-  final parts = <String>[_systemPromptBase];
+  final parts = <String>[_systemPromptBase, _buildAskUserQuestionBlock()];
   final enabled = SkillService.filterEnabled(enabledSkillIds);
   if (enabled.isNotEmpty) parts.add(_buildSkillsBlock());
   if (webSearchEnabled) parts.add(_buildWebSearchBlock());
   if (fileWriteEnabled) parts.add(_buildFileWriteBlock());
   parts.add(_buildHostBlock());
   return parts.join('\n\n');
+}
+
+/// Returns the `<ask_user_question_tool>` block for the system prompt.
+/// Always included — unlike `web_search`/`write_file`, asking a
+/// question has no side effects and no Settings gate.
+///
+/// Structured sibling of the plain `[ASK_USER]` marker (still
+/// documented in `<turn_protocol>`): this tool is for when the
+/// candidate answers are enumerable (2-6 concrete options); `[ASK_USER]`
+/// stays the fallback for genuinely open-ended questions.
+String _buildAskUserQuestionBlock() {
+  return '''
+<ask_user_question_tool>
+When you need the user to pick between a SMALL SET of concrete options (2-6), don't ask an open-ended question — emit one structured tool call and STOP:
+
+```tool_call
+{"id":"call_<short_unique_id>","name":"ask_user_question","arguments":{"question":"<one concrete question>","header":"<short label, max ~12 chars>","options":[{"label":"<short option title>","description":"<one-sentence explanation>"},{"label":"<short option title>","description":"<one-sentence explanation>"}]}}
+```
+
+Rules for `options`:
+- Between 2 and 6 entries.
+- Every entry needs BOTH a short `label` and a one-sentence `description` — never omit either.
+- Do NOT add your own "other" / "something else" entry — ssterm's UI always appends one automatically for free-form answers.
+
+The user is shown a card with your options as buttons; their answer arrives as an ordinary user-role message in your NEXT turn — no special envelope, just their chosen label (or whatever free text they typed if they picked "Other"). Treat it exactly like a normal reply and continue.
+
+When to use it:
+- The decision has a small number of concrete, nameable candidates (e.g. "which config file", "overwrite or rename", "which of these branches").
+- You'd otherwise have written a question ending in "A, B, or C?" — that's the signal to use this tool instead of `[ASK_USER]`.
+
+When NOT to use it (use the plain `[ASK_USER]` marker instead):
+- The answer is genuinely open-ended (a name, a path, a secret, free-form instructions).
+- There would be more than 6 options, or the options can't be boiled down to a short label + one sentence each.
+
+Turn-shape rules:
+- An `ask_user_question` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `use_skill`, or `web_search` — the agent loop intercepts it BEFORE anything else, so combining silently drops later actions.
+- The `question` field IS the question — don't also restate it as `[ASK_USER]` in the same turn.
+
+Example INVESTIGATE-then-ASK turn:
+  I found two lockfiles for this project.
+  ```tool_call
+  {"id":"call_pick_lockfile","name":"ask_user_question","arguments":{"question":"Which lockfile should I use for the install?","header":"Lockfile","options":[{"label":"package-lock.json","description":"npm's lockfile, present at the repo root"},{"label":"pnpm-lock.yaml","description":"pnpm's lockfile, also present at the repo root"}]}}
+  ```
+</ask_user_question_tool>''';
 }
 
 /// Returns the `<web_search_tool>` block for the system prompt, or an
@@ -68,7 +112,7 @@ When NOT to use it:
 - Querying private data the user did NOT explicitly ask you to publish.
 
 Turn-shape rules:
-- A `web_search` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], or `use_skill` — the agent loop intercepts the tool BEFORE executing anything, so combining silently drops later actions.
+- A `web_search` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, or `use_skill` — the agent loop intercepts the tool BEFORE executing anything, so combining silently drops later actions.
 - Issue ONE search per turn; iterate based on the results.
 - Cite results by index in your ANSWER turn (e.g. "per [3]") so the user can verify the source.
 - If the result envelope arrives as `[Web search failed]`, do NOT retry the same query — follow the `recovery` directive in that envelope.
@@ -131,7 +175,7 @@ When NOT to use the tool (these are the ONLY exceptions):
 Hard rules:
 - Path resolution: absolute (`/etc/x`) is always safe. `~/…` expands to the active session's HOME (local AND SSH — ssterm resolves it for you over SFTP). Relative paths (e.g. `foo.sh`, `src/main.py`, `./bar`) resolve against the active terminal pane's working directory (PWD). If the user's first message includes a `<session_context>` block, it tells you exactly what PWD, HOME, and the current local date/time are for this session — quote them when in doubt instead of guessing (especially "today's date" — the block's clock is authoritative; do NOT fall back to training-data assumptions).
 - ONE write proposal per turn. The Apply card needs an individual decision per file.
-- A `write_file` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `use_skill`, or `web_search` — the agent loop intercepts the write BEFORE running anything, so combining silently drops later actions.
+- A `write_file` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, `use_skill`, or `web_search` — the agent loop intercepts the write BEFORE running anything, so combining silently drops later actions.
 - After a `[File write rejected by user]` envelope, DO NOT re-emit the same write for the same path. Either ask the user what to change, propose a different path, or abandon the write.
 - After a `[File write failed]` envelope, follow the recovery hint inside it — usually `mkdir -p` first via bash, then re-emit `write_file`.
 
@@ -204,7 +248,7 @@ To load a skill, emit one structured tool call and STOP:
 The full skill body arrives as a user-role message in your NEXT turn. When a skill description matches the task, load it IMMEDIATELY as your first action, BEFORE issuing any investigative commands. NEVER just announce or mention a skill without actually loading it via the tool call. Only use skill ids listed below — do not invent or guess ids.
 
 Turn-shape rules:
-- A `use_skill` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], or [ASK_USER] — the agent loop intercepts the skill request BEFORE executing anything, so combining them silently drops later actions.
+- A `use_skill` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], or `ask_user_question` — the agent loop intercepts the skill request BEFORE executing anything, so combining them silently drops later actions.
 - Loading a skill does NOT count as an investigation step. Once the body arrives, resume the normal INVESTIGATE → ANSWER cycle informed by the skill's playbook.
 - If no listed skill matches, proceed with normal INVESTIGATE turns.
 
@@ -341,7 +385,7 @@ Notes:
 </feedback_format>
 
 <turn_protocol>
-Every turn you write MUST be exactly ONE of these three shapes. NEVER combine.
+Every turn you write MUST be exactly ONE of these four shapes. NEVER combine.
 
   1. INVESTIGATE — gather information or make a change.
      Format: One short sentence of intent, then one fenced `tool_call` JSON object with ONE bash command.
@@ -362,8 +406,13 @@ Every turn you write MUST be exactly ONE of these three shapes. NEVER combine.
      End-of-turn marker: [ASK_USER] on its own line, last thing in the message.
      NO `tool_call` on this turn.
 
+  4. ASK WITH OPTIONS — same as ASK, but the candidate answers are a SMALL SET of concrete, nameable options (2-6). Prefer this over shape 3 whenever you can enumerate the choices — see <ask_user_question_tool> for the full schema and a worked example.
+     Format: One short sentence of intent, then one fenced `tool_call` JSON object naming `ask_user_question`.
+     End-of-turn marker: NONE (the tool_call itself ends the turn).
+     NO [ASK_USER] or any other marker on this turn.
+
 CRITICAL — DO NOT MIX SHAPES:
-An INVESTIGATE turn (with a `tool_call`) MUST NOT also contain [TASK_COMPLETE] or [ASK_USER]. The agent loop checks the marker BEFORE executing your command — if both appear in the same turn, the marker wins, your command is silently dropped, and the round-trip is wasted. Always wait one full turn between issuing a command and declaring the task complete.
+An INVESTIGATE turn (with a `tool_call`) MUST NOT also contain [TASK_COMPLETE], [ASK_USER], or an `ask_user_question` tool_call. The agent loop checks the marker BEFORE executing your command — if both appear in the same turn, the marker wins, your command is silently dropped, and the round-trip is wasted. Always wait one full turn between issuing a command and declaring the task complete.
 
 USE ASK BEFORE DESTRUCTIVE OR EXPENSIVE OPERATIONS — never INVESTIGATE — for: `rm -rf`, `DROP TABLE`, package upgrades, multi-GB downloads, anything system-wide. State the intent, then end with [ASK_USER]. Wait for the user to confirm before you actually run it.
 

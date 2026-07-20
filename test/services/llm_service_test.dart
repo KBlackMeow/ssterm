@@ -1038,6 +1038,27 @@ Done.
         expect(() => jsonDecode(json), returnsNormally, reason: json);
       }
     });
+
+    test(
+      'ask_user_question tool is always advertised regardless of feature flags',
+      () {
+        // Unlike web_search/write_file, this tool has no Settings gate —
+        // it must appear even with every other optional feature off.
+        final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{},
+          webSearchEnabled: false,
+          fileWriteEnabled: false,
+        );
+        expect(prompt.contains('<ask_user_question_tool>'), isTrue);
+        expect(prompt.contains('"name":"ask_user_question"'), isTrue);
+      },
+    );
+
+    test('turn_protocol documents ask_user_question as a 4th shape', () {
+      final prompt = LlmService.systemPromptFor(enabledSkillIds: <String>{});
+      expect(prompt.contains('ask_user_question'), isTrue);
+      expect(prompt.contains('four shapes'), isTrue);
+    });
   });
 
   group('SkillService.buildPromptCatalogue Cursor-style format', () {
