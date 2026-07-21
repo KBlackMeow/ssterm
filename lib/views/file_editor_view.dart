@@ -259,6 +259,12 @@ class FileEditorViewState extends State<FileEditorView> {
                           fontSize: 13,
                           height: 1.4,
                         ),
+                        // Default GutterStyle width (80) is sized for a
+                        // generic sans-serif editor font; at our 13px
+                        // JetBrainsMono size a 4-digit line number only
+                        // needs ~32px, so the default reads as a wide
+                        // empty stripe down the left edge.
+                        gutterStyle: const GutterStyle(width: 44),
                       ),
                     ),
                   ),
