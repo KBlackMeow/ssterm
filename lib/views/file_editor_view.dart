@@ -252,22 +252,33 @@ class FileEditorViewState extends State<FileEditorView> {
                     child: CodeField(
                       controller: _controller,
                       expands: false,
+                      // Without this, CodeField paints its OWN background
+                      // from the highlight theme's root style (Atom One
+                      // Dark's #282c34) instead of our chrome's _kBg
+                      // (#1E1E1E) — invisible while at rest, but rubber-
+                      // band overscroll past the top/bottom pulls the
+                      // code area away from the viewport edge and
+                      // reveals the mismatched color underneath.
+                      background: _kBg,
                       textStyle: const TextStyle(
                         fontFamily: 'JetBrainsMono',
                         fontSize: 13,
                         height: 1.4,
                       ),
-                      // Line numbers off: flutter_code_editor 0.3.5's
+                      // Gutter off entirely: flutter_code_editor 0.3.5's
                       // gutter mis-renders line numbers in this app
-                      // (values repeat/skip rather than the display
-                      // simply being visually misaligned) — a display
-                      // bug, not a data-loss risk (the .fullText save
-                      // path is unaffected). Folding/error columns are
-                      // untouched; only the number column is hidden.
-                      gutterStyle: const GutterStyle(
-                        showLineNumbers: false,
-                        width: 32,
-                      ),
+                      // (values repeat/skip, not just visual misalignment)
+                      // — a display bug, not a data-loss risk (the
+                      // .fullText save path is unaffected). Hiding just
+                      // the number column left the gutter's width
+                      // uncomputed (CodeField only sizes the gutter
+                      // Container when showLineNumbers is true), which
+                      // showed up as leftover blank space — GutterStyle
+                      // .none collapses the whole gutter to zero width,
+                      // which is the package's own documented way to
+                      // hide it (rather than setting every show* flag
+                      // false individually).
+                      gutterStyle: GutterStyle.none,
                     ),
                   ),
                 ),
