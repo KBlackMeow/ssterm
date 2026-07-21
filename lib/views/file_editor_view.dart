@@ -1,9 +1,12 @@
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
 
 import '../services/file_write_service.dart';
 import '../widgets/frosted_glass.dart';
+import 'file_editor_language.dart';
 
 const _kBg = Color(0xFF1E1E1E);
 const _kToolbar = Color(0x66252525);
@@ -12,10 +15,17 @@ const _kFgDim = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
 const _kDanger = Color(0xFFFF6E67);
 
-/// Plain-text editor tab for a remote file opened from the SFTP panel.
-/// I/O goes entirely through [SftpFileSystemAdapter] — no AI Agent
-/// involvement, no LLM-facing envelopes; every error string here is
-/// written for a human reading the toolbar.
+/// Syntax-highlighted editor tab for a remote file opened from the SFTP
+/// panel. I/O goes entirely through [SftpFileSystemAdapter] — no AI
+/// Agent involvement, no LLM-facing envelopes; every error string here
+/// is written for a human reading the toolbar.
+///
+/// Highlighting/line-numbers/folding come from `flutter_code_editor`'s
+/// [CodeController] (a [TextEditingController] subclass) and [CodeField].
+/// IMPORTANT: [CodeController.text] returns only the VISIBLE text when
+/// code is folded — every place below that reads or replaces the full
+/// buffer uses [CodeController.fullText] instead, so a folded save (or
+/// a reload) can never silently drop the folded-away content.
 class FileEditorView extends StatefulWidget {
   const FileEditorView({
     super.key,
@@ -39,7 +49,7 @@ class FileEditorView extends StatefulWidget {
   final String label;
 
   /// Content loaded by the SFTP panel BEFORE this tab was created —
-  /// used once, in [State.initState], to seed the [TextEditingController].
+  /// used once, in [State.initState], to seed the [CodeController].
   final String initialContent;
 
   /// mtime captured alongside [initialContent] — the initial concurrency
@@ -58,7 +68,7 @@ class FileEditorView extends StatefulWidget {
 enum _ConflictChoice { overwrite, reload }
 
 class FileEditorViewState extends State<FileEditorView> {
-  late final TextEditingController _controller;
+  late final CodeController _controller;
   late String _originalContent;
   DateTime? _mtime;
   String? _error;
@@ -67,7 +77,10 @@ class FileEditorViewState extends State<FileEditorView> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialContent);
+    _controller = CodeController(
+      text: widget.initialContent,
+      language: codeEditorLanguageForPath(widget.path),
+    );
     _originalContent = widget.initialContent;
     _mtime = widget.initialMtime;
     _controller.addListener(_onTextChanged);
@@ -81,7 +94,7 @@ class FileEditorViewState extends State<FileEditorView> {
   }
 
   void _onTextChanged() {
-    final isDirty = _controller.text != _originalContent;
+    final isDirty = _controller.fullText != _originalContent;
     if (widget.dirty.value != isDirty) widget.dirty.value = isDirty;
   }
 
@@ -102,12 +115,12 @@ class FileEditorViewState extends State<FileEditorView> {
     try {
       final result = await _adapter.commit(
         widget.path,
-        _controller.text,
+        _controller.fullText,
         expectedMtime: _mtime,
       );
       if (!mounted) return true;
       setState(() {
-        _originalContent = _controller.text;
+        _originalContent = _controller.fullText;
         _mtime = result.mtime;
         _saving = false;
       });
@@ -152,10 +165,11 @@ class FileEditorViewState extends State<FileEditorView> {
     if (!mounted) return false;
     if (choice == _ConflictChoice.overwrite) {
       try {
-        final result = await _adapter.commit(widget.path, _controller.text);
+        final result =
+            await _adapter.commit(widget.path, _controller.fullText);
         if (!mounted) return true;
         setState(() {
-          _originalContent = _controller.text;
+          _originalContent = _controller.fullText;
           _mtime = result.mtime;
         });
         widget.dirty.value = false;
@@ -179,7 +193,11 @@ class FileEditorViewState extends State<FileEditorView> {
       final preview = await _adapter.preview(widget.path);
       if (!mounted) return;
       setState(() {
-        _controller.text = content;
+        // fullText (not text) — a plain `.text =` assignment would
+        // bypass CodeController's folding-aware Code model and could
+        // leave stale fold-block bookkeeping pointing at line numbers
+        // that no longer make sense after this full-content replace.
+        _controller.fullText = content;
         _originalContent = content;
         _mtime = preview.mtime;
         _error = null;
@@ -230,20 +248,18 @@ class FileEditorViewState extends State<FileEditorView> {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(8),
-                  child: TextField(
-                    controller: _controller,
-                    maxLines: null,
-                    expands: true,
-                    textAlignVertical: TextAlignVertical.top,
-                    style: TextStyle(
-                      color: fg,
-                      fontFamily: 'JetBrainsMono',
-                      fontSize: 13,
-                      height: 1.4,
-                    ),
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      isCollapsed: true,
+                  child: CodeTheme(
+                    data: CodeThemeData(styles: atomOneDarkTheme),
+                    child: SingleChildScrollView(
+                      child: CodeField(
+                        controller: _controller,
+                        expands: false,
+                        textStyle: const TextStyle(
+                          fontFamily: 'JetBrainsMono',
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
                     ),
                   ),
                 ),
