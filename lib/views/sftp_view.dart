@@ -812,54 +812,72 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
             child: VerticalDivider(color: divider, width: 1),
           ),
           const SizedBox(width: 4),
-          if (widget.panelPosition != null &&
-              widget.onPanelPositionChanged != null)
-            _ToolBtn(
-              icon: widget.panelPosition == SftpPanelPosition.right
-                  ? Icons.view_agenda_outlined
-                  : Icons.view_sidebar_outlined,
-              tooltip: widget.panelPosition == SftpPanelPosition.right
-                  ? 'Move to bottom'
-                  : 'Move to right',
-              onTap: () => widget.onPanelPositionChanged!(
-                widget.panelPosition == SftpPanelPosition.right
-                    ? SftpPanelPosition.bottom
-                    : SftpPanelPosition.right,
+          // The action buttons below are wrapped in their own horizontal
+          // scroll region (Flexible, not Expanded — it only claims the
+          // space this cluster actually needs) so that when the panel
+          // is squeezed narrower than the buttons' combined width (e.g.
+          // docked next to the AI Agent panel on a small window), the
+          // cluster scrolls internally instead of overflowing the Row —
+          // a real RenderFlex overflow was observed here at panel
+          // widths as narrow as ~200px.
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.panelPosition != null &&
+                      widget.onPanelPositionChanged != null)
+                    _ToolBtn(
+                      icon: widget.panelPosition == SftpPanelPosition.right
+                          ? Icons.view_agenda_outlined
+                          : Icons.view_sidebar_outlined,
+                      tooltip: widget.panelPosition == SftpPanelPosition.right
+                          ? 'Move to bottom'
+                          : 'Move to right',
+                      onTap: () => widget.onPanelPositionChanged!(
+                        widget.panelPosition == SftpPanelPosition.right
+                            ? SftpPanelPosition.bottom
+                            : SftpPanelPosition.right,
+                      ),
+                    ),
+                  _ToolBtn(
+                    icon: Icons.upload,
+                    tooltip: 'Upload',
+                    onTap: _upload,
+                  ),
+                  _ToolBtn(
+                    icon: Icons.download,
+                    tooltip: 'Download',
+                    onTap: canDown ? () => _download(_selected!) : null,
+                  ),
+                  _ToolBtn(
+                    icon: Icons.create_new_folder_outlined,
+                    tooltip: 'New Folder',
+                    onTap: _mkdir,
+                  ),
+                  _ToolBtn(
+                    icon: Icons.delete_outline,
+                    tooltip: 'Delete',
+                    onTap: canDel ? () => _delete(_selected!) : null,
+                    danger: canDel,
+                  ),
+                  if (widget.onClose != null) ...[
+                    const SizedBox(width: 4),
+                    SizedBox(
+                      height: 16,
+                      child: VerticalDivider(color: divider, width: 1),
+                    ),
+                    _ToolBtn(
+                      icon: Icons.close,
+                      tooltip: 'Hide SFTP',
+                      onTap: widget.onClose,
+                    ),
+                  ],
+                ],
               ),
             ),
-          _ToolBtn(
-            icon: Icons.upload,
-            tooltip: 'Upload',
-            onTap: _upload,
           ),
-          _ToolBtn(
-            icon: Icons.download,
-            tooltip: 'Download',
-            onTap: canDown ? () => _download(_selected!) : null,
-          ),
-          _ToolBtn(
-            icon: Icons.create_new_folder_outlined,
-            tooltip: 'New Folder',
-            onTap: _mkdir,
-          ),
-          _ToolBtn(
-            icon: Icons.delete_outline,
-            tooltip: 'Delete',
-            onTap: canDel ? () => _delete(_selected!) : null,
-            danger: canDel,
-          ),
-          if (widget.onClose != null) ...[
-            const SizedBox(width: 4),
-            SizedBox(
-              height: 16,
-              child: VerticalDivider(color: divider, width: 1),
-            ),
-            _ToolBtn(
-              icon: Icons.close,
-              tooltip: 'Hide SFTP',
-              onTap: widget.onClose,
-            ),
-          ],
         ],
       ),
     );
