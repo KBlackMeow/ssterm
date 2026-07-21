@@ -257,12 +257,17 @@ class FileEditorViewState extends State<FileEditorView> {
                         fontSize: 13,
                         height: 1.4,
                       ),
-                      // Default GutterStyle width (80) is sized for a
-                      // generic sans-serif editor font; at our 13px
-                      // JetBrainsMono size a 4-digit line number only
-                      // needs ~32px, so the default reads as a wide
-                      // empty stripe down the left edge.
-                      gutterStyle: const GutterStyle(width: 44),
+                      // Line numbers off: flutter_code_editor 0.3.5's
+                      // gutter mis-renders line numbers in this app
+                      // (values repeat/skip rather than the display
+                      // simply being visually misaligned) — a display
+                      // bug, not a data-loss risk (the .fullText save
+                      // path is unaffected). Folding/error columns are
+                      // untouched; only the number column is hidden.
+                      gutterStyle: const GutterStyle(
+                        showLineNumbers: false,
+                        width: 32,
+                      ),
                     ),
                   ),
                 ),
