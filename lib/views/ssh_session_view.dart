@@ -26,9 +26,6 @@ class SshSessionView extends StatefulWidget {
     this.onOpenEditorTab,
   });
 
-  /// Default SFTP panel share of the session area (2/5 of width or height).
-  static const defaultPanelFraction = 2 / 5;
-
   final SftpClient sftp;
   final String host;
   final ValueNotifier<String> remotePath;
@@ -56,6 +53,17 @@ class _SshSessionViewState extends State<SshSessionView> {
   static const _kMinSide = 160.0;
   static const _kMaxFraction = 0.8;
 
+  /// Default panel size when the user hasn't dragged the resize handle
+  /// yet (`_customPanelSize == null`). A fixed pixel value rather than
+  /// a fraction of the available width — the old `total * 2/5` default
+  /// meant the panel visibly shrank whenever `total` shrank, which
+  /// happens every time the AI Agent panel is also open (it's docked
+  /// in a Row alongside this view and claims its own share of the
+  /// window first, so this view's LayoutBuilder constraints are
+  /// whatever's left over, not the full window). A constant size means
+  /// the SFTP panel no longer reacts to what the AI panel is doing.
+  static const _kDefaultPanelSize = 280.0;
+
   late SftpPanelPosition _position;
   double? _customPanelSize;
 
@@ -75,8 +83,11 @@ class _SshSessionViewState extends State<SshSessionView> {
     if (_customPanelSize != null) {
       return _customPanelSize!.clamp(_kMinSide, maxSide);
     }
-    return (total * SshSessionView.defaultPanelFraction)
-        .clamp(_kMinSide, maxSide);
+    // Still clamped to [_kMinSide, maxSide] — on a genuinely narrow
+    // window/pane the panel still gives way rather than pushing the
+    // terminal off-screen, but that's now a last-resort floor/ceiling
+    // rather than the everyday behavior.
+    return _kDefaultPanelSize.clamp(_kMinSide, maxSide);
   }
 
   @override
