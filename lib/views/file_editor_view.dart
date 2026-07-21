@@ -246,26 +246,23 @@ class FileEditorViewState extends State<FileEditorView> {
               _buildToolbar(fg, fgDim),
               if (_error != null) _buildErrorBar(),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: CodeTheme(
-                    data: CodeThemeData(styles: atomOneDarkTheme),
-                    child: SingleChildScrollView(
-                      child: CodeField(
-                        controller: _controller,
-                        expands: false,
-                        textStyle: const TextStyle(
-                          fontFamily: 'JetBrainsMono',
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                        // Default GutterStyle width (80) is sized for a
-                        // generic sans-serif editor font; at our 13px
-                        // JetBrainsMono size a 4-digit line number only
-                        // needs ~32px, so the default reads as a wide
-                        // empty stripe down the left edge.
-                        gutterStyle: const GutterStyle(width: 44),
+                child: CodeTheme(
+                  data: CodeThemeData(styles: atomOneDarkTheme),
+                  child: SingleChildScrollView(
+                    child: CodeField(
+                      controller: _controller,
+                      expands: false,
+                      textStyle: const TextStyle(
+                        fontFamily: 'JetBrainsMono',
+                        fontSize: 13,
+                        height: 1.4,
                       ),
+                      // Default GutterStyle width (80) is sized for a
+                      // generic sans-serif editor font; at our 13px
+                      // JetBrainsMono size a 4-digit line number only
+                      // needs ~32px, so the default reads as a wide
+                      // empty stripe down the left edge.
+                      gutterStyle: const GutterStyle(width: 44),
                     ),
                   ),
                 ),
