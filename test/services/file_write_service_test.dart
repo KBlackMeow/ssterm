@@ -1,7 +1,25 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/file_write_service.dart';
+
+/// Reproduces a killed/dropped SSH transport: every request is "sent"
+/// but no reply ever arrives. Only [stat] is overridden — that's the
+/// first network call every [SftpFileSystemAdapter] method makes, so a
+/// hang there is enough to exercise the timeout wrapper without needing
+/// a full fake of `open`/`write`/`rename`/etc.
+class _HangingSftpClient implements SftpClient {
+  @override
+  Future<SftpFileAttrs> stat(String path, {bool followLink = true}) {
+    return Completer<SftpFileAttrs>().future;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -307,6 +325,66 @@ void main() {
       // new value without rebuilding the adapter.
       pwd = '/tmp';
       expect(adapter.currentDirectory, equals('/tmp'));
+    });
+  });
+
+  group('SftpFileSystemAdapter timeout handling', () {
+    // Regression test: a killed/dropped SSH transport doesn't always
+    // surface as an immediate error — dartssh2 has no built-in
+    // operation timeout, so a request that never gets a reply used to
+    // hang the caller (e.g. FileEditorView.save()) forever with no
+    // error and no way out. Verified live against a real dropped
+    // connection; this fake reproduces the "request sent, no reply
+    // ever arrives" condition deterministically and fast.
+    test('preview times out instead of hanging forever when the '
+        'connection is dead', () async {
+      final adapter = SftpFileSystemAdapter(
+        sftp: _HangingSftpClient(),
+        label: 'ssh: dead-but-not-null',
+        opTimeout: const Duration(milliseconds: 50),
+      );
+      await expectLater(
+        () => adapter.preview('/tmp/x'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind,
+          'kind',
+          equals(FileWriteErrorKind.notSupported),
+        )),
+      );
+    });
+
+    test('readContent times out instead of hanging forever when the '
+        'connection is dead', () async {
+      final adapter = SftpFileSystemAdapter(
+        sftp: _HangingSftpClient(),
+        label: 'ssh: dead-but-not-null',
+        opTimeout: const Duration(milliseconds: 50),
+      );
+      await expectLater(
+        () => adapter.readContent('/tmp/x'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind,
+          'kind',
+          equals(FileWriteErrorKind.notSupported),
+        )),
+      );
+    });
+
+    test('commit times out instead of hanging forever when the '
+        'connection is dead', () async {
+      final adapter = SftpFileSystemAdapter(
+        sftp: _HangingSftpClient(),
+        label: 'ssh: dead-but-not-null',
+        opTimeout: const Duration(milliseconds: 50),
+      );
+      await expectLater(
+        () => adapter.commit('/tmp/x', 'content'),
+        throwsA(isA<FileWriteException>().having(
+          (e) => e.kind,
+          'kind',
+          equals(FileWriteErrorKind.notSupported),
+        )),
+      );
     });
   });
 

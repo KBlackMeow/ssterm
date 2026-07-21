@@ -502,10 +502,17 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   /// the SFTP HOME we discovered so it has a concrete starting point.
   final String? Function()? cwdProvider;
 
+  /// How long to wait for a network SFTP call before giving up and
+  /// throwing [FileWriteErrorKind.notSupported]. Overridable only for
+  /// tests (a dead-connection test can't afford to wait the real 15s
+  /// default) — production code should never pass this.
+  final Duration opTimeout;
+
   SftpFileSystemAdapter({
     required this.sftp,
     required this.label,
     this.cwdProvider,
+    this.opTimeout = _kOpTimeout,
   });
 
   /// Lazily-discovered HOME on the remote — populated by the first
@@ -538,8 +545,25 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
     return _cachedHome;
   }
 
+  // Network SFTP calls can hang indefinitely when the underlying SSH
+  // transport dies without a clean close (killed process, dropped Wi-Fi,
+  // unplugged cable) — dartssh2 has no built-in operation timeout for
+  // that case, so a caller (e.g. FileEditorView.save()) would otherwise
+  // spin forever with no error. Every public method below wraps its
+  // implementation in this timeout, matching the 15s convention already
+  // used for SFTP setup in ssh_connection.dart / sftp_download_worker.dart.
+  static const _kOpTimeout = Duration(seconds: 15);
+
+  FileWriteException _timeoutException() => const FileWriteException(
+    FileWriteErrorKind.notSupported,
+    'The SFTP operation timed out — the SSH connection may be dead.',
+  );
+
   @override
-  Future<FileWritePreview> preview(String path) async {
+  Future<FileWritePreview> preview(String path) =>
+      _previewImpl(path).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+
+  Future<FileWritePreview> _previewImpl(String path) async {
     final client = sftp;
     if (client == null) {
       throw const FileWriteException(
@@ -611,7 +635,10 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   }
 
   @override
-  Future<String> readContent(String path) async {
+  Future<String> readContent(String path) =>
+      _readContentImpl(path).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+
+  Future<String> _readContentImpl(String path) async {
     final client = sftp;
     if (client == null) {
       throw const FileWriteException(
@@ -661,6 +688,14 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
 
   @override
   Future<FileWriteResult> commit(
+    String path,
+    String content, {
+    DateTime? expectedMtime,
+  }) =>
+      _commitImpl(path, content, expectedMtime: expectedMtime)
+          .timeout(opTimeout, onTimeout: () => throw _timeoutException());
+
+  Future<FileWriteResult> _commitImpl(
     String path,
     String content, {
     DateTime? expectedMtime,
