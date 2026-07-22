@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'local_shell_wrapper.dart';
+
 /// A local shell that can be launched in a PTY tab.
 class LocalShellOption {
   const LocalShellOption({
@@ -342,13 +344,23 @@ class LocalShellDiscovery {
       for (final distro in distros) {
         final launcher = _findDistroLauncher(distro);
         if (launcher != null) {
+          // `<launcher> run <cmd>` executes non-interactively in the
+          // launcher's own (Windows-side) CWD rather than the Linux
+          // $HOME the no-args interactive form uses, so `cd ~` first to
+          // match today's behavior before handing off to the OSC 133
+          // wrapper — the same hook macOS/Linux native shells get, wired
+          // up here so WSL tabs stop being stuck on the echo-sentinel
+          // fallback (see CommandSentinelDialect.posix).
           _addShell(
             shells,
             seen,
             id: 'wsl:$distro',
             displayName: distro,
             executable: launcher,
-            arguments: const [],
+            arguments: [
+              'run',
+              'cd ~ 2>/dev/null\n${buildInteractiveShellWrapper()}',
+            ],
             isWsl: true,
           );
           continue;
