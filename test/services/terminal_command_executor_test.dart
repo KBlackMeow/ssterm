@@ -30,6 +30,62 @@ void main() {
       expect(prepared, endsWith("'"));
       expect(prepared, contains('\n'));
     });
+
+    test(
+      'cmd dialect sends multiline commands unwrapped but normalizes '
+      'line separators to CR',
+      () {
+        // Not wrapped into a nested invocation (unlike posix/powershell)
+        // — but LF alone doesn't submit a line on the classic Windows
+        // console line-input mode backing cmd.exe, so embedded newlines
+        // must become CR for each line to actually execute in turn.
+        final prepared = executor.prepareCommand(
+          'cd foo\ndir',
+          dialect: CommandSentinelDialect.cmd,
+        );
+
+        expect(prepared, 'cd foo\rdir');
+      },
+    );
+
+    test('powershell dialect wraps multiline commands as one nested '
+        'invocation whose payload round-trips', () {
+      const script = "Write-Host 'a'\nWrite-Host 'b'";
+      final prepared = executor.prepareCommand(
+        script,
+        dialect: CommandSentinelDialect.powershell,
+      );
+
+      expect(
+        prepared,
+        startsWith('powershell -NoProfile -NonInteractive -EncodedCommand '),
+      );
+      final encoded = prepared.split(' ').last;
+      expect(_decodePowerShellEncodedCommand(encoded), script);
+    });
+
+    test(
+      'powershell dialect uses the given shellExecutable for multiline '
+      'commands',
+      () {
+        final prepared = executor.prepareCommand(
+          'a\nb',
+          dialect: CommandSentinelDialect.powershell,
+          shellExecutable: r'C:\pwsh.exe',
+        );
+
+        expect(prepared, startsWith(r'C:\pwsh.exe -NoProfile'));
+      },
+    );
+
+    test('single-line command is unchanged regardless of dialect', () {
+      for (final dialect in CommandSentinelDialect.values) {
+        expect(
+          executor.prepareCommand('git status', dialect: dialect),
+          'git status',
+        );
+      }
+    });
   });
 
   test('CommandExecutionTarget keeps command and raw senders together', () {
@@ -155,4 +211,111 @@ void main() {
     expect(commands.single, contains('__ssterm_ec'));
     expect(result?.exitCode, 3);
   });
+
+  group('sentinel fallback dialects', () {
+    test('cmd dialect echoes the marker on a separate line via %errorlevel%', () async {
+      final terminal = Terminal();
+      terminal.write(List.filled(20, '\r\n').join());
+      final commands = <String>[];
+      final target = CommandExecutionTarget(
+        terminal: terminal,
+        outputPipe: null,
+        sentinelDialect: CommandSentinelDialect.cmd,
+        sendCommand: (command) {
+          commands.add(command);
+          final marker =
+              RegExp(r'(__SSTM_\d+__)').firstMatch(command)!.group(1)!;
+          terminal.write('\r\n$marker:3\r\n');
+        },
+        sendRaw: (_) {},
+      );
+      const executor = TerminalCommandExecutor(
+        pollInterval: Duration(milliseconds: 1),
+        fallbackTimeout: Duration(milliseconds: 20),
+      );
+
+      final result = await executor.execute(target, 'dir');
+
+      final sent = commands.single;
+      expect(sent, isNot(contains('__ssterm_ec')));
+      expect(sent, isNot(contains(';')));
+      // CR, not LF: the classic Windows console line-input mode backing
+      // cmd.exe only submits a line on `\r` — see the note in
+      // TerminalCommandExecutor.prepareCommand's cmd branch.
+      expect(sent, contains('\recho '));
+      expect(sent, isNot(contains('\necho ')));
+      expect(sent, contains('%errorlevel%'));
+      expect(result?.exitCode, 3);
+    });
+
+    test(
+      'cmd dialect exit code can be negative (NTSTATUS-derived errorlevel)',
+      () async {
+        final terminal = Terminal();
+        terminal.write(List.filled(20, '\r\n').join());
+        final target = CommandExecutionTarget(
+          terminal: terminal,
+          outputPipe: null,
+          sentinelDialect: CommandSentinelDialect.cmd,
+          sendCommand: (command) {
+            final marker =
+                RegExp(r'(__SSTM_\d+__)').firstMatch(command)!.group(1)!;
+            terminal.write('\r\n$marker:-1073741819\r\n');
+          },
+          sendRaw: (_) {},
+        );
+        const executor = TerminalCommandExecutor(
+          pollInterval: Duration(milliseconds: 1),
+          fallbackTimeout: Duration(milliseconds: 20),
+        );
+
+        final result = await executor.execute(target, 'crash.exe');
+
+        expect(result?.exitCode, -1073741819);
+      },
+    );
+
+    test('powershell dialect uses \$LASTEXITCODE and Console.Out.Write', () async {
+      final terminal = Terminal();
+      terminal.write(List.filled(20, '\r\n').join());
+      final commands = <String>[];
+      final target = CommandExecutionTarget(
+        terminal: terminal,
+        outputPipe: null,
+        sentinelDialect: CommandSentinelDialect.powershell,
+        sendCommand: (command) {
+          commands.add(command);
+          final marker =
+              RegExp(r'(__SSTM_\d+__)').firstMatch(command)!.group(1)!;
+          terminal.write('\r\n$marker:3\r\n');
+        },
+        sendRaw: (_) {},
+      );
+      const executor = TerminalCommandExecutor(
+        pollInterval: Duration(milliseconds: 1),
+        fallbackTimeout: Duration(milliseconds: 20),
+      );
+
+      final result = await executor.execute(target, 'Get-Item nope');
+
+      final sent = commands.single;
+      expect(sent, contains(r'$LASTEXITCODE'));
+      expect(sent, contains('[Console]::Out.Write'));
+      expect(sent, isNot(contains('printf')));
+      expect(result?.exitCode, 3);
+    });
+  });
+}
+
+/// Decodes a `-EncodedCommand` payload (base64 of UTF-16LE bytes) back to
+/// the original script text, mirroring what `powershell.exe` does natively.
+/// Used to verify `encodePowerShellCommand` round-trips without needing a
+/// real PowerShell process in the test environment.
+String _decodePowerShellEncodedCommand(String encoded) {
+  final bytes = base64.decode(encoded);
+  final units = <int>[];
+  for (var i = 0; i + 1 < bytes.length; i += 2) {
+    units.add(bytes[i] | (bytes[i + 1] << 8));
+  }
+  return String.fromCharCodes(units);
 }

@@ -592,7 +592,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
                   ? constraints.maxWidth
                   : constraints.maxHeight;
               final maxSide = total * _kPanelMaxFraction;
-              _customPanelSize = (panelExtent - d).clamp(
+              final current = _customPanelSize ?? panelExtent;
+              _customPanelSize = (current - d).clamp(
                 _kPanelMinExtent,
                 maxSide,
               );

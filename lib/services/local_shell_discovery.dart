@@ -10,6 +10,7 @@ class LocalShellOption {
     this.arguments = const [],
     this.environment,
     this.useUnixWrapper = false,
+    this.usePowerShellWrapper = false,
     this.isWsl = false,
   });
 
@@ -19,6 +20,12 @@ class LocalShellOption {
   final List<String> arguments;
   final Map<String, String>? environment;
   final bool useUnixWrapper;
+
+  /// Whether to inject the OSC 133 PowerShell prelude at spawn time (see
+  /// `powershell_shell_wrapper.dart`). Only ever set for native
+  /// `powershell`/`pwsh` candidates, never for `cmd` (which has no
+  /// programmable prompt-execution hook to build one on).
+  final bool usePowerShellWrapper;
   final bool isWsl;
 
   @override
@@ -40,6 +47,7 @@ class LocalShellOption {
         displayName == other.displayName &&
         executable == other.executable &&
         useUnixWrapper == other.useUnixWrapper &&
+        usePowerShellWrapper == other.usePowerShellWrapper &&
         isWsl == other.isWsl &&
         _listEquals(arguments, other.arguments) &&
         _mapEquals(environment, other.environment);
@@ -53,6 +61,7 @@ class LocalShellOption {
         if (environment != null && environment!.isNotEmpty)
           'environment': environment,
         if (useUnixWrapper) 'useUnixWrapper': true,
+        if (usePowerShellWrapper) 'usePowerShellWrapper': true,
         if (isWsl) 'isWsl': true,
       };
 
@@ -81,6 +90,7 @@ class LocalShellOption {
       arguments: args,
       environment: env,
       useUnixWrapper: json['useUnixWrapper'] as bool? ?? false,
+      usePowerShellWrapper: json['usePowerShellWrapper'] as bool? ?? false,
       isWsl: json['isWsl'] as bool? ?? false,
     );
   }
@@ -213,6 +223,7 @@ class LocalShellDiscovery {
             String path,
             List<String> args,
             Map<String, String>? env,
+            bool usePowerShellWrapper,
           })
         >[
           (
@@ -223,6 +234,7 @@ class LocalShellDiscovery {
                 r'$systemRoot\System32\cmd.exe',
             args: const <String>[],
             env: null,
+            usePowerShellWrapper: false,
           ),
           (
             id: 'powershell',
@@ -230,6 +242,7 @@ class LocalShellDiscovery {
             path: r'$systemRoot\System32\WindowsPowerShell\v1.0\powershell.exe',
             args: const <String>[],
             env: null,
+            usePowerShellWrapper: true,
           ),
           (
             id: 'pwsh',
@@ -237,6 +250,7 @@ class LocalShellDiscovery {
             path: r'C:\Program Files\PowerShell\7\pwsh.exe',
             args: const <String>[],
             env: null,
+            usePowerShellWrapper: true,
           ),
           (
             id: 'pwsh-x86',
@@ -244,6 +258,7 @@ class LocalShellDiscovery {
             path: r'C:\Program Files (x86)\PowerShell\7\pwsh.exe',
             args: const <String>[],
             env: null,
+            usePowerShellWrapper: true,
           ),
           (
             id: 'git-bash',
@@ -267,6 +282,7 @@ class LocalShellDiscovery {
               // "cannot execute binary file".
               'SHELL': '/usr/bin/bash',
             },
+            usePowerShellWrapper: false,
           ),
           (
             id: 'git-bash-x86',
@@ -287,6 +303,7 @@ class LocalShellDiscovery {
               'CHERE_INVOKING': '1',
               'SHELL': '/usr/bin/bash',
             },
+            usePowerShellWrapper: false,
           ),
         ];
 
@@ -300,6 +317,7 @@ class LocalShellDiscovery {
         executable: path,
         arguments: c.args,
         environment: c.env,
+        usePowerShellWrapper: c.usePowerShellWrapper,
       );
     }
   }
@@ -524,6 +542,7 @@ class LocalShellDiscovery {
     List<String> arguments = const [],
     Map<String, String>? environment,
     bool useUnixWrapper = false,
+    bool usePowerShellWrapper = false,
     bool isWsl = false,
   }) {
     final key = isWsl ? id : _normalizePath(executable);
@@ -539,6 +558,7 @@ class LocalShellDiscovery {
         arguments: arguments,
         environment: environment,
         useUnixWrapper: useUnixWrapper,
+        usePowerShellWrapper: usePowerShellWrapper,
         isWsl: isWsl,
       ),
     );

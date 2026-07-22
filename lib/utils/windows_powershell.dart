@@ -23,19 +23,27 @@ public static class SsTermDpi {
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 ''';
 
-/// Runs [script] via `powershell -EncodedCommand`, which sidesteps command-line
-/// quoting issues for multi-line scripts. stdout is decoded as UTF-8 so that
-/// non-ASCII paths (e.g. Chinese folder names) survive intact.
-Future<ProcessResult> runPowerShellEncoded(String script) {
+/// Encodes [script] the way `-EncodedCommand` expects: UTF-16LE bytes,
+/// base64'd. Sidesteps command-line quoting issues entirely (quotes,
+/// backticks, embedded newlines) since the argument is never re-parsed as
+/// shell syntax.
+String encodePowerShellCommand(String script) {
   final units = script.codeUnits; // UTF-16 code units
   final bytes = Uint8List(units.length * 2);
   for (var i = 0; i < units.length; i++) {
     bytes[i * 2] = units[i] & 0xFF; // little-endian (UTF-16LE)
     bytes[i * 2 + 1] = (units[i] >> 8) & 0xFF;
   }
+  return base64.encode(bytes);
+}
+
+/// Runs [script] via `powershell -EncodedCommand`, which sidesteps command-line
+/// quoting issues for multi-line scripts. stdout is decoded as UTF-8 so that
+/// non-ASCII paths (e.g. Chinese folder names) survive intact.
+Future<ProcessResult> runPowerShellEncoded(String script) {
   return Process.run(
     'powershell',
-    ['-NoProfile', '-EncodedCommand', base64.encode(bytes)],
+    ['-NoProfile', '-EncodedCommand', encodePowerShellCommand(script)],
     stdoutEncoding: utf8,
   );
 }

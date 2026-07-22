@@ -723,14 +723,24 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   /// Honors split panes — sends to the active pane's session/pty.
   void Function(String) _executeOnTab(_Tab tab) {
     return (String cmd) {
-      // Strip a trailing newline so we never send `\n\n` (which would run
-      // the command and then submit an empty line, polluting prompt /
-      // OSC 133 boundaries).  The command always needs ONE trailing
-      // newline to actually execute; we add it ourselves below.
-      while (cmd.endsWith('\n')) {
+      // Strip a trailing newline so we never send two Enters (which would
+      // run the command and then submit an empty line, polluting prompt /
+      // OSC 133 boundaries).  The command always needs ONE trailing Enter
+      // to actually execute; we add it ourselves below.
+      //
+      // That Enter MUST be `\r` (CR), not `\n` (LF) — this is what a real
+      // keypress sends (see xterm's own default keytab: `Enter-NewLine :
+      // "\r"`). A bare LF happens to also work on POSIX ptys (canonical
+      // line discipline treats NL as end-of-line), which is why this went
+      // unnoticed there, but native Windows console input translation
+      // (ConPTY, backing local PowerShell/CMD tabs) only synthesizes an
+      // Enter/VK_RETURN key event from CR — a bare LF is just inserted as
+      // literal input, leaving the command sitting unexecuted until a real
+      // keypress supplies the missing CR.
+      while (cmd.endsWith('\n') || cmd.endsWith('\r')) {
         cmd = cmd.substring(0, cmd.length - 1);
       }
-      final data = utf8.encode('$cmd\n');
+      final data = utf8.encode('$cmd\r');
       final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
       // Crucially, when the SPLIT pane is active but its session / PTY
       // aren't wired up yet (still connecting, just torn down, …), we
@@ -785,6 +795,18 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     }
   }
 
+  /// Which sentinel-fallback syntax to speak for [shell]. `null` (SSH tabs,
+  /// or before local shell discovery resolves) defaults to POSIX, matching
+  /// today's behavior. Git Bash/WSL fall through to POSIX too — they're
+  /// real bash-compatible shells, so the existing `sh`-flavored sentinel
+  /// already works there.
+  CommandSentinelDialect _sentinelDialectFor(LocalShellOption? shell) {
+    if (shell == null) return CommandSentinelDialect.posix;
+    if (shell.id == 'cmd') return CommandSentinelDialect.cmd;
+    if (shell.usePowerShellWrapper) return CommandSentinelDialect.powershell;
+    return CommandSentinelDialect.posix;
+  }
+
   CommandExecutionTarget? _activeCommandTarget(_Tab tab) {
     final isSplitPane = tab.isSplit && tab.activeSshPane == 1;
     final terminal = isSplitPane ? tab.splitTerminal : tab.terminal;
@@ -795,6 +817,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       outputPipe: isSplitPane ? tab.splitPipe : tab.pipe,
       sendCommand: _executeOnTab(tab),
       sendRaw: (bytes) => _sendRawToTab(tab, bytes),
+      sentinelDialect: _sentinelDialectFor(tab.localShell),
+      shellExecutable: tab.localShell?.executable,
     );
   }
 

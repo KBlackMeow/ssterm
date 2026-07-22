@@ -126,8 +126,9 @@ class _SshSessionViewState extends State<SshSessionView> {
                         axis: Axis.horizontal,
                         onDrag: (d) => setState(() {
                           final maxSide = constraints.maxWidth * _kMaxFraction;
+                          final current = _customPanelSize ?? panelSize;
                           _customPanelSize =
-                              (panelSize - d).clamp(_kMinSide, maxSide);
+                              (current - d).clamp(_kMinSide, maxSide);
                           widget.onLayoutChanged
                               ?.call(_position, _customPanelSize);
                         }),
@@ -156,8 +157,9 @@ class _SshSessionViewState extends State<SshSessionView> {
                         onDrag: (d) => setState(() {
                           final maxSide =
                               constraints.maxHeight * _kMaxFraction;
+                          final current = _customPanelSize ?? panelSize;
                           _customPanelSize =
-                              (panelSize - d).clamp(_kMinSide, maxSide);
+                              (current - d).clamp(_kMinSide, maxSide);
                           widget.onLayoutChanged
                               ?.call(_position, _customPanelSize);
                         }),

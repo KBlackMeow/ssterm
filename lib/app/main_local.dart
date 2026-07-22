@@ -255,6 +255,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final home = userHomeDir();
     final env = _environmentForLocalShell(shell);
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
+    final usePowerShellWrapper =
+        shell.usePowerShellWrapper && Platform.isWindows;
 
     final Pty pty;
     try {
@@ -267,6 +269,19 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         pty = await Pty.start(
           '/bin/sh',
           arguments: shArgs,
+          columns: columns,
+          rows: rows,
+          environment: env,
+          workingDirectory: workingDirectory ?? home,
+          ackRead: true,
+        );
+      } else if (usePowerShellWrapper) {
+        final encoded = encodePowerShellCommand(
+          buildPowerShellOsc133Prelude(),
+        );
+        pty = await Pty.start(
+          shell.executable,
+          arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],
           columns: columns,
           rows: rows,
           environment: env,
@@ -309,10 +324,18 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       onBytesAccepted: (_) => pty.ackRead(),
       transform: (bytes) {
         final parsed = cwdParser.process(bytes);
-        if (parsed.cwd != null &&
-            tab.localPath != null &&
-            !tab.manuallyDisconnected) {
-          tab.localPath!.value = parsed.cwd!;
+        var cwd = parsed.cwd;
+        // PowerShell's OSC 7 prelude reports cwd in POSIX shape
+        // (`/C:/Users/foo`, see powershell_shell_wrapper.dart) since the
+        // OSC7 URI convention has no native drive-letter form; native
+        // Windows child processes (Pty.start on _restartSession) need
+        // `C:\Users\foo` instead.
+        if (cwd != null && Platform.isWindows) {
+          final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
+          if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
+        }
+        if (cwd != null && tab.localPath != null && !tab.manuallyDisconnected) {
+          tab.localPath!.value = cwd;
         }
         return parsed.cleaned;
       },
