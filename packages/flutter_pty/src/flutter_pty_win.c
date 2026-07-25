@@ -593,12 +593,17 @@ cleanup:
     return NULL;
 }
 
-FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
+static DWORD WINAPI close_pseudo_console_thread(LPVOID arg)
 {
-    if (handle == NULL)
-    {
-        return;
-    }
+    ClosePseudoConsole((HPCON)arg);
+    return 0;
+}
+
+// The actual teardown work, run entirely on a plain native thread (never a
+// Dart isolate -- see pty_destroy's comment for why that distinction matters).
+static DWORD WINAPI destroy_thread(LPVOID arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
 
     CloseHandle(handle->inputWriteSide);
 
@@ -617,8 +622,52 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         CloseHandle(hProcess);
     }
 
-    ClosePseudoConsole(handle->hPty);
+    // For WSL-backed shells, dwProcessId is the `wsl.exe`/`ubuntu.exe`
+    // launcher, not the process actually attached to the pseudoconsole (the
+    // real session lives inside the WSL VM and is relayed by a separate,
+    // outlasting helper process). TerminateProcess above kills the launcher
+    // but the relay can keep the console attached, so ClosePseudoConsole can
+    // block forever. Run it on its own thread too and give up after a
+    // bounded wait; on timeout the pseudoconsole handle is intentionally
+    // leaked rather than risking another hang.
+    HANDLE closeThread = CreateThread(NULL, 0, close_pseudo_console_thread, handle->hPty, 0, NULL);
+    if (closeThread != NULL)
+    {
+        WaitForSingleObject(closeThread, 3000);
+        CloseHandle(closeThread);
+    }
+
     free(handle);
+    return 0;
+}
+
+FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
+{
+    if (handle == NULL)
+    {
+        return;
+    }
+
+    // Hand the whole teardown off to a plain Win32 thread and return
+    // immediately. This call USED to run on a throwaway Dart isolate
+    // (`Isolate.run`/`Isolate.spawn`) so the slow steps below wouldn't block
+    // the caller -- but any Dart isolate spawned or messaged at the exact
+    // moment the app's window is closing races the engine's own isolate-group
+    // shutdown (which waits for every isolate in the group to fully
+    // terminate) and can hang the whole process forever, reproducibly, once
+    // a WSL tab is open. A plain native thread isn't part of that isolate
+    // bookkeeping at all, so it can't race it. Making this call itself
+    // return near-instantly means the Dart side no longer needs an isolate
+    // hop to stay non-blocking either.
+    HANDLE thread = CreateThread(NULL, 0, destroy_thread, handle, 0, NULL);
+    if (thread != NULL)
+    {
+        CloseHandle(thread);
+    }
+    else
+    {
+        free(handle);
+    }
 }
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)

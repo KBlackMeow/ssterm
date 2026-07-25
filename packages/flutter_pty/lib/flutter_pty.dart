@@ -114,15 +114,6 @@ int _ptyCreateInIsolate({
   return handle.address;
 }
 
-/// Tear down a native PTY handle off the UI isolate.  [pty_destroy] can block
-/// for a long time on Windows (ClosePseudoConsole waits for the shell).
-@pragma('vm:entry-point')
-void _ptyDestroyInIsolate(int handleAddress) {
-  _ensureInitialized();
-  if (handleAddress == 0) return;
-  _bindings.pty_destroy(Pointer<PtyHandle>.fromAddress(handleAddress));
-}
-
 /// Pty represents a process running in a pseudo-terminal.
 ///
 /// To create a Pty, use [Pty.start].
@@ -337,14 +328,18 @@ class Pty {
     // pty_destroy blocks forever waiting for it.
     _stdoutPort.close();
     _exitPort.close();
-    _destroyNativeAsync();
+    _destroyNative();
   }
 
-  void _destroyNativeAsync() {
+  // pty_destroy hands the actual teardown off to a native thread and returns
+  // near-instantly (see its doc comment in flutter_pty_win.c) — deliberately
+  // NOT routed through a Dart isolate, since spawning or messaging one at the
+  // exact moment the app's window is closing can race the engine's own
+  // isolate-group shutdown and hang the whole process.
+  void _destroyNative() {
     if (_nativeDestroyed) return;
     _nativeDestroyed = true;
-    final address = _handle.address;
-    unawaited(Isolate.run(() => _ptyDestroyInIsolate(address)));
+    _bindings.pty_destroy(_handle);
   }
 
   /// indicates that a data chunk has been processed.
@@ -361,7 +356,7 @@ class Pty {
     _exitSubscription = null;
     _stdoutPort.close();
     _exitPort.close();
-    _destroyNativeAsync();
+    _destroyNative();
     _exitCodeCompleter.complete(exitCode);
   }
 }

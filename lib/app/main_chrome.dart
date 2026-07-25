@@ -848,8 +848,13 @@ class _PlusMenu extends StatelessWidget {
       );
 
   String _shellSubtitle(LocalShellOption shell) {
-    if (shell.arguments.isEmpty) return shell.executable;
-    return '${shell.executable} ${shell.arguments.join(' ')}';
+    // Some WSL distro-launcher entries embed the whole OSC 133 shell
+    // integration bootstrap script as an argument (see
+    // `local_shell_discovery.dart`'s `_discoverWsl`); that's not meant for
+    // display, so drop any argument containing a newline before joining.
+    final visibleArgs = shell.arguments.where((a) => !a.contains('\n'));
+    if (visibleArgs.isEmpty) return shell.executable;
+    return '${shell.executable} ${visibleArgs.join(' ')}';
   }
 
   PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
