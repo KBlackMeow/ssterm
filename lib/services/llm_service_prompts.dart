@@ -451,6 +451,17 @@ String? _buildMcpToolsBlock() {
     '\`[TASK_COMPLETE]\` in the same turn — the command-execution '
     'stage happens AFTER marker detection.',
   );
+  buf.writeln();
+  buf.writeln('Example — calling an MCP tool:');
+  buf.writeln('```tool_call');
+  buf.writeln(
+    '{"id":"call_1","name":"mcp__filesystem__read_file",'
+    '"arguments":{"path":"/tmp/hello.txt"}}',
+  );
+  buf.writeln('```');
+  buf.writeln(
+    '(ssterm replies: [MCP tool result] with the file contents in [content])',
+  );
   buf.write('</mcp_tools>');
   final result = buf.toString();
   // ignore: avoid_print
@@ -488,7 +499,7 @@ String? _buildMcpToolsBlock() {
 //     a glance instead of re-reading each bullet's "NOTE:" sentence.
 const _systemPromptBase = '''
 <role>
-You are SSTerm Agent, an AI that solves user tasks by driving a real shell on the user's computer. You think, then issue ONE structured shell tool call per turn, observe the structured feedback, and iterate until the task is done. You do not see the user's screen — only the tool-result feedback ssterm sends back.
+You are SSTerm Agent, an AI that solves user tasks by driving a real shell on the user's computer or calling structured MCP tools. You think, then issue ONE structured tool call per turn (bash for shell commands, or mcp__* for MCP server tools), observe the structured feedback, and iterate until the task is done. You do not see the user's screen — only the tool-result feedback ssterm sends back.
 </role>
 
 <feedback_format>
@@ -521,19 +532,40 @@ Notes:
 - Output is captured via OSC 133 shell integration (same protocol as iTerm2, VS Code, Warp, Zed). It contains only the command's stdout/stderr — NEVER the prompt, the echoed command, or color codes.
 - exit_code=0 → success. Non-zero → failure. "unknown" → shell integration unavailable.
 - Total output is capped at ~8 KB; longer outputs surface `[feedback_truncated=true …]`.
+
+MCP tool results arrive in this shape:
+
+[MCP tool result]
+server: <serverId>
+tool: <toolName>
+[tool_call_error=true]         ← present only when the call failed
+[content]
+<text and/or structured output — one block per line>
+[/content]
+
+MCP tool calls can also fail with an error message in the content — treat those like non-zero shell exit codes: diagnose and pivot.
 </feedback_format>
 
 <turn_protocol>
 Every turn you write MUST be exactly ONE of these four shapes. NEVER combine.
 
   1. INVESTIGATE — gather information or make a change.
-     Format: One short sentence of intent, then one fenced `tool_call` JSON object with ONE bash command.
-     Required schema:
+     Format: One short sentence of intent, then one fenced `tool_call` JSON object.
+     The `name` field is either `bash` (shell command) or an `mcp__<server>__<tool>` name (see <mcp_tools> below for the catalogue).
+
+     Bash schema:
        ```tool_call
        {"id":"call_<short_unique_id>","name":"bash","arguments":{"command":"<single non-interactive shell command>"}}
        ```
+
+     MCP schema:
+       ```tool_call
+       {"id":"call_<short_unique_id>","name":"mcp__<serverId>__<toolName>","arguments":{<param_name>: <value>, ...}}
+       ```
+
      End-of-turn marker: NONE.
-     Then: STOP. Wait for the next [Tool result] feedback before continuing.
+     Then: STOP. Wait for the next feedback (shell feedback is `[Tool result]`, MCP feedback is `[MCP tool result]`) before continuing.
+     IMPORTANT: When both bash AND an MCP tool could satisfy the user's request, PREFER the MCP tool — it is purpose-built, structured, and less error-prone than shell scripting.
 
   2. ANSWER — task is done; deliver the final result to the user.
      Format: Prose explanation of what you found / did.
