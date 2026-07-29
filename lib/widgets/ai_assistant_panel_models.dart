@@ -93,6 +93,12 @@ class _ChatMessage {
   /// message kind.
   _QuestionProposal? questionProposal;
 
+  /// For "MCP tool call result" messages: the structured result from an
+  /// MCP `tools/call` invocation, rendered as an expandable card showing
+  /// server, tool name, and content blocks.  Nullable for the same
+  /// hot-reload reason as the other proposal fields.
+  _McpResultData? mcpResultData;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -106,6 +112,7 @@ class _ChatMessage {
     this.editProposal,
     this.dangerProposal,
     this.questionProposal,
+    this.mcpResultData,
   });
 
   factory _ChatMessage.user(String text) =>
@@ -170,6 +177,33 @@ class _ChatMessage {
   /// `Completer` the agent loop awaits.
   factory _ChatMessage.questionProposal(_QuestionProposal proposal) =>
       _ChatMessage._(text: '', isUser: false, questionProposal: proposal);
+
+  factory _ChatMessage.mcpResult({
+    required String serverId,
+    required String toolName,
+    required McpToolResult result,
+  }) =>
+      _ChatMessage._(
+        text: '',
+        isUser: false,
+        mcpResultData: _McpResultData(
+          serverId: serverId,
+          toolName: toolName,
+          result: result,
+        ),
+      );
+}
+
+/// Lightweight payload for an MCP tool call result chat card.
+class _McpResultData {
+  final String serverId;
+  final String toolName;
+  final McpToolResult result;
+  const _McpResultData({
+    required this.serverId,
+    required this.toolName,
+    required this.result,
+  });
 }
 
 // ── File-write proposal (Apply/Reject card state machine) ──────────────────

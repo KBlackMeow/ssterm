@@ -32,6 +32,8 @@ import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/session_logger.dart';
+import 'services/llm_service.dart';
+import 'services/mcp_service.dart';
 import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
 import 'services/terminal_command_executor.dart';
@@ -189,11 +191,22 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
       // of the chrome (which would otherwise thrash the paragraph caches of
       // every open terminal).
       unawaited(_refreshLocalShellsIfChanged());
+      // Connect to enabled MCP servers in the background — slow/offline
+      // servers must never block the app from becoming interactive.
+      McpService.onToolsChanged = () {
+        LlmService.refreshSystemPrompt();
+      };
+      try {
+        McpService.init(c.agent?.mcpServers ?? []);
+      } catch (_) {
+        // MCP init failure is non-fatal; the user can retry from Settings.
+      }
     });
   }
 
   @override
   void dispose() {
+    McpService.shutdown();
     for (final t in _tabs) {
       t.dispose();
     }

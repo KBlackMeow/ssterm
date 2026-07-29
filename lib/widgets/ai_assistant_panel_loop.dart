@@ -268,6 +268,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       ToolCall? writeFileTool;
       ToolCall? editFileTool;
       ToolCall? askUserQuestionTool;
+      final mcpToolCalls = <ToolCall>[];
       for (final call in toolCalls) {
         if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
           useSkillTool = call;
@@ -295,6 +296,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             call.header != null &&
             call.options.length >= 2) {
           askUserQuestionTool = call;
+        }
+        if (call.isMcp &&
+            call.mcpServerId != null &&
+            call.mcpToolName != null) {
+          mcpToolCalls.add(call);
         }
       }
       final useSkill =
@@ -436,6 +442,43 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
         _conversationHistory.add({'role': 'user', 'content': injected});
         setState(() => _agentLoopStatus = null);
+        continue;
+      }
+
+      // ── MCP tool calls ──────────────────────────────────────────────
+      // MCP tools are structured API calls (not shell commands), so they
+      // bypass the auto-execute confirmation gate — same as web_search
+      // and use_skill.  The user already approved the server by adding it
+      // in Settings.  Errors are surfaced in the chat card and as a
+      // feedback envelope so the model can pivot.
+      if (mcpToolCalls.isNotEmpty) {
+        final feedbacks = <String>[];
+        for (final call in mcpToolCalls) {
+          final serverId = call.mcpServerId!;
+          final toolName = call.mcpToolName!;
+
+          setState(() => _agentLoopStatus = 'Calling MCP: $toolName');
+          _scrollToBottom();
+
+          final result = await _executeMcpCall(gen, call);
+          if (!mounted || gen != _generation) return;
+
+          setState(() {
+            _messages.add(_ChatMessage.mcpResult(
+              serverId: serverId,
+              toolName: toolName,
+              result: result,
+            ));
+          });
+          _scrollToBottom();
+
+          feedbacks.add(_formatMcpResult(call, result));
+        }
+        _conversationHistory.add({
+          'role': 'user',
+          'content': feedbacks.join('\n\n'),
+        });
+        setState(() => _agentLoopStatus = 'MCP results sent, AI thinking…');
         continue;
       }
 

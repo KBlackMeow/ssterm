@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/agent_config.dart';
+import '../models/mcp_server_config.dart';
 import 'api_key_storage.dart';
+import 'mcp_service.dart';
 import 'skill_service.dart';
 
 part 'llm_service_prompts.dart';
@@ -119,6 +121,27 @@ class ToolCall {
 
   bool get isAskUserQuestion =>
       name == 'ask_user_question' || name == 'ask_question';
+
+  /// MCP tools use the `mcp__<serverId>__<toolName>` naming convention.
+  bool get isMcp => name.startsWith('mcp__');
+
+  /// Extracts the server id from an MCP tool name like
+  /// `mcp__github__search_repositories`.  Returns null for non-MCP tools
+  /// or malformed names.
+  String? get mcpServerId {
+    if (!isMcp) return null;
+    final parts = name.substring(5).split('__');
+    return parts.isNotEmpty ? parts.first : null;
+  }
+
+  /// Extracts the tool name from an MCP tool name like
+  /// `mcp__github__search_repositories`.  Returns null for non-MCP tools
+  /// or malformed names.
+  String? get mcpToolName {
+    if (!isMcp) return null;
+    final parts = name.substring(5).split('__');
+    return parts.length >= 2 ? parts.sublist(1).join('__') : null;
+  }
 
   String? get question {
     final value = arguments['question'];
@@ -559,6 +582,9 @@ class LlmService {
   static bool _cachedSystemPromptWebSearch = false;
   // File-write slice of the cache key — same rationale as web search.
   static bool _cachedSystemPromptFileWrite = false;
+  // MCP slices of the cache key — same orthogonal-invalidation pattern.
+  static bool _cachedSystemPromptMcpEnabled = false;
+  static String? _cachedSystemPromptMcpFingerprint;
 
   /// Build the active system prompt for the given enabled-skill whitelist
   /// and web-search toggle.
@@ -578,21 +604,36 @@ class LlmService {
   /// missing-key error and feeds the model a `[Web search failed]`
   /// envelope that tells it to ask the user — same recovery path as
   /// an expired key, so we don't need to double-gate at prompt time.
+  /// Stable fingerprint of the current MCP tool set (sorted names joined).
+  /// Used in the prompt cache key so the prompt rebuilds when tools change.
+  static String? _mcpToolsFingerprint() {
+    final tools = McpService.allTools;
+    if (tools.isEmpty) return null;
+    final names = tools.map((t) => t.qualifiedName).toList();
+    names.sort();
+    return names.join(',');
+  }
+
   static String systemPromptFor({
     Set<String>? enabledSkillIds,
     bool webSearchEnabled = false,
     bool fileWriteEnabled = false,
+    bool mcpEnabled = false,
   }) {
+    final mcpFp = mcpEnabled ? _mcpToolsFingerprint() : null;
     if (_cachedSystemPromptHasKey &&
         _setEquals(_cachedSystemPromptKey, enabledSkillIds) &&
         _cachedSystemPromptWebSearch == webSearchEnabled &&
-        _cachedSystemPromptFileWrite == fileWriteEnabled) {
+        _cachedSystemPromptFileWrite == fileWriteEnabled &&
+        _cachedSystemPromptMcpEnabled == mcpEnabled &&
+        _cachedSystemPromptMcpFingerprint == mcpFp) {
       return _cachedSystemPrompt!;
     }
     final built = _buildSystemPrompt(
       enabledSkillIds: enabledSkillIds,
       webSearchEnabled: webSearchEnabled,
       fileWriteEnabled: fileWriteEnabled,
+      mcpEnabled: mcpEnabled,
     );
     _cachedSystemPrompt = built;
     _cachedSystemPromptKey = enabledSkillIds == null
@@ -600,6 +641,8 @@ class LlmService {
         : Set.of(enabledSkillIds);
     _cachedSystemPromptWebSearch = webSearchEnabled;
     _cachedSystemPromptFileWrite = fileWriteEnabled;
+    _cachedSystemPromptMcpEnabled = mcpEnabled;
+    _cachedSystemPromptMcpFingerprint = mcpFp;
     _cachedSystemPromptHasKey = true;
     return built;
   }
@@ -619,6 +662,8 @@ class LlmService {
     _cachedSystemPromptKey = null;
     _cachedSystemPromptWebSearch = false;
     _cachedSystemPromptFileWrite = false;
+    _cachedSystemPromptMcpEnabled = false;
+    _cachedSystemPromptMcpFingerprint = null;
     _cachedSystemPromptHasKey = false;
   }
 
@@ -663,6 +708,7 @@ class LlmService {
       enabledSkillIds: config.enabledSkills,
       webSearchEnabled: config.webSearchEnabled,
       fileWriteEnabled: config.fileWriteEnabled,
+      mcpEnabled: config.mcpEnabled,
     );
     try {
       switch (provider.id) {
@@ -741,6 +787,11 @@ class LlmService {
           call.header != null &&
           call.options.length >= 2 &&
           call.options.length <= 6;
+    }
+    if (call.isMcp) {
+      return call.mcpServerId != null &&
+          call.mcpToolName != null &&
+          call.arguments.isNotEmpty;
     }
     return false;
   }
@@ -950,6 +1001,7 @@ class LlmService {
       enabledSkillIds: config.enabledSkills,
       webSearchEnabled: config.webSearchEnabled,
       fileWriteEnabled: config.fileWriteEnabled,
+      mcpEnabled: config.mcpEnabled,
     );
     switch (provider.id) {
       case 'claude':

@@ -14,11 +14,16 @@ String _buildSystemPrompt({
   Set<String>? enabledSkillIds,
   bool webSearchEnabled = false,
   bool fileWriteEnabled = false,
+  bool mcpEnabled = false,
 }) {
   final parts = <String>[_systemPromptBase, _buildAskUserQuestionBlock()];
   final enabled = SkillService.filterEnabled(enabledSkillIds);
   if (enabled.isNotEmpty) parts.add(_buildSkillsBlock());
   if (webSearchEnabled) parts.add(_buildWebSearchBlock());
+  if (mcpEnabled) {
+    final block = _buildMcpToolsBlock();
+    if (block != null) parts.add(block);
+  }
   if (fileWriteEnabled) {
     parts.add(_buildFileWriteBlock());
     parts.add(_buildFileEditBlock());
@@ -378,6 +383,68 @@ When the active tab is a LOCAL terminal, commands run on THIS host — pick the 
 
 When the active tab is an SSH session, commands run on the REMOTE — if behaviour is OS-specific, run `uname -srm` (or `cat /etc/os-release`) FIRST to detect the remote platform, THEN issue the OS-appropriate command. Do NOT assume the dialect tips above apply to the remote.
 </host_environment>''';
+}
+
+/// Builds the `<mcp_tools>` block listing all tools from all connected
+/// MCP servers.  Returns null when no servers are connected or the MCP
+/// master switch is off, so the prompt stays uncluttered.
+///
+/// Uses the progressive-disclosure pattern also used by `<agent_skills>`:
+/// only tool names, descriptions and parameter names are listed — the
+/// full JSON Schema is validated server-side at call time.
+String? _buildMcpToolsBlock() {
+  final tools = McpService.allTools;
+  if (tools.isEmpty) return null;
+
+  // Group tools by server.
+  final byServer = <String, List<McpTool>>{};
+  for (final tool in tools) {
+    byServer.putIfAbsent(tool.serverName, () => []).add(tool);
+  }
+
+  final buf = StringBuffer();
+  buf.writeln('<mcp_tools>');
+  buf.writeln(
+    'Available MCP tools. Use the fully-qualified name '
+    '(\`mcp__<serverId>__<toolName>\`) as the \`name\` in a '
+    '\`\`\`tool_call block. The arguments map must match the '
+    'parameters described for each tool.',
+  );
+  buf.writeln(
+    'Only invoke tools listed below; the list may change between '
+    'turns if servers go offline or are reconfigured.',
+  );
+
+  for (final entry in byServer.entries) {
+    buf.writeln();
+    buf.writeln('[MCP server: ${entry.key}]');
+    for (final tool in entry.value) {
+      // Build a compact parameter list from the input schema.
+      final params = <String>[];
+      final schema = tool.inputSchema;
+      final properties = schema['properties'];
+      if (properties is Map) {
+        final required = (schema['required'] as List?)?.cast<String>() ?? [];
+        for (final name in (properties as Map).keys) {
+          final isReq = required.contains(name);
+          params.add('$name (${isReq ? "required" : "optional"})');
+        }
+      }
+      final paramStr = params.isNotEmpty ? ' Params: ${params.join(", ")}' : '';
+      buf.writeln('- ${tool.qualifiedName} — ${tool.description}$paramStr');
+    }
+  }
+
+  buf.writeln();
+  buf.writeln(
+    'MCP tool call turn rules: one MCP tool call per turn. '
+    'Results arrive as a \`[MCP tool result]\` envelope in the '
+    'next turn. Do NOT call an MCP tool and emit '
+    '\`[TASK_COMPLETE]\` in the same turn — the command-execution '
+    'stage happens AFTER marker detection.',
+  );
+  buf.write('</mcp_tools>');
+  return buf.toString();
 }
 
 // ── System prompt design notes ──────────────────────────────────────────

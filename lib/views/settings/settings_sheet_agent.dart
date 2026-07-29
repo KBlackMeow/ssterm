@@ -37,6 +37,9 @@ extension _AgentSettingsExt on _SettingsPageState {
         _sectionTitle('Skills'),
         _buildSkillsSection(),
         const SizedBox(height: 16),
+        _sectionTitle('MCP Servers'),
+        _buildMcpSection(),
+        const SizedBox(height: 16),
         _sectionTitle('Providers'),
         for (final p in _agentConfig.providers) _buildProviderCard(p),
       ],
@@ -697,6 +700,170 @@ extension _AgentSettingsExt on _SettingsPageState {
     );
     _agentApply(next);
   }
+
+  // ── MCP section ─────────────────────────────────────────────────────
+
+  Widget _buildMcpSection() {
+    final enabled = _agentConfig.mcpEnabled;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Enable MCP tools'),
+          subtitle: const Text(
+            'Allow the agent to discover and call tools from '
+            'configured MCP servers.',
+          ),
+          value: enabled,
+          onChanged: (v) => _agentApply(_agentConfig.copyWith(mcpEnabled: v)),
+        ),
+        if (!enabled)
+          Padding(
+            padding: const EdgeInsets.only(left: 16, top: 4),
+            child: Text(
+              'Enable this switch to configure MCP servers.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                fontSize: 12,
+              ),
+            ),
+          ),
+        if (enabled) ...[
+          const SizedBox(height: 8),
+          if (_agentConfig.mcpServers.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'No MCP servers configured. Add one to get started.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          for (var i = 0; i < _agentConfig.mcpServers.length; i++)
+            _buildMcpServerCard(i),
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton.icon(
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add MCP Server'),
+              onPressed: () => _showAddMcpServerDialog(),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMcpServerCard(int index) {
+    final server = _agentConfig.mcpServers[index];
+    final transportLabel =
+        server.transport == McpTransportType.stdio ? 'stdio' : 'HTTP';
+    final connected = McpService.isConnected(server.id);
+    final toolCount = McpService.toolCount(server.id);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  server.transport == McpTransportType.stdio
+                      ? Icons.terminal
+                      : Icons.language,
+                  size: 16,
+                  color: connected ? Colors.green : Colors.grey,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    server.displayName,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+                Text(
+                  connected ? '$transportLabel · $toolCount tools' : '$transportLabel · offline',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: connected ? Colors.green : Colors.grey,
+                  ),
+                ),
+                Switch(
+                  value: server.enabled,
+                  onChanged: (v) {
+                    final updated = server.copyWith(enabled: v);
+                    final servers = List<McpServerConfig>.of(_agentConfig.mcpServers);
+                    servers[index] = updated;
+                    _agentApply(_agentConfig.copyWith(mcpServers: servers));
+                    if (v) {
+                      unawaited(McpService.connect(updated).then((_) {
+                        if (mounted) setState(() {});
+                      }));
+                    } else {
+                      unawaited(McpService.disconnect(server.id).then((_) {
+                        if (mounted) setState(() {});
+                      }));
+                    }
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  onPressed: () {
+                    unawaited(McpService.disconnect(server.id));
+                    final servers = List<McpServerConfig>.of(_agentConfig.mcpServers);
+                    servers.removeAt(index);
+                    _agentApply(_agentConfig.copyWith(mcpServers: servers));
+                  },
+                ),
+              ],
+            ),
+            if (connected) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  Text(
+                    '$toolCount tool${toolCount == 1 ? "" : "s"} available',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddMcpServerDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => _McpServerDialog(
+        onSave: (config) {
+          final servers = List<McpServerConfig>.of(_agentConfig.mcpServers);
+          servers.add(config);
+          _agentApply(_agentConfig.copyWith(mcpServers: servers));
+          // Connect in the background — setState after completion so
+          // the card refreshes to show connection status + tool count.
+          unawaited(McpService.connect(config).then((_) {
+            if (mounted) setState(() {});
+          }));
+        },
+      ),
+    );
+  }
 }
 
 /// Provider-glyph picker for the Agent tab's "Providers" header — kept
@@ -712,11 +879,129 @@ IconData _providerIcon(String id) {
     case 'deepseek':
       return Icons.explore;
     case 'ollama':
-      // The llama silhouette doesn't exist in Material; `pets` is the
-      // closest "this is the local animal-themed model runner" cue and
-      // matches Ollama's mascot well enough at icon size.
       return Icons.pets;
     default:
       return Icons.smart_toy;
+  }
+}
+
+/// Simple dialog for adding an MCP server.
+class _McpServerDialog extends StatefulWidget {
+  final void Function(McpServerConfig) onSave;
+  const _McpServerDialog({required this.onSave});
+
+  @override
+  State<_McpServerDialog> createState() => _McpServerDialogState();
+}
+
+class _McpServerDialogState extends State<_McpServerDialog> {
+  final _nameCtrl = TextEditingController();
+  final _cmdCtrl = TextEditingController();
+  final _argsCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
+  McpTransportType _transport = McpTransportType.stdio;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _cmdCtrl.dispose();
+    _argsCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add MCP Server'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. github, filesystem',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<McpTransportType>(
+              value: _transport,
+              decoration: const InputDecoration(
+                labelText: 'Transport',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: McpTransportType.stdio, child: Text('stdio (subprocess)')),
+                DropdownMenuItem(value: McpTransportType.streamableHttp, child: Text('Streamable HTTP')),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _transport = v);
+              },
+            ),
+            const SizedBox(height: 12),
+            if (_transport == McpTransportType.stdio) ...[
+              TextField(
+                controller: _cmdCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Command',
+                  hintText: 'npx or uvx',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _argsCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Arguments',
+                  hintText: '-y @scope/server-name',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+            if (_transport == McpTransportType.streamableHttp)
+              TextField(
+                controller: _urlCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'URL',
+                  hintText: 'http://localhost:3000/mcp',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final name = _nameCtrl.text.trim();
+            if (name.isEmpty) return;
+            final args = _argsCtrl.text
+                .trim()
+                .split(RegExp(r'\s+'))
+                .where((s) => s.isNotEmpty)
+                .toList();
+            widget.onSave(McpServerConfig(
+              id: name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-'),
+              displayName: name,
+              enabled: true,
+              transport: _transport,
+              command: _transport == McpTransportType.stdio ? _cmdCtrl.text.trim() : null,
+              args: args,
+              url: _transport == McpTransportType.streamableHttp ? _urlCtrl.text.trim() : null,
+            ));
+            Navigator.of(context).pop();
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }

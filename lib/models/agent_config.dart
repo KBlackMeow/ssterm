@@ -1,3 +1,5 @@
+import 'mcp_server_config.dart';
+
 // ── Provider ids ──────────────────────────────────────────────────────────
 
 enum LlmProvider {
@@ -462,6 +464,16 @@ class AgentConfig {
   /// consulting the policy on every command.
   DangerousCommandsPolicy dangerousPolicy;
 
+  /// Master switch for MCP (Model Context Protocol) tool integration.
+  /// When false, the MCP tools block is omitted from the system prompt
+  /// even if servers are configured.  Defaults to false — opt-in; the
+  /// user must explicitly enable this in Settings after adding servers.
+  bool mcpEnabled;
+
+  /// Configured MCP servers.  Only servers where [McpServerConfig.enabled]
+  /// is true are connected at startup.  Defaults to empty.
+  List<McpServerConfig> mcpServers;
+
   AgentConfig({
     this.defaultProvider,
     this.defaultModel,
@@ -471,7 +483,10 @@ class AgentConfig {
     this.fileWriteEnabled = true,
     this.enabledSkills,
     DangerousCommandsPolicy? dangerousPolicy,
+    this.mcpEnabled = false,
+    List<McpServerConfig>? mcpServers,
   })  : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
+        mcpServers = mcpServers ?? [],
         providers = providers ??
             [
               ProviderConfig.chatgpt(),
@@ -515,6 +530,9 @@ class AgentConfig {
         if (enabledSkills != null)
           'enabledSkills': (enabledSkills!.toList()..sort()),
         'dangerousPolicy': dangerousPolicy.toJson(),
+        'mcpEnabled': mcpEnabled,
+        if (mcpServers.isNotEmpty)
+          'mcpServers': mcpServers.map((s) => s.toJson()).toList(),
       };
 
   factory AgentConfig.fromJson(Map<String, dynamic>? json) {
@@ -571,6 +589,17 @@ class AgentConfig {
     if (rawEnabledSkills is List) {
       parsedEnabledSkills = rawEnabledSkills.whereType<String>().toSet();
     }
+    // Defensive MCP server list parsing — skip malformed entries.
+    final mcpServers = <McpServerConfig>[];
+    final rawMcpServers = json['mcpServers'];
+    if (rawMcpServers is List) {
+      for (final e in rawMcpServers) {
+        if (e is! Map<String, dynamic>) continue;
+        final s = McpServerConfig.tryFromJson(e);
+        if (s != null) mcpServers.add(s);
+      }
+    }
+
     return AgentConfig(
       defaultProvider: json['defaultProvider'] as String?,
       defaultModel: json['defaultModel'] as String?,
@@ -592,6 +621,8 @@ class AgentConfig {
       dangerousPolicy: DangerousCommandsPolicy.fromJson(
         json['dangerousPolicy'] as Map<String, dynamic>?,
       ),
+      mcpEnabled: json['mcpEnabled'] as bool? ?? false,
+      mcpServers: mcpServers,
     );
   }
 
@@ -609,6 +640,8 @@ class AgentConfig {
     Set<String>? enabledSkills,
     bool resetEnabledSkills = false,
     DangerousCommandsPolicy? dangerousPolicy,
+    bool? mcpEnabled,
+    List<McpServerConfig>? mcpServers,
   }) =>
       AgentConfig(
         defaultProvider: defaultProvider ?? this.defaultProvider,
@@ -621,5 +654,7 @@ class AgentConfig {
             ? null
             : (enabledSkills ?? this.enabledSkills),
         dangerousPolicy: dangerousPolicy ?? this.dangerousPolicy,
+        mcpEnabled: mcpEnabled ?? this.mcpEnabled,
+        mcpServers: mcpServers ?? List.of(this.mcpServers),
       );
 }

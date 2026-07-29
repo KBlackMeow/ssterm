@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
@@ -9,11 +11,13 @@ import '../../widgets/frosted_glass.dart';
 import '../../models/agent_config.dart';
 import '../../models/command.dart';
 import '../../models/commands_store.dart';
+import '../../models/mcp_server_config.dart';
 import '../../models/skill.dart';
 import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
 import '../../services/image_file_picker.dart';
+import '../../services/mcp_service.dart';
 import '../../services/skill_service.dart';
 import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';

@@ -8,12 +8,14 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../io/output_pipe.dart' show CommandResult;
 import '../models/agent_config.dart';
+import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/command_safety.dart';
 import '../services/llm_service.dart';
 import '../services/file_write_service.dart';
 import '../services/file_edit_service.dart';
+import '../services/mcp_service.dart';
 import '../utils/line_diff.dart';
 import '../services/session_context.dart';
 import '../services/skill_service.dart';

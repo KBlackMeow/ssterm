@@ -682,6 +682,16 @@ class _AiPanelContent extends StatelessWidget {
       );
     }
 
+    // MCP tool call result: expandable card showing tool name, server,
+    // and content blocks.
+    final mcpResult = msg.mcpResultData;
+    if (mcpResult != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _McpResultCard(data: mcpResult),
+      );
+    }
+
     // `== true` instead of plain truthy check — `isNotice` is `bool?` so
     // legacy hot-reloaded objects (where the field didn't exist when they
     // were constructed) safely compare to false instead of throwing on a
@@ -795,5 +805,85 @@ class _AiPanelContent extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Simple card rendering an MCP tool call result.
+class _McpResultCard extends StatelessWidget {
+  final _McpResultData data;
+  const _McpResultCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = AppColors.maybeOf(context)?.foreground ?? const Color(0xFFD4D4D4);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF8E8E8E))
+        .withValues(alpha: 0.6);
+    final surface =
+        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
+
+    final result = data.result;
+    final isError = result.isError;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isError
+              ? Colors.red.withValues(alpha: 0.3)
+              : Colors.green.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isError ? Icons.error_outline : Icons.handyman_outlined,
+                size: 14,
+                color: isError ? Colors.red.shade300 : Colors.green.shade300,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'MCP: ${data.serverId}/${data.toolName}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final block in result.content)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _buildContentBlock(block, dim, fg),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContentBlock(McpContentBlock block, Color dim, Color fg) {
+    switch (block.type) {
+      case 'text':
+        return SelectableText(
+          block.text ?? '',
+          style: TextStyle(fontSize: 12, color: fg, fontFamily: 'monospace'),
+        );
+      case 'image':
+        return Text('[image: ${block.mimeType ?? "unknown"}]',
+            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+      case 'resource':
+        return Text('[resource: ${block.uri ?? "unknown"}]',
+            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+      default:
+        return Text('[${block.type} content]',
+            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+    }
   }
 }

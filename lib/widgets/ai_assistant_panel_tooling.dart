@@ -802,4 +802,42 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       FocusScope.of(context).requestFocus(_agentInputFocusNode);
     }
   }
+
+  // ── MCP tool call helpers ──────────────────────────────────────────
+
+  /// Execute an MCP tool call via [McpService].  Returns the result
+  /// directly — all errors (connection lost, timeout, protocol error)
+  /// are captured as [McpToolResult.isError] so the agent loop never
+  /// has to catch exceptions from the MCP layer.
+  Future<McpToolResult> _executeMcpCall(int gen, ToolCall call) async {
+    final serverId = call.mcpServerId!;
+    final toolName = call.mcpToolName!;
+    return await McpService.callTool(
+      serverId: serverId,
+      toolName: toolName,
+      arguments: call.arguments,
+    );
+  }
+
+  /// Format an MCP tool result as a feedback envelope for the LLM.
+  /// Mirrors the pattern of [CommandFeedbackFormatter.format].
+  String _formatMcpResult(ToolCall call, McpToolResult result) {
+    final buf = StringBuffer();
+    buf.writeln('[MCP tool result]');
+    buf.writeln('server: ${result.serverId}');
+    buf.writeln('tool: ${result.toolName}');
+    if (result.isError) {
+      buf.writeln('[tool_call_error=true]');
+    }
+    buf.writeln('[content]');
+    for (final block in result.content) {
+      if (block.type == 'text') {
+        buf.writeln(block.text ?? '');
+      } else {
+        buf.writeln('[$block.type content, ${block.mimeType ?? "no mime"}]');
+      }
+    }
+    buf.writeln('[/content]');
+    return buf.toString();
+  }
 }
