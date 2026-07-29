@@ -122,25 +122,26 @@ class ToolCall {
   bool get isAskUserQuestion =>
       name == 'ask_user_question' || name == 'ask_question';
 
-  /// MCP tools use the `mcp__<serverId>__<toolName>` naming convention.
-  bool get isMcp => name.startsWith('mcp__');
+  /// MCP tool calls use the unified `mcp` tool name with `server` and
+  /// `tool` in the arguments map.
+  bool get isMcp => name == 'mcp';
 
-  /// Extracts the server id from an MCP tool name like
-  /// `mcp__github__search_repositories`.  Returns null for non-MCP tools
-  /// or malformed names.
+  /// The MCP server id from `arguments['server']`.
   String? get mcpServerId {
-    if (!isMcp) return null;
-    final parts = name.substring(5).split('__');
-    return parts.isNotEmpty ? parts.first : null;
+    final v = arguments['server'];
+    return v is String && v.isNotEmpty ? v : null;
   }
 
-  /// Extracts the tool name from an MCP tool name like
-  /// `mcp__github__search_repositories`.  Returns null for non-MCP tools
-  /// or malformed names.
+  /// The MCP tool name from `arguments['tool']`.
   String? get mcpToolName {
-    if (!isMcp) return null;
-    final parts = name.substring(5).split('__');
-    return parts.length >= 2 ? parts.sublist(1).join('__') : null;
+    final v = arguments['tool'];
+    return v is String && v.isNotEmpty ? v : null;
+  }
+
+  /// The MCP tool's own parameters from `arguments['params']`.
+  Map<String, Object?> get mcpParams {
+    final v = arguments['params'];
+    return v is Map<String, Object?> ? v : {};
   }
 
   String? get question {
@@ -795,9 +796,7 @@ class LlmService {
           call.options.length <= 6;
     }
     if (call.isMcp) {
-      return call.mcpServerId != null &&
-          call.mcpToolName != null &&
-          call.arguments.isNotEmpty;
+      return call.mcpServerId != null && call.mcpToolName != null;
     }
     return false;
   }

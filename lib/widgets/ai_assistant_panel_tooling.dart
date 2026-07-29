@@ -815,21 +815,23 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     return await McpService.callTool(
       serverId: serverId,
       toolName: toolName,
-      arguments: call.arguments,
+      arguments: call.mcpParams,
     );
   }
 
   /// Format an MCP tool result as a feedback envelope for the LLM.
-  /// Mirrors the pattern of [CommandFeedbackFormatter.format].
+  /// Format an MCP tool result as a feedback envelope for the LLM.
+  /// Uses the same `[Tool result]` shape as bash commands so the LLM
+  /// processes both uniformly — only the metadata fields differ.
   String _formatMcpResult(ToolCall call, McpToolResult result) {
     final buf = StringBuffer();
-    buf.writeln('[MCP tool result]');
+    buf.writeln('[Tool result]');
+    buf.writeln('[tool_call_id=${call.id}]');
+    buf.writeln('[tool_name=mcp]');
     buf.writeln('server: ${result.serverId}');
     buf.writeln('tool: ${result.toolName}');
-    if (result.isError) {
-      buf.writeln('[tool_call_error=true]');
-    }
-    buf.writeln('[content]');
+    buf.writeln('[exit_code=${result.isError ? 1 : 0}]');
+    buf.writeln('[output]');
     for (final block in result.content) {
       if (block.type == 'text') {
         buf.writeln(block.text ?? '');
@@ -837,7 +839,6 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         buf.writeln('[$block.type content, ${block.mimeType ?? "no mime"}]');
       }
     }
-    buf.writeln('[/content]');
     return buf.toString();
   }
 }

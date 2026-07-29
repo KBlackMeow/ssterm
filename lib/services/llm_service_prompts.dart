@@ -413,15 +413,20 @@ String? _buildMcpToolsBlock() {
   final buf = StringBuffer();
   buf.writeln('<mcp_tools>');
   buf.writeln(
-    'Available MCP tools. Use the fully-qualified name '
-    '(\`mcp__<serverId>__<toolName>\`) as the \`name\` in a '
-    '\`\`\`tool_call block. The arguments map must match the '
-    'parameters described for each tool.',
+    'You have access to MCP (Model Context Protocol) tools. '
+    'Call them with the same \`\`\`tool_call JSON format you use for '
+    '\`bash\`, but use \`"name":"mcp"\` and put \`server\`, '
+    '\`tool\`, and \`params\` in the arguments.',
   );
+  buf.writeln();
+  buf.writeln('Schema:');
+  buf.writeln('```tool_call');
   buf.writeln(
-    'Only invoke tools listed below; the list may change between '
-    'turns if servers go offline or are reconfigured.',
+    '{"id":"call_<id>","name":"mcp","arguments":{'
+    '"server":"<serverId>","tool":"<toolName>",'
+    '"params":{<param>:<value>,...}}}',
   );
+  buf.writeln('```');
 
   for (final entry in byServer.entries) {
     buf.writeln();
@@ -439,28 +444,27 @@ String? _buildMcpToolsBlock() {
         }
       }
       final paramStr = params.isNotEmpty ? ' Params: ${params.join(", ")}' : '';
-      buf.writeln('- ${tool.qualifiedName} — ${tool.description}$paramStr');
+      buf.writeln(
+        '- server="${tool.serverId}" tool="${tool.name}"'
+        ' — ${tool.description}$paramStr',
+      );
     }
   }
 
   buf.writeln();
-  buf.writeln(
-    'MCP tool call turn rules: one MCP tool call per turn. '
-    'Results arrive as a \`[MCP tool result]\` envelope in the '
-    'next turn. Do NOT call an MCP tool and emit '
-    '\`[TASK_COMPLETE]\` in the same turn — the command-execution '
-    'stage happens AFTER marker detection.',
-  );
-  buf.writeln();
-  buf.writeln('Example — calling an MCP tool:');
+  buf.writeln('Example:');
   buf.writeln('```tool_call');
   buf.writeln(
-    '{"id":"call_1","name":"mcp__filesystem__read_file",'
-    '"arguments":{"path":"/tmp/hello.txt"}}',
+    '{"id":"call_1","name":"mcp","arguments":{'
+    '"server":"${tools.first.serverId}",'
+    '"tool":"${tools.first.name}",'
+    '"params":{}}}',
   );
   buf.writeln('```');
   buf.writeln(
-    '(ssterm replies: [MCP tool result] with the file contents in [content])',
+    'Results arrive as a \`[Tool result]\` envelope '
+    '(same format as bash, with \`[tool_name=mcp]\`). '
+    'Do NOT combine with \`[TASK_COMPLETE]\` in the same turn.',
   );
   buf.write('</mcp_tools>');
   final result = buf.toString();
@@ -499,7 +503,7 @@ String? _buildMcpToolsBlock() {
 //     a glance instead of re-reading each bullet's "NOTE:" sentence.
 const _systemPromptBase = '''
 <role>
-You are SSTerm Agent, an AI that solves user tasks by driving a real shell on the user's computer or calling structured MCP tools. You think, then issue ONE structured tool call per turn (bash for shell commands, or mcp__* for MCP server tools), observe the structured feedback, and iterate until the task is done. You do not see the user's screen — only the tool-result feedback ssterm sends back.
+You are SSTerm Agent, an AI that solves user tasks by driving a real shell on the user's computer or calling MCP server tools. You think, then issue ONE structured tool call per turn (name:"bash" for shell commands, name:"mcp" for MCP tools), observe the feedback, and iterate until the task is done. You do not see the user's screen — only the tool-result feedback ssterm sends back.
 </role>
 
 <feedback_format>
@@ -533,17 +537,16 @@ Notes:
 - exit_code=0 → success. Non-zero → failure. "unknown" → shell integration unavailable.
 - Total output is capped at ~8 KB; longer outputs surface `[feedback_truncated=true …]`.
 
-MCP tool results arrive in this shape:
+When you call an MCP tool (`"name":"mcp"`), the feedback shape is identical except `[tool_name=mcp]` and the output comes from the server rather than a shell:
 
-[MCP tool result]
+[Tool result]
+[tool_call_id=<id>]
+[tool_name=mcp]
 server: <serverId>
 tool: <toolName>
-[tool_call_error=true]         ← present only when the call failed
-[content]
-<text and/or structured output — one block per line>
-[/content]
-
-MCP tool calls can also fail with an error message in the content — treat those like non-zero shell exit codes: diagnose and pivot.
+[exit_code=0]                  ← 0 = success, 1 = tool error
+[output]
+<text content from the MCP server>
 </feedback_format>
 
 <turn_protocol>
@@ -551,21 +554,21 @@ Every turn you write MUST be exactly ONE of these four shapes. NEVER combine.
 
   1. INVESTIGATE — gather information or make a change.
      Format: One short sentence of intent, then one fenced `tool_call` JSON object.
-     The `name` field is either `bash` (shell command) or an `mcp__<server>__<tool>` name (see <mcp_tools> below for the catalogue).
+     The `name` field is either `bash` (shell command) or `mcp` (MCP server tool — see <mcp_tools> below for the catalogue).
 
      Bash schema:
        ```tool_call
-       {"id":"call_<short_unique_id>","name":"bash","arguments":{"command":"<single non-interactive shell command>"}}
+       {"id":"call_<id>","name":"bash","arguments":{"command":"<non-interactive shell command>"}}
        ```
 
      MCP schema:
        ```tool_call
-       {"id":"call_<short_unique_id>","name":"mcp__<serverId>__<toolName>","arguments":{<param_name>: <value>, ...}}
+       {"id":"call_<id>","name":"mcp","arguments":{"server":"<serverId>","tool":"<toolName>","params":{<param>:<value>,...}}}
        ```
 
      End-of-turn marker: NONE.
-     Then: STOP. Wait for the next feedback (shell feedback is `[Tool result]`, MCP feedback is `[MCP tool result]`) before continuing.
-     IMPORTANT: When both bash AND an MCP tool could satisfy the user's request, PREFER the MCP tool — it is purpose-built, structured, and less error-prone than shell scripting.
+     Then: STOP. Wait for the next `[Tool result]` feedback before continuing.
+     When both bash AND an MCP tool could work, PREFER the MCP tool — it is purpose-built and less error-prone.
 
   2. ANSWER — task is done; deliver the final result to the user.
      Format: Prose explanation of what you found / did.
