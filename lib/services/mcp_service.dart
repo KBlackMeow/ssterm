@@ -90,11 +90,7 @@ class McpService {
       serverId: config.id,
     ));
     // ignore: avoid_print
-    print('[mcp] connected ${config.id}: ${entry.tools.length} tools');
-    for (final t in entry.tools) {
-      // ignore: avoid_print
-      print('[mcp]   ${t.qualifiedName} — ${t.description}');
-    }
+    print('[mcp] ${config.id} connected, ${entry.tools.length} tools');
     onToolsChanged?.call();
   }
 

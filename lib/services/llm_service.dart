@@ -622,12 +622,6 @@ class LlmService {
     bool mcpEnabled = false,
   }) {
     final mcpFp = mcpEnabled ? _mcpToolsFingerprint() : null;
-    // ignore: avoid_print
-    print('[mcp-prompt] systemPromptFor: mcpEnabled=$mcpEnabled '
-        'mcpFp=${mcpFp ?? "<null>"} '
-        'cachedMcpEnabled=$_cachedSystemPromptMcpEnabled '
-        'cachedMcpFp=${_cachedSystemPromptMcpFingerprint ?? "<null>"} '
-        'hasKey=$_cachedSystemPromptHasKey');
     if (_cachedSystemPromptHasKey &&
         _setEquals(_cachedSystemPromptKey, enabledSkillIds) &&
         _cachedSystemPromptWebSearch == webSearchEnabled &&

@@ -394,15 +394,7 @@ When the active tab is an SSH session, commands run on the REMOTE — if behavio
 /// full JSON Schema is validated server-side at call time.
 String? _buildMcpToolsBlock() {
   final tools = McpService.allTools;
-  // ignore: avoid_print
-  print('[mcp-prompt] _buildMcpToolsBlock called, mcpEnabled=true, '
-      'connected servers=${McpService.connectedCount}, '
-      'allTools count=${tools.length}');
-  if (tools.isEmpty) {
-    // ignore: avoid_print
-    print('[mcp-prompt] no tools available, omitting <mcp_tools> block');
-    return null;
-  }
+  if (tools.isEmpty) return null;
 
   // Group tools by server.
   final byServer = <String, List<McpTool>>{};
@@ -467,11 +459,7 @@ String? _buildMcpToolsBlock() {
     'Do NOT combine with \`[TASK_COMPLETE]\` in the same turn.',
   );
   buf.write('</mcp_tools>');
-  final result = buf.toString();
-  // ignore: avoid_print
-  print('[mcp-prompt] built MCP tools block (${result.length} chars, '
-      '${byServer.length} servers, ${tools.length} tools)');
-  return result;
+  return buf.toString();
 }
 
 // ── System prompt design notes ──────────────────────────────────────────
