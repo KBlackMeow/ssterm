@@ -25,6 +25,7 @@ The terminal-aware agent panel is the standout feature — converse with an AI a
 | Capability | Description |
 |---|---|
 | **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local) |
+| **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
 | **Session context** | Active tab, working directory, and date/time sent on first turn |
 | **Auto-execute mode** | Agent runs commands and iterates on captured output automatically |
 | **Manual mode** | Agent proposes commands; click **Exec** to run with safety checks |
@@ -32,7 +33,18 @@ The terminal-aware agent panel is the standout feature — converse with an AI a
 | **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
 | **Web search** | Brave Search integration for current web results (configurable) |
 | **Built-in skills** | `disk-space`, `git-bisect`, `port-conflict`, `verify-fix` — toggleable per skill |
+| **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
 | **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
+
+### Tool calling
+
+SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, built-in skills, and configured MCP tools. For providers with native support, calls and results remain structured through the provider's conversation format; the agent executes at most one actionable call per turn. Ollama uses the existing fenced-JSON/text protocol so local models continue to work.
+
+Native calls use the same safeguards as the compatibility path: dangerous commands stop for review, file changes are presented as apply/reject proposals, and MCP calls go through SSTerm's existing tool executor. Tool-call cards redact sensitive argument values and truncate unusually long values before displaying them.
+
+### MCP servers
+
+Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `stdio` servers (a command plus arguments) and remote Streamable HTTP endpoints. It discovers each enabled server's tools and makes those tools available only while MCP is enabled for the agent. Results—including tool errors—are shown in expandable MCP result cards and fed back to the agent for the next turn.
 
 ---
 
