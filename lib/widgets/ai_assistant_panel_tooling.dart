@@ -2,6 +2,14 @@
 
 part of 'ai_assistant_panel.dart';
 
+typedef _AgentStreamResult = ({
+  String text,
+  bool hasReasoning,
+  List<AgentToolCall> toolCalls,
+  String? finishReason,
+  int malformedEventCount,
+});
+
 /// Streaming and tool-approval implementation used by the agent loop.
 extension _AiAgentToolingExt on _AiAssistantOverlayState {
   bool _isTransientStreamError(Object e) {
@@ -16,7 +24,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         s.contains('Connection closed');
   }
 
-  Future<String?> _streamAiResponse(
+  Future<_AgentStreamResult?> _streamAiResponse(
     int gen,
     int historyLenBefore,
     _ChatMessage aiMsg,
@@ -24,6 +32,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
   ) async {
     String fullText = '';
     String reasoningText = '';
+    final nativeToolCalls = <AgentToolCall>[];
+    String? finishReason;
+    var malformedEventCount = 0;
 
     // Outer retry loop: at most one extra attempt, and only when the
     // first attempt yielded zero content AND failed with a transient
@@ -58,6 +69,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
 
       fullText = '';
       reasoningText = '';
+      nativeToolCalls.clear();
+      finishReason = null;
+      malformedEventCount = 0;
       var scheduled = false;
       // Once the stream completes (success OR error), block all pending
       // post-frame callbacks from clobbering `aiMsg.text` with the
@@ -71,6 +85,11 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         await for (final event in result.stream) {
           if (event.kind == 'reasoning') {
             reasoningText += event.content;
+          } else if (event.kind == 'tool_call' && event.toolCall != null) {
+            nativeToolCalls.add(event.toolCall!);
+          } else if (event.kind == 'diagnostics') {
+            finishReason = event.finishReason;
+            malformedEventCount += event.malformedEventCount;
           } else {
             fullText += event.content;
           }
@@ -149,7 +168,13 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     }
 
     if (!mounted || gen != _generation) return null;
-    return fullText;
+    return (
+      text: fullText,
+      hasReasoning: reasoningText.isNotEmpty,
+      toolCalls: List<AgentToolCall>.unmodifiable(nativeToolCalls),
+      finishReason: finishReason,
+      malformedEventCount: malformedEventCount,
+    );
   }
 
   Future<String?> _runWebSearch({
@@ -548,7 +573,10 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       final envelope = e.kind == EditMatchErrorKind.noMatch
           ? FileEditService.formatNoMatchForLlm(path, oldString)
           : FileEditService.formatAmbiguousForLlm(
-              path, oldString, e.matchCount);
+              path,
+              oldString,
+              e.matchCount,
+            );
       _logAgent(
         '${tp}iter=$iter file_edit_match_err kind=${e.kind.name} '
         'count=${e.matchCount} path=${_logQuote(path)}',
@@ -772,9 +800,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
 
     if (proposal.agentGeneration != _generation) {
       setState(() => proposal.state = _QuestionProposalState.stale);
-      _logAgent(
-        'ask_user_question_stale header=${_logQuote(proposal.header)}',
-      );
+      _logAgent('ask_user_question_stale header=${_logQuote(proposal.header)}');
       proposal.decision.complete(null);
       return;
     }

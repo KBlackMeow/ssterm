@@ -692,6 +692,14 @@ class _AiPanelContent extends StatelessWidget {
       );
     }
 
+    final toolCalls = msg.toolCallData;
+    if (toolCalls != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        child: _ToolCallCard(data: toolCalls),
+      );
+    }
+
     // `== true` instead of plain truthy check — `isNotice` is `bool?` so
     // legacy hot-reloaded objects (where the field didn't exist when they
     // were constructed) safely compare to false instead of throwing on a
@@ -808,6 +816,84 @@ class _AiPanelContent extends StatelessWidget {
   }
 }
 
+/// Expandable card showing the model's requested tool calls before dispatch.
+class _ToolCallCard extends StatelessWidget {
+  final _ToolCallData data;
+  const _ToolCallCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg =
+        AppColors.maybeOf(context)?.foreground ?? const Color(0xFFD4D4D4);
+    final dim =
+        (AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF8E8E8E))
+            .withValues(alpha: 0.7);
+    final surface =
+        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: surface.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.22)),
+      ),
+      child: ExpansionTile(
+        dense: true,
+        leading: Icon(
+          Icons.handyman_outlined,
+          size: 16,
+          color: Colors.blue.shade300,
+        ),
+        title: Text(
+          data.summary,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: fg,
+          ),
+        ),
+        children: [
+          for (final call in data.calls)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    call.name,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: fg,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  SelectableText(
+                    'id: ${call.id}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: dim,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  SelectableText(
+                    data.formattedArgumentsFor(call),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: fg,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Simple card rendering an MCP tool call result.
 class _McpResultCard extends StatelessWidget {
   final _McpResultData data;
@@ -815,9 +901,11 @@ class _McpResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = AppColors.maybeOf(context)?.foreground ?? const Color(0xFFD4D4D4);
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF8E8E8E))
-        .withValues(alpha: 0.6);
+    final fg =
+        AppColors.maybeOf(context)?.foreground ?? const Color(0xFFD4D4D4);
+    final dim =
+        (AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF8E8E8E))
+            .withValues(alpha: 0.6);
     final surface =
         AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
 
@@ -876,14 +964,32 @@ class _McpResultCard extends StatelessWidget {
           style: TextStyle(fontSize: 12, color: fg, fontFamily: 'monospace'),
         );
       case 'image':
-        return Text('[image: ${block.mimeType ?? "unknown"}]',
-            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+        return Text(
+          '[image: ${block.mimeType ?? "unknown"}]',
+          style: TextStyle(
+            fontSize: 11,
+            color: dim,
+            fontStyle: FontStyle.italic,
+          ),
+        );
       case 'resource':
-        return Text('[resource: ${block.uri ?? "unknown"}]',
-            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+        return Text(
+          '[resource: ${block.uri ?? "unknown"}]',
+          style: TextStyle(
+            fontSize: 11,
+            color: dim,
+            fontStyle: FontStyle.italic,
+          ),
+        );
       default:
-        return Text('[${block.type} content]',
-            style: TextStyle(fontSize: 11, color: dim, fontStyle: FontStyle.italic));
+        return Text(
+          '[${block.type} content]',
+          style: TextStyle(
+            fontSize: 11,
+            color: dim,
+            fontStyle: FontStyle.italic,
+          ),
+        );
     }
   }
 }

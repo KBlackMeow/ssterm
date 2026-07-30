@@ -181,6 +181,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         _logAgentStop(iter, reason, turnId: turnId);
 
     var loopIterations = 0;
+    agentLoop:
     while (gen == _generation) {
       if (loopIterations >= _maxLoopIterations) {
         stopIter(loopIterations, 'max_iterations');
@@ -202,29 +203,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       // Truncate history — but pin the first [_kPinnedHeadMessages] (the
       // user's goal + the first AI reply) so the agent never forgets WHAT
-      // it was asked to do.  Always remove an EVEN number of entries from
-      // the middle to preserve the user/assistant role alternation that
-      // Anthropic's /v1/messages endpoint enforces.
-      if (_conversationHistory.length > _maxHistoryTurns * 2) {
-        var remove = _conversationHistory.length - _maxHistoryTurns * 2;
-        if (remove.isOdd) remove++;
-        final maxRemovable = _conversationHistory.length - _kPinnedHeadMessages;
-        if (remove > maxRemovable) remove = maxRemovable;
-        // The `maxRemovable` clamp above can turn an even `remove` back
-        // into an odd one when the pinned-head count is itself odd
-        // (e.g. one bootstrapping system message).  We MUST re-floor to
-        // an even count or we'd snip a user-without-its-assistant (or
-        // vice-versa) out of the middle, leaving the role pattern
-        // broken — which Anthropic rejects with a 400.  Better to keep
-        // one extra turn than to corrupt the alternation.
-        if (remove.isOdd) remove--;
-        if (remove > 0) {
-          _conversationHistory.removeRange(
-            _kPinnedHeadMessages,
-            _kPinnedHeadMessages + remove,
-          );
-        }
-      }
+      // it was asked to do. Native tool calls and results form one atomic
+      // transcript group, so trimming must not split them.
+      _conversationHistory.trimToMaxItems(
+        maxItems: _maxHistoryTurns * 2,
+        pinnedItemCount: _kPinnedHeadMessages,
+      );
 
       // --- AI call ---
       // Structured one-line logs, greppable; see `_logAgent` /
@@ -236,29 +220,78 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // one line of pure heartbeat noise from every iteration on the
       // happy path.
       final historyLenAtCall = _conversationHistory.length;
-      final fullText = await _streamAiResponse(
+      final streamResult = await _streamAiResponse(
         gen,
         historyLenBefore,
         aiMsg,
         config,
       );
-      if (fullText == null) {
+      if (streamResult == null) {
         stopIter(loopIterations, 'stream_error_or_cancelled');
         break;
       }
 
+      final resolvedStreamResult = streamResult;
+      final fullText = resolvedStreamResult.text;
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
-      final toolCalls = LlmService.extractToolCalls(protocolText);
+      final nativeToolCalls = resolvedStreamResult.toolCalls
+          .map(
+            (call) => ToolCall(
+              id: call.id,
+              name: call.name,
+              arguments: call.arguments,
+            ),
+          )
+          .toList(growable: false);
+      final toolCalls = nativeToolCalls.isNotEmpty
+          ? nativeToolCalls
+          : LlmService.extractToolCalls(protocolText);
+      const droppedToolCallCount = 0;
+      final incompleteError = LlmService.incompleteStreamError(
+        text: protocolText,
+        hasReasoning: resolvedStreamResult.hasReasoning,
+        toolCallCount: toolCalls.length,
+        finishReason: resolvedStreamResult.finishReason,
+        malformedEventCount: resolvedStreamResult.malformedEventCount,
+      );
+      if (incompleteError != null) {
+        logIter(
+          'iter=$loopIterations error incomplete_reply '
+          'finish_reason=${_logQuote(resolvedStreamResult.finishReason ?? 'unavailable')} '
+          'malformed_events=${resolvedStreamResult.malformedEventCount}',
+        );
+        setState(() {
+          _messages.add(_ChatMessage.ai(text: '', error: incompleteError));
+        });
+        _scrollToBottom();
+        break;
+      }
       final shellToolCalls = toolCalls.where((call) => call.isShell).toList();
       final commands = shellToolCalls
           .map((call) => call.command?.trim())
           .whereType<String>()
           .where((cmd) => cmd.isNotEmpty)
           .toList();
-      _conversationHistory.add({'role': 'assistant', 'content': protocolText});
+      if (resolvedStreamResult.toolCalls.isEmpty) {
+        _conversationHistory.add({
+          'role': 'assistant',
+          'content': protocolText,
+        });
+      } else {
+        _conversationHistory.add(
+          AgentConversationItem.assistantToolCalls(
+            resolvedStreamResult.toolCalls,
+            content: protocolText.isEmpty ? null : protocolText,
+          ),
+        );
+      }
       final displayText = LlmService.stripCompletionMarkers(protocolText);
       aiMsg.text = displayText;
-      setState(() {});
+      setState(() {
+        if (toolCalls.isNotEmpty) {
+          _messages.add(_ChatMessage.toolCalls(toolCalls));
+        }
+      });
       _scrollToBottom();
 
       final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
@@ -332,8 +365,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
         'protocol_chars=${protocolText.length} '
-        'tools=${toolCalls.length} shell_tools=${shellToolCalls.length} '
-        'cmds=${commands.length} marker=$markerLabel',
+        'tools=${toolCalls.length} dropped_tools=$droppedToolCallCount '
+        'shell_tools=${shellToolCalls.length} '
+        'cmds=${commands.length} marker=$markerLabel '
+        'finish_reason=${_logQuote(resolvedStreamResult.finishReason ?? 'unavailable')} '
+        'malformed_events=${resolvedStreamResult.malformedEventCount}',
       );
 
       if (fullText.isEmpty) {
@@ -453,31 +489,71 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // feedback envelope so the model can pivot.
       if (mcpToolCalls.isNotEmpty) {
         final feedbacks = <String>[];
+        final nativeResults = <AgentToolResult>[];
         for (final call in mcpToolCalls) {
           final serverId = call.mcpServerId!;
           final toolName = call.mcpToolName!;
+          final startedAt = DateTime.now().millisecondsSinceEpoch;
+          logIter(
+            'iter=$loopIterations mcp_call '
+            'id=${_logQuote(call.id)} server=${_logQuote(serverId)} '
+            'tool=${_logQuote(toolName)} arg_count=${call.mcpParams.length}',
+          );
 
           setState(() => _agentLoopStatus = 'Calling MCP: $toolName');
           _scrollToBottom();
 
           final result = await _executeMcpCall(gen, call);
           if (!mounted || gen != _generation) return;
+          final elapsed = DateTime.now().millisecondsSinceEpoch - startedAt;
+          logIter(
+            'iter=$loopIterations mcp_result '
+            'id=${_logQuote(call.id)} server=${_logQuote(serverId)} '
+            'tool=${_logQuote(toolName)} '
+            'status=${result.isError ? 'error' : 'ok'} '
+            'blocks=${result.content.length} elapsed_ms=$elapsed',
+          );
 
           setState(() {
-            _messages.add(_ChatMessage.mcpResult(
-              serverId: serverId,
-              toolName: toolName,
-              result: result,
-            ));
+            _messages.add(
+              _ChatMessage.mcpResult(
+                serverId: serverId,
+                toolName: toolName,
+                result: result,
+              ),
+            );
           });
           _scrollToBottom();
 
           feedbacks.add(_formatMcpResult(call, result));
+          nativeResults.add(
+            AgentToolResult(
+              toolCallId: call.id,
+              content: result.textContent.isEmpty
+                  ? 'MCP tool returned ${result.content.length} content block(s).'
+                  : result.textContent,
+              isError: result.isError,
+            ),
+          );
         }
-        _conversationHistory.add({
-          'role': 'user',
-          'content': feedbacks.join('\n\n'),
-        });
+        _conversationHistory.add(
+          resolvedStreamResult.toolCalls.isEmpty
+              ? AgentConversationItem.text(
+                  role: 'user',
+                  content: feedbacks.join('\n\n'),
+                )
+              : AgentConversationItem.toolResults([
+                  ...nativeResults,
+                  for (final call in toolCalls)
+                    if (!call.isMcp)
+                      AgentToolResult(
+                        toolCallId: call.id,
+                        content:
+                            'Tool call was not executed because this turn is processing MCP calls. Reissue it in a later turn if still needed.',
+                        isError: true,
+                      ),
+                ]),
+        );
         setState(() => _agentLoopStatus = 'MCP results sent, AI thinking…');
         continue;
       }
@@ -559,10 +635,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           header: askUserQuestionTool.header!,
           options: askUserQuestionTool.options
               .map(
-                (o) => _QuestionOption(
-                  label: o.label,
-                  description: o.description,
-                ),
+                (o) =>
+                    _QuestionOption(label: o.label, description: o.description),
               )
               .toList(),
           agentGeneration: gen,
@@ -636,6 +710,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // exit code and byte count, so logging both ends would double the
       // noise without adding information.
       final feedbacks = <String>[];
+      final nativeResults = <AgentToolResult>[];
       for (var i = 0; i < shellToolCalls.length; i++) {
         final toolCall = shellToolCalls[i];
         final command = toolCall.command!.trim();
@@ -707,11 +782,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // No shell call.  The proposal card stays in the transcript,
           // flipped to its rejected state — that's the visible record
           // of what happened; no separate "system" card is added.
-          feedbacks.add(
-            verdict != null
-                ? _formatDangerRejection(command, verdict)
-                : _formatCommandRejection(command),
-          );
           if (verdict != null) {
             _logSafety(
               't=$turnId danger_rejected side=agent iter=$loopIterations '
@@ -723,7 +793,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               'iter=$loopIterations confirm_rejected cmd=${_logQuote(command)}',
             );
           }
-          continue;
+          // A rejection is terminal for this agent task.  In particular,
+          // don't aggregate a rejection envelope below: doing so would
+          // trigger another LLM request with the rejected command as input.
+          break agentLoop;
         }
         if (verdict != null) {
           _logSafety(
@@ -765,20 +838,30 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
         _scrollToBottom();
 
-        feedbacks.add(
-          _formatCommandFeedback(
-            command,
-            result,
+        final feedback = _formatCommandFeedback(
+          command,
+          result,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+        );
+        feedbacks.add(feedback);
+        nativeResults.add(
+          AgentToolResult(
             toolCallId: toolCall.id,
-            toolName: toolCall.name,
+            content: feedback,
+            isError: result?.exitCode != null && result!.exitCode != 0,
           ),
         );
       }
 
-      _conversationHistory.add({
-        'role': 'user',
-        'content': feedbacks.join('\n\n'),
-      });
+      _conversationHistory.add(
+        resolvedStreamResult.toolCalls.isEmpty
+            ? AgentConversationItem.text(
+                role: 'user',
+                content: feedbacks.join('\n\n'),
+              )
+            : AgentConversationItem.toolResults(nativeResults),
+      );
       logIter(
         'iter=$loopIterations feedback +${feedbacks.length} '
         'history=${_conversationHistory.length}',

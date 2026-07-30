@@ -99,6 +99,10 @@ class _ChatMessage {
   /// hot-reload reason as the other proposal fields.
   _McpResultData? mcpResultData;
 
+  /// Native or legacy tool calls proposed by the model, rendered before the
+  /// host dispatches them. Nullable for hot-reload compatibility.
+  _ToolCallData? toolCallData;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -113,6 +117,7 @@ class _ChatMessage {
     this.dangerProposal,
     this.questionProposal,
     this.mcpResultData,
+    this.toolCallData,
   });
 
   factory _ChatMessage.user(String text) =>
@@ -182,16 +187,35 @@ class _ChatMessage {
     required String serverId,
     required String toolName,
     required McpToolResult result,
-  }) =>
-      _ChatMessage._(
-        text: '',
-        isUser: false,
-        mcpResultData: _McpResultData(
-          serverId: serverId,
-          toolName: toolName,
-          result: result,
-        ),
-      );
+  }) => _ChatMessage._(
+    text: '',
+    isUser: false,
+    mcpResultData: _McpResultData(
+      serverId: serverId,
+      toolName: toolName,
+      result: result,
+    ),
+  );
+
+  factory _ChatMessage.toolCalls(Iterable<ToolCall> calls) => _ChatMessage._(
+    text: '',
+    isUser: false,
+    toolCallData: _ToolCallData(calls),
+  );
+}
+
+/// Immutable display payload for one model turn's tool invocations.
+class _ToolCallData {
+  final List<ToolCall> calls;
+
+  _ToolCallData(Iterable<ToolCall> calls) : calls = List.unmodifiable(calls);
+
+  String get summary => calls.length == 1
+      ? 'Calling ${calls.single.name}'
+      : 'Calling ${calls.length} tools';
+
+  String formattedArgumentsFor(ToolCall call) =>
+      ToolCallDisplayFormatter.formatArguments(call.arguments);
 }
 
 /// Lightweight payload for an MCP tool call result chat card.
@@ -296,13 +320,7 @@ enum _EditProposalOutcome {
 
 /// Lifecycle states for an [_EditProposal].  Mirrors
 /// [_WriteProposalState] one-for-one.
-enum _EditProposalState {
-  pending,
-  applying,
-  applied,
-  rejected,
-  failed,
-}
+enum _EditProposalState { pending, applying, applied, rejected, failed }
 
 /// Per-proposal record for a pending `edit_file` tool call.  Unlike
 /// [_WriteProposal] (which carries the full new file body), this holds

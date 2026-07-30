@@ -13,6 +13,7 @@ import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/command_safety.dart';
 import '../services/llm_service.dart';
+import '../services/agent_tool_contract.dart';
 import '../services/file_write_service.dart';
 import '../services/file_edit_service.dart';
 import '../services/mcp_service.dart';
@@ -20,6 +21,7 @@ import '../utils/line_diff.dart';
 import '../services/session_context.dart';
 import '../services/skill_service.dart';
 import '../services/web_search_service.dart';
+import '../services/tool_call_display_formatter.dart';
 import 'frosted_glass.dart';
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -242,7 +244,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   int _agentTurnSeq = 0;
 
   // Conversation history for agent mode (preserved across messages).
-  final _conversationHistory = <Map<String, String>>[];
+  final _conversationHistory = AgentConversationHistory();
 
   /// True while the agent is auto-executing commands — terminal input is
   /// blocked to prevent the user from interfering with the agent's work.
@@ -595,10 +597,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
                   : constraints.maxHeight;
               final maxSide = total * _kPanelMaxFraction;
               final current = _customPanelSize ?? panelExtent;
-              _customPanelSize = (current - d).clamp(
-                _kPanelMinExtent,
-                maxSide,
-              );
+              _customPanelSize = (current - d).clamp(_kPanelMinExtent, maxSide);
             });
             widget.onLayoutChanged?.call(_position, _customPanelSize);
           },

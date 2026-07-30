@@ -9,6 +9,118 @@ import 'package:ssterm/services/skill_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('OpenAiStreamAccumulator', () {
+    test('assembles tool arguments by index when later chunks omit id', () {
+      final accumulator = OpenAiStreamAccumulator();
+
+      final firstEvents = accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {
+              'delta': {
+                'tool_calls': [
+                  {
+                    'index': 0,
+                    'id': 'call_pwd',
+                    'function': {'name': 'bash', 'arguments': '{"com'},
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+      final secondEvents = accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {
+              'delta': {
+                'tool_calls': [
+                  {
+                    'index': 0,
+                    'function': {'arguments': 'mand":"pwd"}'},
+                  },
+                ],
+              },
+              'finish_reason': 'tool_calls',
+            },
+          ],
+        }),
+      );
+      final completedEvents = accumulator.finish();
+
+      expect(firstEvents, isEmpty);
+      expect(secondEvents, isEmpty);
+      expect(completedEvents, hasLength(1));
+      expect(completedEvents.single.kind, 'tool_call');
+      expect(completedEvents.single.toolCall?.id, 'call_pwd');
+      expect(completedEvents.single.toolCall?.name, 'bash');
+      expect(completedEvents.single.toolCall?.arguments, {'command': 'pwd'});
+      expect(accumulator.finishReason, 'tool_calls');
+      expect(accumulator.malformedEventCount, 0);
+    });
+
+    test('counts malformed events and continues parsing later text', () {
+      final accumulator = OpenAiStreamAccumulator();
+
+      expect(accumulator.addData('{not-json'), isEmpty);
+      final events = accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {
+              'delta': {'content': 'Recovered'},
+              'finish_reason': 'stop',
+            },
+          ],
+        }),
+      );
+
+      expect(accumulator.malformedEventCount, 1);
+      expect(events.single.kind, 'text');
+      expect(events.single.content, 'Recovered');
+      expect(accumulator.finishReason, 'stop');
+    });
+  });
+
+  group('LlmService.incompleteStreamError', () {
+    test('rejects a reasoning-only response', () {
+      final error = LlmService.incompleteStreamError(
+        text: '',
+        hasReasoning: true,
+        toolCallCount: 0,
+        finishReason: 'stop',
+        malformedEventCount: 0,
+      );
+
+      expect(error, contains('reasoning'));
+      expect(error, contains('stop'));
+    });
+
+    test('accepts final text or a valid tool call', () {
+      expect(
+        LlmService.incompleteStreamError(
+          text: 'Which directory should I scan?',
+          hasReasoning: true,
+          toolCallCount: 0,
+          finishReason: 'stop',
+          malformedEventCount: 0,
+        ),
+        isNull,
+      );
+      expect(
+        LlmService.incompleteStreamError(
+          text: '',
+          hasReasoning: true,
+          toolCallCount: 1,
+          finishReason: 'tool_calls',
+          malformedEventCount: 0,
+        ),
+        isNull,
+      );
+    });
+  });
+
   group('LlmService.extractCommands', () {
     test('extracts a single bash block', () {
       const input = '''
@@ -334,15 +446,17 @@ Now the real call:
       expect(LlmService.extractToolCalls(input), isEmpty);
     });
 
-    test('edit_file with old_string == new_string is rejected (no-op edit)',
-        () {
-      const input = r'''
+    test(
+      'edit_file with old_string == new_string is rejected (no-op edit)',
+      () {
+        const input = r'''
 ```tool_call
 {"id":"call_edit","name":"edit_file","arguments":{"path":"/tmp/a.txt","old_string":"same","new_string":"same"}}
 ```
 ''';
-      expect(LlmService.extractToolCalls(input), isEmpty);
-    });
+        expect(LlmService.extractToolCalls(input), isEmpty);
+      },
+    );
 
     test('edit_file new_string may be empty (a deletion edit)', () {
       const input = r'''
@@ -426,16 +540,19 @@ Now the real call:
       expect(LlmService.extractToolCalls(input), isEmpty);
     });
 
-    test('ask_user_question option missing description is dropped from the list', () {
-      const input = '''
+    test(
+      'ask_user_question option missing description is dropped from the list',
+      () {
+        const input = '''
 ```tool_call
 {"id":"call_ask","name":"ask_user_question","arguments":{"question":"Proceed?","header":"Confirm","options":[{"label":"Yes"},{"label":"No","description":"Stop"}]}}
 ```
 ''';
-      // Only 1 of the 2 declared options survives parsing (missing
-      // description) -> below the 2-option floor -> whole call rejected.
-      expect(LlmService.extractToolCalls(input), isEmpty);
-    });
+        // Only 1 of the 2 declared options survives parsing (missing
+        // description) -> below the 2-option floor -> whole call rejected.
+        expect(LlmService.extractToolCalls(input), isEmpty);
+      },
+    );
 
     test('extracts a tool_calls array with mixed supported tools', () {
       const input = '''
@@ -1104,8 +1221,7 @@ Done.
       );
       final writeBlockStart = prompt.indexOf('<file_write_tool>');
       final writeBlockEnd = prompt.indexOf('</file_write_tool>');
-      final writeBlock =
-          prompt.substring(writeBlockStart, writeBlockEnd);
+      final writeBlock = prompt.substring(writeBlockStart, writeBlockEnd);
       expect(writeBlock.contains('edit_file'), isTrue);
     });
 
@@ -1170,6 +1286,34 @@ Done.
       expect(prompt.contains('ask_user_question'), isTrue);
       expect(prompt.contains('four shapes'), isTrue);
     });
+
+    test(
+      'native tool mode uses the compact prompt without fenced tool schemas',
+      () {
+        final prompt = LlmService.systemPromptFor(
+          enabledSkillIds: <String>{},
+          webSearchEnabled: true,
+          fileWriteEnabled: true,
+          nativeToolCalling: true,
+        );
+
+        expect(
+          prompt,
+          contains('Tool schemas supplied by the API are authoritative'),
+        );
+        expect(
+          prompt,
+          contains('compare it with the user\'s requested outcome'),
+        );
+        expect(
+          prompt,
+          contains('do not stop merely because one tool call succeeded'),
+        );
+        expect(prompt, isNot(contains('```tool_call')));
+        expect(prompt, isNot(contains('<file_write_tool>')));
+        expect(prompt, isNot(contains('<web_search_tool>')));
+      },
+    );
   });
 
   group('SkillService.buildPromptCatalogue Cursor-style format', () {

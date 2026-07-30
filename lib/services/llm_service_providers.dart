@@ -16,9 +16,10 @@ Future<LlmResponse> _callOpenAiCompatible(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
-  String systemPrompt,
-) async {
+  List<AgentConversationItem> messages,
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
       ? baseUrl
@@ -28,9 +29,12 @@ Future<LlmResponse> _callOpenAiCompatible(
     'model': model,
     'messages': [
       {'role': 'system', 'content': systemPrompt},
-      ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
+      ...AgentProviderTools.openAiMessages(messages),
     ],
     'max_tokens': 4096,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
+    if (tools.isNotEmpty) 'tool_choice': 'auto',
+    if (tools.isNotEmpty) 'parallel_tool_calls': false,
   };
 
   final client = HttpClient();
@@ -50,9 +54,13 @@ Future<LlmResponse> _callOpenAiCompatible(
     }
 
     final data = jsonDecode(responseBody) as Map<String, dynamic>;
-    final choice = (data['choices'] as List?)?.firstOrNull as Map<String, dynamic>?;
+    final choice =
+        (data['choices'] as List?)?.firstOrNull as Map<String, dynamic>?;
     final text = choice?['message']?['content'] as String? ?? '';
-    return LlmResponse(text: text);
+    return LlmResponse(
+      text: text,
+      toolCalls: AgentProviderTools.parseOpenAiToolCalls(data),
+    );
   } finally {
     client.close(force: true);
   }
@@ -83,33 +91,34 @@ Future<LlmResponse> _callOpenAiCompatible(
 ///   • Anthropic ignores `cache_control` on requests below the size
 ///     threshold; safe to always include.
 List<Map<String, dynamic>> _anthropicSystemBlock(String prompt) => [
-      {
-        'type': 'text',
-        'text': prompt,
-        'cache_control': {'type': 'ephemeral'},
-      },
-    ];
+  {
+    'type': 'text',
+    'text': prompt,
+    'cache_control': {'type': 'ephemeral'},
+  },
+];
 
 Future<LlmResponse> _callAnthropic(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
-  String systemPrompt,
-) async {
+  List<AgentConversationItem> messages,
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
 
-  final apiMessages = messages.map((m) => {
-    'role': m['role'],
-    'content': m['content'],
-  }).toList();
+  final apiMessages = AgentProviderTools.anthropicMessages(messages);
 
   final body = {
     'model': model,
     'system': _anthropicSystemBlock(systemPrompt),
     'messages': apiMessages,
     'max_tokens': 4096,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
+    if (tools.isNotEmpty)
+      'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
   };
 
   final client = HttpClient();
@@ -138,7 +147,10 @@ Future<LlmResponse> _callAnthropic(
         .where((c) => c['type'] == 'text')
         .map((c) => c['text'] as String)
         .join('\n');
-    return LlmResponse(text: text);
+    return LlmResponse(
+      text: text,
+      toolCalls: AgentProviderTools.parseAnthropicToolCalls(data),
+    );
   } finally {
     client.close(force: true);
   }
@@ -150,29 +162,26 @@ Future<LlmResponse> _callGemini(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
-  String systemPrompt,
-) async {
-  final baseUrl = provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
-  final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/models/$model:generateContent?key=$apiKey';
+  List<AgentConversationItem> messages,
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async {
+  final baseUrl =
+      provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
+  final url =
+      '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/models/$model:generateContent?key=$apiKey';
 
-  final contents = <Map<String, dynamic>>[];
-  for (final m in messages) {
-    final role = m['role'] == 'assistant' ? 'model' : 'user';
-    contents.add({
-      'role': role,
-      'parts': [{'text': m['content']}],
-    });
-  }
+  final contents = AgentProviderTools.geminiContents(messages);
 
   final body = {
     'system_instruction': {
-      'parts': [{'text': systemPrompt}],
+      'parts': [
+        {'text': systemPrompt},
+      ],
     },
     'contents': contents,
-    'generationConfig': {
-      'maxOutputTokens': 4096,
-    },
+    'generationConfig': {'maxOutputTokens': 4096},
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
   final client = HttpClient();
@@ -192,13 +201,17 @@ Future<LlmResponse> _callGemini(
 
     final data = jsonDecode(responseBody) as Map<String, dynamic>;
     final candidates = data['candidates'] as List?;
-    final parts = candidates
-        ?.firstOrNull?['content']?['parts'] as List?;
-    final text = parts
-        ?.where((p) => p['text'] != null)
-        .map((p) => p['text'] as String)
-        .join('\n') ?? '';
-    return LlmResponse(text: text);
+    final parts = candidates?.firstOrNull?['content']?['parts'] as List?;
+    final text =
+        parts
+            ?.where((p) => p['text'] != null)
+            .map((p) => p['text'] as String)
+            .join('\n') ??
+        '';
+    return LlmResponse(
+      text: text,
+      toolCalls: AgentProviderTools.parseGeminiToolCalls(data),
+    );
   } finally {
     client.close(force: true);
   }
@@ -213,7 +226,9 @@ String _extractError(String responseBody) {
         data['error']?.toString() ??
         responseBody;
   } catch (_) {
-    return responseBody.length > 200 ? responseBody.substring(0, 200) : responseBody;
+    return responseBody.length > 200
+        ? responseBody.substring(0, 200)
+        : responseBody;
   }
 }
 
@@ -246,14 +261,123 @@ String _stripPseudoPrompts(String body) {
 
 // ── OpenAI / DeepSeek streaming ──────────────────────────────────────
 
+class _OpenAiStreamingToolCall {
+  String? id;
+  String? name;
+  final arguments = StringBuffer();
+}
+
+/// Stateful decoder for the `data:` payloads in an OpenAI-compatible SSE
+/// stream. Public so its provider-wire behavior can be regression-tested
+/// without making real network or keychain calls.
+class OpenAiStreamAccumulator {
+  final Map<int, _OpenAiStreamingToolCall> _toolCalls = {};
+
+  String? finishReason;
+  int malformedEventCount = 0;
+
+  List<LlmStreamEvent> addData(String data) {
+    try {
+      final decoded = jsonDecode(data);
+      if (decoded is! Map<String, dynamic>) {
+        malformedEventCount++;
+        return const [];
+      }
+      final choices = decoded['choices'];
+      if (choices is! List || choices.isEmpty) return const [];
+      final rawChoice = choices.first;
+      if (rawChoice is! Map) {
+        malformedEventCount++;
+        return const [];
+      }
+      final choice = rawChoice.cast<String, dynamic>();
+      final rawFinishReason = choice['finish_reason'];
+      if (rawFinishReason is String && rawFinishReason.isNotEmpty) {
+        finishReason = rawFinishReason;
+      }
+
+      final rawDelta = choice['delta'];
+      if (rawDelta == null) return const [];
+      if (rawDelta is! Map) {
+        malformedEventCount++;
+        return const [];
+      }
+      final delta = rawDelta.cast<String, dynamic>();
+      final rawToolCalls = delta['tool_calls'];
+      if (rawToolCalls is List) {
+        for (final raw in rawToolCalls) {
+          if (raw is! Map) {
+            malformedEventCount++;
+            continue;
+          }
+          final index = raw['index'];
+          if (index is! int) {
+            malformedEventCount++;
+            continue;
+          }
+          final pending = _toolCalls.putIfAbsent(
+            index,
+            _OpenAiStreamingToolCall.new,
+          );
+          final id = raw['id'];
+          if (id is String && id.isNotEmpty) pending.id = id;
+          final function = raw['function'];
+          if (function is Map) {
+            final name = function['name'];
+            if (name is String && name.isNotEmpty) pending.name = name;
+            final fragment = function['arguments'];
+            if (fragment is String) pending.arguments.write(fragment);
+          }
+        }
+      }
+
+      final events = <LlmStreamEvent>[];
+      final reasoning = delta['reasoning_content'];
+      if (reasoning is String && reasoning.isNotEmpty) {
+        events.add(LlmStreamEvent('reasoning', reasoning));
+      }
+      final content = delta['content'];
+      if (content is String && content.isNotEmpty) {
+        events.add(LlmStreamEvent('text', content));
+      }
+      return events;
+    } on FormatException {
+      malformedEventCount++;
+      return const [];
+    } on TypeError {
+      malformedEventCount++;
+      return const [];
+    }
+  }
+
+  List<LlmStreamEvent> finish() {
+    final events = <LlmStreamEvent>[];
+    for (final entry in _toolCalls.entries) {
+      final pending = entry.value;
+      final call = AgentToolCall.fromRaw(
+        id: pending.id ?? 'call_openai_stream_${entry.key}',
+        name: pending.name ?? '',
+        arguments: pending.arguments.toString(),
+      );
+      if (call == null) {
+        malformedEventCount++;
+      } else {
+        events.add(LlmStreamEvent('tool_call', '', toolCall: call));
+      }
+    }
+    return events;
+  }
+}
+
 Stream<LlmStreamEvent> _streamOpenAi(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
+  List<AgentConversationItem> messages,
   HttpClient client,
-  String systemPrompt,
-) async* {
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
       ? baseUrl
@@ -264,10 +388,13 @@ Stream<LlmStreamEvent> _streamOpenAi(
     'model': model,
     'messages': [
       {'role': 'system', 'content': systemPrompt},
-      ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
+      ...AgentProviderTools.openAiMessages(messages),
     ],
     'max_tokens': 4096,
     'stream': true,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
+    if (tools.isNotEmpty) 'tool_choice': 'auto',
+    if (tools.isNotEmpty) 'parallel_tool_calls': false,
     // DeepSeek-only: only `reasoning_effort` is recognised by their
     // OpenAI-compatible chat-completions endpoint.  The previous build
     // also sent `'thinking': {'type': 'enabled'}` — that's Anthropic's
@@ -287,27 +414,24 @@ Stream<LlmStreamEvent> _streamOpenAi(
     throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
   }
 
+  final accumulator = OpenAiStreamAccumulator();
   await for (final line
       in response.transform(utf8.decoder).transform(const LineSplitter())) {
     if (!line.startsWith('data: ')) continue;
     final data = line.substring(6).trim();
     if (data == '[DONE]') break;
     if (data.isEmpty) continue;
-    try {
-      final json = jsonDecode(data) as Map<String, dynamic>;
-      final choices = json['choices'] as List?;
-      final delta = choices?.firstOrNull?['delta'] as Map<String, dynamic>?;
-      if (delta == null) continue;
-      final reasoning = delta['reasoning_content'] as String?;
-      if (reasoning != null && reasoning.isNotEmpty) {
-        yield LlmStreamEvent('reasoning', reasoning);
-      }
-      final content = delta['content'] as String?;
-      if (content != null && content.isNotEmpty) {
-        yield LlmStreamEvent('text', content);
-      }
-    } catch (_) {}
+    for (final event in accumulator.addData(data)) {
+      yield event;
+    }
   }
+  for (final event in accumulator.finish()) {
+    yield event;
+  }
+  yield LlmStreamEvent.diagnostics(
+    finishReason: accumulator.finishReason,
+    malformedEventCount: accumulator.malformedEventCount,
+  );
 }
 
 // ── Anthropic streaming ──────────────────────────────────────────────
@@ -316,17 +440,15 @@ Stream<LlmStreamEvent> _streamAnthropic(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
+  List<AgentConversationItem> messages,
   HttpClient client,
-  String systemPrompt,
-) async* {
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
 
-  final apiMessages = messages.map((m) => {
-    'role': m['role'],
-    'content': m['content'],
-  }).toList();
+  final apiMessages = AgentProviderTools.anthropicMessages(messages);
 
   final body = <String, dynamic>{
     'model': model,
@@ -334,6 +456,9 @@ Stream<LlmStreamEvent> _streamAnthropic(
     'messages': apiMessages,
     'max_tokens': 4096,
     'stream': true,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
+    if (tools.isNotEmpty)
+      'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
   };
   // Extended thinking is only supported on Claude Sonnet 3.7+ and the v4+
   // Sonnet / Opus families.  Sending it to claude-3-5-sonnet, claude-3-haiku,
@@ -341,10 +466,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
   // model" — gate the parameter behind a model-name match so the user can
   // freely switch models without hitting that wall.
   if (_anthropicSupportsThinking(model)) {
-    body['thinking'] = {
-      'type': 'enabled',
-      'budget_tokens': 2048,
-    };
+    body['thinking'] = {'type': 'enabled', 'budget_tokens': 2048};
   }
 
   final request = await client.postUrl(Uri.parse(url));
@@ -359,6 +481,9 @@ Stream<LlmStreamEvent> _streamAnthropic(
     throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
   }
 
+  final toolNames = <String, String>{};
+  final toolArguments = <String, StringBuffer>{};
+  String? currentToolId;
   await for (final line
       in response.transform(utf8.decoder).transform(const LineSplitter())) {
     if (!line.startsWith('data: ')) continue;
@@ -366,10 +491,26 @@ Stream<LlmStreamEvent> _streamAnthropic(
     if (data.isEmpty) continue;
     try {
       final json = jsonDecode(data) as Map<String, dynamic>;
-      if (json['type'] == 'content_block_delta') {
+      if (json['type'] == 'content_block_start') {
+        final block = json['content_block'] as Map<String, dynamic>?;
+        if (block?['type'] == 'tool_use') {
+          final id = block?['id'] as String?;
+          final name = block?['name'] as String?;
+          if (id != null && name != null) {
+            toolNames[id] = name;
+            toolArguments[id] = StringBuffer();
+            currentToolId = id;
+          }
+        }
+      } else if (json['type'] == 'content_block_delta') {
         final delta = json['delta'] as Map<String, dynamic>?;
         if (delta == null) continue;
-        if (delta['type'] == 'thinking_delta') {
+        if (delta['type'] == 'input_json_delta') {
+          final partial = delta['partial_json'] as String?;
+          if (partial != null && currentToolId != null) {
+            toolArguments[currentToolId]!.write(partial);
+          }
+        } else if (delta['type'] == 'thinking_delta') {
           final text = delta['thinking'] as String?;
           if (text != null && text.isNotEmpty) {
             yield LlmStreamEvent('reasoning', text);
@@ -383,6 +524,16 @@ Stream<LlmStreamEvent> _streamAnthropic(
       }
     } catch (_) {}
   }
+  for (final entry in toolArguments.entries) {
+    final call = AgentToolCall.fromRaw(
+      id: entry.key,
+      name: toolNames[entry.key] ?? '',
+      arguments: entry.value.toString(),
+    );
+    if (call != null) {
+      yield LlmStreamEvent('tool_call', '', toolCall: call);
+    }
+  }
 }
 
 // ── Gemini streaming ─────────────────────────────────────────────────
@@ -391,34 +542,30 @@ Stream<LlmStreamEvent> _streamGemini(
   ProviderConfig provider,
   String model,
   String apiKey,
-  List<Map<String, String>> messages,
+  List<AgentConversationItem> messages,
   HttpClient client,
-  String systemPrompt,
-) async* {
-  final baseUrl = provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
+  String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
+}) async* {
+  final baseUrl =
+      provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
   // `alt=sse` is REQUIRED: without it `:streamGenerateContent` returns a single
   // JSON array (not Server-Sent Events), so the `data: ` prefix parsing below
   // silently yields nothing and the user sees an eternal spinner.
   final url =
       '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/models/$model:streamGenerateContent?alt=sse&key=$apiKey';
 
-  final contents = <Map<String, dynamic>>[];
-  for (final m in messages) {
-    final role = m['role'] == 'assistant' ? 'model' : 'user';
-    contents.add({
-      'role': role,
-      'parts': [{'text': m['content']}],
-    });
-  }
+  final contents = AgentProviderTools.geminiContents(messages);
 
   final body = {
     'system_instruction': {
-      'parts': [{'text': systemPrompt}],
+      'parts': [
+        {'text': systemPrompt},
+      ],
     },
     'contents': contents,
-    'generationConfig': {
-      'maxOutputTokens': 4096,
-    },
+    'generationConfig': {'maxOutputTokens': 4096},
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
   final request = await client.postUrl(Uri.parse(url));
@@ -447,6 +594,17 @@ Stream<LlmStreamEvent> _streamGemini(
       final parts = candidates.firstOrNull?['content']?['parts'] as List?;
       if (parts == null) continue;
       for (final part in parts) {
+        final function = part['functionCall'];
+        if (function is Map) {
+          final call = AgentToolCall.fromRaw(
+            id: 'call_gemini_stream',
+            name: function['name'] as String? ?? '',
+            arguments: function['args'],
+          );
+          if (call != null) {
+            yield LlmStreamEvent('tool_call', '', toolCall: call);
+          }
+        }
         final text = part['text'] as String?;
         if (text != null && text.isNotEmpty) yield LlmStreamEvent('text', text);
       }
@@ -498,7 +656,7 @@ bool _anthropicSupportsThinking(String model) {
 Future<LlmResponse> _callOllama(
   ProviderConfig provider,
   String model,
-  List<Map<String, String>> messages,
+  List<AgentConversationItem> messages,
   String systemPrompt,
 ) async {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
@@ -508,14 +666,10 @@ Future<LlmResponse> _callOllama(
   // convention as OpenAI's chat format and what the Modelfile expects.
   final apiMessages = <Map<String, dynamic>>[
     {'role': 'system', 'content': systemPrompt},
-    ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
+    ...AgentProviderTools.legacyMessages(messages),
   ];
 
-  final body = {
-    'model': model,
-    'messages': apiMessages,
-    'stream': false,
-  };
+  final body = {'model': model, 'messages': apiMessages, 'stream': false};
 
   final client = HttpClient();
   try {
@@ -544,7 +698,7 @@ Future<LlmResponse> _callOllama(
 Stream<LlmStreamEvent> _streamOllama(
   ProviderConfig provider,
   String model,
-  List<Map<String, String>> messages,
+  List<AgentConversationItem> messages,
   HttpClient client,
   String systemPrompt,
 ) async* {
@@ -553,14 +707,10 @@ Stream<LlmStreamEvent> _streamOllama(
 
   final apiMessages = <Map<String, dynamic>>[
     {'role': 'system', 'content': systemPrompt},
-    ...messages.map((m) => {'role': m['role'], 'content': m['content']}),
+    ...AgentProviderTools.legacyMessages(messages),
   ];
 
-  final body = {
-    'model': model,
-    'messages': apiMessages,
-    'stream': true,
-  };
+  final body = {'model': model, 'messages': apiMessages, 'stream': true};
 
   final request = await client.postUrl(Uri.parse(url));
   request.headers.set('Content-Type', 'application/json; charset=utf-8');

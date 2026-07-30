@@ -4,6 +4,9 @@ import 'dart:io';
 import '../models/agent_config.dart';
 import '../models/mcp_server_config.dart';
 import 'api_key_storage.dart';
+import 'agent_tool_contract.dart';
+import 'agent_tool_registry.dart';
+import 'agent_provider_tools.dart';
 import 'mcp_service.dart';
 import 'skill_service.dart';
 
@@ -14,15 +17,36 @@ part 'llm_service_providers.dart';
 class LlmResponse {
   final String text;
   final String? error;
+  final List<AgentToolCall> toolCalls;
 
-  LlmResponse({required this.text, this.error});
+  LlmResponse({required this.text, this.error, this.toolCalls = const []});
 }
 
 /// A chunk yielded during streaming. [kind] is 'text' or 'reasoning'.
 class LlmStreamEvent {
   final String kind;
   final String content;
-  LlmStreamEvent(this.kind, this.content);
+  final AgentToolCall? toolCall;
+  final String? finishReason;
+  final int malformedEventCount;
+
+  LlmStreamEvent(
+    this.kind,
+    this.content, {
+    this.toolCall,
+    this.finishReason,
+    this.malformedEventCount = 0,
+  });
+
+  factory LlmStreamEvent.diagnostics({
+    String? finishReason,
+    required int malformedEventCount,
+  }) => LlmStreamEvent(
+    'diagnostics',
+    '',
+    finishReason: finishReason,
+    malformedEventCount: malformedEventCount,
+  );
 }
 
 /// Structured tool invocation emitted by the model.
@@ -185,6 +209,33 @@ class ToolCall {
 /// Supports OpenAI-compatible APIs, Anthropic's native format, and
 /// Google Gemini's native format.
 class LlmService {
+  /// Returns a user-facing error when a provider finishes after emitting only
+  /// reasoning, without a final answer or a usable tool call.
+  ///
+  /// A completed response is not retried automatically: replaying an agent
+  /// turn can duplicate a command or mutation if the provider's final event
+  /// was merely unreadable to this client.
+  static String? incompleteStreamError({
+    required String text,
+    required bool hasReasoning,
+    required int toolCallCount,
+    String? finishReason,
+    required int malformedEventCount,
+  }) {
+    if (!hasReasoning || text.trim().isNotEmpty || toolCallCount > 0) {
+      return null;
+    }
+    final reason = finishReason == null || finishReason.trim().isEmpty
+        ? 'unavailable'
+        : finishReason.trim();
+    final malformed = malformedEventCount == 0
+        ? ''
+        : ' $malformedEventCount malformed stream event(s) were ignored.';
+    return 'The provider returned reasoning but no final answer or usable '
+        'tool call (finish reason: $reason).$malformed '
+        'Try again or switch provider/model.';
+  }
+
   // ── Marker matchers ─────────────────────────────────────────────────────
   //
   // The agent loop watches for two control markers in the model's reply:
@@ -586,6 +637,7 @@ class LlmService {
   // MCP slices of the cache key — same orthogonal-invalidation pattern.
   static bool _cachedSystemPromptMcpEnabled = false;
   static String? _cachedSystemPromptMcpFingerprint;
+  static bool _cachedSystemPromptNativeTools = false;
 
   /// Build the active system prompt for the given enabled-skill whitelist
   /// and web-search toggle.
@@ -620,6 +672,7 @@ class LlmService {
     bool webSearchEnabled = false,
     bool fileWriteEnabled = false,
     bool mcpEnabled = false,
+    bool nativeToolCalling = false,
   }) {
     final mcpFp = mcpEnabled ? _mcpToolsFingerprint() : null;
     if (_cachedSystemPromptHasKey &&
@@ -627,7 +680,8 @@ class LlmService {
         _cachedSystemPromptWebSearch == webSearchEnabled &&
         _cachedSystemPromptFileWrite == fileWriteEnabled &&
         _cachedSystemPromptMcpEnabled == mcpEnabled &&
-        _cachedSystemPromptMcpFingerprint == mcpFp) {
+        _cachedSystemPromptMcpFingerprint == mcpFp &&
+        _cachedSystemPromptNativeTools == nativeToolCalling) {
       return _cachedSystemPrompt!;
     }
     final built = _buildSystemPrompt(
@@ -635,6 +689,7 @@ class LlmService {
       webSearchEnabled: webSearchEnabled,
       fileWriteEnabled: fileWriteEnabled,
       mcpEnabled: mcpEnabled,
+      nativeToolCalling: nativeToolCalling,
     );
     _cachedSystemPrompt = built;
     _cachedSystemPromptKey = enabledSkillIds == null
@@ -644,6 +699,7 @@ class LlmService {
     _cachedSystemPromptFileWrite = fileWriteEnabled;
     _cachedSystemPromptMcpEnabled = mcpEnabled;
     _cachedSystemPromptMcpFingerprint = mcpFp;
+    _cachedSystemPromptNativeTools = nativeToolCalling;
     _cachedSystemPromptHasKey = true;
     return built;
   }
@@ -665,6 +721,7 @@ class LlmService {
     _cachedSystemPromptFileWrite = false;
     _cachedSystemPromptMcpEnabled = false;
     _cachedSystemPromptMcpFingerprint = null;
+    _cachedSystemPromptNativeTools = false;
     _cachedSystemPromptHasKey = false;
   }
 
@@ -674,7 +731,7 @@ class LlmService {
   /// Send a chat message to the configured LLM and return the response.
   static Future<LlmResponse> chat({
     required AgentConfig config,
-    required List<Map<String, String>> messages,
+    required List<AgentConversationItem> messages,
   }) async {
     final provider = config.current;
     if (provider == null) {
@@ -710,32 +767,59 @@ class LlmService {
       webSearchEnabled: config.webSearchEnabled,
       fileWriteEnabled: config.fileWriteEnabled,
       mcpEnabled: config.mcpEnabled,
+      nativeToolCalling: provider.id != 'ollama',
     );
+    final toolRegistry = AgentToolRegistry.build(
+      webSearchEnabled: config.webSearchEnabled,
+      fileWriteEnabled: config.fileWriteEnabled,
+      skillsEnabled: SkillService.filterEnabled(
+        config.enabledSkills,
+      ).isNotEmpty,
+      mcpTools: config.mcpEnabled ? McpService.allTools : const [],
+    );
+    final nativeTools = toolRegistry.definitions;
     try {
+      final LlmResponse response;
       switch (provider.id) {
         case 'claude':
-          return _callAnthropic(
+          response = await _callAnthropic(
             provider,
             model,
             apiKey,
             messages,
             systemPrompt,
+            tools: nativeTools,
           );
         case 'gemini':
-          return _callGemini(provider, model, apiKey, messages, systemPrompt);
+          response = await _callGemini(
+            provider,
+            model,
+            apiKey,
+            messages,
+            systemPrompt,
+            tools: nativeTools,
+          );
         case 'ollama':
           return _callOllama(provider, model, messages, systemPrompt);
         default:
           // OpenAI-compatible (OpenAI, DeepSeek, etc.) — prefix caching is
           // automatic on these providers (no `cache_control` to set).
-          return _callOpenAiCompatible(
+          response = await _callOpenAiCompatible(
             provider,
             model,
             apiKey,
             messages,
             systemPrompt,
+            tools: nativeTools,
           );
       }
+      return LlmResponse(
+        text: response.text,
+        error: response.error,
+        toolCalls: response.toolCalls
+            .map(toolRegistry.normalizeToolCall)
+            .toList(growable: false),
+      );
     } catch (e) {
       return LlmResponse(text: '', error: 'Request failed: $e');
     }
@@ -877,11 +961,9 @@ class LlmService {
         'write_file' ||
         'file_write' ||
         'fs.write' => '${call.name}\n${call.path}\n${call.content}',
-        'edit_file' ||
-        'file_edit' ||
-        'fs.edit' =>
+        'edit_file' || 'file_edit' || 'fs.edit' =>
           '${call.name}\n${call.path}\n${call.oldString}\n'
-          '${call.newString}\n${call.replaceAll}',
+              '${call.newString}\n${call.replaceAll}',
         _ => '${call.name}\n${jsonEncode(call.arguments)}',
       };
       if (seen.add(key)) out.add(call);
@@ -963,7 +1045,7 @@ class LlmService {
   /// kind='text' for the final answer.
   static ({Stream<LlmStreamEvent> stream, void Function() cancel}) chatStream({
     required AgentConfig config,
-    required List<Map<String, String>> messages,
+    required List<AgentConversationItem> messages,
   }) {
     final client = HttpClient();
     return (
@@ -974,7 +1056,7 @@ class LlmService {
 
   static Stream<LlmStreamEvent> _chatStreamInternal(
     AgentConfig config,
-    List<Map<String, String>> messages,
+    List<AgentConversationItem> messages,
     HttpClient client,
   ) async* {
     final provider = config.current;
@@ -1001,37 +1083,71 @@ class LlmService {
       webSearchEnabled: config.webSearchEnabled,
       fileWriteEnabled: config.fileWriteEnabled,
       mcpEnabled: config.mcpEnabled,
+      nativeToolCalling: provider.id != 'ollama',
     );
+    final toolRegistry = AgentToolRegistry.build(
+      webSearchEnabled: config.webSearchEnabled,
+      fileWriteEnabled: config.fileWriteEnabled,
+      skillsEnabled: SkillService.filterEnabled(
+        config.enabledSkills,
+      ).isNotEmpty,
+      mcpTools: config.mcpEnabled ? McpService.allTools : const [],
+    );
+    final nativeTools = toolRegistry.definitions;
+    final Stream<LlmStreamEvent> providerStream;
     switch (provider.id) {
       case 'claude':
-        yield* _streamAnthropic(
+        providerStream = _streamAnthropic(
           provider,
           model,
           apiKey,
           messages,
           client,
           systemPrompt,
+          tools: nativeTools,
         );
       case 'gemini':
-        yield* _streamGemini(
+        providerStream = _streamGemini(
           provider,
           model,
           apiKey,
           messages,
           client,
           systemPrompt,
+          tools: nativeTools,
         );
       case 'ollama':
-        yield* _streamOllama(provider, model, messages, client, systemPrompt);
+        providerStream = _streamOllama(
+          provider,
+          model,
+          messages,
+          client,
+          systemPrompt,
+        );
       default:
-        yield* _streamOpenAi(
+        providerStream = _streamOpenAi(
           provider,
           model,
           apiKey,
           messages,
           client,
           systemPrompt,
+          tools: nativeTools,
         );
+    }
+    await for (final event in providerStream) {
+      final toolCall = event.toolCall;
+      if (toolCall == null) {
+        yield event;
+        continue;
+      }
+      yield LlmStreamEvent(
+        event.kind,
+        event.content,
+        toolCall: toolRegistry.normalizeToolCall(toolCall),
+        finishReason: event.finishReason,
+        malformedEventCount: event.malformedEventCount,
+      );
     }
   }
 }
