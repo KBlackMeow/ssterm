@@ -1439,6 +1439,48 @@ Done.
     });
   });
 
+  group('Agent model catalogues', () {
+    test('new configurations expose the current cloud model catalogues', () {
+      expect(ProviderConfig.chatgpt().models, equals([
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ]));
+      expect(ProviderConfig.claude().models, equals([
+        'claude-opus-4-8',
+        'claude-sonnet-4-6',
+      ]));
+      expect(ProviderConfig.gemini().models, equals([
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+      ]));
+      expect(ProviderConfig.deepseek().models, equals([
+        'deepseek-v4-pro',
+        'deepseek-v4-flash',
+      ]));
+    });
+
+    test('reloading a saved configuration promotes defaults and keeps custom models', () {
+      final config = AgentConfig.fromJson({
+        'providers': [
+          {
+            'id': 'chatgpt',
+            'models': ['gpt-5.5', 'my-openai-proxy-model'],
+          },
+        ],
+      });
+      final chatgpt = config.providers.firstWhere((p) => p.id == 'chatgpt');
+      expect(chatgpt.models, equals([
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+        'gpt-5.5',
+        'my-openai-proxy-model',
+      ]));
+    });
+  });
+
   group('Ollama provider registration', () {
     test(
       'LlmProvider.ollama is wired into the enum (id + display + fromId)',

@@ -97,9 +97,9 @@ class ProviderConfig {
         displayName: 'ChatGPT (OpenAI)',
         baseUrl: 'https://api.openai.com/v1',
         models: [
-          'gpt-5.5',
-          'gpt-5.5-pro',
-          'gpt-5.4-mini',
+          'gpt-5.6-sol',
+          'gpt-5.6-terra',
+          'gpt-5.6-luna',
         ],
       );
 
@@ -118,8 +118,9 @@ class ProviderConfig {
         displayName: 'Gemini (Google)',
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         models: [
-          'gemini-3.1-pro-preview',
-          'gemini-3-flash-preview',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash',
+          'gemini-3.5-flash-lite',
         ],
       );
 
