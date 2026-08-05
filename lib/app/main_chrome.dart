@@ -138,7 +138,12 @@ class _TabBarState extends State<_TabBar> with WindowListener {
                     : null,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    if (widget.tabs.isEmpty) return const SizedBox();
+                    if (widget.tabs.isEmpty) {
+                      return SizedBox(
+                        width: constraints.maxWidth,
+                        height: 28,
+                      );
+                    }
 
                     const tabGap = 4.0;
                     final slotWidth =
