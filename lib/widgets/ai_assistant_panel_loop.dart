@@ -205,10 +205,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // user's goal + the first AI reply) so the agent never forgets WHAT
       // it was asked to do. Native tool calls and results form one atomic
       // transcript group, so trimming must not split them.
-      _conversationHistory.trimToMaxItems(
-        maxItems: _maxHistoryTurns * 2,
-        pinnedItemCount: _kPinnedHeadMessages,
-      );
+      await _compactHistoryIfNeeded(gen, config);
+      if (gen != _generation) break;
 
       // --- AI call ---
       // Structured one-line logs, greppable; see `_logAgent` /
@@ -871,5 +869,46 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     // Lock release lives in _continueAgentLoop's finally — DON'T duplicate
     // it here, otherwise an early `return` from the inner loop would skip
     // it and the outer wrapper's finally would still need to fire anyway.
+  }
+
+  Future<void> _compactHistoryIfNeeded(int gen, AgentConfig config) async {
+    final maxItems = _maxHistoryTurns * 2;
+    if (!_conversationHistory.needsCompaction(maxItems: maxItems)) return;
+    final candidate = _conversationHistory.compactionCandidate(
+      pinnedItemCount: _kPinnedHeadMessages,
+      recentItemCount: _recentHistoryItems,
+    );
+    if (candidate.isEmpty) {
+      _conversationHistory.trimToMaxItems(
+        maxItems: maxItems,
+        pinnedItemCount: _kPinnedHeadMessages,
+      );
+      return;
+    }
+    if (mounted) setState(() => _agentLoopStatus = 'Compressing context…');
+    final summary = await LlmService.compactConversation(
+      config: config,
+      prompt: ConversationCompactor.buildPrompt(
+        existingSummary: _conversationHistory.summaryContent ?? '',
+        items: candidate,
+      ),
+    );
+    if (mounted && gen == _generation) {
+      setState(() => _agentLoopStatus = null);
+    }
+    if (gen == _generation && summary != null) {
+      _conversationHistory.replaceWithSummary(
+        summary: summary,
+        pinnedItemCount: _kPinnedHeadMessages,
+        recentItemCount: _recentHistoryItems,
+      );
+      _logAgent('context_compaction result=summary');
+    } else if (gen == _generation) {
+      _conversationHistory.trimToMaxItems(
+        maxItems: maxItems,
+        pinnedItemCount: _kPinnedHeadMessages,
+      );
+      _logAgent('context_compaction result=fallback_trim');
+    }
   }
 }

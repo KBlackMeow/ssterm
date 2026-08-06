@@ -12,6 +12,7 @@ import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/command_safety.dart';
+import '../services/conversation_compactor.dart';
 import '../services/llm_service.dart';
 import '../services/agent_tool_contract.dart';
 import '../services/file_write_service.dart';
@@ -69,6 +70,7 @@ const _kAiPanelMargin = 8.0;
 
 /// Max conversation turns / loop iterations before we summarise old ones.
 const _maxHistoryTurns = 10;
+const _recentHistoryItems = 8;
 const _maxLoopIterations = 15;
 
 /// Number of head messages kept across truncation — typically the user's

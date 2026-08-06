@@ -1,6 +1,8 @@
 import 'dart:collection';
 import 'dart:convert';
 
+import 'conversation_compactor.dart';
+
 /// Provider-neutral description of one parameter accepted by an agent tool.
 class AgentToolParameter {
   final String type;
@@ -282,5 +284,68 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
       start = groupStart;
     }
     if (start > pinned) _items.removeRange(pinned, start);
+  }
+
+  String? get summaryContent {
+    for (final item in _items) {
+      final summary = ConversationCompactor.unwrap(item.content);
+      if (summary != null) return summary;
+    }
+    return null;
+  }
+
+  bool needsCompaction({required int maxItems}) => _items.length > maxItems;
+
+  List<AgentConversationItem> compactionCandidate({
+    required int pinnedItemCount,
+    required int recentItemCount,
+  }) {
+    final pinned = pinnedItemCount.clamp(0, _items.length);
+    final start = _summaryIndexAfter(pinned);
+    var end = _items.length;
+    var kept = 0;
+    while (end > start && kept < recentItemCount) {
+      var groupStart = end - 1;
+      var groupSize = 1;
+      if (_items[groupStart].toolResults.isNotEmpty &&
+          groupStart > start &&
+          _items[groupStart - 1].toolCalls.isNotEmpty) {
+        groupStart--;
+        groupSize = 2;
+      }
+      if (kept + groupSize > recentItemCount) break;
+      kept += groupSize;
+      end = groupStart;
+    }
+    return List.unmodifiable(_items.sublist(start, end));
+  }
+
+  bool replaceWithSummary({
+    required String summary,
+    required int pinnedItemCount,
+    required int recentItemCount,
+  }) {
+    final candidate = compactionCandidate(
+      pinnedItemCount: pinnedItemCount,
+      recentItemCount: recentItemCount,
+    );
+    if (candidate.isEmpty) return false;
+    final start = _summaryIndexAfter(pinnedItemCount.clamp(0, _items.length));
+    final end = start + candidate.length;
+    _items.replaceRange(start, end, [
+      AgentConversationItem.text(
+        role: 'user',
+        content: ConversationCompactor.wrap(summary),
+      ),
+    ]);
+    return true;
+  }
+
+  int _summaryIndexAfter(int pinned) {
+    if (pinned < _items.length &&
+        ConversationCompactor.unwrap(_items[pinned].content) != null) {
+      return pinned + 1;
+    }
+    return pinned;
   }
 }
