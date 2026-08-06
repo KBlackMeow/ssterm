@@ -16,7 +16,12 @@ class McpService {
   McpService._();
 
   static final Map<String, _ServerEntry> _servers = {};
+  static final Map<String, Timer> _healthTimers = {};
+  static final Map<String, Timer> _reconnectTimers = {};
+  static final Map<String, int> _retryAttempts = {};
   static bool _initialized = false;
+
+  static const _healthCheckInterval = Duration(seconds: 30);
 
   /// Called whenever the set of available MCP tools changes (server
   /// connected, disconnected, or tools refreshed).  The host wires this
@@ -37,58 +42,57 @@ class McpService {
       if (!config.enabled) continue;
       // Fire-and-forget per server so one slow connection doesn't
       // block the others or the app startup.
-      unawaited(connect(config).catchError((_) {
-        // Errors are already reported through _setError + the events
-        // stream; nothing more to do here.
-      }));
+      unawaited(
+        connect(config).catchError((_) {
+          // Errors are already reported through _setError + the events
+          // stream; nothing more to do here.
+        }),
+      );
     }
   }
 
   /// Connect (or reconnect) a single server.  If an existing connection
   /// with the same [config.id] is already running it is disconnected first.
-  static Future<void> connect(McpServerConfig config) async {
-    await disconnect(config.id);
+  static Future<void> connect(
+    McpServerConfig config, {
+    bool isRetry = false,
+  }) async {
+    await _removeServer(config.id, clearRetryState: !isRetry);
 
     final entry = _ServerEntry(config);
     _servers[config.id] = entry;
 
     try {
-      await entry
-          .connect()
-          .timeout(Duration(seconds: config.connectionTimeoutSeconds));
+      await entry.connect().timeout(
+        Duration(seconds: config.connectionTimeoutSeconds),
+      );
     } catch (e) {
-      entry._setError('Connection failed: $e');
-      _emit(McpServiceEvent(
-        kind: McpServiceEventKind.error,
-        serverId: config.id,
-        message: '$e',
-      ));
+      await _handleFailure(entry, 'Connection failed: $e');
       return;
     }
 
     // Discover tools.
     try {
-      await entry
-          .refreshTools()
-          .timeout(Duration(seconds: config.connectionTimeoutSeconds));
+      await entry.refreshTools().timeout(
+        Duration(seconds: config.connectionTimeoutSeconds),
+      );
     } catch (e) {
-      entry._setError('Tool discovery failed: $e');
-      _emit(McpServiceEvent(
-        kind: McpServiceEventKind.error,
-        serverId: config.id,
-        message: 'Tool discovery: $e',
-      ));
+      await _handleFailure(entry, 'Tool discovery failed: $e');
       return;
     }
 
-    _emit(McpServiceEvent(
-      kind: McpServiceEventKind.connected,
-      serverId: config.id,
-    ));
-    _emit(McpServiceEvent(
-      kind: McpServiceEventKind.toolsChanged,
-      serverId: config.id,
-    ));
+    entry._setOnline();
+    _retryAttempts.remove(config.id);
+    _startHealthChecks(config);
+    _emit(
+      McpServiceEvent(kind: McpServiceEventKind.connected, serverId: config.id),
+    );
+    _emit(
+      McpServiceEvent(
+        kind: McpServiceEventKind.toolsChanged,
+        serverId: config.id,
+      ),
+    );
     // ignore: avoid_print
     print('[mcp] ${config.id} connected, ${entry.tools.length} tools');
     onToolsChanged?.call();
@@ -96,13 +100,22 @@ class McpService {
 
   /// Disconnect and remove a single server.
   static Future<void> disconnect(String id) async {
+    await _removeServer(id, clearRetryState: true);
+  }
+
+  static Future<void> _removeServer(
+    String id, {
+    required bool clearRetryState,
+  }) async {
+    _healthTimers.remove(id)?.cancel();
+    _reconnectTimers.remove(id)?.cancel();
+    if (clearRetryState) _retryAttempts.remove(id);
     final entry = _servers.remove(id);
     if (entry == null) return;
     await entry._dispose();
-    _emit(McpServiceEvent(
-      kind: McpServiceEventKind.disconnected,
-      serverId: id,
-    ));
+    _emit(
+      McpServiceEvent(kind: McpServiceEventKind.disconnected, serverId: id),
+    );
     // ignore: avoid_print
     print('[mcp] disconnected $id');
     onToolsChanged?.call();
@@ -119,18 +132,15 @@ class McpService {
 
   /// Re-discover tools for all connected servers.
   static Future<void> refreshAllTools() async {
-    for (final entry in _servers.values) {
-      if (!entry.isConnected) continue;
-      try {
-        await entry.refreshTools();
-      } catch (_) {
-        // Individual refresh failures are surfaced per-server; keep going.
-      }
+    for (final id in _servers.keys.toList()) {
+      await checkServer(id);
     }
-    _emit(const McpServiceEvent(
-      kind: McpServiceEventKind.toolsChanged,
-      serverId: '*',
-    ));
+    _emit(
+      const McpServiceEvent(
+        kind: McpServiceEventKind.toolsChanged,
+        serverId: '*',
+      ),
+    );
   }
 
   /// All tools from all connected servers, flattened.
@@ -155,6 +165,45 @@ class McpService {
   static bool isConnected(String serverId) {
     final entry = _servers[serverId];
     return entry?.isConnected ?? false;
+  }
+
+  /// Whether a server is currently performing an explicit health check.
+  static bool isChecking(String serverId) =>
+      _servers[serverId]?._checking ?? false;
+
+  /// Re-check a configured server immediately. Connected servers receive a
+  /// harmless `tools/list` request; offline servers attempt a fresh handshake.
+  static Future<void> checkServer(String serverId) async {
+    final entry = _servers[serverId];
+    if (entry == null) return;
+    if (!entry.isConnected) {
+      await connect(entry.config);
+      return;
+    }
+    entry._setChecking();
+    _emit(
+      McpServiceEvent(kind: McpServiceEventKind.checking, serverId: serverId),
+    );
+    try {
+      await entry.refreshTools().timeout(
+        Duration(seconds: entry.config.connectionTimeoutSeconds),
+      );
+      entry._setOnline();
+      _emit(
+        McpServiceEvent(
+          kind: McpServiceEventKind.connected,
+          serverId: serverId,
+        ),
+      );
+      _emit(
+        McpServiceEvent(
+          kind: McpServiceEventKind.toolsChanged,
+          serverId: serverId,
+        ),
+      );
+    } catch (e) {
+      await _handleFailure(entry, 'Health check failed: $e');
+    }
   }
 
   /// Number of tools discovered from a given server, or 0.
@@ -209,14 +258,14 @@ class McpService {
 
     try {
       final result = await client
-          .callTool(CallToolRequest(
-            name: toolName,
-            arguments: _safeArgs(arguments),
-          ))
+          .callTool(
+            CallToolRequest(name: toolName, arguments: _safeArgs(arguments)),
+          )
           .timeout(Duration(seconds: entry.config.toolCallTimeoutSeconds));
 
       return _convertResult(serverId, toolName, result);
     } on TimeoutException {
+      unawaited(_handleFailure(entry, 'Tool call timed out.'));
       return McpToolResult.clientError(
         serverId: serverId,
         toolName: toolName,
@@ -224,12 +273,14 @@ class McpService {
             'MCP tool call timed out after ${entry.config.toolCallTimeoutSeconds}s.',
       );
     } on McpError catch (e) {
+      unawaited(_handleFailure(entry, 'MCP error (${e.code}): ${e.message}'));
       return McpToolResult.clientError(
         serverId: serverId,
         toolName: toolName,
         message: 'MCP error (${e.code}): ${e.message}',
       );
     } catch (e) {
+      unawaited(_handleFailure(entry, 'Tool call failed: $e'));
       return McpToolResult.clientError(
         serverId: serverId,
         toolName: toolName,
@@ -247,6 +298,50 @@ class McpService {
     if (!_eventController.isClosed) {
       _eventController.add(event);
     }
+  }
+
+  static void _startHealthChecks(McpServerConfig config) {
+    _healthTimers.remove(config.id)?.cancel();
+    _healthTimers[config.id] = Timer.periodic(_healthCheckInterval, (_) {
+      unawaited(checkServer(config.id));
+    });
+  }
+
+  static Future<void> _handleFailure(_ServerEntry entry, String message) async {
+    if (_servers[entry.config.id] != entry) return;
+    entry._setError(message);
+    await entry._closeClient();
+    _healthTimers.remove(entry.config.id)?.cancel();
+    _emit(
+      McpServiceEvent(
+        kind: McpServiceEventKind.error,
+        serverId: entry.config.id,
+        message: message,
+      ),
+    );
+    _emit(
+      McpServiceEvent(
+        kind: McpServiceEventKind.disconnected,
+        serverId: entry.config.id,
+      ),
+    );
+    onToolsChanged?.call();
+    _scheduleReconnect(entry.config);
+  }
+
+  static void _scheduleReconnect(McpServerConfig config) {
+    if (!config.enabled || _reconnectTimers.containsKey(config.id)) return;
+    final failureIndex = _retryAttempts[config.id] ?? 0;
+    _retryAttempts[config.id] = failureIndex + 1;
+    _reconnectTimers[config.id] = Timer(
+      McpReconnectBackoff.delayForFailure(failureIndex),
+      () {
+        _reconnectTimers.remove(config.id);
+        final entry = _servers[config.id];
+        if (entry == null || !entry.config.enabled) return;
+        unawaited(connect(entry.config, isRetry: true));
+      },
+    );
   }
 
   // ── Internal helpers ────────────────────────────────────────────────
@@ -274,22 +369,12 @@ class McpService {
       case TextContent(:final text):
         return McpContentBlock(type: 'text', text: text);
       case ImageContent(:final data, :final mimeType):
-        return McpContentBlock(
-          type: 'image',
-          data: data,
-          mimeType: mimeType,
-        );
+        return McpContentBlock(type: 'image', data: data, mimeType: mimeType);
       case AudioContent(:final data, :final mimeType):
-        return McpContentBlock(
-          type: 'audio',
-          data: data,
-          mimeType: mimeType,
-        );
+        return McpContentBlock(type: 'audio', data: data, mimeType: mimeType);
       case EmbeddedResource(:final resource):
-        final text =
-            resource is TextResourceContents ? resource.text : null;
-        final blob =
-            resource is BlobResourceContents ? resource.blob : null;
+        final text = resource is TextResourceContents ? resource.text : null;
+        final blob = resource is BlobResourceContents ? resource.blob : null;
         return McpContentBlock(
           type: 'resource',
           uri: resource.uri,
@@ -331,6 +416,7 @@ class _ServerEntry {
   McpClient? _client;
   List<McpTool> _tools = [];
   String? _lastError;
+  bool _checking = false;
   bool _disposed = false;
 
   _ServerEntry(this.config);
@@ -351,11 +437,7 @@ class _ServerEntry {
     _lastError = null;
 
     final client = McpClient(
-      Implementation(
-        name: 'ssterm',
-        title: 'SSTerm',
-        version: '1.7.1',
-      ),
+      Implementation(name: 'ssterm', title: 'SSTerm', version: '1.7.1'),
       options: const McpClientOptions(
         // Use stable mode: prefer latest spec version with legacy fallback.
         protocol: McpProtocol.stable,
@@ -372,8 +454,7 @@ class _ServerEntry {
           StdioServerParameters(
             command: config.command!,
             args: config.args,
-            environment:
-                config.env?.map((k, v) => MapEntry(k, v)),
+            environment: config.env?.map((k, v) => MapEntry(k, v)),
           ),
         );
         break;
@@ -414,12 +495,19 @@ class _ServerEntry {
     }).toList();
   }
 
-  void _setError(String message) {
-    _lastError = message;
+  void _setChecking() => _checking = true;
+
+  void _setOnline() {
+    _lastError = null;
+    _checking = false;
   }
 
-  Future<void> _dispose() async {
-    _disposed = true;
+  void _setError(String message) {
+    _lastError = message;
+    _checking = false;
+  }
+
+  Future<void> _closeClient() async {
     try {
       await _client?.close();
     } catch (_) {
@@ -427,5 +515,20 @@ class _ServerEntry {
     }
     _client = null;
     _tools = [];
+  }
+
+  Future<void> _dispose() async {
+    _disposed = true;
+    await _closeClient();
+  }
+}
+
+/// Backoff for failed MCP reconnections: 2, 4, 8, 16, then 30 seconds.
+class McpReconnectBackoff {
+  const McpReconnectBackoff._();
+
+  static Duration delayForFailure(int failureIndex) {
+    final seconds = 2 << failureIndex.clamp(0, 4).toInt();
+    return Duration(seconds: seconds > 30 ? 30 : seconds);
   }
 }

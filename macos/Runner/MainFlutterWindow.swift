@@ -51,15 +51,6 @@ class MainFlutterWindow: NSWindow {
     NSApp.activate(ignoringOtherApps: true)
   }
 
-  override func sendEvent(_ event: NSEvent) {
-    #if DEBUG
-    if event.type == .leftMouseDown || event.type == .leftMouseUp {
-      logMouseEvent(event)
-    }
-    #endif
-    super.sendEvent(event)
-  }
-
   // MARK: - Swizzle mouseDownCanMoveWindow
 
   private func swizzleMouseDownCanMoveWindow() {
@@ -190,53 +181,6 @@ class MainFlutterWindow: NSWindow {
     return [p.x, h - p.y]
   }
 
-  #if DEBUG
-  private func logMouseEvent(_ event: NSEvent) {
-    let point = event.locationInWindow
-    let titleBarHeight = frame.height - contentRect(forFrameRect: frame).height
-    let yFromTop = frame.height - point.y
-    let inTitleBarBand = yFromTop <= titleBarHeight + 6
-
-    let contentHit = contentView.flatMap {
-      $0.hitTest($0.convert(point, from: nil))
-    }
-
-    let closeButton = standardWindowButton(.closeButton)
-    let buttonContainer = closeButton?.superview
-    let titleBarView = buttonContainer?.superview
-    let titleBarContainer = titleBarView?.superview
-
-    let titleBarHit = titleBarView.flatMap { view -> NSView? in
-      let local = view.convert(point, from: nil)
-      return view.bounds.contains(local) ? view.hitTest(local) : nil
-    }
-
-    let titleBarContainerHit = titleBarContainer.flatMap { view -> NSView? in
-      let local = view.convert(point, from: nil)
-      return view.bounds.contains(local) ? view.hitTest(local) : nil
-    }
-
-    Swift.print(
-      """
-      [ssterm][macos] \(event.type == .leftMouseDown ? "down" : "up") \
-      ts=\(String(format: "%.4f", event.timestamp)) \
-      clickCount=\(event.clickCount) \
-      point=(\(Int(point.x)),\(Int(point.y))) \
-      yFromTop=\(String(format: "%.1f", yFromTop)) \
-      titleBarHeight=\(String(format: "%.1f", titleBarHeight)) \
-      inTitleBarBand=\(inTitleBarBand) \
-      contentHit=\(debugViewName(contentHit)) \
-      titleBarHit=\(debugViewName(titleBarHit)) \
-      titleBarContainerHit=\(debugViewName(titleBarContainerHit))
-      """
-    )
-  }
-
-  private func debugViewName(_ view: NSView?) -> String {
-    guard let view else { return "nil" }
-    return "\(NSStringFromClass(type(of: view)))#\(Unmanaged.passUnretained(view).toOpaque())"
-  }
-  #endif
 }
 
 // MARK: - NSView swizzled getter

@@ -144,38 +144,39 @@ class _ConsoleRailItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? _consoleForeground : _consoleMuted;
-    return Tooltip(
-      message: destination.label,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 40,
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: selected ? _consoleSignal.withValues(alpha: .12) : null,
-            borderRadius: BorderRadius.circular(6),
-            border: Border(
-              left: BorderSide(
-                color: selected ? _consoleSignal : Colors.transparent,
-                width: 2,
-              ),
+    return InkWell(
+      onTap: onTap,
+      hoverColor: Colors.transparent,
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      focusColor: Colors.transparent,
+      child: Container(
+        height: 40,
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: selected ? _consoleSignal.withValues(alpha: .12) : null,
+          borderRadius: BorderRadius.circular(6),
+          border: Border(
+            left: BorderSide(
+              color: selected ? _consoleSignal : Colors.transparent,
+              width: 2,
             ),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            children: [
-              Icon(destination.icon, size: 17, color: color),
-              const SizedBox(width: 10),
-              Text(
-                destination.label,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Row(
+          children: [
+            Icon(destination.icon, size: 17, color: color),
+            const SizedBox(width: 10),
+            Text(
+              destination.label,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

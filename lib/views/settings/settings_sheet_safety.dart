@@ -26,8 +26,7 @@ part of 'settings_sheet.dart';
 // ───────────────────────────────────────────────────────────────────────────
 
 extension _SafetySettingsExt on _SettingsPageState {
-  DangerousCommandsPolicy get _dangerPolicy =>
-      _agentConfig.dangerousPolicy;
+  DangerousCommandsPolicy get _dangerPolicy => _agentConfig.dangerousPolicy;
 
   /// Mutate-then-apply helper.  Settings UIs are almost always small
   /// deltas on top of the existing policy, and DangerousCommandsPolicy is
@@ -121,8 +120,7 @@ extension _SafetySettingsExt on _SettingsPageState {
         border: Border.all(color: _kDivider),
       ),
       child: SwitchListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         dense: true,
         title: const Text(
           'Require confirmation for agent commands',
@@ -136,8 +134,7 @@ extension _SafetySettingsExt on _SettingsPageState {
         ),
         value: _dangerPolicy.agentConfirmEnabled,
         activeThumbColor: _kAccent,
-        onChanged: (v) =>
-            _updatePolicy((p) => p.agentConfirmEnabled = v),
+        onChanged: (v) => _updatePolicy((p) => p.agentConfirmEnabled = v),
       ),
     );
   }
@@ -153,8 +150,7 @@ extension _SafetySettingsExt on _SettingsPageState {
       child: Column(
         children: [
           for (var i = 0; i < rules.length; i++) ...[
-            if (i != 0)
-              const Divider(height: 1, color: _kDivider),
+            if (i != 0) const Divider(height: 1, color: _kDivider),
             _builtinRuleTile(rules[i].id, rules[i].label),
           ],
         ],
@@ -165,13 +161,9 @@ extension _SafetySettingsExt on _SettingsPageState {
   Widget _builtinRuleTile(String id, String label) {
     final disabled = _dangerPolicy.disabledBuiltins.contains(id);
     return SwitchListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       dense: true,
-      title: Text(
-        label,
-        style: const TextStyle(color: _kFg, fontSize: 13),
-      ),
+      title: Text(label, style: const TextStyle(color: _kFg, fontSize: 13)),
       subtitle: Text(
         id,
         style: const TextStyle(
@@ -226,8 +218,7 @@ extension _SafetySettingsExt on _SettingsPageState {
     // the rule itself remains in the list — a malformed regex is just
     // silently skipped by [CommandSafety.danger], which means the only
     // visible consequence here is the helper text.
-    final isValid =
-        CommandSafety.isValidDangerRegex(patternCtrl.text);
+    final isValid = CommandSafety.isValidDangerRegex(patternCtrl.text);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 8, 10),
@@ -265,10 +256,8 @@ extension _SafetySettingsExt on _SettingsPageState {
                   size: 18,
                   color: _kFgMuted,
                 ),
-                tooltip: 'Delete rule',
                 onPressed: () => _deleteCustomDangerRule(pattern),
-                constraints:
-                    const BoxConstraints(minWidth: 32, minHeight: 32),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 padding: const EdgeInsets.all(6),
               ),
             ],
@@ -295,12 +284,10 @@ extension _SafetySettingsExt on _SettingsPageState {
             child: Text(
               isValid
                   ? 'Case-insensitive Dart RegExp. Matched against each '
-                      'line of the command.'
+                        'line of the command.'
                   : 'Invalid regex — rule will be ignored until fixed.',
               style: TextStyle(
-                color: isValid
-                    ? _kFgMuted
-                    : const Color(0xFFFF6E67),
+                color: isValid ? _kFgMuted : const Color(0xFFFF6E67),
                 fontSize: 11,
                 height: 1.3,
               ),
@@ -383,8 +370,7 @@ extension _SafetySettingsExt on _SettingsPageState {
     if (ok != true) return;
     _disposeDangerCtrls(p.id);
     _updatePolicy(
-      (policy) =>
-          policy.customPatterns.removeWhere((c) => c.id == p.id),
+      (policy) => policy.customPatterns.removeWhere((c) => c.id == p.id),
     );
   }
 }

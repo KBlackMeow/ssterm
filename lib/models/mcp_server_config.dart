@@ -76,18 +76,18 @@ class McpServerConfig {
   // ── Serialisation ──────────────────────────────────────────────────
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'enabled': enabled,
-        'transport': transport.name,
-        if (command != null) 'command': command,
-        if (args.isNotEmpty) 'args': args,
-        if (env?.isNotEmpty == true) 'env': env,
-        if (url != null) 'url': url,
-        if (headers?.isNotEmpty == true) 'headers': headers,
-        'connectionTimeoutSeconds': connectionTimeoutSeconds,
-        'toolCallTimeoutSeconds': toolCallTimeoutSeconds,
-      };
+    'id': id,
+    'displayName': displayName,
+    'enabled': enabled,
+    'transport': transport.name,
+    if (command != null) 'command': command,
+    if (args.isNotEmpty) 'args': args,
+    if (env?.isNotEmpty == true) 'env': env,
+    if (url != null) 'url': url,
+    if (headers?.isNotEmpty == true) 'headers': headers,
+    'connectionTimeoutSeconds': connectionTimeoutSeconds,
+    'toolCallTimeoutSeconds': toolCallTimeoutSeconds,
+  };
 
   /// Returns null for malformed entries so the caller can skip them
   /// rather than abort the whole config load.
@@ -118,7 +118,7 @@ class McpServerConfig {
       env = <String, String>{};
       for (final e in rawEnv.entries) {
         if (e.key is String && e.value is String) {
-          env![e.key as String] = e.value as String;
+          env[e.key as String] = e.value as String;
         }
       }
       if (env.isEmpty) env = null;
@@ -130,7 +130,7 @@ class McpServerConfig {
       headers = <String, String>{};
       for (final e in rawHeaders.entries) {
         if (e.key is String && e.value is String) {
-          headers![e.key as String] = e.value as String;
+          headers[e.key as String] = e.value as String;
         }
       }
       if (headers.isEmpty) headers = null;
@@ -146,10 +146,8 @@ class McpServerConfig {
       env: env,
       url: json['url'] as String?,
       headers: headers,
-      connectionTimeoutSeconds:
-          json['connectionTimeoutSeconds'] as int? ?? 30,
-      toolCallTimeoutSeconds:
-          json['toolCallTimeoutSeconds'] as int? ?? 60,
+      connectionTimeoutSeconds: json['connectionTimeoutSeconds'] as int? ?? 30,
+      toolCallTimeoutSeconds: json['toolCallTimeoutSeconds'] as int? ?? 60,
     );
   }
 
@@ -170,23 +168,21 @@ class McpServerConfig {
     Map<String, String>? headers,
     int? connectionTimeoutSeconds,
     int? toolCallTimeoutSeconds,
-  }) =>
-      McpServerConfig(
-        id: id,
-        displayName: displayName ?? this.displayName,
-        enabled: enabled ?? this.enabled,
-        transport: transport ?? this.transport,
-        command: command ?? this.command,
-        args: args ?? List.of(this.args),
-        env: env ?? (this.env != null ? Map.of(this.env!) : null),
-        url: url ?? this.url,
-        headers:
-            headers ?? (this.headers != null ? Map.of(this.headers!) : null),
-        connectionTimeoutSeconds:
-            connectionTimeoutSeconds ?? this.connectionTimeoutSeconds,
-        toolCallTimeoutSeconds:
-            toolCallTimeoutSeconds ?? this.toolCallTimeoutSeconds,
-      );
+  }) => McpServerConfig(
+    id: id,
+    displayName: displayName ?? this.displayName,
+    enabled: enabled ?? this.enabled,
+    transport: transport ?? this.transport,
+    command: command ?? this.command,
+    args: args ?? List.of(this.args),
+    env: env ?? (this.env != null ? Map.of(this.env!) : null),
+    url: url ?? this.url,
+    headers: headers ?? (this.headers != null ? Map.of(this.headers!) : null),
+    connectionTimeoutSeconds:
+        connectionTimeoutSeconds ?? this.connectionTimeoutSeconds,
+    toolCallTimeoutSeconds:
+        toolCallTimeoutSeconds ?? this.toolCallTimeoutSeconds,
+  );
 }
 
 /// A tool discovered from an MCP server.
@@ -242,13 +238,12 @@ class McpToolResult {
     required String toolName,
     required String text,
     bool isError = false,
-  }) =>
-      McpToolResult(
-        serverId: serverId,
-        toolName: toolName,
-        content: [McpContentBlock.text(text)],
-        isError: isError,
-      );
+  }) => McpToolResult(
+    serverId: serverId,
+    toolName: toolName,
+    content: [McpContentBlock.text(text)],
+    isError: isError,
+  );
 
   /// Convenience constructor for an error result from the client side
   /// (connection lost, timeout, JSON-RPC protocol error).
@@ -256,13 +251,12 @@ class McpToolResult {
     required String serverId,
     required String toolName,
     required String message,
-  }) =>
-      McpToolResult(
-        serverId: serverId,
-        toolName: toolName,
-        content: [McpContentBlock.text(message)],
-        isError: true,
-      );
+  }) => McpToolResult(
+    serverId: serverId,
+    toolName: toolName,
+    content: [McpContentBlock.text(message)],
+    isError: true,
+  );
 
   /// Concatenated text from all `text`-type content blocks.
   String get textContent => content
@@ -306,6 +300,7 @@ class McpContentBlock {
 
 /// Event emitted by [McpService] to notify listeners of server state changes.
 enum McpServiceEventKind {
+  checking,
   connected,
   disconnected,
   toolsChanged,

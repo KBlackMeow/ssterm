@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:xterm/xterm.dart';
@@ -7,6 +8,8 @@ import 'package:xterm/xterm.dart';
 import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
 import '../../services/api_key_storage.dart';
 import '../../services/command_safety.dart';
+import '../../services/file_picker_service.dart';
+import '../../services/llm_service.dart';
 import '../../widgets/frosted_glass.dart';
 import '../../models/agent_config.dart';
 import '../../models/command.dart';
@@ -19,6 +22,7 @@ import '../../models/terminal_theme_presets.dart';
 import '../../services/image_file_picker.dart';
 import '../../services/mcp_service.dart';
 import '../../services/skill_service.dart';
+import '../../services/skill_archive_importer.dart';
 import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
 import '../../widgets/wallpaper_background.dart';
@@ -67,6 +71,9 @@ class _SettingsPageState extends State<SettingsPage>
   late TabController _tabController;
   PackageInfo? _packageInfo;
   List<Command> _commands = const [];
+  bool _skillImporting = false;
+  bool _skillDragOver = false;
+  StreamSubscription<McpServiceEvent>? _mcpStatusSubscription;
 
   final _apiKeyControllers = <String, TextEditingController>{};
   final _apiKeyVisible = <String, bool>{};
@@ -102,6 +109,9 @@ class _SettingsPageState extends State<SettingsPage>
     _loadPackageInfo();
     _loadCommands();
     _initAgentControllers();
+    _mcpStatusSubscription = McpService.events.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _initAgentControllers() {
@@ -149,6 +159,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
+    _mcpStatusSubscription?.cancel();
     _tabController.dispose();
     for (final c in _apiKeyControllers.values) {
       c.dispose();
@@ -559,7 +570,6 @@ class _SettingsPageState extends State<SettingsPage>
             IconButton(
               icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
               onPressed: () => _editHost(host),
-              tooltip: 'Edit',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               padding: const EdgeInsets.all(6),
             ),
@@ -570,7 +580,6 @@ class _SettingsPageState extends State<SettingsPage>
                 color: _kFgMuted,
               ),
               onPressed: () => _confirmDeleteHost(host),
-              tooltip: 'Delete',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               padding: const EdgeInsets.all(6),
             ),

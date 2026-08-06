@@ -24,7 +24,10 @@ extension _CommandsSettingsExt on _SettingsPageState {
             TextButton.icon(
               onPressed: _addCommand,
               icon: const Icon(Icons.add, size: 14, color: _kAccent),
-              label: const Text('Add', style: TextStyle(color: _kAccent, fontSize: 12)),
+              label: const Text(
+                'Add',
+                style: TextStyle(color: _kAccent, fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -39,8 +42,7 @@ extension _CommandsSettingsExt on _SettingsPageState {
             ),
           )
         else
-          for (var i = 0; i < _commands.length; i++)
-            _buildCommandTile(i),
+          for (var i = 0; i < _commands.length; i++) _buildCommandTile(i),
       ],
     );
   }
@@ -67,25 +69,6 @@ extension _CommandsSettingsExt on _SettingsPageState {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (cmd.builtIn) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: _kAccent.withAlpha(40),
-                  borderRadius: BorderRadius.circular(3),
-                  border: Border.all(color: _kAccent.withAlpha(100)),
-                ),
-                child: const Text(
-                  'Official',
-                  style: TextStyle(
-                    color: _kAccent,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
         subtitle: Text(
@@ -98,27 +81,27 @@ extension _CommandsSettingsExt on _SettingsPageState {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: cmd.builtIn
-            ? const SizedBox(width: 8)
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
-                    onPressed: () => _editCommand(index),
-                    tooltip: 'Edit',
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    padding: const EdgeInsets.all(6),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 15, color: _kFgMuted),
-                    onPressed: () => _confirmDeleteCommand(index),
-                    tooltip: 'Delete',
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    padding: const EdgeInsets.all(6),
-                  ),
-                ],
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
+              onPressed: () => _editCommand(index),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 15,
+                color: _kFgMuted,
               ),
+              onPressed: () => _confirmDeleteCommand(index),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -154,24 +137,37 @@ extension _CommandsSettingsExt on _SettingsPageState {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Delete Command',
-                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Text(
+                    'Delete Command',
+                    style: TextStyle(
+                      color: _kFg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 10),
-                  Text('Delete "${cmd.name}"?',
-                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  Text(
+                    'Delete "${cmd.name}"?',
+                    style: const TextStyle(color: _kFgMuted, fontSize: 13),
+                  ),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: _kFgMuted),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Delete',
-                            style: TextStyle(color: Color(0xFFFF6E67))),
+                        child: const Text(
+                          'Delete',
+                          style: TextStyle(color: Color(0xFFFF6E67)),
+                        ),
                       ),
                     ],
                   ),

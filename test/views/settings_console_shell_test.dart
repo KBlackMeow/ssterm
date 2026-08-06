@@ -46,6 +46,19 @@ void main() {
     expect(find.text('Agent content'), findsOneWidget);
   });
 
+  testWidgets('desktop rail suppresses hover and tap highlights', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(const _Harness(width: 1100));
+
+    final item = tester.widget<InkWell>(find.byType(InkWell).first);
+    expect(item.hoverColor, Colors.transparent);
+    expect(item.splashColor, Colors.transparent);
+    expect(item.highlightColor, Colors.transparent);
+  });
+
   testWidgets('narrow shell keeps the tab strip', (tester) async {
     await tester.pumpWidget(const _Harness(width: 700));
 
@@ -86,6 +99,26 @@ void main() {
 
     expect(find.text('Skills'), findsOneWidget);
     expect(find.text('MCP'), findsOneWidget);
+  });
+
+  testWidgets('skills destination offers ZIP import', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(),
+          onChanged: (_) {},
+          agent: AgentConfig(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Skills'));
+    await tester.pump();
+
+    expect(find.byKey(const Key('settings-import-skill')), findsOneWidget);
+    expect(find.text('Import ZIP'), findsOneWidget);
   });
 
   testWidgets('appearance starts with a compact terminal preview panel', (

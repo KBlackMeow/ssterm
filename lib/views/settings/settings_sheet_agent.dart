@@ -66,89 +66,164 @@ extension _AgentSettingsExt on _SettingsPageState {
   // skills auto-show up without an extra click.
   Widget _buildSkillsSection() {
     final skills = SkillService.skills;
-    if (skills.isEmpty) {
-      return _consoleSurface(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(
-            'No skills installed.  Drop a SKILL.md into '
-            '${SkillService.userSkillsDirPath}/<id>/ and restart ssterm '
-            'to add one.',
-            style: const TextStyle(color: _kFgMuted, fontSize: 12, height: 1.4),
-          ),
-        ),
-      );
-    }
-
     final whitelist = _agentConfig.enabledSkills;
     final allIds = skills.map((s) => s.id).toSet();
     bool isEnabled(String id) => whitelist == null || whitelist.contains(id);
     final enabledCount = skills.where((s) => isEnabled(s.id)).length;
 
-    return _consoleSurface(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '$enabledCount of ${skills.length} enabled',
-                    style: const TextStyle(color: _kFgMuted, fontSize: 11),
-                  ),
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _skillDragOver = true),
+      onDragExited: (_) => setState(() => _skillDragOver = false),
+      onDragDone: (detail) async {
+        setState(() => _skillDragOver = false);
+        if (detail.files.length != 1) {
+          _showSkillImportMessage('一次只能导入一个 Skill ZIP。');
+          return;
+        }
+        await _importSkillZip(detail.files.single.path);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: _skillDragOver
+              ? Border.all(color: _kAccent, width: 1.5)
+              : null,
+        ),
+        child: _consoleSurface(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        skills.isEmpty
+                            ? 'No skills installed'
+                            : '$enabledCount of ${skills.length} enabled',
+                        style: const TextStyle(color: _kFgMuted, fontSize: 11),
+                      ),
+                    ),
+                    TextButton.icon(
+                      key: const Key('settings-import-skill'),
+                      onPressed: _skillImporting ? null : _pickSkillZip,
+                      icon: _skillImporting
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                              ),
+                            )
+                          : const Icon(Icons.upload_file_outlined, size: 15),
+                      label: Text(_skillImporting ? 'Importing' : 'Import ZIP'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: _kAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: enabledCount == skills.length
+                          ? null
+                          : () => _agentApply(
+                              _agentConfig.copyWith(resetEnabledSkills: true),
+                            ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                      child: const Text(
+                        'Enable all',
+                        style: TextStyle(color: _kAccent, fontSize: 11),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: enabledCount == 0
+                          ? null
+                          : () => _agentApply(
+                              _agentConfig.copyWith(enabledSkills: <String>{}),
+                            ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                      child: const Text(
+                        'Disable all',
+                        style: TextStyle(color: _kFgMuted, fontSize: 11),
+                      ),
+                    ),
+                  ],
                 ),
-                TextButton(
-                  onPressed: enabledCount == skills.length
-                      ? null
-                      : () => _agentApply(
-                          _agentConfig.copyWith(resetEnabledSkills: true),
-                        ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 28),
-                  ),
-                  child: const Text(
-                    'Enable all',
-                    style: TextStyle(color: _kAccent, fontSize: 11),
-                  ),
-                ),
-                TextButton(
-                  onPressed: enabledCount == 0
-                      ? null
-                      : () => _agentApply(
-                          _agentConfig.copyWith(enabledSkills: <String>{}),
-                        ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 28),
-                  ),
-                  child: const Text(
-                    'Disable all',
-                    style: TextStyle(color: _kFgMuted, fontSize: 11),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          for (final skill in skills)
-            _buildSkillRow(skill, isEnabled(skill.id), allIds),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-            child: Text(
-              'User skills live in ${SkillService.userSkillsDirPath}/<id>/SKILL.md — '
-              'they are auto-discovered at startup.',
-              style: const TextStyle(
-                color: _kFgMuted,
-                fontSize: 10.5,
-                height: 1.4,
               ),
-            ),
+              if (skills.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
+                  child: Text(
+                    'Choose or drop a .zip archive to add a Skill.',
+                    style: TextStyle(
+                      color: _kFgMuted,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                )
+              else
+                for (final skill in skills)
+                  _buildSkillRow(skill, isEnabled(skill.id), allIds),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: Text(
+                  'ZIP must contain <id>/SKILL.md. You can also drop a ZIP here.',
+                  style: const TextStyle(
+                    color: _kFgMuted,
+                    fontSize: 10.5,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  Future<void> _pickSkillZip() async {
+    final path = await FilePickerService.pickZipFile();
+    if (path != null) await _importSkillZip(path);
+  }
+
+  Future<void> _importSkillZip(String path) async {
+    if (_skillImporting) return;
+    if (!path.toLowerCase().endsWith('.zip')) {
+      _showSkillImportMessage('请选择 .zip 格式的 Skill 包。');
+      return;
+    }
+    setState(() => _skillImporting = true);
+    try {
+      final result = await SkillArchiveImporter().importZip(path);
+      await SkillService.init();
+      LlmService.refreshSystemPrompt();
+      if (!mounted) return;
+      setState(() {});
+      _showSkillImportMessage('已导入 Skill: ${result.skillId}');
+    } on SkillArchiveImportException catch (error) {
+      _showSkillImportMessage(error.message);
+    } catch (_) {
+      _showSkillImportMessage('导入 Skill 失败。');
+    } finally {
+      if (mounted) setState(() => _skillImporting = false);
+    }
+  }
+
+  void _showSkillImportMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _buildSkillRow(Skill skill, bool enabled, Set<String> allIds) {
@@ -778,6 +853,7 @@ extension _AgentSettingsExt on _SettingsPageState {
         ? 'stdio'
         : 'HTTP';
     final connected = McpService.isConnected(server.id);
+    final checking = McpService.isChecking(server.id);
     final toolCount = McpService.toolCount(server.id);
 
     return Padding(
@@ -795,7 +871,11 @@ extension _AgentSettingsExt on _SettingsPageState {
                         ? Icons.terminal
                         : Icons.language,
                     size: 16,
-                    color: connected ? Colors.green : Colors.grey,
+                    color: checking
+                        ? _kAccent
+                        : connected
+                        ? Colors.green
+                        : Colors.grey,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -808,16 +888,36 @@ extension _AgentSettingsExt on _SettingsPageState {
                     ),
                   ),
                   Text(
-                    connected
+                    checking
+                        ? '$transportLabel · checking'
+                        : connected
                         ? '$transportLabel · $toolCount tools'
                         : '$transportLabel · offline',
                     style: TextStyle(
                       fontSize: 11,
-                      color: connected ? const Color(0xFF5DDBA0) : _kFgMuted,
+                      color: checking
+                          ? _kAccent
+                          : connected
+                          ? const Color(0xFF5DDBA0)
+                          : _kFgMuted,
                     ),
+                  ),
+                  IconButton(
+                    icon: checking
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
+                    onPressed: checking
+                        ? null
+                        : () => unawaited(McpService.checkServer(server.id)),
                   ),
                   Switch(
                     value: server.enabled,
+                    activeThumbColor: _kAccent,
+                    activeTrackColor: _kAccent.withValues(alpha: 0.45),
                     onChanged: (v) {
                       final updated = server.copyWith(enabled: v);
                       final servers = List<McpServerConfig>.of(
@@ -957,7 +1057,7 @@ class _McpServerDialogState extends State<_McpServerDialog> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<McpTransportType>(
-              value: _transport,
+              initialValue: _transport,
               decoration: const InputDecoration(
                 labelText: 'Transport',
                 border: OutlineInputBorder(),

@@ -32,7 +32,7 @@ The terminal-aware agent panel is the standout feature — converse with an AI a
 | **Dangerous-command gate** | 25+ built-in safety rules; destructive commands pause for approval |
 | **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
 | **Web search** | Brave Search integration for current web results (configurable) |
-| **Built-in skills** | `disk-space`, `git-bisect`, `port-conflict`, `verify-fix` — toggleable per skill |
+| **Custom skills** | Add user-defined skills from the Settings page; no built-in playbooks are enabled by default |
 | **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
 | **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
 
