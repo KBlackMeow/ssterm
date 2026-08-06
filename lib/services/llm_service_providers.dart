@@ -595,6 +595,16 @@ Stream<LlmStreamEvent> _streamGemini(
     if (data.isEmpty) continue;
     try {
       final json = jsonDecode(data) as Map<String, dynamic>;
+      final usage = json['usageMetadata'];
+      if (usage is Map) {
+        final thoughtsTokenCount = usage['thoughtsTokenCount'];
+        if (thoughtsTokenCount is int && thoughtsTokenCount >= 0) {
+          yield LlmStreamEvent.diagnostics(
+            malformedEventCount: 0,
+            reasoningTokenCount: thoughtsTokenCount,
+          );
+        }
+      }
       final candidates = json['candidates'] as List?;
       // Gemini interleaves `usageMetadata`/`promptFeedback` chunks that
       // have no `candidates` at all.  `break` would terminate the WHOLE

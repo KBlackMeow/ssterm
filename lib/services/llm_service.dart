@@ -213,6 +213,35 @@ class ToolCall {
 /// Supports OpenAI-compatible APIs, Anthropic's native format, and
 /// Google Gemini's native format.
 class LlmService {
+  /// Returns a deterministic display-only approximation for reasoning whose
+  /// provider does not report a separate reasoning-token count.
+  static int estimateReasoningTokenCount(String reasoning) {
+    var count = 0;
+    var inOtherRun = false;
+    for (final rune in reasoning.runes) {
+      final isWhitespace = String.fromCharCode(rune).trim().isEmpty;
+      final isCjk =
+          (rune >= 0x3400 && rune <= 0x4dbf) ||
+          (rune >= 0x4e00 && rune <= 0x9fff) ||
+          (rune >= 0xf900 && rune <= 0xfaff);
+      if (isCjk) {
+        count++;
+        inOtherRun = false;
+      } else if (isWhitespace) {
+        inOtherRun = false;
+      } else if (!inOtherRun) {
+        count++;
+        inOtherRun = true;
+      }
+    }
+    return count;
+  }
+
+  static String reasoningTokenCountLabel({
+    required int tokenCount,
+    required bool isExact,
+  }) => '${isExact ? '' : '约 '}$tokenCount tokens';
+
   /// Returns a user-facing error when a provider finishes after emitting only
   /// reasoning, without a final answer or a usable tool call.
   ///

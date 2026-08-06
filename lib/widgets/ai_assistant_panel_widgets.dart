@@ -30,7 +30,8 @@ class _ModeSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.6);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -137,10 +138,10 @@ class _ShellIntegrationBadge extends StatelessWidget {
     final color = active ? const Color(0xFF2EE767) : const Color(0xFFFFB454);
     final tooltip = active
         ? 'OSC 133 shell integration is active — '
-            'agent captures clean stdout + exit codes.'
+              'agent captures clean stdout + exit codes.'
         : 'Shell integration not detected — '
-            'agent uses an echo-sentinel fallback. '
-            'Reopen the tab after upgrading to enable OSC 133.';
+              'agent uses an echo-sentinel fallback. '
+              'Reopen the tab after upgrading to enable OSC 133.';
     return Tooltip(
       message: tooltip,
       child: Container(
@@ -205,7 +206,9 @@ class _TabChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? _kAccent.withValues(alpha: 0.2) : Colors.transparent,
+          color: selected
+              ? _kAccent.withValues(alpha: 0.2)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: selected ? _kAccent : dim.withValues(alpha: 0.25),
@@ -217,11 +220,14 @@ class _TabChip extends StatelessWidget {
           children: [
             Icon(icon, size: 12, color: selected ? _kAccent : dim),
             const SizedBox(width: 4),
-            Text(label,
-                style: TextStyle(
-                    color: selected ? _kAccent : dim,
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal)),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? _kAccent : dim,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
           ],
         ),
       ),
@@ -233,7 +239,14 @@ class _TabChip extends StatelessWidget {
 
 class _ReasoningSection extends StatefulWidget {
   final String reasoning;
-  const _ReasoningSection({required this.reasoning});
+  final int? tokenCount;
+  final bool isExactTokenCount;
+
+  const _ReasoningSection({
+    required this.reasoning,
+    this.tokenCount,
+    this.isExactTokenCount = false,
+  });
 
   @override
   State<_ReasoningSection> createState() => _ReasoningSectionState();
@@ -244,7 +257,8 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
 
   @override
   Widget build(BuildContext context) {
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.6);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,8 +282,22 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
                 const SizedBox(width: 4),
                 Text(
                   _expanded ? 'Hide reasoning' : 'Show reasoning',
-                  style: TextStyle(color: dim, fontSize: 11, fontStyle: FontStyle.italic),
+                  style: TextStyle(
+                    color: dim,
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
+                if (widget.tokenCount != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    LlmService.reasoningTokenCountLabel(
+                      tokenCount: widget.tokenCount!,
+                      isExact: widget.isExactTokenCount,
+                    ),
+                    style: TextStyle(color: dim, fontSize: 11),
+                  ),
+                ],
               ],
             ),
           ),
@@ -330,11 +358,14 @@ class _CommandResultCardState extends State<_CommandResultCard> {
   @override
   Widget build(BuildContext context) {
     final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6);
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.6);
     final out = widget.output;
     final lines = out.isEmpty ? const <String>[] : out.split('\n');
     final overflow = !_expanded && lines.length > _kCollapsedLines;
-    final visible = overflow ? lines.sublist(0, _kCollapsedLines).join('\n') : out;
+    final visible = overflow
+        ? lines.sublist(0, _kCollapsedLines).join('\n')
+        : out;
 
     return Container(
       decoration: BoxDecoration(
@@ -367,10 +398,7 @@ class _CommandResultCardState extends State<_CommandResultCard> {
             ),
           ),
           if (out.isNotEmpty) ...[
-            Container(
-              height: 1,
-              color: dim.withValues(alpha: 0.12),
-            ),
+            Container(height: 1, color: dim.withValues(alpha: 0.12)),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
               child: Column(

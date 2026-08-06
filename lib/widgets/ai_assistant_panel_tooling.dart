@@ -35,6 +35,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     final nativeToolCalls = <AgentToolCall>[];
     String? finishReason;
     var malformedEventCount = 0;
+    int? exactReasoningTokenCount;
 
     // Outer retry loop: at most one extra attempt, and only when the
     // first attempt yielded zero content AND failed with a transient
@@ -72,6 +73,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       nativeToolCalls.clear();
       finishReason = null;
       malformedEventCount = 0;
+      exactReasoningTokenCount = null;
       var scheduled = false;
       // Once the stream completes (success OR error), block all pending
       // post-frame callbacks from clobbering `aiMsg.text` with the
@@ -90,6 +92,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           } else if (event.kind == 'diagnostics') {
             finishReason = event.finishReason;
             malformedEventCount += event.malformedEventCount;
+            if (event.reasoningTokenCount != null) {
+              exactReasoningTokenCount = event.reasoningTokenCount;
+            }
           } else {
             fullText += event.content;
           }
@@ -108,6 +113,12 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
                 aiMsg.reasoning = reasoningText.isNotEmpty
                     ? reasoningText
                     : null;
+                aiMsg.reasoningTokenCount = reasoningText.isEmpty
+                    ? null
+                    : exactReasoningTokenCount ??
+                          LlmService.estimateReasoningTokenCount(reasoningText);
+                aiMsg.hasExactReasoningTokenCount =
+                    exactReasoningTokenCount != null;
               });
               _scrollToBottom();
             });
@@ -118,6 +129,12 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           setState(() {
             aiMsg.text = LlmService.stripStreamingMarkers(fullText);
             aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
+            aiMsg.reasoningTokenCount = reasoningText.isEmpty
+                ? null
+                : exactReasoningTokenCount ??
+                      LlmService.estimateReasoningTokenCount(reasoningText);
+            aiMsg.hasExactReasoningTokenCount =
+                exactReasoningTokenCount != null;
           });
         }
         // Stream finished cleanly — break out of the retry loop.

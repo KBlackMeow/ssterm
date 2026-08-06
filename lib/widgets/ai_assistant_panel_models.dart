@@ -34,6 +34,8 @@ enum _WriteProposalOutcome {
 class _ChatMessage {
   String text;
   String? reasoning;
+  int? reasoningTokenCount;
+  bool? hasExactReasoningTokenCount;
   final bool isUser;
   final bool isSystem;
 
@@ -106,6 +108,8 @@ class _ChatMessage {
   _ChatMessage._({
     required this.text,
     this.reasoning,
+    this.reasoningTokenCount,
+    this.hasExactReasoningTokenCount,
     required this.isUser,
     this.isSystem = false,
     this.isNotice = false,
@@ -126,10 +130,14 @@ class _ChatMessage {
   factory _ChatMessage.ai({
     required String text,
     String? reasoning,
+    int? reasoningTokenCount,
+    bool? hasExactReasoningTokenCount,
     String? error,
   }) => _ChatMessage._(
     text: text,
     reasoning: reasoning,
+    reasoningTokenCount: reasoningTokenCount,
+    hasExactReasoningTokenCount: hasExactReasoningTokenCount,
     isUser: false,
     error: error,
   );

@@ -793,7 +793,12 @@ class _AiPanelContent extends StatelessWidget {
                   )
                 else ...[
                   if (msg.reasoning != null)
-                    _ReasoningSection(reasoning: msg.reasoning!),
+                    _ReasoningSection(
+                      reasoning: msg.reasoning!,
+                      tokenCount: msg.reasoningTokenCount,
+                      isExactTokenCount:
+                          msg.hasExactReasoningTokenCount == true,
+                    ),
                   if (markdownEnabled && msg.text.isNotEmpty)
                     _buildMarkdown(context, msg.text, fg)
                   else
