@@ -34,15 +34,23 @@ extension _AgentSettingsExt on _SettingsPageState {
         _sectionTitle('File Write'),
         _buildFileWriteSection(),
         const SizedBox(height: 16),
-        _sectionTitle('Skills'),
-        _buildSkillsSection(),
-        const SizedBox(height: 16),
-        _sectionTitle('MCP Servers'),
-        _buildMcpSection(),
-        const SizedBox(height: 16),
         _sectionTitle('Providers'),
         for (final p in _agentConfig.providers) _buildProviderCard(p),
       ],
+    );
+  }
+
+  Widget _buildSkillsTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [_sectionTitle('Skills'), _buildSkillsSection()],
+    );
+  }
+
+  Widget _buildMcpTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      children: [_sectionTitle('MCP Servers'), _buildMcpSection()],
     );
   }
 
@@ -59,18 +67,15 @@ extension _AgentSettingsExt on _SettingsPageState {
   Widget _buildSkillsSection() {
     final skills = SkillService.skills;
     if (skills.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: _kSurface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _kDivider),
-        ),
-        child: Text(
-          'No skills installed.  Drop a SKILL.md into '
-          '${SkillService.userSkillsDirPath}/<id>/ and restart ssterm '
-          'to add one.',
-          style: const TextStyle(color: _kFgMuted, fontSize: 12, height: 1.4),
+      return _consoleSurface(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'No skills installed.  Drop a SKILL.md into '
+            '${SkillService.userSkillsDirPath}/<id>/ and restart ssterm '
+            'to add one.',
+            style: const TextStyle(color: _kFgMuted, fontSize: 12, height: 1.4),
+          ),
         ),
       );
     }
@@ -80,12 +85,7 @@ extension _AgentSettingsExt on _SettingsPageState {
     bool isEnabled(String id) => whitelist == null || whitelist.contains(id);
     final enabledCount = skills.where((s) => isEnabled(s.id)).length;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
-      ),
+    return _consoleSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -103,38 +103,47 @@ extension _AgentSettingsExt on _SettingsPageState {
                   onPressed: enabledCount == skills.length
                       ? null
                       : () => _agentApply(
-                            _agentConfig.copyWith(resetEnabledSkills: true),
-                          ),
+                          _agentConfig.copyWith(resetEnabledSkills: true),
+                        ),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: const Size(0, 28),
                   ),
-                  child: const Text('Enable all',
-                      style: TextStyle(color: _kAccent, fontSize: 11)),
+                  child: const Text(
+                    'Enable all',
+                    style: TextStyle(color: _kAccent, fontSize: 11),
+                  ),
                 ),
                 TextButton(
                   onPressed: enabledCount == 0
                       ? null
                       : () => _agentApply(
-                            _agentConfig.copyWith(enabledSkills: <String>{}),
-                          ),
+                          _agentConfig.copyWith(enabledSkills: <String>{}),
+                        ),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: const Size(0, 28),
                   ),
-                  child: const Text('Disable all',
-                      style: TextStyle(color: _kFgMuted, fontSize: 11)),
+                  child: const Text(
+                    'Disable all',
+                    style: TextStyle(color: _kFgMuted, fontSize: 11),
+                  ),
                 ),
               ],
             ),
           ),
-          for (final skill in skills) _buildSkillRow(skill, isEnabled(skill.id), allIds),
+          for (final skill in skills)
+            _buildSkillRow(skill, isEnabled(skill.id), allIds),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
             child: Text(
               'User skills live in ${SkillService.userSkillsDirPath}/<id>/SKILL.md — '
               'they are auto-discovered at startup.',
-              style: const TextStyle(color: _kFgMuted, fontSize: 10.5, height: 1.4),
+              style: const TextStyle(
+                color: _kFgMuted,
+                fontSize: 10.5,
+                height: 1.4,
+              ),
             ),
           ),
         ],
@@ -208,8 +217,7 @@ extension _AgentSettingsExt on _SettingsPageState {
   /// So whenever the resulting set covers every installed skill, we
   /// collapse it back to null via `resetEnabledSkills: true`.
   void _toggleSkill(String id, bool enabled, Set<String> allIds) {
-    final current =
-        _agentConfig.enabledSkills ?? Set<String>.of(allIds);
+    final current = _agentConfig.enabledSkills ?? Set<String>.of(allIds);
     final next = Set<String>.of(current);
     if (enabled) {
       next.add(id);
@@ -226,12 +234,7 @@ extension _AgentSettingsExt on _SettingsPageState {
   }
 
   Widget _buildAgentDisplaySection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
-      ),
+    return _consoleSurface(
       child: SwitchListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         dense: true,
@@ -256,18 +259,15 @@ extension _AgentSettingsExt on _SettingsPageState {
   // ── Web search section ────────────────────────────────────────────────
   Widget _buildWebSearchSection() {
     final enabled = _agentConfig.webSearchEnabled;
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
-      ),
+    return _consoleSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SwitchListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 0,
+            ),
             dense: true,
             title: const Text(
               'Enable web search (Brave)',
@@ -303,8 +303,8 @@ extension _AgentSettingsExt on _SettingsPageState {
                     _braveSearchKeyVisible = !_braveSearchKeyVisible;
                   }),
                 ),
-                onChanged: (v) => ApiKeyStorage.store(
-                    AgentConfig.braveSearchKeyId, v.trim()),
+                onChanged: (v) =>
+                    ApiKeyStorage.store(AgentConfig.braveSearchKeyId, v.trim()),
               ),
             ),
         ],
@@ -315,15 +315,9 @@ extension _AgentSettingsExt on _SettingsPageState {
   // ── File write section ────────────────────────────────────────────────
   Widget _buildFileWriteSection() {
     final enabled = _agentConfig.fileWriteEnabled;
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
-      ),
+    return _consoleSurface(
       child: SwitchListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         dense: true,
         title: const Text(
           'Enable file write & edit',
@@ -348,69 +342,80 @@ extension _AgentSettingsExt on _SettingsPageState {
   }
 
   Widget _buildDefaultProviderSection() {
-    final enabledProviders =
-        _agentConfig.providers.where((p) => p.enabled).toList();
+    final enabledProviders = _agentConfig.providers
+        .where((p) => p.enabled)
+        .toList();
     final currentProvider = _agentConfig.current;
     final allModels = currentProvider?.models ?? <String>[];
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _kSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DropdownButtonFormField<String>(
-            initialValue: _agentConfig.defaultProvider ??
-                (enabledProviders.isNotEmpty ? enabledProviders.first.id : null),
-            decoration: const InputDecoration(
-              labelText: 'Provider',
-              labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              border: OutlineInputBorder(),
-            ),
-            style: const TextStyle(color: _kFg, fontSize: 13),
-            dropdownColor: _kSurface,
-            items: _agentConfig.providers.map((p) {
-              return DropdownMenuItem(value: p.id, child: Text(p.displayName));
-            }).toList(),
-            onChanged: (v) {
-              if (v == null) return;
-              _agentApply(_agentConfig.copyWith(defaultProvider: v));
-            },
-          ),
-          if (currentProvider != null) ...[
-            const SizedBox(height: 8),
+    return _consoleSurface(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             DropdownButtonFormField<String>(
-              initialValue: _agentConfig.defaultModel != null &&
-                      allModels.contains(_agentConfig.defaultModel)
-                  ? _agentConfig.defaultModel
-                  : null,
+              initialValue:
+                  _agentConfig.defaultProvider ??
+                  (enabledProviders.isNotEmpty
+                      ? enabledProviders.first.id
+                      : null),
               decoration: const InputDecoration(
-                labelText: 'Default Model',
+                labelText: 'Provider',
                 labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
-                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 border: OutlineInputBorder(),
               ),
               style: const TextStyle(color: _kFg, fontSize: 13),
               dropdownColor: _kSurface,
-              hint: Text(
-                allModels.isNotEmpty ? allModels.first : 'No models',
-                style: const TextStyle(color: _kFgMuted, fontSize: 13),
-              ),
-              items: allModels.map((m) {
-                return DropdownMenuItem(value: m, child: Text(m));
+              items: _agentConfig.providers.map((p) {
+                return DropdownMenuItem(
+                  value: p.id,
+                  child: Text(p.displayName),
+                );
               }).toList(),
               onChanged: (v) {
                 if (v == null) return;
-                _agentApply(_agentConfig.copyWith(defaultModel: v));
+                _agentApply(_agentConfig.copyWith(defaultProvider: v));
               },
             ),
+            if (currentProvider != null) ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue:
+                    _agentConfig.defaultModel != null &&
+                        allModels.contains(_agentConfig.defaultModel)
+                    ? _agentConfig.defaultModel
+                    : null,
+                decoration: const InputDecoration(
+                  labelText: 'Default Model',
+                  labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  border: OutlineInputBorder(),
+                ),
+                style: const TextStyle(color: _kFg, fontSize: 13),
+                dropdownColor: _kSurface,
+                hint: Text(
+                  allModels.isNotEmpty ? allModels.first : 'No models',
+                  style: const TextStyle(color: _kFgMuted, fontSize: 13),
+                ),
+                items: allModels.map((m) {
+                  return DropdownMenuItem(value: m, child: Text(m));
+                }).toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  _agentApply(_agentConfig.copyWith(defaultModel: v));
+                },
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -500,10 +505,7 @@ extension _AgentSettingsExt on _SettingsPageState {
                       child: Text(
                         'No API key required (local provider). '
                         'Set Base URL to point at your daemon.',
-                        style: const TextStyle(
-                          color: _kFgMuted,
-                          fontSize: 12,
-                        ),
+                        style: const TextStyle(color: _kFgMuted, fontSize: 12),
                       ),
                     ),
                   ],
@@ -554,8 +556,10 @@ extension _AgentSettingsExt on _SettingsPageState {
             decoration: InputDecoration(
               filled: true,
               fillColor: const Color(0xFF161820),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 6,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(4),
                 borderSide: const BorderSide(color: _kDivider),
@@ -587,8 +591,7 @@ extension _AgentSettingsExt on _SettingsPageState {
             spacing: 4,
             runSpacing: 4,
             children: [
-              for (final m in provider.models)
-                _modelChip(m, provider, idx),
+              for (final m in provider.models) _modelChip(m, provider, idx),
               _addModelChip(provider, idx),
             ],
           ),
@@ -608,14 +611,12 @@ extension _AgentSettingsExt on _SettingsPageState {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            model,
-            style: const TextStyle(color: _kFg, fontSize: 11),
-          ),
+          Text(model, style: const TextStyle(color: _kFg, fontSize: 11)),
           const SizedBox(width: 4),
           GestureDetector(
             onTap: () {
-              final nextModels = List<String>.of(provider.models)..remove(model);
+              final nextModels = List<String>.of(provider.models)
+                ..remove(model);
               final nextDefault = _agentConfig.defaultModel == model
                   ? null
                   : _agentConfig.defaultModel;
@@ -648,10 +649,7 @@ extension _AgentSettingsExt on _SettingsPageState {
           children: [
             Icon(Icons.add, size: 11, color: _kAccent),
             const SizedBox(width: 2),
-            Text(
-              'Add',
-              style: TextStyle(color: _kAccent, fontSize: 11),
-            ),
+            Text('Add', style: TextStyle(color: _kAccent, fontSize: 11)),
           ],
         ),
       ),
@@ -666,7 +664,10 @@ extension _AgentSettingsExt on _SettingsPageState {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: _kSurface,
-          title: const Text('Add Model', style: TextStyle(color: _kFg, fontSize: 14)),
+          title: const Text(
+            'Add Model',
+            style: TextStyle(color: _kFg, fontSize: 14),
+          ),
           content: TextField(
             controller: _modelAddController,
             autofocus: true,
@@ -684,7 +685,8 @@ extension _AgentSettingsExt on _SettingsPageState {
               child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(ctx, _modelAddController.text.trim()),
+              onPressed: () =>
+                  Navigator.pop(ctx, _modelAddController.text.trim()),
               child: const Text('Add', style: TextStyle(color: _kAccent)),
             ),
           ],
@@ -706,142 +708,166 @@ extension _AgentSettingsExt on _SettingsPageState {
   Widget _buildMcpSection() {
     final enabled = _agentConfig.mcpEnabled;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SwitchListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Enable MCP tools'),
-          subtitle: const Text(
-            'Allow the agent to discover and call tools from '
-            'configured MCP servers.',
-          ),
-          value: enabled,
-          onChanged: (v) => _agentApply(_agentConfig.copyWith(mcpEnabled: v)),
-        ),
-        if (!enabled)
-          Padding(
-            padding: const EdgeInsets.only(left: 16, top: 4),
-            child: Text(
-              'Enable this switch to configure MCP servers.',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
-                fontSize: 12,
-              ),
-            ),
-          ),
-        if (enabled) ...[
-          const SizedBox(height: 8),
-          if (_agentConfig.mcpServers.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'No MCP servers configured. Add one to get started.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
-                  fontSize: 12,
+    return KeyedSubtree(
+      key: const Key('settings-mcp-section'),
+      child: _consoleSurface(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                activeThumbColor: _kAccent,
+                title: const Text(
+                  'Enable MCP tools',
+                  style: TextStyle(color: _kFg, fontSize: 13),
                 ),
+                subtitle: const Text(
+                  'Allow the agent to discover and call tools from '
+                  'configured MCP servers.',
+                  style: TextStyle(color: _kFgMuted, fontSize: 11),
+                ),
+                value: enabled,
+                onChanged: (v) =>
+                    _agentApply(_agentConfig.copyWith(mcpEnabled: v)),
               ),
-            ),
-          for (var i = 0; i < _agentConfig.mcpServers.length; i++)
-            _buildMcpServerCard(i),
-          const SizedBox(height: 8),
-          Center(
-            child: TextButton.icon(
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Add MCP Server'),
-              onPressed: () => _showAddMcpServerDialog(),
-            ),
+              if (!enabled)
+                const Padding(
+                  padding: EdgeInsets.only(left: 16, top: 4),
+                  child: Text(
+                    'Enable this switch to configure MCP servers.',
+                    style: TextStyle(color: _kFgMuted, fontSize: 12),
+                  ),
+                ),
+              if (enabled) ...[
+                const SizedBox(height: 8),
+                if (_agentConfig.mcpServers.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      'No MCP servers configured. Add one to get started.',
+                      style: TextStyle(color: _kFgMuted, fontSize: 12),
+                    ),
+                  ),
+                for (var i = 0; i < _agentConfig.mcpServers.length; i++)
+                  _buildMcpServerCard(i),
+                const SizedBox(height: 8),
+                Center(
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.add, size: 18, color: _kAccent),
+                    label: const Text(
+                      'Add MCP Server',
+                      style: TextStyle(color: _kAccent),
+                    ),
+                    onPressed: () => _showAddMcpServerDialog(),
+                  ),
+                ),
+              ],
+            ],
           ),
-        ],
-      ],
+        ),
+      ),
     );
   }
 
   Widget _buildMcpServerCard(int index) {
     final server = _agentConfig.mcpServers[index];
-    final transportLabel =
-        server.transport == McpTransportType.stdio ? 'stdio' : 'HTTP';
+    final transportLabel = server.transport == McpTransportType.stdio
+        ? 'stdio'
+        : 'HTTP';
     final connected = McpService.isConnected(server.id);
     final toolCount = McpService.toolCount(server.id);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  server.transport == McpTransportType.stdio
-                      ? Icons.terminal
-                      : Icons.language,
-                  size: 16,
-                  color: connected ? Colors.green : Colors.grey,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    server.displayName,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-                Text(
-                  connected ? '$transportLabel · $toolCount tools' : '$transportLabel · offline',
-                  style: TextStyle(
-                    fontSize: 11,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: _consoleSurface(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    server.transport == McpTransportType.stdio
+                        ? Icons.terminal
+                        : Icons.language,
+                    size: 16,
                     color: connected ? Colors.green : Colors.grey,
                   ),
-                ),
-                Switch(
-                  value: server.enabled,
-                  onChanged: (v) {
-                    final updated = server.copyWith(enabled: v);
-                    final servers = List<McpServerConfig>.of(_agentConfig.mcpServers);
-                    servers[index] = updated;
-                    _agentApply(_agentConfig.copyWith(mcpServers: servers));
-                    if (v) {
-                      unawaited(McpService.connect(updated).then((_) {
-                        if (mounted) setState(() {});
-                      }));
-                    } else {
-                      unawaited(McpService.disconnect(server.id).then((_) {
-                        if (mounted) setState(() {});
-                      }));
-                    }
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  onPressed: () {
-                    unawaited(McpService.disconnect(server.id));
-                    final servers = List<McpServerConfig>.of(_agentConfig.mcpServers);
-                    servers.removeAt(index);
-                    _agentApply(_agentConfig.copyWith(mcpServers: servers));
-                  },
-                ),
-              ],
-            ),
-            if (connected) ...[
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: [
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      server.displayName,
+                      style: const TextStyle(
+                        color: _kFg,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
                   Text(
-                    '$toolCount tool${toolCount == 1 ? "" : "s"} available',
+                    connected
+                        ? '$transportLabel · $toolCount tools'
+                        : '$transportLabel · offline',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+                      color: connected ? const Color(0xFF5DDBA0) : _kFgMuted,
                     ),
+                  ),
+                  Switch(
+                    value: server.enabled,
+                    onChanged: (v) {
+                      final updated = server.copyWith(enabled: v);
+                      final servers = List<McpServerConfig>.of(
+                        _agentConfig.mcpServers,
+                      );
+                      servers[index] = updated;
+                      _agentApply(_agentConfig.copyWith(mcpServers: servers));
+                      if (v) {
+                        unawaited(
+                          McpService.connect(updated).then((_) {
+                            if (mounted) setState(() {});
+                          }),
+                        );
+                      } else {
+                        unawaited(
+                          McpService.disconnect(server.id).then((_) {
+                            if (mounted) setState(() {});
+                          }),
+                        );
+                      }
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () {
+                      unawaited(McpService.disconnect(server.id));
+                      final servers = List<McpServerConfig>.of(
+                        _agentConfig.mcpServers,
+                      );
+                      servers.removeAt(index);
+                      _agentApply(_agentConfig.copyWith(mcpServers: servers));
+                    },
                   ),
                 ],
               ),
+              if (connected) ...[
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      '$toolCount tool${toolCount == 1 ? "" : "s"} available',
+                      style: TextStyle(fontSize: 11, color: _kFgMuted),
+                    ),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -857,9 +883,11 @@ extension _AgentSettingsExt on _SettingsPageState {
           _agentApply(_agentConfig.copyWith(mcpServers: servers));
           // Connect in the background — setState after completion so
           // the card refreshes to show connection status + tool count.
-          unawaited(McpService.connect(config).then((_) {
-            if (mounted) setState(() {});
-          }));
+          unawaited(
+            McpService.connect(config).then((_) {
+              if (mounted) setState(() {});
+            }),
+          );
         },
       ),
     );
@@ -935,8 +963,14 @@ class _McpServerDialogState extends State<_McpServerDialog> {
                 border: OutlineInputBorder(),
               ),
               items: const [
-                DropdownMenuItem(value: McpTransportType.stdio, child: Text('stdio (subprocess)')),
-                DropdownMenuItem(value: McpTransportType.streamableHttp, child: Text('Streamable HTTP')),
+                DropdownMenuItem(
+                  value: McpTransportType.stdio,
+                  child: Text('stdio (subprocess)'),
+                ),
+                DropdownMenuItem(
+                  value: McpTransportType.streamableHttp,
+                  child: Text('Streamable HTTP'),
+                ),
               ],
               onChanged: (v) {
                 if (v != null) setState(() => _transport = v);
@@ -988,15 +1022,21 @@ class _McpServerDialogState extends State<_McpServerDialog> {
                 .split(RegExp(r'\s+'))
                 .where((s) => s.isNotEmpty)
                 .toList();
-            widget.onSave(McpServerConfig(
-              id: name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-'),
-              displayName: name,
-              enabled: true,
-              transport: _transport,
-              command: _transport == McpTransportType.stdio ? _cmdCtrl.text.trim() : null,
-              args: args,
-              url: _transport == McpTransportType.streamableHttp ? _urlCtrl.text.trim() : null,
-            ));
+            widget.onSave(
+              McpServerConfig(
+                id: name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '-'),
+                displayName: name,
+                enabled: true,
+                transport: _transport,
+                command: _transport == McpTransportType.stdio
+                    ? _cmdCtrl.text.trim()
+                    : null,
+                args: args,
+                url: _transport == McpTransportType.streamableHttp
+                    ? _urlCtrl.text.trim()
+                    : null,
+              ),
+            );
             Navigator.of(context).pop();
           },
           child: const Text('Save'),

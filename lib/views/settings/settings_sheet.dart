@@ -23,17 +23,18 @@ import '../../services/wallpaper_storage.dart';
 import '../../widgets/terminal_preview.dart';
 import '../../widgets/wallpaper_background.dart';
 import 'settings_dialogs.dart';
+import 'settings_console_shell.dart';
 
 part 'settings_sheet_agent.dart';
 part 'settings_sheet_commands.dart';
 part 'settings_sheet_safety.dart';
 
-const _kSheetBg = Color(0xFF111113);
-const _kDivider = Color(0xFF252525);
-const _kSurface = Color(0xFF1C1C20);  // dropdown / button backgrounds
-const _kFg = Color(0xFFD4D4D4);
-const _kFgMuted = Color(0xFF8E8E8E);
-const _kAccent = Color(0xFF2472C8);
+const _kSheetBg = Color(0xFF0B0F16);
+const _kDivider = Color(0xFF283545);
+const _kSurface = Color(0xFF121A26); // dropdown / button backgrounds
+const _kFg = Color(0xFFE4EDF8);
+const _kFgMuted = Color(0xFF8797AD);
+const _kAccent = Color(0xFF56C8FF);
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -97,7 +98,7 @@ class _SettingsPageState extends State<SettingsPage>
     super.initState();
     _s = widget.settings.copyWith();
     _agentConfig = widget.agent ?? AgentConfig();
-    _tabController = TabController(length: 8, vsync: this);
+    _tabController = TabController(length: 10, vsync: this);
     _loadPackageInfo();
     _loadCommands();
     _initAgentControllers();
@@ -173,67 +174,78 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    const destinations = [
+      SettingsConsoleDestination(
+        label: 'Appearance',
+        icon: Icons.palette_outlined,
+      ),
+      SettingsConsoleDestination(label: 'Font', icon: Icons.text_fields),
+      SettingsConsoleDestination(label: 'Cursor', icon: Icons.edit_outlined),
+      SettingsConsoleDestination(label: 'SSH', icon: Icons.dns_outlined),
+      SettingsConsoleDestination(
+        label: 'Commands',
+        icon: Icons.terminal_outlined,
+      ),
+      SettingsConsoleDestination(
+        label: 'Agent',
+        icon: Icons.smart_toy_outlined,
+      ),
+      SettingsConsoleDestination(
+        label: 'Skills',
+        icon: Icons.extension_outlined,
+      ),
+      SettingsConsoleDestination(label: 'MCP', icon: Icons.hub_outlined),
+      SettingsConsoleDestination(label: 'Safety', icon: Icons.shield_outlined),
+      SettingsConsoleDestination(label: 'About', icon: Icons.info_outline),
+    ];
+
+    final tabBar = TabBar(
+      key: const Key('settings-tab-strip'),
+      controller: _tabController,
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      labelColor: _kFg,
+      unselectedLabelColor: _kFgMuted,
+      indicatorColor: _kAccent,
+      indicatorSize: TabBarIndicatorSize.label,
+      dividerColor: _kDivider,
+      labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+      unselectedLabelStyle: const TextStyle(fontSize: 12),
+      tabs: const [
+        Tab(text: 'Appearance'),
+        Tab(text: 'Font'),
+        Tab(text: 'Cursor'),
+        Tab(text: 'SSH'),
+        Tab(text: 'Commands'),
+        Tab(text: 'Agent'),
+        Tab(text: 'Skills'),
+        Tab(text: 'MCP'),
+        Tab(text: 'Safety'),
+        Tab(text: 'About'),
+      ],
+    );
+
+    final tabViews = [
+      _buildAppearanceTab(),
+      _buildFontTab(),
+      _buildCursorTab(),
+      _buildSshTab(),
+      _buildCommandsTab(),
+      _buildAgentTab(),
+      _buildSkillsTab(),
+      _buildMcpTab(),
+      _buildSafetyTab(),
+      _buildAboutTab(),
+    ];
+
+    return Material(
       color: _kSheetBg,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            child: const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Settings',
-                style: TextStyle(
-                  color: _kFg,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: TerminalPreview(settings: _s),
-          ),
-          const SizedBox(height: 8),
-          TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelColor: _kFg,
-            unselectedLabelColor: _kFgMuted,
-            indicatorColor: _kAccent,
-            indicatorSize: TabBarIndicatorSize.label,
-            dividerColor: _kDivider,
-            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-            unselectedLabelStyle: const TextStyle(fontSize: 12),
-            tabs: const [
-              Tab(text: 'Appearance'),
-              Tab(text: 'Font'),
-              Tab(text: 'Cursor'),
-              Tab(text: 'SSH'),
-              Tab(text: 'Commands'),
-              Tab(text: 'Agent'),
-              Tab(text: 'Safety'),
-              Tab(text: 'About'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildAppearanceTab(),
-                _buildFontTab(),
-                _buildCursorTab(),
-                _buildSshTab(),
-                _buildCommandsTab(),
-                _buildAgentTab(),
-                _buildSafetyTab(),
-                _buildAboutTab(),
-              ],
-            ),
-          ),
-        ],
+      child: SettingsConsoleShell(
+        controller: _tabController,
+        destinations: destinations,
+        tabBar: tabBar,
+        tabViews: tabViews,
+        header: const SettingsConsoleHeader(title: 'Settings'),
       ),
     );
   }
@@ -242,19 +254,76 @@ class _SettingsPageState extends State<SettingsPage>
 
   Widget _buildAppearanceTab() {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
       children: [
-        _sectionTitle('Theme'),
-        _presetChips(),
-        const SizedBox(height: 12),
+        KeyedSubtree(
+          key: const Key('settings-appearance-preview'),
+          child: _consoleSurface(
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'LIVE TERMINAL PREVIEW',
+                    style: TextStyle(
+                      color: _kFgMuted,
+                      fontFamily: 'JetBrainsMono',
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: .8,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TerminalPreview(settings: _s),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        _sectionTitle('Terminal theme'),
+        _consoleSurface(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: _presetChips(),
+          ),
+        ),
+        const SizedBox(height: 16),
         _sectionTitle('Colors'),
-        _colorRow('Foreground', 'foreground', _s.resolveTheme().foreground),
-        _colorRow('Background', 'background', _s.resolveTheme().background),
-        _colorRow('Cursor', 'cursor', _s.resolveTheme().cursor),
-        _colorRow('Selection', 'selection', _s.resolveTheme().selection),
-        const SizedBox(height: 12),
+        _consoleSurface(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Column(
+              children: [
+                _colorRow(
+                  'Foreground',
+                  'foreground',
+                  _s.resolveTheme().foreground,
+                ),
+                _colorRow(
+                  'Background',
+                  'background',
+                  _s.resolveTheme().background,
+                ),
+                _colorRow('Cursor', 'cursor', _s.resolveTheme().cursor),
+                _colorRow(
+                  'Selection',
+                  'selection',
+                  _s.resolveTheme().selection,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         _sectionTitle('Wallpaper'),
-        _wallpaperSection(),
+        _consoleSurface(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: _wallpaperSection(),
+          ),
+        ),
       ],
     );
   }
@@ -270,14 +339,15 @@ class _SettingsPageState extends State<SettingsPage>
         const SizedBox(height: 4),
         Text(
           'Bundled fonts ship with the app and render the same on every '
-              'machine; system fonts depend on your OS having them installed.',
+          'machine; system fonts depend on your OS having them installed.',
           style: const TextStyle(color: _kFgMuted, fontSize: 11),
         ),
         const SizedBox(height: 12),
         _sectionTitle('CJK / 中文'),
         _controlLabel(
           'Fallback for Chinese and other wide characters',
-          hint: 'English/code uses JetBrains Mono; '
+          hint:
+              'English/code uses JetBrains Mono; '
               '中文 uses this font (e.g. Microsoft YaHei UI)',
         ),
         const SizedBox(height: 6),
@@ -327,7 +397,10 @@ class _SettingsPageState extends State<SettingsPage>
         _sectionTitle('Blink'),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Enable blinking', style: TextStyle(color: _kFg, fontSize: 13)),
+          title: const Text(
+            'Enable blinking',
+            style: TextStyle(color: _kFg, fontSize: 13),
+          ),
           value: _s.cursorBlink,
           activeTrackColor: _kAccent,
           onChanged: (v) => _apply(_s.copyWith(cursorBlink: v)),
@@ -351,22 +424,22 @@ class _SettingsPageState extends State<SettingsPage>
   // ── Blink helpers ───────────────────────────────────────────────────────────
 
   int get _blinkSpeedIndex => switch (_s.cursorBlinkPeriodMs) {
-        <= 400 => 0,
-        >= 700 => 2,
-        _ => 1,
-      };
+    <= 400 => 0,
+    >= 700 => 2,
+    _ => 1,
+  };
 
   String get _blinkSpeedLabel => switch (_blinkSpeedIndex) {
-        0 => 'Fast',
-        2 => 'Slow',
-        _ => 'Normal',
-      };
+    0 => 'Fast',
+    2 => 'Slow',
+    _ => 'Normal',
+  };
 
   int _periodFromIndex(int i) => switch (i) {
-        0 => 400,
-        2 => 800,
-        _ => 530,
-      };
+    0 => 400,
+    2 => 800,
+    _ => 530,
+  };
 
   // Commands tab lives in `settings_sheet_commands.dart` (part).
 
@@ -399,10 +472,7 @@ class _SettingsPageState extends State<SettingsPage>
             child: SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: _kAccent,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2, color: _kAccent),
             ),
           )
         else ...[
@@ -437,7 +507,10 @@ class _SettingsPageState extends State<SettingsPage>
             TextButton.icon(
               onPressed: _addHost,
               icon: const Icon(Icons.add, size: 14, color: _kAccent),
-              label: const Text('Add', style: TextStyle(color: _kAccent, fontSize: 12)),
+              label: const Text(
+                'Add',
+                style: TextStyle(color: _kAccent, fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -491,7 +564,11 @@ class _SettingsPageState extends State<SettingsPage>
               padding: const EdgeInsets.all(6),
             ),
             IconButton(
-              icon: const Icon(Icons.delete_outline, size: 15, color: _kFgMuted),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 15,
+                color: _kFgMuted,
+              ),
               onPressed: () => _confirmDeleteHost(host),
               tooltip: 'Delete',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -527,24 +604,37 @@ class _SettingsPageState extends State<SettingsPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Delete Configuration',
-                      style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Text(
+                    'Delete Configuration',
+                    style: TextStyle(
+                      color: _kFg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 10),
-                  Text('Delete "${host.alias}"?',
-                      style: const TextStyle(color: _kFgMuted, fontSize: 13)),
+                  Text(
+                    'Delete "${host.alias}"?',
+                    style: const TextStyle(color: _kFgMuted, fontSize: 13),
+                  ),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: _kFgMuted),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Delete',
-                            style: TextStyle(color: Color(0xFFFF6E67))),
+                        child: const Text(
+                          'Delete',
+                          style: TextStyle(color: Color(0xFFFF6E67)),
+                        ),
                       ),
                     ],
                   ),
@@ -561,17 +651,40 @@ class _SettingsPageState extends State<SettingsPage>
   // ── Shared section widget helpers ───────────────────────────────────────────
 
   Widget _sectionTitle(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8, top: 4),
-        child: Text(
+    padding: const EdgeInsets.only(bottom: 8, top: 4),
+    child: Row(
+      children: [
+        Container(
+          width: 3,
+          height: 12,
+          decoration: BoxDecoration(
+            color: _kAccent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 7),
+        Text(
           text.toUpperCase(),
           style: const TextStyle(
             color: _kFgMuted,
+            fontFamily: 'JetBrainsMono',
             fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.8,
           ),
         ),
-      );
+      ],
+    ),
+  );
+
+  Widget _consoleSurface({required Widget child}) => Container(
+    decoration: BoxDecoration(
+      color: _kSurface,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: _kDivider),
+    ),
+    child: child,
+  );
 
   Widget _presetChips() {
     final ids = [...TerminalThemePresets.all.keys, 'custom'];
@@ -634,7 +747,9 @@ class _SettingsPageState extends State<SettingsPage>
     if (!ImageFilePicker.isSupported) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Image picker is not available on this platform.')),
+        const SnackBar(
+          content: Text('Image picker is not available on this platform.'),
+        ),
       );
       return;
     }
@@ -645,8 +760,9 @@ class _SettingsPageState extends State<SettingsPage>
     final id = await WallpaperStorage.importFrom(path);
     if (id == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Could not import image.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not import image.')));
       return;
     }
     if (!mounted) return;
@@ -789,10 +905,12 @@ class _SettingsPageState extends State<SettingsPage>
       decoration: const InputDecoration(
         isDense: true,
         contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: _kDivider),
+        ),
+        focusedBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: _kAccent),
+        ),
       ),
       items: [
         for (final f in options)
@@ -819,10 +937,12 @@ class _SettingsPageState extends State<SettingsPage>
       decoration: const InputDecoration(
         isDense: true,
         contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder:
-            UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: _kDivider),
+        ),
+        focusedBorder: UnderlineInputBorder(
+          borderSide: BorderSide(color: _kAccent),
+        ),
       ),
       items: [
         for (final f in options) DropdownMenuItem(value: f, child: Text(f)),
@@ -934,7 +1054,10 @@ class _SettingsPageState extends State<SettingsPage>
           children: [
             Text(label, style: const TextStyle(color: _kFg, fontSize: 13)),
             const Spacer(),
-            Text(display, style: const TextStyle(color: _kFgMuted, fontSize: 12)),
+            Text(
+              display,
+              style: const TextStyle(color: _kFgMuted, fontSize: 12),
+            ),
           ],
         ),
         if (hint != null) ...[
@@ -960,4 +1083,3 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 }
-
