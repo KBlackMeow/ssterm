@@ -401,6 +401,11 @@ Stream<LlmStreamEvent> _streamOpenAi(
     ],
     'max_tokens': 4096,
     'stream': true,
+    // Chat Completions sends stream usage only when explicitly requested.
+    // Limit this extension to our known OpenAI-compatible providers so custom
+    // endpoints are not rejected for an unsupported optional parameter.
+    if (provider.id == 'chatgpt' || isDeepSeek)
+      'stream_options': {'include_usage': true},
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
     if (tools.isNotEmpty) 'tool_choice': 'auto',
     if (tools.isNotEmpty) 'parallel_tool_calls': false,
