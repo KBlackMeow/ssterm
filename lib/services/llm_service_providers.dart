@@ -275,6 +275,7 @@ class OpenAiStreamAccumulator {
 
   String? finishReason;
   int malformedEventCount = 0;
+  int? reasoningTokenCount;
 
   List<LlmStreamEvent> addData(String data) {
     try {
@@ -282,6 +283,14 @@ class OpenAiStreamAccumulator {
       if (decoded is! Map<String, dynamic>) {
         malformedEventCount++;
         return const [];
+      }
+      final usage = decoded['usage'];
+      if (usage is Map) {
+        final details = usage['completion_tokens_details'];
+        if (details is Map) {
+          final tokens = details['reasoning_tokens'];
+          if (tokens is int && tokens >= 0) reasoningTokenCount = tokens;
+        }
       }
       final choices = decoded['choices'];
       if (choices is! List || choices.isEmpty) return const [];
@@ -431,6 +440,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
   yield LlmStreamEvent.diagnostics(
     finishReason: accumulator.finishReason,
     malformedEventCount: accumulator.malformedEventCount,
+    reasoningTokenCount: accumulator.reasoningTokenCount,
   );
 }
 

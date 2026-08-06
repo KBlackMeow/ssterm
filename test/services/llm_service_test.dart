@@ -81,6 +81,46 @@ void main() {
       expect(events.single.content, 'Recovered');
       expect(accumulator.finishReason, 'stop');
     });
+
+    test('retains exact reasoning usage from a terminal chunk', () {
+      final accumulator = OpenAiStreamAccumulator();
+
+      accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {
+              'delta': {},
+              'finish_reason': 'stop',
+            },
+          ],
+          'usage': {
+            'completion_tokens_details': {'reasoning_tokens': 37},
+          },
+        }),
+      );
+
+      expect(accumulator.reasoningTokenCount, 37);
+    });
+
+    test('ignores missing or invalid reasoning usage', () {
+      final accumulator = OpenAiStreamAccumulator();
+
+      accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {
+              'delta': {},
+              'finish_reason': 'stop',
+            },
+          ],
+          'usage': {
+            'completion_tokens_details': {'reasoning_tokens': '37'},
+          },
+        }),
+      );
+
+      expect(accumulator.reasoningTokenCount, isNull);
+    });
   });
 
   group('LlmService.incompleteStreamError', () {
