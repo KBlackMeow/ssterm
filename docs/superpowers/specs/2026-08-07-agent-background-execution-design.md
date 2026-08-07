@@ -70,6 +70,13 @@ tab's selected shell. For SSH tabs, execution uses a new SSH exec channel,
 not the interactive shell channel. The remote invocation starts by changing to
 the agent cwd with shell-safe quoting, then runs the requested command.
 
+The local runner must not use a bare `sh -c` regardless of the tab's selected
+shell. It uses the selected shell executable with explicit non-interactive
+arguments and a stable startup-environment snapshot captured when the agent
+context is created. That makes PATH, language toolchains, and user shell setup
+available without coupling commands to the visible PTY or re-running an
+interactive shell initialisation sequence on every call.
+
 ### `terminal_input` — intentional terminal typing
 
 Inputs:
@@ -109,8 +116,12 @@ The agent background context stores one cwd per tab.
 - New SSH tabs initialise it from the remote login directory once available.
 - A successful background command whose shell execution changes directory must
   update the stored cwd for subsequent background commands. The implementation
-  should use a private, unambiguous completion envelope containing both exit
-  status and final `pwd`, rather than parsing ordinary output.
+  should use a private, random-token completion envelope containing both exit
+  status and final `pwd`, rather than parsing ordinary output. For local
+  execution this metadata should travel on a private temporary file or pipe;
+  for SSH execution it must use the remote command's stderr stream and be
+  stripped before returning stderr to the model. It must never rely on a
+  marker scanned from terminal rendering.
 - Failed commands leave the stored cwd unchanged unless the final envelope
   proves a completed directory change; the initial implementation will keep
   the prior cwd on any nonzero exit to make the rule simple and predictable.
@@ -119,8 +130,10 @@ The agent background context stores one cwd per tab.
 
 ## Lifecycle and Safety
 
-- Background command cancellation terminates only its own local process or
-  SSH exec channel. It never sends Ctrl-C to the visible terminal.
+- Background command cancellation terminates only its own local process group
+  or SSH exec channel. It never sends Ctrl-C to the visible terminal. The
+  local target first requests graceful termination, then force-kills the whole
+  child process group after a short grace period so grandchildren do not leak.
 - Closing a tab cancels and disposes any background work for that tab.
 - At most one background command runs per tab at a time in the initial
   implementation. This preserves sequential agent semantics and makes cwd
@@ -130,7 +143,10 @@ The agent background context stores one cwd per tab.
   path when `submit` is true, because it can execute a command.
 - The existing approval policy remains the authority for dangerous operations.
 - Output limits are enforced independently for stdout and stderr. Results
-  report truncation rather than silently dropping data.
+  report truncation rather than silently dropping data. The executor continues
+  draining both streams after the inline limits are reached, and applies an
+  absolute byte watchdog that terminates a runaway task before it can exhaust
+  memory or disk.
 
 ## Architecture
 
@@ -138,7 +154,8 @@ Introduce a transport-independent `BackgroundCommandExecutor` with a target
 interface that supplies cwd, execution, cancellation, and disposal behaviour.
 
 - `LocalBackgroundCommandTarget` starts the selected shell without a PTY,
-  captures stdout/stderr separately, and terminates the child process on
+  captures stdout/stderr separately, uses the tab's immutable startup
+  environment snapshot, and terminates the process group on
   timeout/cancellation.
 - `SshBackgroundCommandTarget` opens an SSH exec channel, collects its stdout,
   stderr, and exit status, and closes that channel on timeout/cancellation.
@@ -165,7 +182,8 @@ interface that supplies cwd, execution, cancellation, and disposal behaviour.
 ## Verification
 
 - Unit tests for local command stdout/stderr/exit status, timeout,
-  cancellation, truncation, quoting, and cwd persistence.
+  cancellation, process-tree cleanup, truncation, quoting, startup-environment
+  snapshotting, and cwd persistence.
 - Unit tests for SSH target command construction, cwd envelope parsing,
   cancellation, disconnect errors, and independent stdout/stderr collection.
 - Registry and provider-contract tests covering all new tool schemas.
