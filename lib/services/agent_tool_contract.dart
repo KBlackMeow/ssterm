@@ -300,8 +300,7 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
     required int pinnedItemCount,
     required int recentItemCount,
   }) {
-    final pinned = pinnedItemCount.clamp(0, _items.length);
-    final start = _summaryIndexAfter(pinned);
+    final start = _safeCompactionStart(pinnedItemCount);
     var end = _items.length;
     var kept = 0;
     while (end > start && kept < recentItemCount) {
@@ -330,7 +329,7 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
       recentItemCount: recentItemCount,
     );
     if (candidate.isEmpty) return false;
-    final start = _summaryIndexAfter(pinnedItemCount.clamp(0, _items.length));
+    final start = _safeCompactionStart(pinnedItemCount);
     final end = start + candidate.length;
     _items.replaceRange(start, end, [
       AgentConversationItem.text(
@@ -341,6 +340,29 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
     return true;
   }
 
+  /// Returns the compaction start index, ensuring we never split a
+  /// tool_calls/tool_results pair at the boundary between pinned items and
+  /// the compaction candidate. If [pinnedItemCount] falls between an
+  /// assistant tool_calls and its tool_results, the tool_calls is moved
+  /// into the candidate so the pair stays together.
+  int _safeCompactionStart(int pinnedItemCount) {
+    final pinned = pinnedItemCount.clamp(0, _items.length);
+    var start = pinned;
+    if (start < _items.length &&
+        ConversationCompactor.unwrap(_items[start].content) != null) {
+      start++; // skip past a summary that sits right at the boundary
+    }
+    // Don't let the start boundary split a tool_calls/tool_results pair.
+    if (start < _items.length &&
+        start > 0 &&
+        _items[start].toolResults.isNotEmpty &&
+        _items[start - 1].toolCalls.isNotEmpty) {
+      start--; // pull the tool_calls into the candidate
+    }
+    return start;
+  }
+
+  @Deprecated('Use _safeCompactionStart instead')
   int _summaryIndexAfter(int pinned) {
     if (pinned < _items.length &&
         ConversationCompactor.unwrap(_items[pinned].content) != null) {

@@ -51,4 +51,49 @@ void main() {
       expect(history.last.content, 'next');
     },
   );
+
+  test(
+    'pinned boundary never splits tool_calls from its tool_results',
+    () {
+      final call = AgentToolCall.fromRaw(
+        id: 'call_1',
+        name: 'bash',
+        arguments: const {'command': 'pwd'},
+      )!;
+      // The tool_calls is inside the pinned head, its tool_results is not.
+      final history = AgentConversationHistory()
+        ..add(const {'role': 'user', 'content': 'goal'})
+        ..add(AgentConversationItem.assistantToolCalls([call]))
+        ..add(
+          AgentConversationItem.toolResults(const [
+            AgentToolResult(toolCallId: 'call_1', content: '/tmp'),
+          ]),
+        )
+        ..add(const {'role': 'assistant', 'content': 'done'})
+        ..add(const {'role': 'user', 'content': 'next'});
+
+      // pinnedItemCount=2 means [goal, tool_calls] are pinned.
+      // Without the fix, tool_results at index 2 would be compacted
+      // while tool_calls at index 1 stays pinned — breaking the API protocol.
+      final changed = history.replaceWithSummary(
+        summary: 'Ran pwd.',
+        pinnedItemCount: 2,
+        recentItemCount: 2,
+      );
+
+      expect(changed, isTrue);
+      // After fix: tool_calls must not survive orphaned — either both
+      // tool_calls and tool_results survive, or neither does.
+      final hasToolCalls = history.any((item) => item.toolCalls.isNotEmpty);
+      final hasToolResults = history.any((item) => item.toolResults.isNotEmpty);
+      if (hasToolCalls) {
+        expect(hasToolResults, isTrue,
+            reason: 'tool_calls without tool_results breaks the API');
+      }
+      if (hasToolResults) {
+        expect(hasToolCalls, isTrue,
+            reason: 'tool_results without tool_calls is orphaned data');
+      }
+    },
+  );
 }
