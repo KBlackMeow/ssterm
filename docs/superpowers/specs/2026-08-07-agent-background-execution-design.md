@@ -2,14 +2,17 @@
 
 ## Goal
 
-Make the agent execute shell commands through a stable, independent background
-channel by default, following the Claude Code interaction model. The visible
-terminal remains a separate, user-owned interactive session that the agent can
-operate only through explicit tools.
+Make the agent execute shell commands through a stable, independent,
+out-of-terminal channel by default, following the Claude Code interaction
+model. The visible terminal remains a separate, user-owned interactive session
+that the agent can operate only through explicit tools.
 
 This replaces the current default path, where the agent submits commands into
 the active terminal and depends on OSC 133 or a terminal-buffer sentinel to
-detect completion.
+detect completion. “Background” in this document means that execution is
+separate from the visible terminal; the default `bash` call still waits for
+completion and returns a result. A detached long-running task facility is a
+separate future capability, not part of this change.
 
 ## Scope
 
@@ -91,10 +94,18 @@ explicit user request to operate the terminal.
 
 ### `terminal_observe` — terminal output observation
 
-Reads the current visible terminal buffer, or output accumulated since an
-explicit observation cursor. It returns bounded, ANSI-stripped text plus a
-cursor suitable for the next incremental observation. It must disclose when
-the result was truncated or the cursor has expired.
+Reads an ANSI-stripped transcript of bytes received from the terminal transport,
+or output accumulated since an explicit observation cursor. It returns bounded
+text plus a cursor suitable for the next incremental observation. It must
+disclose when the result was truncated or the cursor has expired.
+
+This requires a bounded, per-pane transcript ring owned by `OutputPipe` (or a
+small adjacent service), populated before terminal rendering. Reading only the
+xterm screen buffer is not sufficient: full-screen applications, cursor
+rewrites, scrollback trimming, and ANSI control sequences make it unsuitable
+as a reliable incremental-output source. A separately available `snapshot`
+mode may return the rendered screen when that is explicitly what the agent
+needs.
 
 Observation does not infer whether an interactive command has completed.
 
@@ -134,6 +145,9 @@ The agent background context stores one cwd per tab.
   or SSH exec channel. It never sends Ctrl-C to the visible terminal. The
   local target first requests graceful termination, then force-kills the whole
   child process group after a short grace period so grandchildren do not leak.
+  The SSH target first sends `SIGTERM` through `SSHSession.kill`, waits briefly
+  for the channel to close, then closes that exec session; it must not close
+  the shared `SSHClient` transport.
 - Closing a tab cancels and disposes any background work for that tab.
 - At most one background command runs per tab at a time in the initial
   implementation. This preserves sequential agent semantics and makes cwd
@@ -142,6 +156,10 @@ The agent background context stores one cwd per tab.
   `terminal_execute`; `terminal_input` receives its own conservative review
   path when `submit` is true, because it can execute a command.
 - The existing approval policy remains the authority for dangerous operations.
+- `terminal_input` uses the same command review when `submit` is true. With
+  `submit` false it is an intentional keystroke tool (for example, responding
+  to a prompt), so its text is treated as sensitive tool input and redacted in
+  cards/logs instead of being parsed as a shell command.
 - Output limits are enforced independently for stdout and stderr. Results
   report truncation rather than silently dropping data. The executor continues
   draining both streams after the inline limits are reached, and applies an
@@ -161,6 +179,9 @@ interface that supplies cwd, execution, cancellation, and disposal behaviour.
   stderr, and exit status, and closes that channel on timeout/cancellation.
 - A `BackgroundCommandContext` is stored on `_Tab` and owns the per-tab cwd
   plus serialization of executions.
+- A `TerminalTranscriptBuffer` is stored per terminal pane. It owns monotonic
+  observation cursors, bounded decoded output, and snapshot retrieval; it is
+  independent of OSC 133 command capture.
 - The existing `TerminalCommandExecutor` remains focused solely on
   `terminal_execute`.
 - The agent tool registry exposes `bash`, `terminal_input`, `terminal_observe`,
