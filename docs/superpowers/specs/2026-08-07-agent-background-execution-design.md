@@ -53,6 +53,29 @@ This deliberate isolation prevents user activity, full-screen applications,
 split-pane routing, OSC integration availability, and terminal-buffer parsing
 from affecting normal agent command execution.
 
+## IDE-Style Agent Host
+
+The agent panel is the host for an agent session; the visible terminal is not
+its transport. For each tab, the host owns the conversation, background-command
+context, permission state, and cancellation generation. Tool calls are routed
+from that host to one of two domains:
+
+- **Background domain**: `bash` runs through the independent local or SSH
+  target and returns a completed result to the agent loop.
+- **Terminal domain**: the three explicit terminal tools act on the selected
+  visible pane only when called.
+
+The host must associate every pending permission prompt and command with a
+generation/request id. Cancelling a turn rejects only that request, cancels its
+background target when appropriate, and ignores late results. It must not tear
+down the tab's terminal session or SSH transport.
+
+The initial implementation deliberately has no detached agent task manager:
+`bash` waits for a bounded result, while long-running processes time out or
+are cancelled. If persistent background jobs are introduced later, they need
+their own task ids, output retention, completion notifications, and tab/agent
+lifecycle rules rather than being hidden behind default `bash`.
+
 ## Tool Contract
 
 ### `bash` — default background execution
