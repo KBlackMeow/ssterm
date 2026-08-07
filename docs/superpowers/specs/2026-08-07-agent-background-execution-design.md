@@ -1,11 +1,11 @@
-# Agent Background Execution Design
+# Agent Out-of-Terminal Execution Design
 
 ## Goal
 
 Make the agent execute shell commands through a stable, independent,
-out-of-terminal channel by default, following the Claude Code interaction
-model. The visible terminal remains a separate, user-owned interactive session
-that the agent can operate only through explicit tools.
+out-of-terminal channel by default, matching the intended IDE-plugin
+interaction model. The visible terminal remains a separate, user-owned
+interactive session that the agent can operate only through explicit tools.
 
 This replaces the current default path, where the agent submits commands into
 the active terminal and depends on OSC 133 or a terminal-buffer sentinel to
@@ -30,6 +30,9 @@ Out of scope:
 - Trying to mirror arbitrary interactive shell state, aliases, functions,
   tmux sessions, REPL state, or environment mutations into the background
   executor.
+- Reproducing Claude CLI's shell snapshot, persistent task-output storage, or
+  CLI-specific background-task features. Those are separate product concerns
+  and are not needed for the IDE-style default execution model.
 - Changing ordinary user-entered terminal input or terminal rendering.
 
 ## Execution Contexts
@@ -75,10 +78,11 @@ the agent cwd with shell-safe quoting, then runs the requested command.
 
 The local runner must not use a bare `sh -c` regardless of the tab's selected
 shell. It uses the selected shell executable with explicit non-interactive
-arguments and a stable startup-environment snapshot captured when the agent
-context is created. That makes PATH, language toolchains, and user shell setup
-available without coupling commands to the visible PTY or re-running an
-interactive shell initialisation sequence on every call.
+arguments and an immutable baseline environment captured from SSTerm when the
+tab's agent context is created. The baseline may include per-shell variables
+already calculated by SSTerm, but it does not load, snapshot, or attempt to
+mirror the live terminal's aliases, functions, `source` effects, or later
+environment mutations.
 
 ### `terminal_input` — intentional terminal typing
 
@@ -172,9 +176,8 @@ Introduce a transport-independent `BackgroundCommandExecutor` with a target
 interface that supplies cwd, execution, cancellation, and disposal behaviour.
 
 - `LocalBackgroundCommandTarget` starts the selected shell without a PTY,
-  captures stdout/stderr separately, uses the tab's immutable startup
-  environment snapshot, and terminates the process group on
-  timeout/cancellation.
+  captures stdout/stderr separately, uses the tab's immutable baseline
+  environment, and terminates the process group on timeout/cancellation.
 - `SshBackgroundCommandTarget` opens an SSH exec channel, collects its stdout,
   stderr, and exit status, and closes that channel on timeout/cancellation.
 - A `BackgroundCommandContext` is stored on `_Tab` and owns the per-tab cwd
