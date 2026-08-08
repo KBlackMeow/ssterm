@@ -1495,6 +1495,16 @@ Done.
   });
 
   group('Agent model catalogues', () {
+    test('compatible presets expose protocol and current model', () {
+      expect(ProviderConfig.kimi().protocol, ProviderProtocol.openAiCompatible);
+      expect(ProviderConfig.kimi().baseUrl, 'https://api.moonshot.cn/v1');
+      expect(ProviderConfig.kimi().models.first, 'kimi-k2.6');
+      expect(
+        ProviderConfig.minimax().protocol,
+        ProviderProtocol.anthropicCompatible,
+      );
+    });
+
     test('new configurations expose the current cloud model catalogues', () {
       expect(
         ProviderConfig.chatgpt().models,
@@ -1658,7 +1668,7 @@ Done.
       // mentally), with Ollama appended at the tail.
       expect(
         ids,
-        equals(['chatgpt', 'claude', 'gemini', 'deepseek', 'ollama']),
+        equals(ProviderConfig.builtIns.map((provider) => provider.id).toList()),
       );
       // The back-filled Ollama entry must inherit factory defaults
       // (including the no-key flag) — otherwise the dispatcher would

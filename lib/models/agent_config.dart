@@ -2,6 +2,39 @@ import 'mcp_server_config.dart';
 
 // ── Provider ids ──────────────────────────────────────────────────────────
 
+/// HTTP wire format used for an Agent provider.
+///
+/// Compatible providers must select one protocol deliberately.  Guessing by
+/// URL or model name is unsafe because a tool-result continuation can only be
+/// encoded in the same protocol as its original tool call.
+enum ProviderProtocol {
+  openAiCompatible,
+  anthropicCompatible,
+  geminiNative,
+  ollamaNative;
+
+  String get id => switch (this) {
+    ProviderProtocol.openAiCompatible => 'openai-compatible',
+    ProviderProtocol.anthropicCompatible => 'anthropic-compatible',
+    ProviderProtocol.geminiNative => 'gemini-native',
+    ProviderProtocol.ollamaNative => 'ollama-native',
+  };
+
+  String get displayName => switch (this) {
+    ProviderProtocol.openAiCompatible => 'OpenAI-compatible',
+    ProviderProtocol.anthropicCompatible => 'Claude-compatible',
+    ProviderProtocol.geminiNative => 'Gemini native',
+    ProviderProtocol.ollamaNative => 'Ollama native',
+  };
+
+  static ProviderProtocol? tryFromId(String? id) {
+    for (final protocol in ProviderProtocol.values) {
+      if (protocol.id == id) return protocol;
+    }
+    return null;
+  }
+}
+
 enum LlmProvider {
   chatgpt,
   claude,
@@ -68,6 +101,7 @@ enum LlmProvider {
 class ProviderConfig {
   final String id;
   String displayName;
+  final ProviderProtocol protocol;
   bool enabled;
   String? baseUrl;
   List<String> models;
@@ -88,6 +122,7 @@ class ProviderConfig {
   ProviderConfig({
     required this.id,
     required this.displayName,
+    this.protocol = ProviderProtocol.openAiCompatible,
     this.enabled = false,
     this.baseUrl,
     List<String>? models,
@@ -99,6 +134,7 @@ class ProviderConfig {
   factory ProviderConfig.chatgpt() => ProviderConfig(
     id: 'chatgpt',
     displayName: 'ChatGPT (OpenAI)',
+    protocol: ProviderProtocol.openAiCompatible,
     baseUrl: 'https://api.openai.com/v1',
     models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     modelContextWindows: {
@@ -111,6 +147,7 @@ class ProviderConfig {
   factory ProviderConfig.claude() => ProviderConfig(
     id: 'claude',
     displayName: 'Claude (Anthropic)',
+    protocol: ProviderProtocol.anthropicCompatible,
     baseUrl: 'https://api.anthropic.com',
     models: ['claude-opus-4-8', 'claude-sonnet-4-6'],
     modelContextWindows: {
@@ -122,6 +159,7 @@ class ProviderConfig {
   factory ProviderConfig.gemini() => ProviderConfig(
     id: 'gemini',
     displayName: 'Gemini (Google)',
+    protocol: ProviderProtocol.geminiNative,
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     models: ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
     modelContextWindows: {
@@ -134,6 +172,7 @@ class ProviderConfig {
   factory ProviderConfig.deepseek() => ProviderConfig(
     id: 'deepseek',
     displayName: 'DeepSeek',
+    protocol: ProviderProtocol.openAiCompatible,
     baseUrl: 'https://api.deepseek.com',
     models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
     modelContextWindows: {
@@ -156,10 +195,155 @@ class ProviderConfig {
   factory ProviderConfig.ollama() => ProviderConfig(
     id: 'ollama',
     displayName: 'Ollama (local)',
+    protocol: ProviderProtocol.ollamaNative,
     baseUrl: 'http://localhost:11434',
     requiresApiKey: false,
     models: const [],
   );
+
+  factory ProviderConfig.openrouter() => ProviderConfig(
+    id: 'openrouter',
+    displayName: 'OpenRouter',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: ['anthropic/claude-sonnet-4.6', 'moonshotai/kimi-k2.6'],
+    modelContextWindows: {
+      'anthropic/claude-sonnet-4.6': 200000,
+      'moonshotai/kimi-k2.6': 256000,
+    },
+  );
+
+  factory ProviderConfig.kimi() => ProviderConfig(
+    id: 'kimi',
+    displayName: 'Kimi (Moonshot AI)',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.moonshot.cn/v1',
+    models: ['kimi-k2.6'],
+    modelContextWindows: {'kimi-k2.6': 256000},
+  );
+
+  factory ProviderConfig.qwen() => ProviderConfig(
+    id: 'qwen',
+    displayName: 'Qwen (Alibaba Model Studio)',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen3.7-plus'],
+    modelContextWindows: {'qwen3.7-plus': 128000},
+  );
+
+  factory ProviderConfig.groq() => ProviderConfig(
+    id: 'groq',
+    displayName: 'Groq',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.groq.com/openai/v1',
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    modelContextWindows: {
+      'openai/gpt-oss-120b': 128000,
+      'openai/gpt-oss-20b': 128000,
+    },
+  );
+
+  factory ProviderConfig.mistral() => ProviderConfig(
+    id: 'mistral',
+    displayName: 'Mistral AI',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.mistral.ai/v1',
+    models: ['devstral-latest', 'mistral-large-latest'],
+    modelContextWindows: {
+      'devstral-latest': 256000,
+      'mistral-large-latest': 256000,
+    },
+  );
+
+  factory ProviderConfig.siliconflow() => ProviderConfig(
+    id: 'siliconflow',
+    displayName: 'SiliconFlow',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    models: ['deepseek-ai/DeepSeek-V3.2'],
+    modelContextWindows: {'deepseek-ai/DeepSeek-V3.2': 128000},
+  );
+
+  factory ProviderConfig.together() => ProviderConfig(
+    id: 'together',
+    displayName: 'Together AI',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.together.xyz/v1',
+    models: ['moonshotai/Kimi-K2.5'],
+    modelContextWindows: {'moonshotai/Kimi-K2.5': 128000},
+  );
+
+  factory ProviderConfig.fireworks() => ProviderConfig(
+    id: 'fireworks',
+    displayName: 'Fireworks AI',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    models: ['accounts/fireworks/models/kimi-k2p5'],
+    modelContextWindows: {'accounts/fireworks/models/kimi-k2p5': 128000},
+  );
+
+  factory ProviderConfig.minimax() => ProviderConfig(
+    id: 'minimax',
+    displayName: 'MiniMax',
+    protocol: ProviderProtocol.anthropicCompatible,
+    baseUrl: 'https://api.minimax.io/anthropic',
+    models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
+    modelContextWindows: {
+      'MiniMax-M2.7': 204800,
+      'MiniMax-M2.7-highspeed': 204800,
+    },
+  );
+
+  factory ProviderConfig.openrouterAnthropic() => ProviderConfig(
+    id: 'openrouter-anthropic',
+    displayName: 'OpenRouter (Claude-compatible)',
+    protocol: ProviderProtocol.anthropicCompatible,
+    baseUrl: 'https://openrouter.ai/api',
+    models: ['anthropic/claude-sonnet-4.6'],
+    modelContextWindows: {'anthropic/claude-sonnet-4.6': 200000},
+  );
+
+  factory ProviderConfig.custom({
+    required String id,
+    required String displayName,
+    required ProviderProtocol protocol,
+    required String baseUrl,
+    required List<String> models,
+    Map<String, int>? modelContextWindows,
+  }) {
+    assert(
+      protocol == ProviderProtocol.openAiCompatible ||
+          protocol == ProviderProtocol.anthropicCompatible,
+    );
+    assert(baseUrl.isNotEmpty);
+    assert(models.isNotEmpty);
+    return ProviderConfig(
+      id: id,
+      displayName: displayName,
+      protocol: protocol,
+      baseUrl: baseUrl,
+      models: models,
+      modelContextWindows: modelContextWindows,
+    );
+  }
+
+  static List<ProviderConfig> get builtIns => [
+    ProviderConfig.chatgpt(),
+    ProviderConfig.claude(),
+    ProviderConfig.gemini(),
+    ProviderConfig.deepseek(),
+    ProviderConfig.ollama(),
+    ProviderConfig.openrouter(),
+    ProviderConfig.kimi(),
+    ProviderConfig.qwen(),
+    ProviderConfig.groq(),
+    ProviderConfig.mistral(),
+    ProviderConfig.siliconflow(),
+    ProviderConfig.together(),
+    ProviderConfig.fireworks(),
+    ProviderConfig.minimax(),
+    ProviderConfig.openrouterAnthropic(),
+  ];
 
   static ProviderConfig fromId(String id) {
     switch (id) {
@@ -173,6 +357,26 @@ class ProviderConfig {
         return ProviderConfig.deepseek();
       case 'ollama':
         return ProviderConfig.ollama();
+      case 'openrouter':
+        return ProviderConfig.openrouter();
+      case 'kimi':
+        return ProviderConfig.kimi();
+      case 'qwen':
+        return ProviderConfig.qwen();
+      case 'groq':
+        return ProviderConfig.groq();
+      case 'mistral':
+        return ProviderConfig.mistral();
+      case 'siliconflow':
+        return ProviderConfig.siliconflow();
+      case 'together':
+        return ProviderConfig.together();
+      case 'fireworks':
+        return ProviderConfig.fireworks();
+      case 'minimax':
+        return ProviderConfig.minimax();
+      case 'openrouter-anthropic':
+        return ProviderConfig.openrouterAnthropic();
       default:
         throw ArgumentError('Unknown provider: $id');
     }
@@ -181,6 +385,7 @@ class ProviderConfig {
   Map<String, dynamic> toJson() => {
     'id': id,
     'displayName': displayName,
+    'protocol': protocol.id,
     'enabled': enabled,
     if (baseUrl != null) 'baseUrl': baseUrl,
     'models': models,
@@ -201,10 +406,12 @@ class ProviderConfig {
     if (id is! String || id.isEmpty) return null;
     String fallbackName;
     bool fallbackRequiresKey = true;
+    ProviderProtocol fallbackProtocol = ProviderProtocol.openAiCompatible;
     try {
       final factory = ProviderConfig.fromId(id);
       fallbackName = factory.displayName;
       fallbackRequiresKey = factory.requiresApiKey;
+      fallbackProtocol = factory.protocol;
     } catch (_) {
       // Unknown provider id (third-party, deprecated) — keep the entry
       // anyway so the user doesn't lose their stored API key list, but
@@ -214,6 +421,9 @@ class ProviderConfig {
     return ProviderConfig(
       id: id,
       displayName: json['displayName'] as String? ?? fallbackName,
+      protocol:
+          ProviderProtocol.tryFromId(json['protocol'] as String?) ??
+          fallbackProtocol,
       enabled: json['enabled'] as bool? ?? false,
       baseUrl: json['baseUrl'] as String?,
       models:
@@ -237,6 +447,7 @@ class ProviderConfig {
 
   ProviderConfig copyWith({
     String? displayName,
+    ProviderProtocol? protocol,
     bool? enabled,
     String? baseUrl,
     List<String>? models,
@@ -245,6 +456,7 @@ class ProviderConfig {
   }) => ProviderConfig(
     id: id,
     displayName: displayName ?? this.displayName,
+    protocol: protocol ?? this.protocol,
     enabled: enabled ?? this.enabled,
     baseUrl: baseUrl ?? this.baseUrl,
     models: models ?? List.of(this.models),
@@ -510,15 +722,7 @@ class AgentConfig {
     List<McpServerConfig>? mcpServers,
   }) : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
        mcpServers = mcpServers ?? [],
-       providers =
-           providers ??
-           [
-             ProviderConfig.chatgpt(),
-             ProviderConfig.claude(),
-             ProviderConfig.gemini(),
-             ProviderConfig.deepseek(),
-             ProviderConfig.ollama(),
-           ];
+       providers = providers ?? ProviderConfig.builtIns;
 
   /// The currently enabled provider matching [defaultProvider], or the first
   /// enabled provider if none is explicitly selected.
@@ -600,7 +804,7 @@ class AgentConfig {
     // know to append the newcomer.  Appending (vs prepending) keeps
     // the user's existing visual order intact.
     final presentIds = providers.map((p) => p.id).toSet();
-    for (final builtin in LlmProvider.values) {
+    for (final builtin in ProviderConfig.builtIns) {
       if (presentIds.contains(builtin.id)) continue;
       try {
         providers.add(ProviderConfig.fromId(builtin.id));
