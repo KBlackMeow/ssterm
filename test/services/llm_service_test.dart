@@ -1520,6 +1520,13 @@ Done.
         ProviderConfig.minimax().protocol,
         ProviderProtocol.anthropicCompatible,
       );
+      expect(ProviderConfig.glm().protocol, ProviderProtocol.openAiCompatible);
+      expect(
+        ProviderConfig.glm().baseUrl,
+        'https://open.bigmodel.cn/api/paas/v4',
+      );
+      expect(ProviderConfig.glm().models, ['glm-5.2', 'glm-5.1', 'glm-4.7']);
+      expect(ProviderConfig.glm().modelContextWindows['glm-5.2'], 1000000);
     });
 
     test('new configurations expose the current cloud model catalogues', () {

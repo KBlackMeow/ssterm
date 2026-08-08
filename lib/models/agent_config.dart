@@ -231,6 +231,19 @@ class ProviderConfig {
     modelContextWindows: {'qwen3.7-plus': 128000},
   );
 
+  factory ProviderConfig.glm() => ProviderConfig(
+    id: 'glm',
+    displayName: 'GLM (Zhipu AI)',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    models: ['glm-5.2', 'glm-5.1', 'glm-4.7'],
+    modelContextWindows: {
+      'glm-5.2': 1000000,
+      'glm-5.1': 200000,
+      'glm-4.7': 200000,
+    },
+  );
+
   factory ProviderConfig.groq() => ProviderConfig(
     id: 'groq',
     displayName: 'Groq',
@@ -336,6 +349,7 @@ class ProviderConfig {
     ProviderConfig.openrouter(),
     ProviderConfig.kimi(),
     ProviderConfig.qwen(),
+    ProviderConfig.glm(),
     ProviderConfig.groq(),
     ProviderConfig.mistral(),
     ProviderConfig.siliconflow(),
@@ -363,6 +377,8 @@ class ProviderConfig {
         return ProviderConfig.kimi();
       case 'qwen':
         return ProviderConfig.qwen();
+      case 'glm':
+        return ProviderConfig.glm();
       case 'groq':
         return ProviderConfig.groq();
       case 'mistral':
