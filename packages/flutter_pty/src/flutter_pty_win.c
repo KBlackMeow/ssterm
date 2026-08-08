@@ -708,3 +708,68 @@ FFI_PLUGIN_EXPORT char *pty_error()
 {
     return error_message;
 }
+
+typedef struct JobHandle
+{
+    HANDLE handle;
+} JobHandle;
+
+FFI_PLUGIN_EXPORT JobHandle *job_create_kill_on_close(void)
+{
+    HANDLE job = CreateJobObjectW(NULL, NULL);
+    if (job == NULL)
+    {
+        return NULL;
+    }
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = {0};
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info,
+            sizeof(info)))
+    {
+        CloseHandle(job);
+        return NULL;
+    }
+    JobHandle *result = calloc(1, sizeof(JobHandle));
+    if (result == NULL)
+    {
+        CloseHandle(job);
+        return NULL;
+    }
+    result->handle = job;
+    return result;
+}
+
+FFI_PLUGIN_EXPORT int job_assign_pid(JobHandle *handle, int pid)
+{
+    if (handle == NULL || handle->handle == NULL)
+        return ERROR_INVALID_HANDLE;
+    HANDLE process = OpenProcess(
+        PROCESS_SET_QUOTA | PROCESS_TERMINATE,
+        FALSE,
+        (DWORD)pid);
+    if (process == NULL)
+        return (int)GetLastError();
+    BOOL ok = AssignProcessToJobObject(handle->handle, process);
+    DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(process);
+    return (int)error;
+}
+
+FFI_PLUGIN_EXPORT int job_terminate(JobHandle *handle)
+{
+    if (handle == NULL || handle->handle == NULL)
+        return ERROR_INVALID_HANDLE;
+    return TerminateJobObject(handle->handle, 1) ? ERROR_SUCCESS : (int)GetLastError();
+}
+
+FFI_PLUGIN_EXPORT void job_close(JobHandle *handle)
+{
+    if (handle == NULL)
+        return;
+    if (handle->handle != NULL)
+        CloseHandle(handle->handle);
+    free(handle);
+}
