@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'agent_tool_contract.dart';
+
 /// Model-aware token limits for agent conversation compaction.
 class AgentContextBudget {
   const AgentContextBudget._({
@@ -48,5 +52,26 @@ class AgentContextBudget {
     }
     return estimatedTokens >= autoCompactAtTokens ||
         itemCount >= itemFallbackThreshold;
+  }
+
+  /// Conservative cross-provider estimate used until an adapter reports exact
+  /// usage. UTF-8 bytes / 3 is deliberately safer for CJK and JSON-heavy tool
+  /// payloads than the common English-only characters / 4 shortcut.
+  static int estimateHistoryTokens(Iterable<AgentConversationItem> items) {
+    var bytes = 0;
+    for (final item in items) {
+      bytes += utf8.encode(item.role ?? '').length;
+      bytes += utf8.encode(item.content ?? '').length;
+      for (final call in item.toolCalls) {
+        bytes += utf8.encode(call.id).length;
+        bytes += utf8.encode(call.name).length;
+        bytes += utf8.encode(jsonEncode(call.arguments)).length;
+      }
+      for (final result in item.toolResults) {
+        bytes += utf8.encode(result.toolCallId).length;
+        bytes += utf8.encode(result.content).length;
+      }
+    }
+    return (bytes / 3).ceil();
   }
 }

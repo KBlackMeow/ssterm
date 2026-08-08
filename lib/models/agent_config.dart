@@ -7,6 +7,7 @@ enum LlmProvider {
   claude,
   gemini,
   deepseek,
+
   /// Local Ollama server (https://ollama.ai).  Uses the native `/api/chat`
   /// NDJSON streaming endpoint (NOT the OpenAI-compat shim) so we get
   /// first-class access to the `thinking` channel from reasoning models
@@ -70,6 +71,7 @@ class ProviderConfig {
   bool enabled;
   String? baseUrl;
   List<String> models;
+  Map<String, int> modelContextWindows;
 
   /// True iff this provider requires a per-user API key.  Cloud providers
   /// (OpenAI/Anthropic/Gemini/DeepSeek) all do; local-only providers like
@@ -89,50 +91,56 @@ class ProviderConfig {
     this.enabled = false,
     this.baseUrl,
     List<String>? models,
+    Map<String, int>? modelContextWindows,
     this.requiresApiKey = true,
-  }) : models = models ?? [];
+  }) : models = models ?? [],
+       modelContextWindows = modelContextWindows ?? {};
 
   factory ProviderConfig.chatgpt() => ProviderConfig(
-        id: 'chatgpt',
-        displayName: 'ChatGPT (OpenAI)',
-        baseUrl: 'https://api.openai.com/v1',
-        models: [
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-        ],
-      );
+    id: 'chatgpt',
+    displayName: 'ChatGPT (OpenAI)',
+    baseUrl: 'https://api.openai.com/v1',
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    modelContextWindows: {
+      'gpt-5.6-sol': 128000,
+      'gpt-5.6-terra': 128000,
+      'gpt-5.6-luna': 128000,
+    },
+  );
 
   factory ProviderConfig.claude() => ProviderConfig(
-        id: 'claude',
-        displayName: 'Claude (Anthropic)',
-        baseUrl: 'https://api.anthropic.com',
-        models: [
-          'claude-opus-4-8',
-          'claude-sonnet-4-6',
-        ],
-      );
+    id: 'claude',
+    displayName: 'Claude (Anthropic)',
+    baseUrl: 'https://api.anthropic.com',
+    models: ['claude-opus-4-8', 'claude-sonnet-4-6'],
+    modelContextWindows: {
+      'claude-opus-4-8': 200000,
+      'claude-sonnet-4-6': 200000,
+    },
+  );
 
   factory ProviderConfig.gemini() => ProviderConfig(
-        id: 'gemini',
-        displayName: 'Gemini (Google)',
-        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-        models: [
-          'gemini-3.6-flash',
-          'gemini-3.5-flash',
-          'gemini-3.5-flash-lite',
-        ],
-      );
+    id: 'gemini',
+    displayName: 'Gemini (Google)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    models: ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
+    modelContextWindows: {
+      'gemini-3.6-flash': 128000,
+      'gemini-3.5-flash': 128000,
+      'gemini-3.5-flash-lite': 128000,
+    },
+  );
 
   factory ProviderConfig.deepseek() => ProviderConfig(
-        id: 'deepseek',
-        displayName: 'DeepSeek',
-        baseUrl: 'https://api.deepseek.com',
-        models: [
-          'deepseek-v4-pro',
-          'deepseek-v4-flash',
-        ],
-      );
+    id: 'deepseek',
+    displayName: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+    modelContextWindows: {
+      'deepseek-v4-pro': 128000,
+      'deepseek-v4-flash': 128000,
+    },
+  );
 
   /// Local Ollama daemon (https://ollama.ai).  Default `baseUrl` is the
   /// loopback bind Ollama ships with; users running it on another machine
@@ -146,12 +154,12 @@ class ProviderConfig {
   /// Settings UI's "+" affordance than to ship phantom defaults that
   /// fail with `model not found` on first dispatch.
   factory ProviderConfig.ollama() => ProviderConfig(
-        id: 'ollama',
-        displayName: 'Ollama (local)',
-        baseUrl: 'http://localhost:11434',
-        requiresApiKey: false,
-        models: const [],
-      );
+    id: 'ollama',
+    displayName: 'Ollama (local)',
+    baseUrl: 'http://localhost:11434',
+    requiresApiKey: false,
+    models: const [],
+  );
 
   static ProviderConfig fromId(String id) {
     switch (id) {
@@ -171,16 +179,18 @@ class ProviderConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'enabled': enabled,
-        if (baseUrl != null) 'baseUrl': baseUrl,
-        'models': models,
-        // Persisted so a user-defined provider's "no-auth" flag round-trips.
-        // Built-in providers don't strictly need it (the factory hard-codes
-        // their `requiresApiKey`) but it keeps the JSON self-describing.
-        'requiresApiKey': requiresApiKey,
-      };
+    'id': id,
+    'displayName': displayName,
+    'enabled': enabled,
+    if (baseUrl != null) 'baseUrl': baseUrl,
+    'models': models,
+    if (modelContextWindows.isNotEmpty)
+      'modelContextWindows': modelContextWindows,
+    // Persisted so a user-defined provider's "no-auth" flag round-trips.
+    // Built-in providers don't strictly need it (the factory hard-codes
+    // their `requiresApiKey`) but it keeps the JSON self-describing.
+    'requiresApiKey': requiresApiKey,
+  };
 
   /// Parses a single provider entry.  Returns `null` for malformed or
   /// unknown providers — the caller is expected to skip those rather than
@@ -206,12 +216,15 @@ class ProviderConfig {
       displayName: json['displayName'] as String? ?? fallbackName,
       enabled: json['enabled'] as bool? ?? false,
       baseUrl: json['baseUrl'] as String?,
-      models: (json['models'] as List<dynamic>?)
+      models:
+          (json['models'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           [],
-      requiresApiKey:
-          json['requiresApiKey'] as bool? ?? fallbackRequiresKey,
+      modelContextWindows: _parseModelContextWindows(
+        json['modelContextWindows'],
+      ),
+      requiresApiKey: json['requiresApiKey'] as bool? ?? fallbackRequiresKey,
     );
   }
 
@@ -227,16 +240,27 @@ class ProviderConfig {
     bool? enabled,
     String? baseUrl,
     List<String>? models,
+    Map<String, int>? modelContextWindows,
     bool? requiresApiKey,
-  }) =>
-      ProviderConfig(
-        id: id,
-        displayName: displayName ?? this.displayName,
-        enabled: enabled ?? this.enabled,
-        baseUrl: baseUrl ?? this.baseUrl,
-        models: models ?? List.of(this.models),
-        requiresApiKey: requiresApiKey ?? this.requiresApiKey,
-      );
+  }) => ProviderConfig(
+    id: id,
+    displayName: displayName ?? this.displayName,
+    enabled: enabled ?? this.enabled,
+    baseUrl: baseUrl ?? this.baseUrl,
+    models: models ?? List.of(this.models),
+    modelContextWindows:
+        modelContextWindows ?? Map.of(this.modelContextWindows),
+    requiresApiKey: requiresApiKey ?? this.requiresApiKey,
+  );
+}
+
+Map<String, int> _parseModelContextWindows(Object? raw) {
+  if (raw is! Map) return {};
+  final windows = <String, int>{};
+  raw.forEach((key, value) {
+    if (key is String && value is int && value > 0) windows[key] = value;
+  });
+  return windows;
 }
 
 // ── Dangerous-command blacklist ───────────────────────────────────────────
@@ -272,11 +296,11 @@ class CustomDangerPattern {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'label': label,
-        'pattern': pattern,
-        'enabled': enabled,
-      };
+    'id': id,
+    'label': label,
+    'pattern': pattern,
+    'enabled': enabled,
+  };
 
   /// Returns null for malformed entries so the caller can skip them
   /// rather than abort the whole config load — same defensive style as
@@ -298,13 +322,12 @@ class CustomDangerPattern {
     String? label,
     String? pattern,
     bool? enabled,
-  }) =>
-      CustomDangerPattern(
-        id: id,
-        label: label ?? this.label,
-        pattern: pattern ?? this.pattern,
-        enabled: enabled ?? this.enabled,
-      );
+  }) => CustomDangerPattern(
+    id: id,
+    label: label ?? this.label,
+    pattern: pattern ?? this.pattern,
+    enabled: enabled ?? this.enabled,
+  );
 }
 
 /// Settings for the dangerous-command blacklist.
@@ -340,18 +363,18 @@ class DangerousCommandsPolicy {
     this.agentConfirmEnabled = true,
     Set<String>? disabledBuiltins,
     List<CustomDangerPattern>? customPatterns,
-  })  : disabledBuiltins = disabledBuiltins ?? <String>{},
-        customPatterns = customPatterns ?? <CustomDangerPattern>[];
+  }) : disabledBuiltins = disabledBuiltins ?? <String>{},
+       customPatterns = customPatterns ?? <CustomDangerPattern>[];
 
   Map<String, dynamic> toJson() => {
-        'agentConfirmEnabled': agentConfirmEnabled,
-        // Sort so unrelated settings toggles don't reshuffle the JSON
-        // diff — same rationale as `enabledSkills` above.
-        if (disabledBuiltins.isNotEmpty)
-          'disabledBuiltins': (disabledBuiltins.toList()..sort()),
-        if (customPatterns.isNotEmpty)
-          'customPatterns': customPatterns.map((p) => p.toJson()).toList(),
-      };
+    'agentConfirmEnabled': agentConfirmEnabled,
+    // Sort so unrelated settings toggles don't reshuffle the JSON
+    // diff — same rationale as `enabledSkills` above.
+    if (disabledBuiltins.isNotEmpty)
+      'disabledBuiltins': (disabledBuiltins.toList()..sort()),
+    if (customPatterns.isNotEmpty)
+      'customPatterns': customPatterns.map((p) => p.toJson()).toList(),
+  };
 
   factory DangerousCommandsPolicy.fromJson(Map<String, dynamic>? json) {
     if (json == null) return DangerousCommandsPolicy();
@@ -384,12 +407,11 @@ class DangerousCommandsPolicy {
     bool? agentConfirmEnabled,
     Set<String>? disabledBuiltins,
     List<CustomDangerPattern>? customPatterns,
-  }) =>
-      DangerousCommandsPolicy(
-        agentConfirmEnabled: agentConfirmEnabled ?? this.agentConfirmEnabled,
-        disabledBuiltins: disabledBuiltins ?? Set.of(this.disabledBuiltins),
-        customPatterns: customPatterns ?? List.of(this.customPatterns),
-      );
+  }) => DangerousCommandsPolicy(
+    agentConfirmEnabled: agentConfirmEnabled ?? this.agentConfirmEnabled,
+    disabledBuiltins: disabledBuiltins ?? Set.of(this.disabledBuiltins),
+    customPatterns: customPatterns ?? List.of(this.customPatterns),
+  );
 }
 
 // ── Top-level agent config ─────────────────────────────────────────────────
@@ -486,23 +508,25 @@ class AgentConfig {
     DangerousCommandsPolicy? dangerousPolicy,
     this.mcpEnabled = false,
     List<McpServerConfig>? mcpServers,
-  })  : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
-        mcpServers = mcpServers ?? [],
-        providers = providers ??
-            [
-              ProviderConfig.chatgpt(),
-              ProviderConfig.claude(),
-              ProviderConfig.gemini(),
-              ProviderConfig.deepseek(),
-              ProviderConfig.ollama(),
-            ];
+  }) : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
+       mcpServers = mcpServers ?? [],
+       providers =
+           providers ??
+           [
+             ProviderConfig.chatgpt(),
+             ProviderConfig.claude(),
+             ProviderConfig.gemini(),
+             ProviderConfig.deepseek(),
+             ProviderConfig.ollama(),
+           ];
 
   /// The currently enabled provider matching [defaultProvider], or the first
   /// enabled provider if none is explicitly selected.
   ProviderConfig? get current {
     if (defaultProvider != null) {
-      final match =
-          providers.where((p) => p.id == defaultProvider && p.enabled).firstOrNull;
+      final match = providers
+          .where((p) => p.id == defaultProvider && p.enabled)
+          .firstOrNull;
       if (match != null) return match;
     }
     return providers.where((p) => p.enabled).firstOrNull;
@@ -520,21 +544,21 @@ class AgentConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        if (defaultProvider != null) 'defaultProvider': defaultProvider,
-        if (defaultModel != null) 'defaultModel': defaultModel,
-        'providers': providers.map((p) => p.toJson()).toList(),
-        'markdownEnabled': markdownEnabled,
-        'webSearchEnabled': webSearchEnabled,
-        'fileWriteEnabled': fileWriteEnabled,
-        // Serialise as a sorted list so the JSON diff stays stable across
-        // saves (toggling unrelated settings shouldn't reshuffle this).
-        if (enabledSkills != null)
-          'enabledSkills': (enabledSkills!.toList()..sort()),
-        'dangerousPolicy': dangerousPolicy.toJson(),
-        'mcpEnabled': mcpEnabled,
-        if (mcpServers.isNotEmpty)
-          'mcpServers': mcpServers.map((s) => s.toJson()).toList(),
-      };
+    if (defaultProvider != null) 'defaultProvider': defaultProvider,
+    if (defaultModel != null) 'defaultModel': defaultModel,
+    'providers': providers.map((p) => p.toJson()).toList(),
+    'markdownEnabled': markdownEnabled,
+    'webSearchEnabled': webSearchEnabled,
+    'fileWriteEnabled': fileWriteEnabled,
+    // Serialise as a sorted list so the JSON diff stays stable across
+    // saves (toggling unrelated settings shouldn't reshuffle this).
+    if (enabledSkills != null)
+      'enabledSkills': (enabledSkills!.toList()..sort()),
+    'dangerousPolicy': dangerousPolicy.toJson(),
+    'mcpEnabled': mcpEnabled,
+    if (mcpServers.isNotEmpty)
+      'mcpServers': mcpServers.map((s) => s.toJson()).toList(),
+  };
 
   factory AgentConfig.fromJson(Map<String, dynamic>? json) {
     if (json == null) return AgentConfig();
@@ -643,19 +667,18 @@ class AgentConfig {
     DangerousCommandsPolicy? dangerousPolicy,
     bool? mcpEnabled,
     List<McpServerConfig>? mcpServers,
-  }) =>
-      AgentConfig(
-        defaultProvider: defaultProvider ?? this.defaultProvider,
-        defaultModel: defaultModel ?? this.defaultModel,
-        providers: providers ?? List.of(this.providers),
-        markdownEnabled: markdownEnabled ?? this.markdownEnabled,
-        webSearchEnabled: webSearchEnabled ?? this.webSearchEnabled,
-        fileWriteEnabled: fileWriteEnabled ?? this.fileWriteEnabled,
-        enabledSkills: resetEnabledSkills
-            ? null
-            : (enabledSkills ?? this.enabledSkills),
-        dangerousPolicy: dangerousPolicy ?? this.dangerousPolicy,
-        mcpEnabled: mcpEnabled ?? this.mcpEnabled,
-        mcpServers: mcpServers ?? List.of(this.mcpServers),
-      );
+  }) => AgentConfig(
+    defaultProvider: defaultProvider ?? this.defaultProvider,
+    defaultModel: defaultModel ?? this.defaultModel,
+    providers: providers ?? List.of(this.providers),
+    markdownEnabled: markdownEnabled ?? this.markdownEnabled,
+    webSearchEnabled: webSearchEnabled ?? this.webSearchEnabled,
+    fileWriteEnabled: fileWriteEnabled ?? this.fileWriteEnabled,
+    enabledSkills: resetEnabledSkills
+        ? null
+        : (enabledSkills ?? this.enabledSkills),
+    dangerousPolicy: dangerousPolicy ?? this.dangerousPolicy,
+    mcpEnabled: mcpEnabled ?? this.mcpEnabled,
+    mcpServers: mcpServers ?? List.of(this.mcpServers),
+  );
 }

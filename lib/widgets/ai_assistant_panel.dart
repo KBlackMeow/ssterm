@@ -11,6 +11,7 @@ import '../models/agent_config.dart';
 import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
+import '../services/agent_context_budget.dart';
 import '../services/command_safety.dart';
 import '../services/conversation_compactor.dart';
 import '../services/llm_service.dart';
@@ -69,8 +70,8 @@ const _kAiPanelMargin = 8.0;
 // outside this library can read them.
 
 /// Max conversation turns / loop iterations before we summarise old ones.
-const _maxHistoryTurns = 10;
-const _recentHistoryItems = 8;
+const _recentHistoryItems = 16;
+const _historyItemFallbackLimit = 80;
 
 /// Number of head messages kept across truncation — typically the user's
 /// initial task + the agent's first response.  Pinning these prevents the

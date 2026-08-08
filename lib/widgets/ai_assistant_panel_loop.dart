@@ -869,15 +869,27 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   }
 
   Future<void> _compactHistoryIfNeeded(int gen, AgentConfig config) async {
-    final maxItems = _maxHistoryTurns * 2;
-    if (!_conversationHistory.needsCompaction(maxItems: maxItems)) return;
+    final provider = config.current;
+    final model = config.resolvedModel;
+    final budget = AgentContextBudget.forContextWindow(
+      model == null ? null : provider?.modelContextWindows[model],
+    );
+    final estimatedTokens = AgentContextBudget.estimateHistoryTokens(
+      _conversationHistory,
+    );
+    if (!budget.shouldCompact(
+      estimatedTokens: estimatedTokens,
+      itemCount: _conversationHistory.length,
+    )) {
+      return;
+    }
     final candidate = _conversationHistory.compactionCandidate(
       pinnedItemCount: _kPinnedHeadMessages,
       recentItemCount: _recentHistoryItems,
     );
     if (candidate.isEmpty) {
       _conversationHistory.trimToMaxItems(
-        maxItems: maxItems,
+        maxItems: _historyItemFallbackLimit,
         pinnedItemCount: _kPinnedHeadMessages,
       );
       return;
@@ -902,7 +914,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       _logAgent('context_compaction result=summary');
     } else if (gen == _generation) {
       _conversationHistory.trimToMaxItems(
-        maxItems: maxItems,
+        maxItems: _historyItemFallbackLimit,
         pinnedItemCount: _kPinnedHeadMessages,
       );
       _logAgent('context_compaction result=fallback_trim');

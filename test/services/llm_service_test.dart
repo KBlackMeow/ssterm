@@ -1602,6 +1602,20 @@ Done.
       },
     );
 
+    test('ProviderConfig persists per-model context windows', () {
+      final original = ProviderConfig(
+        id: 'ollama',
+        displayName: 'Ollama',
+        requiresApiKey: false,
+        models: ['qwen'],
+        modelContextWindows: {'qwen': 65536},
+      );
+
+      final decoded = ProviderConfig.fromJson(original.toJson());
+
+      expect(decoded.modelContextWindows, {'qwen': 65536});
+    });
+
     test(
       'legacy JSON without requiresApiKey falls back to the factory default',
       () {
