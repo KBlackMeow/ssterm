@@ -21,7 +21,10 @@ Map<String, String> buildWslEnvironment({
       systemRoot,
       '$systemRoot\\System32\\Wbem',
       '$systemRoot\\System32\\WindowsPowerShell\\v1.0',
-      if (Platform.environment.containsKey('PATH'))
+      // WSL is launched through a Windows CreateProcess environment. On a
+      // non-Windows host this builder is still unit-tested, but inheriting the
+      // host PATH would leak POSIX directories into a Windows-only map.
+      if (Platform.isWindows && Platform.environment.containsKey('PATH'))
         Platform.environment['PATH']!,
     ].join(';'),
   };
