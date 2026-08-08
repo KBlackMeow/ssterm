@@ -1495,6 +1495,23 @@ Done.
   });
 
   group('Agent model catalogues', () {
+    test('compatible providers select their declared adapter', () {
+      expect(LlmService.providerKindFor(ProviderConfig.kimi()), 'openai');
+      expect(LlmService.providerKindFor(ProviderConfig.minimax()), 'anthropic');
+      expect(
+        LlmService.providerKindFor(
+          ProviderConfig.custom(
+            id: 'proxy',
+            displayName: 'Proxy',
+            protocol: ProviderProtocol.openAiCompatible,
+            baseUrl: 'https://proxy.test/v1',
+            models: ['x'],
+          ),
+        ),
+        'openai',
+      );
+    });
+
     test('compatible presets expose protocol and current model', () {
       expect(ProviderConfig.kimi().protocol, ProviderProtocol.openAiCompatible);
       expect(ProviderConfig.kimi().baseUrl, 'https://api.moonshot.cn/v1');
