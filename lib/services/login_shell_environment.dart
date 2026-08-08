@@ -64,7 +64,10 @@ class LoginShellEnvironmentResolver {
     } on TimeoutException {
       process.kill();
       await Future.any<void>([
-        finished.catchError((_) {}),
+        finished.then<void>(
+          (_) {},
+          onError: (Object error, StackTrace stackTrace) {},
+        ),
         Future<void>.delayed(const Duration(seconds: 1)),
       ]);
       return null;
