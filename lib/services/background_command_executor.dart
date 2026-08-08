@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:flutter_pty/flutter_pty.dart' show WindowsJob;
 
 import '../io/output_pipe.dart';
 import 'local_shell_discovery.dart';
@@ -43,8 +44,14 @@ class BackgroundCommandTarget {
 
   BackgroundCommandSupport get support {
     if (platform == BackgroundCommandPlatform.windows) {
+      if (shell.id == 'cmd' ||
+          shell.usePowerShellWrapper ||
+          shell.isWsl ||
+          shell.executable.toLowerCase().endsWith('bash.exe')) {
+        return const BackgroundCommandSupport.supported();
+      }
       return const BackgroundCommandSupport.unsupported(
-        'Agent2 background execution is not available on Windows yet.',
+        'Agent2 background execution does not support this Windows shell.',
       );
     }
     if (platform != BackgroundCommandPlatform.macos &&
@@ -110,9 +117,10 @@ class BackgroundCommandExecutor {
 
     late final Process process;
     try {
+      final invocation = _localInvocation(target, command);
       process = await Process.start(
-        target.shell.executable,
-        ['-c', command],
+        invocation.executable,
+        invocation.arguments,
         workingDirectory: target.cwd,
         runInShell: false,
         includeParentEnvironment: true,
@@ -124,6 +132,19 @@ class BackgroundCommandExecutor {
             '[ssterm background] Could not start ${target.shell.displayName}: $error',
         exitCode: null,
       );
+    }
+    WindowsJob? windowsJob;
+    if (target.platform == BackgroundCommandPlatform.windows) {
+      try {
+        windowsJob = WindowsJob.create()..assignPid(process.pid);
+      } catch (error) {
+        process.kill();
+        return CommandResult(
+          output:
+              '[ssterm background] Could not isolate Windows process: \$error',
+          exitCode: null,
+        );
+      }
     }
 
     final stdout = _BoundedOutput(outputLimitBytes);
@@ -142,7 +163,11 @@ class BackgroundCommandExecutor {
     ) {
       if (isCancelled?.call() != true || cancelled) return;
       cancelled = true;
-      process.kill(ProcessSignal.sigterm);
+      if (windowsJob != null) {
+        windowsJob.terminate();
+      } else {
+        process.kill(ProcessSignal.sigterm);
+      }
       timer.cancel();
     });
 
@@ -150,7 +175,13 @@ class BackgroundCommandExecutor {
       completed.then((_) => false),
       Future<bool>.delayed(timeout, () => true),
     ]);
-    if (timedOut) process.kill(ProcessSignal.sigterm);
+    if (timedOut) {
+      if (windowsJob != null) {
+        windowsJob.terminate();
+      } else {
+        process.kill(ProcessSignal.sigterm);
+      }
+    }
 
     // A SIGTERM-resistant direct child still gets a final hard kill. This is
     // intentionally direct-child cleanup only; process-tree containment is a
@@ -164,6 +195,7 @@ class BackgroundCommandExecutor {
     }
     await completed;
     cancellationPoll.cancel();
+    windowsJob?.close();
 
     final status = cancelled
         ? 'cancelled'
@@ -175,6 +207,35 @@ class BackgroundCommandExecutor {
       exitCode: status == null ? await process.exitCode : null,
       truncated: stdout.truncated || stderr.truncated,
     );
+  }
+
+  ({String executable, List<String> arguments}) _localInvocation(
+    BackgroundCommandTarget target,
+    String command,
+  ) {
+    final shell = target.shell;
+    if (target.platform != BackgroundCommandPlatform.windows) {
+      return (executable: shell.executable, arguments: ['-c', command]);
+    }
+    if (shell.id == 'cmd') {
+      return (
+        executable: shell.executable,
+        arguments: ['/d', '/s', '/c', command],
+      );
+    }
+    if (shell.usePowerShellWrapper) {
+      return (
+        executable: shell.executable,
+        arguments: ['-NoProfile', '-NonInteractive', '-Command', command],
+      );
+    }
+    if (shell.isWsl) {
+      return (
+        executable: shell.executable,
+        arguments: [...shell.arguments, '--', 'sh', '-lc', command],
+      );
+    }
+    return (executable: shell.executable, arguments: ['-c', command]);
   }
 
   /// Executes one command through a dedicated non-PTY SSH session.
