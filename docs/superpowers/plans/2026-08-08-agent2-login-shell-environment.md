@@ -80,7 +80,12 @@ class LoginShellEnvironmentResolver {
 }
 ```
 
-Use `<shell> -l -c 'printf "%s\\0" "$PATH"'`. The private resolution method applies the timeout, accepts exactly one nonempty NUL-terminated PATH value, and returns `const {}` on all failures. Do not log stdout, stderr, or PATH.
+Use `<shell> -l -c 'printf "%s\\0" "$PATH"'`. The default reader must use
+`Process.start`, collect bounded stdout, and on timeout explicitly call `kill()`
+then wait for exit; `Process.run(...).timeout(...)` is not sufficient because it
+leaves the timed-out child alive. The private resolution method accepts exactly
+one nonempty NUL-terminated PATH value and returns `const {}` on all failures.
+Do not log stdout, stderr, or PATH.
 
 - [ ] **Step 4: Run resolver tests**
 
@@ -191,4 +196,3 @@ Expected: no analyzer errors; report any pre-existing warnings separately.
 git add test/services/login_shell_environment_test.dart
 git commit -m "test: cover agent2 login shell environment"
 ```
-
