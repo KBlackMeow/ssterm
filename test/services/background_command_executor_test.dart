@@ -183,7 +183,7 @@ void main() {
       );
       expect(
         wsl.executable,
-        '${Platform.environment['SystemRoot'] ?? r'C:\\Windows'}\\System32\\wsl.exe',
+        '${Platform.environment['SystemRoot'] ?? r'C:\Windows'}\\System32\\wsl.exe',
       );
       expect(wsl.arguments, [
         '-d',
@@ -308,6 +308,57 @@ void main() {
       skip: Platform.isWindows
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
           : false,
+    );
+
+    test('uses the Agent2 cwd', () async {
+      final dir = await Directory.systemTemp.createTemp('ssterm-agent2-cwd-');
+      addTearDown(() => dir.delete(recursive: true));
+
+      final result = await const BackgroundCommandExecutor().executeLocal(
+        BackgroundCommandTarget.local(
+          shell: zsh,
+          cwd: dir.path,
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        'pwd',
+      );
+
+      expect(result.output, contains(dir.path));
+    });
+
+    test('marks output that exceeds its cap', () async {
+      final result = await const BackgroundCommandExecutor(outputLimitBytes: 3)
+          .executeLocal(
+            BackgroundCommandTarget.local(
+              shell: zsh,
+              cwd: Directory.current.path,
+              platform: BackgroundCommandPlatform.macos,
+            ),
+            'printf 12345',
+          );
+
+      expect(result.truncated, isTrue);
+      expect(result.output, contains('output truncated'));
+    });
+
+    test(
+      'returns a timeout result for a command that does not finish',
+      () async {
+        final result =
+            await const BackgroundCommandExecutor(
+              timeout: Duration(milliseconds: 20),
+            ).executeLocal(
+              BackgroundCommandTarget.local(
+                shell: zsh,
+                cwd: Directory.current.path,
+                platform: BackgroundCommandPlatform.macos,
+              ),
+              'sleep 5',
+            );
+
+        expect(result.exitCode, isNull);
+        expect(result.output, contains('timed out'));
+      },
     );
   });
 }
