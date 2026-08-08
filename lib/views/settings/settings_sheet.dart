@@ -141,6 +141,17 @@ class _SettingsPageState extends State<SettingsPage>
     widget.onAgentChanged?.call(next);
   }
 
+  void _registerProvider(ProviderConfig provider) {
+    _apiKeyControllers[provider.id] = TextEditingController();
+    _baseUrlControllers[provider.id] = TextEditingController(
+      text: provider.baseUrl ?? '',
+    );
+    _apiKeyVisible[provider.id] = false;
+    _agentApply(
+      _agentConfig.copyWith(providers: [..._agentConfig.providers, provider]),
+    );
+  }
+
   Future<void> _loadCommands() async {
     final cmds = await CommandsStore.load();
     if (!mounted) return;

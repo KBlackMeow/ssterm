@@ -34,10 +34,119 @@ extension _AgentSettingsExt on _SettingsPageState {
         _sectionTitle('File Write'),
         _buildFileWriteSection(),
         const SizedBox(height: 16),
-        _sectionTitle('Providers'),
+        Row(
+          children: [
+            Expanded(child: _sectionTitle('Providers')),
+            TextButton.icon(
+              key: const Key('settings-add-provider'),
+              onPressed: _showAddProviderDialog,
+              icon: const Icon(Icons.add, size: 15),
+              label: const Text('Add provider'),
+              style: TextButton.styleFrom(
+                foregroundColor: _kAccent,
+                minimumSize: const Size(0, 28),
+              ),
+            ),
+          ],
+        ),
         for (final p in _agentConfig.providers) _buildProviderCard(p),
       ],
     );
+  }
+
+  Future<void> _showAddProviderDialog() async {
+    final name = TextEditingController();
+    final url = TextEditingController();
+    final model = TextEditingController();
+    ProviderProtocol? protocol;
+    final provider = await showDialog<ProviderConfig>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _kSurface,
+          title: const Text('Add provider', style: TextStyle(color: _kFg)),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<ProviderProtocol>(
+                  initialValue: protocol,
+                  hint: const Text('Choose a protocol'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: ProviderProtocol.openAiCompatible,
+                      child: Text('OpenAI-compatible'),
+                    ),
+                    DropdownMenuItem(
+                      value: ProviderProtocol.anthropicCompatible,
+                      child: Text('Claude-compatible'),
+                    ),
+                  ],
+                  onChanged: (value) => setDialogState(() => protocol = value),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: name,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
+                TextField(
+                  controller: url,
+                  decoration: const InputDecoration(labelText: 'Base URL'),
+                ),
+                TextField(
+                  controller: model,
+                  decoration: const InputDecoration(labelText: 'Model'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final parsed = Uri.tryParse(url.text.trim());
+                if (protocol == null ||
+                    name.text.trim().isEmpty ||
+                    model.text.trim().isEmpty ||
+                    parsed == null ||
+                    !(parsed.isScheme('https') || parsed.isScheme('http'))) {
+                  return;
+                }
+                final slug = name.text
+                    .trim()
+                    .toLowerCase()
+                    .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+                    .replaceAll(RegExp(r'^-+|-+$'), '');
+                var id = 'custom-$slug';
+                var suffix = 2;
+                while (_agentConfig.providers.any((p) => p.id == id)) {
+                  id = 'custom-$slug-${suffix++}';
+                }
+                Navigator.pop(
+                  context,
+                  ProviderConfig.custom(
+                    id: id,
+                    displayName: name.text.trim(),
+                    protocol: protocol!,
+                    baseUrl: url.text.trim(),
+                    models: [model.text.trim()],
+                  ),
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    name.dispose();
+    url.dispose();
+    model.dispose();
+    if (provider != null) _registerProvider(provider);
   }
 
   Widget _buildSkillsTab() {
@@ -540,6 +649,13 @@ extension _AgentSettingsExt on _SettingsPageState {
                 activeThumbColor: _kAccent,
               ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              provider.protocol.displayName,
+              style: const TextStyle(color: _kFgMuted, fontSize: 10),
+            ),
           ),
           if (provider.enabled) ...[
             const SizedBox(height: 10),
