@@ -7,7 +7,7 @@
 ## 已确认范围
 
 - 保留现有 OpenAI、Claude、Gemini、DeepSeek 和 Ollama Provider。
-- 首批 OpenAI-compatible 预设：OpenRouter、Kimi/Moonshot、阿里百炼/Qwen、GLM/智谱、Groq、Mistral、硅基流动、Together AI、Fireworks AI。
+- 首批 OpenAI-compatible 预设：OpenRouter、Kimi/Moonshot、阿里百炼/Qwen、GLM/智谱、Mistral、硅基流动。Groq、Together AI 与 Fireworks AI 不作为内置预设，仍可通过自定义 OpenAI-compatible Provider 接入。
 - 首批 Anthropic-compatible 预设：MiniMax；OpenRouter 的 Anthropic Messages 入口可作为单独预设。
 - 新增自定义 Provider 时，用户必须在创建时选择 `OpenAI-compatible` 或 `Anthropic-compatible`。创建后协议不可在原卡片内切换；如需切换，新增另一 Provider，避免历史工具消息按错误协议续传。
 - 模型列表是应用内置目录，随 SSTerm 发布更新，不在设置页面联网查询。用户可增删模型名；自定义 Provider 的模型名完全由用户填写。
@@ -30,6 +30,8 @@
 Providers 区顶部新增“Add provider”。弹窗先显示预设列表和“Custom provider”。选择 Custom 后必须选择两种兼容协议之一，再填写名称、Base URL、API Key、至少一个模型名和可选上下文窗口。预设填写后可编辑 URL、模型和窗口，但不可改协议。
 
 模型目录中，首项是当前推荐模型，供默认下拉框直接使用。发布新版本时，配置加载会把新的内置默认模型合并到已有 Provider，同时保留用户手动添加的模型和已选择的旧模型，绝不静默删除。
+
+OpenRouter 的内置目录按旗舰、专业和快速档覆盖 GPT、Claude、DeepSeek、Kimi 与 Qwen。硅基流动只预填其实际提供的国产/开源模型；不预填 GPT 或 Claude，避免用户在不支持该模型的中转端点上首次调用即失败。
 
 ## Agent 运行时
 
