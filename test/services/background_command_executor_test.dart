@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/background_command_executor.dart';
+import 'package:ssterm/services/login_shell_environment.dart';
 import 'package:ssterm/services/local_shell_discovery.dart';
 
 void main() {
@@ -324,6 +325,53 @@ void main() {
       );
 
       expect(result.output, contains(dir.path));
+    });
+
+    test('uses the resolved login-shell PATH for a POSIX command', () async {
+      final resolver = LoginShellEnvironmentResolver(
+        readPath: (_) async => '/ssterm-login-shell-path',
+      );
+      final result =
+          await BackgroundCommandExecutor(
+            loginEnvironmentResolver: resolver,
+          ).executeLocal(
+            BackgroundCommandTarget.local(
+              shell: zsh,
+              cwd: Directory.current.path,
+              platform: BackgroundCommandPlatform.macos,
+            ),
+            r'printf %s "$PATH"',
+          );
+
+      expect(result.exitCode, 0);
+      expect(result.output, contains('/ssterm-login-shell-path'));
+    });
+
+    test('does not resolve a login-shell PATH for a Windows target', () async {
+      var calls = 0;
+      final resolver = LoginShellEnvironmentResolver(
+        readPath: (_) async {
+          calls++;
+          return '/should-not-be-used';
+        },
+      );
+
+      await BackgroundCommandExecutor(
+        loginEnvironmentResolver: resolver,
+      ).executeLocal(
+        BackgroundCommandTarget.local(
+          shell: const LocalShellOption(
+            id: 'cmd',
+            displayName: 'CMD',
+            executable: 'cmd.exe',
+          ),
+          cwd: Directory.current.path,
+          platform: BackgroundCommandPlatform.windows,
+        ),
+        'echo ok',
+      );
+
+      expect(calls, 0);
     });
 
     test('marks output that exceeds its cap', () async {

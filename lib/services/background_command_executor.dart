@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import '../io/output_pipe.dart';
+import 'login_shell_environment.dart';
 import 'local_shell_discovery.dart';
 
 /// Host platform used to decide whether Agent2 can safely start a local,
@@ -96,10 +97,15 @@ class BackgroundCommandExecutor {
   const BackgroundCommandExecutor({
     this.timeout = const Duration(seconds: 120),
     this.outputLimitBytes = 256 * 1024,
+    this.loginEnvironmentResolver,
   });
 
   final Duration timeout;
   final int outputLimitBytes;
+  final LoginShellEnvironmentResolver? loginEnvironmentResolver;
+
+  static final _defaultLoginEnvironmentResolver =
+      LoginShellEnvironmentResolver();
 
   Future<CommandResult> executeLocal(
     BackgroundCommandTarget target,
@@ -122,6 +128,20 @@ class BackgroundCommandExecutor {
     }
 
     final wslMarker = target.shell.isWsl ? _wslMarkerPath() : null;
+    final environment = _nonInteractiveEnvironment(target.shell.environment);
+    if (target.platform == BackgroundCommandPlatform.macos ||
+        target.platform == BackgroundCommandPlatform.linux) {
+      final loginEnvironment =
+          await (loginEnvironmentResolver ?? _defaultLoginEnvironmentResolver)
+              .resolvePath(target.shell);
+      if (isCancelled?.call() == true) {
+        return CommandResult(
+          output: '[ssterm background] cancelled',
+          exitCode: null,
+        );
+      }
+      environment.addAll(loginEnvironment);
+    }
     late final Process process;
     try {
       final invocation = buildBackgroundCommandInvocation(
@@ -156,7 +176,7 @@ class BackgroundCommandExecutor {
         workingDirectory: target.shell.isWsl ? null : target.cwd,
         runInShell: false,
         includeParentEnvironment: true,
-        environment: _nonInteractiveEnvironment(target.shell.environment),
+        environment: environment,
       );
     } on ProcessException catch (error) {
       return CommandResult(
