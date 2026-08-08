@@ -38,6 +38,7 @@ import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
 import 'services/terminal_command_executor.dart';
 import 'services/background_command_executor.dart';
+import 'services/command_execution_history.dart';
 import 'services/wallpaper_storage.dart';
 import 'utils/app_dir.dart';
 import 'utils/fd_limit.dart';
@@ -167,6 +168,15 @@ class TerminalHome extends StatefulWidget {
 // All UI building lives in _TerminalHomeViewMethods.
 // ─────────────────────────────────────────────────────────────────────────────
 class _TerminalHomeState extends _TerminalHomeViewMethods {
+  final _commandHistory = CommandExecutionHistory(
+    onError: (error) {
+      stderr.writeln('[agent history] $error');
+    },
+  );
+
+  @override
+  CommandExecutionHistory get commandHistory => _commandHistory;
+
   @override
   void initState() {
     super.initState();

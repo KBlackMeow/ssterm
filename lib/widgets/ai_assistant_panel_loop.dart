@@ -183,18 +183,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     var loopIterations = 0;
     agentLoop:
     while (gen == _generation) {
-      if (loopIterations >= _maxLoopIterations) {
-        stopIter(loopIterations, 'max_iterations');
-        setState(() {
-          _messages.add(
-            _ChatMessage.ai(
-              text: '',
-              error: 'Max loop iterations ($_maxLoopIterations) reached.',
-            ),
-          );
-        });
-        break;
-      }
       loopIterations++;
 
       final historyLenBefore = _conversationHistory.length;

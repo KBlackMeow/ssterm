@@ -71,7 +71,6 @@ const _kAiPanelMargin = 8.0;
 /// Max conversation turns / loop iterations before we summarise old ones.
 const _maxHistoryTurns = 10;
 const _recentHistoryItems = 8;
-const _maxLoopIterations = 15;
 
 /// Number of head messages kept across truncation — typically the user's
 /// initial task + the agent's first response.  Pinning these prevents the

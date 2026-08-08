@@ -403,8 +403,12 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       onInsert: tab.terminal != null ? (cmd) => tab.terminal!.paste(cmd) : null,
       onExecute: tab.terminal != null ? _executeOnTab(tab) : null,
       onExecuteAsync: tab.terminal != null
-          ? (String cmd, {isCancelled}) =>
-                _executeAndCapture(tab, cmd, isCancelled: isCancelled)
+          ? (String cmd, {isCancelled}) => _recordAgentCommand(
+              tab,
+              'agent1',
+              cmd,
+              () => _executeAndCapture(tab, cmd, isCancelled: isCancelled),
+            )
           : null,
       agentConfig: _config.agent,
       onGetShellIntegrationActive: tab.terminal != null
@@ -478,8 +482,12 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       key: ValueKey('agent2-${tab.hashCode}'),
       visible: tab.agent2PanelVisible,
       onExecute: (cmd) => unawaited(_executeAgent2Command(tab, cmd)),
-      onExecuteAsync: (cmd, {isCancelled}) =>
-          _executeAgent2Command(tab, cmd, isCancelled: isCancelled),
+      onExecuteAsync: (cmd, {isCancelled}) => _recordAgentCommand(
+        tab,
+        'agent2',
+        cmd,
+        () => _executeAgent2Command(tab, cmd, isCancelled: isCancelled),
+      ),
       agentConfig: _config.agent,
       terminalBackground: _config.terminal.chromeBackground,
       terminalLineHeight: _config.terminal.lineHeight,

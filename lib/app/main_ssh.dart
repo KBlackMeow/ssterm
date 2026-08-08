@@ -6,6 +6,8 @@ part of '../main.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
+  CommandExecutionHistory get commandHistory;
+
   // ── Host list ──────────────────────────────────────────────────────────────
 
   Future<void> _loadSshHosts() async {
@@ -863,6 +865,33 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       command,
       isCancelled: isCancelled,
     );
+  }
+
+  Future<CommandResult?> _recordAgentCommand(
+    _Tab tab,
+    String agentId,
+    String command,
+    Future<CommandResult?> Function() execute,
+  ) async {
+    final result = await execute();
+    await commandHistory.append(
+      CommandExecutionRecord(
+        timestamp: DateTime.now(),
+        agentId: agentId,
+        target: tab.kind == _TabKind.ssh ? 'ssh' : 'local',
+        cwd: agentId == 'agent2'
+            ? tab.agent2Cwd
+            : (tab.kind == _TabKind.ssh
+                  ? tab.remotePath?.value
+                  : tab.localPath?.value),
+        command: command,
+        exitCode: result?.exitCode,
+        truncated: result?.truncated ?? false,
+        output: result?.output ?? '',
+        cancelled: result == null,
+      ),
+    );
+    return result;
   }
 
   void _openSettings() {
