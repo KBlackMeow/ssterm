@@ -34,6 +34,47 @@ void _ensureInitialized() {
   }
 }
 
+/// Owns a Windows Job Object configured to terminate all assigned processes
+/// when closed. Used by non-PTY background commands so a cancellation cannot
+/// leave child processes behind.
+class WindowsJob {
+  WindowsJob._(this._handle);
+
+  final Pointer<JobHandle> _handle;
+  var _closed = false;
+
+  static WindowsJob create() {
+    if (!Platform.isWindows) {
+      throw UnsupportedError(
+          'Windows Job Objects are only available on Windows.');
+    }
+    final handle = _bindings.job_create_kill_on_close();
+    if (handle == nullptr) {
+      throw StateError('CreateJobObjectW failed.');
+    }
+    return WindowsJob._(handle);
+  }
+
+  void assignPid(int pid) {
+    if (_closed) throw StateError('WindowsJob is closed.');
+    final error = _bindings.job_assign_pid(_handle, pid);
+    if (error != 0) {
+      throw StateError('AssignProcessToJobObject failed (Win32 error $error).');
+    }
+  }
+
+  void terminate() {
+    if (_closed) return;
+    _bindings.job_terminate(_handle);
+  }
+
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _bindings.job_close(_handle);
+  }
+}
+
 /// Exception thrown when [Pty.start] fails or times out.
 class PtyStartException implements Exception {
   final String message;

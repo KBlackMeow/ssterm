@@ -476,6 +476,62 @@ class FlutterPtyBindings {
           'pty_error');
   late final _pty_error =
       _pty_errorPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
+
+  /// Windows Job Object helpers used by non-PTY Agent2 processes.  On other
+  /// platforms these return null/false so callers can retain a single FFI API.
+  ffi.Pointer<JobHandle> job_create_kill_on_close() {
+    return _job_create_kill_on_close();
+  }
+
+  late final _job_create_kill_on_closePtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<JobHandle> Function()>>(
+          'job_create_kill_on_close');
+  late final _job_create_kill_on_close = _job_create_kill_on_closePtr
+      .asFunction<ffi.Pointer<JobHandle> Function()>();
+
+  int job_assign_pid(
+    ffi.Pointer<JobHandle> handle,
+    int pid,
+  ) {
+    return _job_assign_pid(
+      handle,
+      pid,
+    );
+  }
+
+  late final _job_assign_pidPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int Function(ffi.Pointer<JobHandle>, ffi.Int)>>('job_assign_pid');
+  late final _job_assign_pid = _job_assign_pidPtr
+      .asFunction<int Function(ffi.Pointer<JobHandle>, int)>();
+
+  int job_terminate(
+    ffi.Pointer<JobHandle> handle,
+  ) {
+    return _job_terminate(
+      handle,
+    );
+  }
+
+  late final _job_terminatePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<JobHandle>)>>(
+          'job_terminate');
+  late final _job_terminate =
+      _job_terminatePtr.asFunction<int Function(ffi.Pointer<JobHandle>)>();
+
+  void job_close(
+    ffi.Pointer<JobHandle> handle,
+  ) {
+    return _job_close(
+      handle,
+    );
+  }
+
+  late final _job_closePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<JobHandle>)>>(
+          'job_close');
+  late final _job_close =
+      _job_closePtr.asFunction<void Function(ffi.Pointer<JobHandle>)>();
 }
 
 typedef Dart_PostCObject_Type = ffi.Pointer<
@@ -789,3 +845,5 @@ final class PtyOptions extends ffi.Struct {
 }
 
 final class PtyHandle extends ffi.Opaque {}
+
+final class JobHandle extends ffi.Opaque {}
