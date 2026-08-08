@@ -191,6 +191,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     tab.transferManager = transferManager;
     tab.remotePath = remotePath;
     tab.remoteCwdPane0 = remotePath.value;
+    tab.agent2Cwd = remotePath.value;
     tab.sshProfile = r.profile;
     tab.activeSshPane = 0;
     tab.pipe = pipe;
@@ -623,13 +624,15 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final sftp = sourceTab.sftp;
     if (sftp == null) return; // source tab's SFTP session isn't live
     setState(() {
-      _tabs.add(_Tab.editor(
-        path: path,
-        sftp: sftp,
-        label: 'ssh: ${sourceTab.title}',
-        mtime: mtime,
-        initialContent: initialContent,
-      ));
+      _tabs.add(
+        _Tab.editor(
+          path: path,
+          sftp: sftp,
+          label: 'ssh: ${sourceTab.title}',
+          mtime: mtime,
+          initialContent: initialContent,
+        ),
+      );
       _active = _tabs.length - 1;
     });
     _activateTab(_active);
@@ -651,12 +654,15 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final decision = await showDialog<_UnsavedChangesDecision>(
       context: context,
       builder: (ctx) => Theme(
-        data: Theme.of(context)
-            .copyWith(extensions: colors != null ? {colors} : null),
+        data: Theme.of(
+          context,
+        ).copyWith(extensions: colors != null ? {colors} : null),
         child: const _UnsavedChangesDialog(),
       ),
     );
-    if (!mounted || decision == null || decision == _UnsavedChangesDecision.cancel) {
+    if (!mounted ||
+        decision == null ||
+        decision == _UnsavedChangesDecision.cancel) {
       return;
     }
     if (decision == _UnsavedChangesDecision.discard) {
@@ -834,6 +840,31 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     ).execute(target, command, isCancelled: isCancelled);
   }
 
+  Future<CommandResult?> _executeAgent2Command(
+    _Tab tab,
+    String command, {
+    bool Function()? isCancelled,
+  }) {
+    if (tab.kind != _TabKind.local || tab.localShell == null) {
+      return Future.value(
+        CommandResult(
+          output:
+              '[ssterm background] Agent2 remote execution is not wired yet.',
+          exitCode: null,
+        ),
+      );
+    }
+    return const BackgroundCommandExecutor().executeLocal(
+      BackgroundCommandTarget.local(
+        shell: tab.localShell!,
+        cwd: tab.agent2Cwd ?? '/',
+        platform: BackgroundCommandTarget.hostPlatform,
+      ),
+      command,
+      isCancelled: isCancelled,
+    );
+  }
+
   void _openSettings() {
     final idx = _tabs.indexWhere((t) => t.kind == _TabKind.settings);
     if (idx != -1) {
@@ -890,13 +921,17 @@ class _UnsavedChangesDialog extends StatelessWidget {
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(
-                          context, _UnsavedChangesDecision.cancel),
+                        context,
+                        _UnsavedChangesDecision.cancel,
+                      ),
                       child: Text('Cancel', style: TextStyle(color: fgDim)),
                     ),
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => Navigator.pop(
-                          context, _UnsavedChangesDecision.discard),
+                        context,
+                        _UnsavedChangesDecision.discard,
+                      ),
                       child: const Text(
                         "Don't Save",
                         style: TextStyle(color: Color(0xFFFF6E67)),
@@ -904,8 +939,8 @@ class _UnsavedChangesDialog extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     TextButton(
-                      onPressed: () => Navigator.pop(
-                          context, _UnsavedChangesDecision.save),
+                      onPressed: () =>
+                          Navigator.pop(context, _UnsavedChangesDecision.save),
                       child: const Text(
                         'Save',
                         style: TextStyle(color: Color(0xFF2472C8)),

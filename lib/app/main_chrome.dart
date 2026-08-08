@@ -24,6 +24,8 @@ class _TabBar extends StatefulWidget {
     this.transferManager,
     required this.aiPanelVisible,
     required this.onToggleAiPanel,
+    required this.agent2PanelVisible,
+    required this.onToggleAgent2Panel,
     required this.canSplit,
     required this.isSplit,
     this.splitAxis,
@@ -54,6 +56,8 @@ class _TabBar extends StatefulWidget {
   final TransferManager? transferManager;
   final bool aiPanelVisible;
   final VoidCallback onToggleAiPanel;
+  final bool agent2PanelVisible;
+  final VoidCallback onToggleAgent2Panel;
   final bool canSplit;
   final bool isSplit;
   final Axis? splitAxis;
@@ -139,10 +143,7 @@ class _TabBarState extends State<_TabBar> with WindowListener {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     if (widget.tabs.isEmpty) {
-                      return SizedBox(
-                        width: constraints.maxWidth,
-                        height: 28,
-                      );
+                      return SizedBox(width: constraints.maxWidth, height: 28);
                     }
 
                     const tabGap = 4.0;
@@ -209,6 +210,12 @@ class _TabBarState extends State<_TabBar> with WindowListener {
             AiAssistantButton(
               visible: widget.aiPanelVisible,
               onToggle: widget.onToggleAiPanel,
+            ),
+            AiAssistantButton(
+              visible: widget.agent2PanelVisible,
+              onToggle: widget.onToggleAgent2Panel,
+              tooltip: 'Toggle Agent2 background assistant',
+              icon: Icons.auto_awesome_outlined,
             ),
             if (widget.hasSftp) ...[
               _SftpButton(

@@ -9,15 +9,19 @@ class AiAssistantButton extends StatelessWidget {
     super.key,
     required this.visible,
     required this.onToggle,
+    this.tooltip,
+    this.icon = Icons.auto_awesome,
   });
 
   final bool visible;
   final VoidCallback onToggle;
+  final String? tooltip;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: visible ? 'Hide AI Assistant' : 'Show AI Assistant',
+      message: tooltip ?? (visible ? 'Hide AI Assistant' : 'Show AI Assistant'),
       child: GestureDetector(
         onTap: onToggle,
         child: Container(
@@ -25,7 +29,7 @@ class AiAssistantButton extends StatelessWidget {
           height: 28,
           alignment: Alignment.center,
           child: Icon(
-            Icons.auto_awesome,
+            icon,
             size: 15,
             color: visible
                 ? const Color(0xFF2472C8)

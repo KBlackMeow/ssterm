@@ -105,6 +105,7 @@ class AiAssistantOverlay extends StatefulWidget {
     this.initialPosition = AiPanelPosition.right,
     this.initialSize,
     this.onLayoutChanged,
+    this.initialMode = AiPanelMode.command,
   });
 
   final Widget child;
@@ -190,13 +191,14 @@ class AiAssistantOverlay extends StatefulWidget {
   /// [AppConfig.aiPosition] / [AppConfig.aiSize] + `save()` so the
   /// layout sticks across launches.
   final void Function(AiPanelPosition position, double? size)? onLayoutChanged;
+  final AiPanelMode initialMode;
 
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
 
 class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
-  AiPanelMode _mode = AiPanelMode.command;
+  late AiPanelMode _mode;
 
   // Dock side + custom drag-resized extent.  Initialised in [initState]
   // from the host's persisted values; subsequent mutations notify the
@@ -209,6 +211,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.initState();
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
+    _mode = widget.initialMode;
   }
 
   // Separate state per mode

@@ -276,9 +276,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           ackRead: true,
         );
       } else if (usePowerShellWrapper) {
-        final encoded = encodePowerShellCommand(
-          buildPowerShellOsc133Prelude(),
-        );
+        final encoded = encodePowerShellCommand(buildPowerShellOsc133Prelude());
         pty = await Pty.start(
           shell.executable,
           arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],
@@ -648,7 +646,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final home = userHomeDir();
     final tab = _Tab.local(title: shell.displayName, shell: shell)
       ..terminal = _createTerminal()
-      ..localPath = ValueNotifier<String>(home ?? '/');
+      ..localPath = ValueNotifier<String>(home ?? '/')
+      ..agent2Cwd = home ?? '/';
     _wireDeferredLocalPty(
       tab,
       terminal: tab.terminal!,

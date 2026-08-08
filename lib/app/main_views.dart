@@ -66,6 +66,18 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                   );
                 }
               },
+              agent2PanelVisible:
+                  _tabs.isNotEmpty &&
+                  _active < _tabs.length &&
+                  _tabs[_active].agent2PanelVisible,
+              onToggleAgent2Panel: () {
+                if (_tabs.isNotEmpty && _active < _tabs.length) {
+                  setState(
+                    () => _tabs[_active].agent2PanelVisible =
+                        !_tabs[_active].agent2PanelVisible,
+                  );
+                }
+              },
               hasSftp:
                   _tabs.isNotEmpty &&
                   _active < _tabs.length &&
@@ -374,13 +386,14 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           _config.sftpSize = size;
           _config.save();
         },
-        onOpenEditorTab: ({required path, required initialContent, required mtime}) =>
-            _openEditorTab(
-              sourceTab: tab,
-              path: path,
-              initialContent: initialContent,
-              mtime: mtime,
-            ),
+        onOpenEditorTab:
+            ({required path, required initialContent, required mtime}) =>
+                _openEditorTab(
+                  sourceTab: tab,
+                  path: path,
+                  initialContent: initialContent,
+                  mtime: mtime,
+                ),
         child: body,
       );
     }
@@ -453,6 +466,44 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       onLayoutChanged: (pos, size) {
         _config.aiPosition = pos;
         _config.aiSize = size;
+        _config.save();
+      },
+      child: body,
+    );
+
+    // Agent2 deliberately owns a second overlay state (history, cancellation,
+    // cwd and executor).  Its default bottom dock complements Agent1's right
+    // dock, so nesting consumes distinct axes rather than hiding either panel.
+    body = AiAssistantOverlay(
+      key: ValueKey('agent2-${tab.hashCode}'),
+      visible: tab.agent2PanelVisible,
+      onExecute: (cmd) => unawaited(_executeAgent2Command(tab, cmd)),
+      onExecuteAsync: (cmd, {isCancelled}) =>
+          _executeAgent2Command(tab, cmd, isCancelled: isCancelled),
+      agentConfig: _config.agent,
+      terminalBackground: _config.terminal.chromeBackground,
+      terminalLineHeight: _config.terminal.lineHeight,
+      fileSystemAdapter: switch (tab.kind) {
+        _TabKind.local => LocalFileSystemAdapter(
+          cwdProvider: () => tab.agent2Cwd,
+        ),
+        _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
+          sftp: tab.sftp,
+          label: 'ssh: ${tab.title}',
+          cwdProvider: () => tab.agent2Cwd,
+        ),
+        _ => null,
+      },
+      initialPosition: _config.agent2Position,
+      initialSize: _config.agent2Size,
+      initialMode: AiPanelMode.agent,
+      onLayoutChanged: (pos, size) {
+        _config.agent2Position = pos == _config.aiPosition
+            ? (pos == AiPanelPosition.right
+                  ? AiPanelPosition.bottom
+                  : AiPanelPosition.right)
+            : pos;
+        _config.agent2Size = size;
         _config.save();
       },
       child: body,

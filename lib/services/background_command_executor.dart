@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../io/output_pipe.dart';
 import 'local_shell_discovery.dart';

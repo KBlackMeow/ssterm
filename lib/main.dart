@@ -37,6 +37,7 @@ import 'services/mcp_service.dart';
 import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
 import 'services/terminal_command_executor.dart';
+import 'services/background_command_executor.dart';
 import 'services/wallpaper_storage.dart';
 import 'utils/app_dir.dart';
 import 'utils/fd_limit.dart';
@@ -166,7 +167,6 @@ class TerminalHome extends StatefulWidget {
 // All UI building lives in _TerminalHomeViewMethods.
 // ─────────────────────────────────────────────────────────────────────────────
 class _TerminalHomeState extends _TerminalHomeViewMethods {
-
   @override
   void initState() {
     super.initState();
@@ -216,36 +216,38 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
   @override
   Widget build(BuildContext context) {
     return Theme(
-      data: Theme.of(context).copyWith(extensions: {
-        AppColors.fromBackground(_config.terminal.chromeTabSelected),
-      }),
-      child: Shortcuts(
-      shortcuts: {
-        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.comma):
-            const _OpenSettingsIntent(),
-        LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyW):
-            const _CloseTabIntent(),
-      },
-      child: Actions(
-        actions: {
-          _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
-            onInvoke: (_) {
-              _openSettings();
-              return null;
-            },
-          ),
-          _CloseTabIntent: CallbackAction<_CloseTabIntent>(
-            onInvoke: (_) {
-              _requestCloseTab(_active);
-              return null;
-            },
-          ),
+      data: Theme.of(context).copyWith(
+        extensions: {
+          AppColors.fromBackground(_config.terminal.chromeTabSelected),
         },
-        child: (Platform.isIOS || Platform.isAndroid)
-            ? _buildMobileChrome()
-            : _buildChrome(),
       ),
-    ),   // Theme
+      child: Shortcuts(
+        shortcuts: {
+          LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.comma):
+              const _OpenSettingsIntent(),
+          LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyW):
+              const _CloseTabIntent(),
+        },
+        child: Actions(
+          actions: {
+            _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
+              onInvoke: (_) {
+                _openSettings();
+                return null;
+              },
+            ),
+            _CloseTabIntent: CallbackAction<_CloseTabIntent>(
+              onInvoke: (_) {
+                _requestCloseTab(_active);
+                return null;
+              },
+            ),
+          },
+          child: (Platform.isIOS || Platform.isAndroid)
+              ? _buildMobileChrome()
+              : _buildChrome(),
+        ),
+      ), // Theme
     );
   }
 }

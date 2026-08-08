@@ -16,21 +16,26 @@ class AppConfig {
     this.sftpSize,
     AiPanelPosition? aiPosition,
     this.aiSize,
+    AiPanelPosition? agent2Position,
+    this.agent2Size,
     List<LocalShellOption>? cachedShells,
     this.agent,
-  })  : terminal = terminal ?? TerminalSettings(),
-        sftpPosition = sftpPosition ?? SftpPanelPosition.bottom,
-        // AI panel defaults to the right: terminal sessions are already
-        // tall-and-narrow, so a side panel preserves more vertical lines
-        // for shell output than a bottom strip would.
-        aiPosition = aiPosition ?? AiPanelPosition.right,
-        cachedShells = cachedShells ?? const <LocalShellOption>[];
+  }) : terminal = terminal ?? TerminalSettings(),
+       sftpPosition = sftpPosition ?? SftpPanelPosition.bottom,
+       // AI panel defaults to the right: terminal sessions are already
+       // tall-and-narrow, so a side panel preserves more vertical lines
+       // for shell output than a bottom strip would.
+       aiPosition = aiPosition ?? AiPanelPosition.right,
+       agent2Position = agent2Position ?? AiPanelPosition.bottom,
+       cachedShells = cachedShells ?? const <LocalShellOption>[];
 
   TerminalSettings terminal;
   SftpPanelPosition sftpPosition;
   double? sftpSize;
   AiPanelPosition aiPosition;
   double? aiSize;
+  AiPanelPosition agent2Position;
+  double? agent2Size;
   List<LocalShellOption> cachedShells;
   AgentConfig? agent;
 
@@ -59,6 +64,10 @@ class AppConfig {
             ? AiPanelPosition.bottom
             : AiPanelPosition.right,
         aiSize: (json['aiSize'] as num?)?.toDouble(),
+        agent2Position: json['agent2Position'] == 'right'
+            ? AiPanelPosition.right
+            : AiPanelPosition.bottom,
+        agent2Size: (json['agent2Size'] as num?)?.toDouble(),
         cachedShells: _decodeShells(json['cachedShells']),
         agent: AgentConfig.fromJson(json['agent'] as Map<String, dynamic>?),
       );
@@ -72,10 +81,16 @@ class AppConfig {
     await f.writeAsString(
       const JsonEncoder.withIndent('  ').convert({
         'terminal': terminal.toJson(),
-        'sftpPosition': sftpPosition == SftpPanelPosition.bottom ? 'bottom' : 'right',
+        'sftpPosition': sftpPosition == SftpPanelPosition.bottom
+            ? 'bottom'
+            : 'right',
         if (sftpSize != null) 'sftpSize': sftpSize,
         'aiPosition': aiPosition == AiPanelPosition.bottom ? 'bottom' : 'right',
         if (aiSize != null) 'aiSize': aiSize,
+        'agent2Position': agent2Position == AiPanelPosition.bottom
+            ? 'bottom'
+            : 'right',
+        if (agent2Size != null) 'agent2Size': agent2Size,
         if (cachedShells.isNotEmpty)
           'cachedShells': cachedShells.map((s) => s.toJson()).toList(),
         if (agent != null) 'agent': agent!.toJson(),
