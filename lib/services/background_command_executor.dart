@@ -246,9 +246,7 @@ class BackgroundCommandExecutor {
     final stderr = _BoundedOutput(outputLimitBytes);
     late final SSHSession session;
     try {
-      session = await client.execute(
-        'cd -- ${shellQuotePosix(cwd)} && $command',
-      );
+      session = await client.execute(buildSshBackgroundCommand(cwd, command));
     } catch (error) {
       return CommandResult(
         output: '[ssterm background] Could not start SSH command: $error',
@@ -368,6 +366,11 @@ class BackgroundCommandExecutor {
     ], runInShell: false);
   }
 }
+
+/// Wraps an Agent2 SSH command in its independent working directory without
+/// interpreting the command itself. Only [cwd] is shell-quoted here.
+String buildSshBackgroundCommand(String cwd, String command) =>
+    'cd -- ${BackgroundCommandExecutor.shellQuotePosix(cwd)} && $command';
 
 /// Reject known cross-shell probes before execution. This is deliberately
 /// narrow: valid commands must remain the shell's responsibility, but these

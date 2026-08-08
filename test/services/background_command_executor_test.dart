@@ -361,4 +361,13 @@ void main() {
       },
     );
   });
+
+  group('SSH background command construction', () {
+    test('quotes cwd before appending the unmodified command', () {
+      expect(
+        buildSshBackgroundCommand("/srv/O'Reilly project", 'printf ok'),
+        "cd -- '/srv/O'\\''Reilly project' && printf ok",
+      );
+    });
+  });
 }
