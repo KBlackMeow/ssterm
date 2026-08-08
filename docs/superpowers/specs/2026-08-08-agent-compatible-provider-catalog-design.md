@@ -7,7 +7,7 @@
 ## 已确认范围
 
 - 保留现有 OpenAI、Claude、Gemini、DeepSeek 和 Ollama Provider。
-- 首批 OpenAI-compatible 预设：OpenRouter、Kimi/Moonshot、阿里百炼/Qwen、Groq、Mistral、硅基流动、Together AI、Fireworks AI。
+- 首批 OpenAI-compatible 预设：OpenRouter、Kimi/Moonshot、阿里百炼/Qwen、GLM/智谱、Groq、Mistral、硅基流动、Together AI、Fireworks AI。
 - 首批 Anthropic-compatible 预设：MiniMax；OpenRouter 的 Anthropic Messages 入口可作为单独预设。
 - 新增自定义 Provider 时，用户必须在创建时选择 `OpenAI-compatible` 或 `Anthropic-compatible`。创建后协议不可在原卡片内切换；如需切换，新增另一 Provider，避免历史工具消息按错误协议续传。
 - 模型列表是应用内置目录，随 SSTerm 发布更新，不在设置页面联网查询。用户可增删模型名；自定义 Provider 的模型名完全由用户填写。
@@ -36,6 +36,8 @@ Providers 区顶部新增“Add provider”。弹窗先显示预设列表和“C
 运行时根据 `protocol` 分发，而不是根据厂商 ID 做特殊分支。工具定义、工具调用和工具结果均通过相应的 OpenAI 或 Anthropic 转换器。`nativeToolCalling` 对这两种兼容协议均为 true。
 
 这使 Kimi、OpenRouter、Groq 等 OpenAI-compatible 服务立刻复用当前稳定的 Agent 工具循环；MiniMax 等 Anthropic-compatible 服务复用 Claude 的内容块和缓存语义。每个模型的上下文窗口继续进入自适应压缩预算；未填写的自定义模型回退至 32K 保守预算。
+
+GLM 预设使用通用 OpenAI-compatible 地址 `https://open.bigmodel.cn/api/paas/v4`，内置 `glm-5.2`（1M）、`glm-5.1`（200K）与 `glm-4.7`（200K）。Coding Plan 用户可在既有 Base URL 字段改为专属 coding 地址；不为套餐额度或私有参数建立独立适配器。
 
 ## 错误与兼容性
 
