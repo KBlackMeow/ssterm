@@ -206,10 +206,31 @@ class ProviderConfig {
     displayName: 'OpenRouter',
     protocol: ProviderProtocol.openAiCompatible,
     baseUrl: 'https://openrouter.ai/api/v1',
-    models: ['anthropic/claude-sonnet-4.6', 'moonshotai/kimi-k2.6'],
+    models: [
+      'openai/gpt-5.4',
+      'openai/gpt-5.2-pro',
+      'openai/gpt-5.2',
+      'anthropic/claude-opus-5',
+      'anthropic/claude-opus-5-fast',
+      'anthropic/claude-sonnet-4.6',
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
+      'moonshotai/kimi-k2.6',
+      'qwen/qwen3.8-max',
+      'qwen/qwen3.7-flash',
+    ],
     modelContextWindows: {
+      'openai/gpt-5.4': 1050000,
+      'openai/gpt-5.2-pro': 400000,
+      'openai/gpt-5.2': 400000,
+      'anthropic/claude-opus-5': 1000000,
+      'anthropic/claude-opus-5-fast': 1000000,
       'anthropic/claude-sonnet-4.6': 200000,
-      'moonshotai/kimi-k2.6': 256000,
+      'deepseek/deepseek-v4-pro': 1048576,
+      'deepseek/deepseek-v4-flash': 1048576,
+      'moonshotai/kimi-k2.6': 262144,
+      'qwen/qwen3.8-max': 1000000,
+      'qwen/qwen3.7-flash': 1000000,
     },
   );
 
@@ -244,18 +265,6 @@ class ProviderConfig {
     },
   );
 
-  factory ProviderConfig.groq() => ProviderConfig(
-    id: 'groq',
-    displayName: 'Groq',
-    protocol: ProviderProtocol.openAiCompatible,
-    baseUrl: 'https://api.groq.com/openai/v1',
-    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-    modelContextWindows: {
-      'openai/gpt-oss-120b': 128000,
-      'openai/gpt-oss-20b': 128000,
-    },
-  );
-
   factory ProviderConfig.mistral() => ProviderConfig(
     id: 'mistral',
     displayName: 'Mistral AI',
@@ -275,24 +284,6 @@ class ProviderConfig {
     baseUrl: 'https://api.siliconflow.cn/v1',
     models: ['deepseek-ai/DeepSeek-V3.2'],
     modelContextWindows: {'deepseek-ai/DeepSeek-V3.2': 128000},
-  );
-
-  factory ProviderConfig.together() => ProviderConfig(
-    id: 'together',
-    displayName: 'Together AI',
-    protocol: ProviderProtocol.openAiCompatible,
-    baseUrl: 'https://api.together.xyz/v1',
-    models: ['moonshotai/Kimi-K2.5'],
-    modelContextWindows: {'moonshotai/Kimi-K2.5': 128000},
-  );
-
-  factory ProviderConfig.fireworks() => ProviderConfig(
-    id: 'fireworks',
-    displayName: 'Fireworks AI',
-    protocol: ProviderProtocol.openAiCompatible,
-    baseUrl: 'https://api.fireworks.ai/inference/v1',
-    models: ['accounts/fireworks/models/kimi-k2p5'],
-    modelContextWindows: {'accounts/fireworks/models/kimi-k2p5': 128000},
   );
 
   factory ProviderConfig.minimax() => ProviderConfig(
@@ -350,11 +341,8 @@ class ProviderConfig {
     ProviderConfig.kimi(),
     ProviderConfig.qwen(),
     ProviderConfig.glm(),
-    ProviderConfig.groq(),
     ProviderConfig.mistral(),
     ProviderConfig.siliconflow(),
-    ProviderConfig.together(),
-    ProviderConfig.fireworks(),
     ProviderConfig.minimax(),
     ProviderConfig.openrouterAnthropic(),
   ];
@@ -379,16 +367,10 @@ class ProviderConfig {
         return ProviderConfig.qwen();
       case 'glm':
         return ProviderConfig.glm();
-      case 'groq':
-        return ProviderConfig.groq();
       case 'mistral':
         return ProviderConfig.mistral();
       case 'siliconflow':
         return ProviderConfig.siliconflow();
-      case 'together':
-        return ProviderConfig.together();
-      case 'fireworks':
-        return ProviderConfig.fireworks();
       case 'minimax':
         return ProviderConfig.minimax();
       case 'openrouter-anthropic':

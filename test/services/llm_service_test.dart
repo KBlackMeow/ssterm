@@ -1529,6 +1529,26 @@ Done.
       expect(ProviderConfig.glm().modelContextWindows['glm-5.2'], 1000000);
     });
 
+    test('OpenRouter groups current GPT, Claude and DeepSeek defaults', () {
+      expect(ProviderConfig.openrouter().models, [
+        'openai/gpt-5.4',
+        'openai/gpt-5.2-pro',
+        'openai/gpt-5.2',
+        'anthropic/claude-opus-5',
+        'anthropic/claude-opus-5-fast',
+        'anthropic/claude-sonnet-4.6',
+        'deepseek/deepseek-v4-pro',
+        'deepseek/deepseek-v4-flash',
+        'moonshotai/kimi-k2.6',
+        'qwen/qwen3.8-max',
+        'qwen/qwen3.7-flash',
+      ]);
+      final ids = ProviderConfig.builtIns.map((provider) => provider.id);
+      expect(ids, isNot(contains('groq')));
+      expect(ids, isNot(contains('together')));
+      expect(ids, isNot(contains('fireworks')));
+    });
+
     test('new configurations expose the current cloud model catalogues', () {
       expect(
         ProviderConfig.chatgpt().models,
