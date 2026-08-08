@@ -847,11 +847,27 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     String command, {
     bool Function()? isCancelled,
   }) {
+    if (tab.kind == _TabKind.ssh) {
+      final client = tab.sshClient;
+      if (client == null) {
+        return Future.value(
+          CommandResult(
+            output: '[ssterm background] SSH connection is not available.',
+            exitCode: null,
+          ),
+        );
+      }
+      return const BackgroundCommandExecutor().executeSsh(
+        client,
+        tab.agent2Cwd ?? '/',
+        command,
+        isCancelled: isCancelled,
+      );
+    }
     if (tab.kind != _TabKind.local || tab.localShell == null) {
       return Future.value(
         CommandResult(
-          output:
-              '[ssterm background] Agent2 remote execution is not wired yet.',
+          output: '[ssterm background] Agent2 cannot execute on this tab.',
           exitCode: null,
         ),
       );

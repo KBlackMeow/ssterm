@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dartssh2/dartssh2.dart';
+
 import '../io/output_pipe.dart';
 import 'local_shell_discovery.dart';
 
@@ -174,6 +176,66 @@ class BackgroundCommandExecutor {
       truncated: stdout.truncated || stderr.truncated,
     );
   }
+
+  /// Executes one command through a dedicated non-PTY SSH session.
+  ///
+  /// The caller retains ownership of [client]. Cancellation closes only the
+  /// created session, leaving the terminal session and SFTP untouched.
+  Future<CommandResult> executeSsh(
+    SSHClient client,
+    String cwd,
+    String command, {
+    bool Function()? isCancelled,
+  }) async {
+    final stdout = _BoundedOutput(outputLimitBytes);
+    final stderr = _BoundedOutput(outputLimitBytes);
+    late final SSHSession session;
+    try {
+      session = await client.execute(
+        'cd -- ${shellQuotePosix(cwd)} && $command',
+      );
+    } catch (error) {
+      return CommandResult(
+        output: '[ssterm background] Could not start SSH command: $error',
+        exitCode: null,
+      );
+    }
+
+    final stdoutDone = session.stdout.listen(stdout.add).asFuture<void>();
+    final stderrDone = session.stderr.listen(stderr.add).asFuture<void>();
+    final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
+    var cancelled = false;
+    final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (isCancelled?.call() != true || cancelled) return;
+      cancelled = true;
+      session.kill(SSHSignal.TERM);
+      session.close();
+      timer.cancel();
+    });
+    final timedOut = await Future.any<bool>([
+      completed.then((_) => false),
+      Future<bool>.delayed(timeout, () => true),
+    ]);
+    if (timedOut) {
+      session.kill(SSHSignal.TERM);
+      session.close();
+    }
+    await completed;
+    poll.cancel();
+    final status = cancelled
+        ? 'cancelled'
+        : timedOut
+        ? 'timed out after ${timeout.inSeconds}s'
+        : null;
+    return CommandResult(
+      output: _formatOutput(stdout, stderr, status),
+      exitCode: status == null ? session.exitCode : null,
+      truncated: stdout.truncated || stderr.truncated,
+    );
+  }
+
+  static String shellQuotePosix(String value) =>
+      "'${value.replaceAll("'", "'\\''")}'";
 
   Map<String, String> _nonInteractiveEnvironment(Map<String, String>? shell) {
     final environment = Map<String, String>.from(Platform.environment);
