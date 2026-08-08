@@ -587,7 +587,7 @@ class _AiPanelContent extends StatelessWidget {
 
     if (msg.isSystem) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 8, left: 32),
+        padding: const EdgeInsets.only(bottom: 8),
         child: _CommandResultCard(
           command: msg.commandRun ?? '',
           output: msg.text,
@@ -695,7 +695,7 @@ class _AiPanelContent extends StatelessWidget {
     final toolCalls = msg.toolCallData;
     if (toolCalls != null) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 12, left: 32),
+        padding: const EdgeInsets.only(bottom: 12),
         child: _ToolCallCard(data: toolCalls),
       );
     }
