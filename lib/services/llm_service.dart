@@ -85,6 +85,12 @@ class ToolCall {
     return value is String && value.trim().isNotEmpty ? value : null;
   }
 
+  /// Short user-facing explanation accompanying a shell tool call.
+  String? get reason {
+    final value = arguments['reason'] ?? arguments['purpose'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+
   bool get isShell =>
       name == 'bash' ||
       name == 'shell' ||

@@ -21,6 +21,43 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   bool get _activeTabIsSplit =>
       _tabs.isNotEmpty && _active < _tabs.length && _tabs[_active].isSplit;
 
+  String? _commandEnvironmentFor(_Tab tab) {
+    if (tab.kind != _TabKind.local || tab.localShell == null) return null;
+    final shell = tab.localShell!;
+    if (shell.isWsl) {
+      return 'Linux running in WSL (${shell.displayName}). Commands run inside '
+          'the Linux distribution, not Windows cmd.exe or PowerShell. Use '
+          'POSIX/Linux commands (for example `ip addr`, not `ipconfig`).';
+    }
+    if (shell.usePowerShellWrapper) {
+      return 'Windows PowerShell (${shell.displayName}). Use PowerShell syntax '
+          'and cmdlets; do not use cmd.exe command separators such as `& ver` '
+          'as a shell probe. For a blank line use `Write-Output \'\'` or '
+          '`[Console]::WriteLine()`; never use bare `echo`.';
+    }
+    if (shell.id == 'cmd') {
+      return 'Windows cmd.exe. Use cmd.exe syntax and built-in commands; do '
+          'not use PowerShell cmdlets or POSIX shell syntax.';
+    }
+    if (shell.id.startsWith('git-bash') ||
+        shell.executable.toLowerCase().endsWith('bash.exe')) {
+      return 'Git Bash / MSYS POSIX shell. Use POSIX shell syntax and Unix '
+          'commands, not cmd.exe or PowerShell syntax.';
+    }
+    return 'Local shell: ${shell.displayName}. Use this shell\'s native command syntax.';
+  }
+
+  FileSystemAdapter _localFileAdapter(_Tab tab, String? Function() cwd) {
+    final shell = tab.localShell;
+    if (shell?.isWsl == true && shell!.id.startsWith('wsl:')) {
+      return WslFileSystemAdapter(
+        distribution: shell.id.substring('wsl:'.length),
+        cwdProvider: cwd,
+      );
+    }
+    return LocalFileSystemAdapter(cwdProvider: cwd);
+  }
+
   // ── Desktop layout ─────────────────────────────────────────────────────────
 
   Widget _buildChrome() {
@@ -448,9 +485,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       // closure keeps the adapter resolving relative + `~/…` paths
       // against the SAME directory the user sees in their shell.
       fileSystemAdapter: switch (tab.kind) {
-        _TabKind.local => LocalFileSystemAdapter(
-          cwdProvider: () => tab.localPath?.value,
-        ),
+        _TabKind.local => _localFileAdapter(tab, () => tab.localPath?.value),
         _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
           sftp: tab.sftp,
           label: 'ssh: ${tab.title}',
@@ -460,6 +495,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         ),
         _ => null,
       },
+      executionEnvironment: _commandEnvironmentFor(tab),
       // Persist dock side + drag-resized extent the same way SFTP does
       // (see `initialPosition` / `initialSize` / `onLayoutChanged` on
       // `SshSessionView` above) — the AI panel's in-panel toggle and
@@ -492,9 +528,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       terminalBackground: _config.terminal.chromeBackground,
       terminalLineHeight: _config.terminal.lineHeight,
       fileSystemAdapter: switch (tab.kind) {
-        _TabKind.local => LocalFileSystemAdapter(
-          cwdProvider: () => tab.agent2Cwd,
-        ),
+        _TabKind.local => _localFileAdapter(tab, () => tab.agent2Cwd),
         _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
           sftp: tab.sftp,
           label: 'ssh: ${tab.title}',
@@ -502,6 +536,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         ),
         _ => null,
       },
+      executionEnvironment: _commandEnvironmentFor(tab),
       initialPosition: _config.agent2Position,
       initialSize: _config.agent2Size,
       initialMode: AiPanelMode.agent,

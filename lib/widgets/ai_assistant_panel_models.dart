@@ -439,6 +439,8 @@ class _DangerProposal {
   /// scripts expand on tap).
   final String command;
 
+  final String? reason;
+
   /// Verdict from `CommandSafety.danger(...)`, or `null` when this card
   /// is an ordinary (non-dangerous) manual-mode confirmation — see the
   /// section comment above [_DangerProposalState].  Carries the rule id
@@ -465,6 +467,7 @@ class _DangerProposal {
 
   _DangerProposal({
     required this.command,
+    required this.reason,
     required this.verdict,
     required this.agentGeneration,
   });

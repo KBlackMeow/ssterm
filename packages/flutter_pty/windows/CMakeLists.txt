@@ -19,5 +19,6 @@ set(flutter_pty_bundled_libraries
   # Defined in ../src/CMakeLists.txt.
   # This can be changed to accomodate different builds.
   $<TARGET_FILE:flutter_pty>
+  $<TARGET_FILE:flutter_pty_job_runner>
   PARENT_SCOPE
 )

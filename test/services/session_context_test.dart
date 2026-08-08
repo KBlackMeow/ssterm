@@ -95,6 +95,26 @@ void main() {
       expect(out, contains('authoritative "now"'));
     });
 
+    test(
+      'states when a WSL tab executes Linux rather than Windows commands',
+      () {
+        final out = SessionContext.build(
+          activeTab: 'Ubuntu',
+          cwd: '/home/illya',
+          home: '/home/illya',
+          executionEnvironment:
+              'Linux running in WSL (Ubuntu). Use `ip addr`, not `ipconfig`.',
+          now: DateTime(2026, 6, 8, 20, 54, 0),
+        );
+
+        expect(
+          out,
+          contains('Command environment: Linux running in WSL (Ubuntu).'),
+        );
+        expect(out, contains('not `ipconfig`'));
+      },
+    );
+
     test('omits adapter-derived lines when their values are null/empty', () {
       // Settings tab / pre-handshake SSH case — no fs adapter, but the
       // clock is still useful.  This is the new behaviour: previously

@@ -101,6 +101,7 @@ class AiAssistantOverlay extends StatefulWidget {
     this.terminalLineHeight,
     this.onTerminalLockChanged,
     this.fileSystemAdapter,
+    this.executionEnvironment,
     this.initialPosition = AiPanelPosition.right,
     this.initialSize,
     this.onLayoutChanged,
@@ -174,6 +175,11 @@ class AiAssistantOverlay extends StatefulWidget {
   /// Reconstructed by the host on every build so a tab switch
   /// immediately swaps the adapter the next Apply click will use.
   final FileSystemAdapter? fileSystemAdapter;
+
+  /// Per-tab command environment supplied to the first agent turn. This is
+  /// distinct from the OS that runs the Flutter UI (for example, WSL on a
+  /// Windows host).
+  final String? executionEnvironment;
 
   /// Initial dock side — restored from [AppConfig.aiPosition] on app
   /// launch.  The user can flip this from the in-panel toggle, which

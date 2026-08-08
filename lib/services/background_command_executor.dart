@@ -4,8 +4,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
-import 'package:flutter_pty/flutter_pty.dart' show WindowsJob;
-
 import '../io/output_pipe.dart';
 import 'local_shell_discovery.dart';
 
@@ -47,6 +45,7 @@ class BackgroundCommandTarget {
       if (shell.id == 'cmd' ||
           shell.usePowerShellWrapper ||
           shell.isWsl ||
+          shell.id.startsWith('git-bash') ||
           shell.executable.toLowerCase().endsWith('bash.exe')) {
         return const BackgroundCommandSupport.supported();
       }
@@ -114,14 +113,47 @@ class BackgroundCommandExecutor {
         exitCode: null,
       );
     }
+    final syntaxIssue = validateBackgroundCommandSyntax(target, command);
+    if (syntaxIssue != null) {
+      return CommandResult(
+        output: '[ssterm background] $syntaxIssue',
+        exitCode: null,
+      );
+    }
 
+    final wslMarker = target.shell.isWsl ? _wslMarkerPath() : null;
     late final Process process;
     try {
-      final invocation = _localInvocation(target, command);
+      final invocation = buildBackgroundCommandInvocation(
+        target,
+        command,
+        wslProcessMarker: wslMarker,
+      );
+      final usesWindowsJobRunner =
+          target.platform == BackgroundCommandPlatform.windows;
+      final runner = usesWindowsJobRunner ? _windowsJobRunnerPath() : null;
+      if (runner != null && !File(runner).existsSync()) {
+        return CommandResult(
+          output:
+              '[ssterm background] Windows process runner is missing: $runner',
+          exitCode: null,
+        );
+      }
       process = await Process.start(
-        invocation.executable,
-        invocation.arguments,
-        workingDirectory: target.cwd,
+        runner ?? invocation.executable,
+        runner == null
+            ? invocation.arguments
+            : [
+                '--parent-pid',
+                pid.toString(),
+                '--',
+                invocation.executable,
+                ...invocation.arguments,
+              ],
+        // WSL receives its Linux working directory through its own arguments.
+        // Passing Agent2's POSIX path to CreateProcess would instead be treated
+        // as a Windows path and can prevent wsl.exe from starting.
+        workingDirectory: target.shell.isWsl ? null : target.cwd,
         runInShell: false,
         includeParentEnvironment: true,
         environment: _nonInteractiveEnvironment(target.shell.environment),
@@ -133,20 +165,6 @@ class BackgroundCommandExecutor {
         exitCode: null,
       );
     }
-    WindowsJob? windowsJob;
-    if (target.platform == BackgroundCommandPlatform.windows) {
-      try {
-        windowsJob = WindowsJob.create()..assignPid(process.pid);
-      } catch (error) {
-        process.kill();
-        return CommandResult(
-          output:
-              '[ssterm background] Could not isolate Windows process: \$error',
-          exitCode: null,
-        );
-      }
-    }
-
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
     final stdoutDone = process.stdout.listen(stdout.add).asFuture<void>();
@@ -163,11 +181,14 @@ class BackgroundCommandExecutor {
     ) {
       if (isCancelled?.call() != true || cancelled) return;
       cancelled = true;
-      if (windowsJob != null) {
-        windowsJob.terminate();
-      } else {
-        process.kill(ProcessSignal.sigterm);
+      if (wslMarker != null) {
+        unawaited(_terminateWslProcessGroup(target.shell, wslMarker));
       }
+      process.kill(
+        target.platform == BackgroundCommandPlatform.windows
+            ? ProcessSignal.sigkill
+            : ProcessSignal.sigterm,
+      );
       timer.cancel();
     });
 
@@ -176,11 +197,14 @@ class BackgroundCommandExecutor {
       Future<bool>.delayed(timeout, () => true),
     ]);
     if (timedOut) {
-      if (windowsJob != null) {
-        windowsJob.terminate();
-      } else {
-        process.kill(ProcessSignal.sigterm);
+      if (wslMarker != null) {
+        unawaited(_terminateWslProcessGroup(target.shell, wslMarker));
       }
+      process.kill(
+        target.platform == BackgroundCommandPlatform.windows
+            ? ProcessSignal.sigkill
+            : ProcessSignal.sigterm,
+      );
     }
 
     // A SIGTERM-resistant direct child still gets a final hard kill. This is
@@ -195,8 +219,7 @@ class BackgroundCommandExecutor {
     }
     await completed;
     cancellationPoll.cancel();
-    windowsJob?.close();
-
+    if (wslMarker != null) unawaited(_removeWslMarker(target.shell, wslMarker));
     final status = cancelled
         ? 'cancelled'
         : timedOut
@@ -207,35 +230,6 @@ class BackgroundCommandExecutor {
       exitCode: status == null ? await process.exitCode : null,
       truncated: stdout.truncated || stderr.truncated,
     );
-  }
-
-  ({String executable, List<String> arguments}) _localInvocation(
-    BackgroundCommandTarget target,
-    String command,
-  ) {
-    final shell = target.shell;
-    if (target.platform != BackgroundCommandPlatform.windows) {
-      return (executable: shell.executable, arguments: ['-c', command]);
-    }
-    if (shell.id == 'cmd') {
-      return (
-        executable: shell.executable,
-        arguments: ['/d', '/s', '/c', command],
-      );
-    }
-    if (shell.usePowerShellWrapper) {
-      return (
-        executable: shell.executable,
-        arguments: ['-NoProfile', '-NonInteractive', '-Command', command],
-      );
-    }
-    if (shell.isWsl) {
-      return (
-        executable: shell.executable,
-        arguments: [...shell.arguments, '--', 'sh', '-lc', command],
-      );
-    }
-    return (executable: shell.executable, arguments: ['-c', command]);
   }
 
   /// Executes one command through a dedicated non-PTY SSH session.
@@ -321,6 +315,171 @@ class BackgroundCommandExecutor {
     }
     return sections.isEmpty ? '' : sections.join('\n');
   }
+
+  String _windowsJobRunnerPath() =>
+      '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}'
+      'flutter_pty_job_runner.exe';
+
+  String _wslMarkerPath() =>
+      '/tmp/ssterm-agent2-$pid-${DateTime.now().microsecondsSinceEpoch}.pid';
+
+  Future<void> _terminateWslProcessGroup(
+    LocalShellOption shell,
+    String marker,
+  ) async {
+    final distro = shell.id.startsWith('wsl:')
+        ? shell.id.substring('wsl:'.length)
+        : '';
+    if (distro.isEmpty) return;
+    final root = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    // The marker is written by the setsid session leader. Retrying covers the
+    // narrow interval between CreateProcess and the first Linux instruction.
+    for (var attempt = 0; attempt < 5; attempt++) {
+      await Process.run('$root\\System32\\wsl.exe', [
+        '-d',
+        distro,
+        '--',
+        'sh',
+        '-c',
+        r'''test -r "$1" && { p=$(cat "$1"); kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p"; }''',
+        'sh',
+        marker,
+      ], runInShell: false);
+      if (attempt < 4) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+  }
+
+  Future<void> _removeWslMarker(LocalShellOption shell, String marker) async {
+    final distro = shell.id.startsWith('wsl:')
+        ? shell.id.substring('wsl:'.length)
+        : '';
+    if (distro.isEmpty) return;
+    final root = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    await Process.run('$root\\System32\\wsl.exe', [
+      '-d',
+      distro,
+      '--',
+      'rm',
+      '-f',
+      '--',
+      marker,
+    ], runInShell: false);
+  }
+}
+
+/// Reject known cross-shell probes before execution. This is deliberately
+/// narrow: valid commands must remain the shell's responsibility, but these
+/// forms are unambiguously accidental cmd.exe syntax in PowerShell and cause
+/// misleading runtime failures.
+String? validateBackgroundCommandSyntax(
+  BackgroundCommandTarget target,
+  String command,
+) {
+  if (!target.shell.usePowerShellWrapper) return null;
+  if (RegExp(
+    r'(^|[;\r\n])\s*&\s*ver\b',
+    caseSensitive: false,
+  ).hasMatch(command)) {
+    return 'PowerShell does not accept cmd.exe `& ver`. Use `\$PSVersionTable` '
+        'or `cmd /c ver`.';
+  }
+  if (RegExp(
+    r'(^|[;\r\n])\s*echo\s*;',
+    caseSensitive: false,
+  ).hasMatch(command)) {
+    return 'PowerShell bare `echo` needs an argument. Use `Write-Output \'\'` '
+        'or `[Console]::WriteLine()` for a blank line.';
+  }
+  return null;
+}
+
+/// Builds the non-interactive shell invocation used for a local background
+/// command. Kept separate from process startup so every supported Windows
+/// shell route can be tested without requiring that shell to be installed.
+({String executable, List<String> arguments}) buildBackgroundCommandInvocation(
+  BackgroundCommandTarget target,
+  String command, {
+  String? wslProcessMarker,
+}) {
+  final shell = target.shell;
+  if (target.platform != BackgroundCommandPlatform.windows) {
+    return (executable: shell.executable, arguments: ['-c', command]);
+  }
+  if (shell.id == 'cmd') {
+    return (
+      executable: shell.executable,
+      arguments: ['/d', '/s', '/c', command],
+    );
+  }
+  if (shell.usePowerShellWrapper) {
+    final utf8Prelude =
+        r'''[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; ''';
+    return (
+      executable: shell.executable,
+      arguments: [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '$utf8Prelude& { $command }',
+      ],
+    );
+  }
+  if (shell.id.startsWith('git-bash')) {
+    return (
+      executable: shell.executable,
+      arguments: _gitBashCommandArguments(shell.arguments, command),
+    );
+  }
+  if (shell.isWsl) {
+    final distro = shell.id.startsWith('wsl:')
+        ? shell.id.substring('wsl:'.length)
+        : '';
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    return (
+      // [shell.arguments] is for the interactive terminal: it can contain a
+      // login shell (`-li`) or a launcher wrapper. Reusing it here makes WSL
+      // wait for an interactive session instead of running the command.
+      executable: '$systemRoot\\System32\\wsl.exe',
+      arguments: [
+        if (distro.isNotEmpty) ...['-d', distro],
+        '--cd',
+        target.cwd.startsWith('/') ? target.cwd : '~',
+        '--',
+        'sh',
+        '-lc',
+        wslProcessMarker == null
+            ? command
+            : 'printf %s "\$\$" > '
+                  '${BackgroundCommandExecutor.shellQuotePosix(wslProcessMarker)}; '
+                  'exec sh -lc ${BackgroundCommandExecutor.shellQuotePosix(command)}',
+      ],
+    );
+  }
+  return (executable: shell.executable, arguments: ['-c', command]);
+}
+
+List<String> _gitBashCommandArguments(
+  List<String> interactiveArguments,
+  String command,
+) {
+  // Git Bash is discovered via `env.exe`, whose leading arguments establish
+  // the MSYS environment and whose remaining arguments start an interactive
+  // bash (`--login -i`). Keep only that environment prefix and replace the
+  // terminal-only tail with a noninteractive shell command.
+  final bashIndex = interactiveArguments.indexOf('/usr/bin/bash');
+  final environment = bashIndex < 0
+      ? const <String>[]
+      : interactiveArguments.take(bashIndex).toList(growable: false);
+  return [
+    ...environment,
+    '/usr/bin/bash',
+    '--noprofile',
+    '--norc',
+    '-lc',
+    command,
+  ];
 }
 
 class _BoundedOutput {
@@ -344,5 +503,26 @@ class _BoundedOutput {
     _bytes.add(chunk);
   }
 
-  String get text => utf8.decode(_bytes.toBytes(), allowMalformed: true);
+  String get text {
+    final bytes = _bytes.toBytes();
+    // Windows PowerShell 5 writes redirected error records as UTF-16LE with a
+    // BOM. The normal UTF-8 decode path turns Chinese error text into mojibake.
+    if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
+      return _decodeUtf16Le(bytes.sublist(2));
+    }
+    if (bytes.length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
+      return _decodeUtf16Be(bytes.sublist(2));
+    }
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  String _decodeUtf16Le(List<int> bytes) => String.fromCharCodes([
+    for (var i = 0; i + 1 < bytes.length; i += 2)
+      bytes[i] | (bytes[i + 1] << 8),
+  ]);
+
+  String _decodeUtf16Be(List<int> bytes) => String.fromCharCodes([
+    for (var i = 0; i + 1 < bytes.length; i += 2)
+      (bytes[i] << 8) | bytes[i + 1],
+  ]);
 }

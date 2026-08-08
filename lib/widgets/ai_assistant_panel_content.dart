@@ -851,6 +851,7 @@ class _ToolCallCard extends StatelessWidget {
         ),
         title: Text(
           data.summary,
+          textAlign: TextAlign.left,
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,

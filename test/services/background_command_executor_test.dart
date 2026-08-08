@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/background_command_executor.dart';
 import 'package:ssterm/services/local_shell_discovery.dart';
@@ -29,7 +31,7 @@ void main() {
       );
     });
 
-    test('rejects terminal-only shell variants and Windows', () {
+    test('supports known Windows shells and rejects unknown ones', () {
       const powershell = LocalShellOption(
         id: 'powershell',
         displayName: 'PowerShell',
@@ -54,6 +56,23 @@ void main() {
       expect(
         BackgroundCommandTarget.local(
           shell: powershell,
+          cwd: r'C:\work',
+          platform: BackgroundCommandPlatform.windows,
+        ).support.isSupported,
+        isTrue,
+      );
+      expect(
+        BackgroundCommandTarget.local(
+          shell: wsl,
+          cwd: r'C:\work',
+          platform: BackgroundCommandPlatform.windows,
+        ).support.isSupported,
+        isTrue,
+      );
+
+      expect(
+        BackgroundCommandTarget.local(
+          shell: powershell,
           cwd: '/tmp',
           platform: BackgroundCommandPlatform.macos,
         ).support.isSupported,
@@ -68,6 +87,167 @@ void main() {
         isFalse,
       );
     });
+
+    test('builds cmd, PowerShell, Git Bash, and WSL invocations', () {
+      BackgroundCommandTarget windows(LocalShellOption shell) =>
+          BackgroundCommandTarget.local(
+            shell: shell,
+            cwd: r'C:\work',
+            platform: BackgroundCommandPlatform.windows,
+          );
+
+      expect(
+        buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'cmd',
+              displayName: 'CMD',
+              executable: 'cmd.exe',
+            ),
+          ),
+          'echo ok',
+        ).arguments,
+        ['/d', '/s', '/c', 'echo ok'],
+      );
+      expect(
+        buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'pwsh',
+              displayName: 'PowerShell',
+              executable: 'pwsh.exe',
+              usePowerShellWrapper: true,
+            ),
+          ),
+          'Write-Output ok',
+        ).arguments.take(3),
+        ['-NoProfile', '-NonInteractive', '-Command'],
+      );
+      expect(
+        buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'pwsh',
+              displayName: 'PowerShell',
+              executable: 'pwsh.exe',
+              usePowerShellWrapper: true,
+            ),
+          ),
+          'Write-Output ok',
+        ).arguments.last,
+        contains('[Console]::OutputEncoding'),
+      );
+      expect(
+        buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'git-bash',
+              displayName: 'Git Bash',
+              executable: 'env.exe',
+              arguments: [
+                'MSYSTEM=MINGW64',
+                'MSYS=enable_pcon winsymlink:nativestrict',
+                'CHERE_INVOKING=1',
+                'SHELL=/usr/bin/bash',
+                '/usr/bin/bash',
+                '--login',
+                '-i',
+              ],
+            ),
+          ),
+          'printf ok',
+        ).arguments,
+        [
+          'MSYSTEM=MINGW64',
+          'MSYS=enable_pcon winsymlink:nativestrict',
+          'CHERE_INVOKING=1',
+          'SHELL=/usr/bin/bash',
+          '/usr/bin/bash',
+          '--noprofile',
+          '--norc',
+          '-lc',
+          'printf ok',
+        ],
+      );
+      final wsl = buildBackgroundCommandInvocation(
+        windows(
+          const LocalShellOption(
+            id: 'wsl:ubuntu',
+            displayName: 'Ubuntu',
+            executable: 'wsl.exe',
+            arguments: ['-d', 'Ubuntu'],
+            isWsl: true,
+          ),
+        ),
+        'printf ok',
+      );
+      expect(
+        wsl.executable,
+        '${Platform.environment['SystemRoot'] ?? r'C:\\Windows'}\\System32\\wsl.exe',
+      );
+      expect(wsl.arguments, [
+        '-d',
+        'ubuntu',
+        '--cd',
+        '~',
+        '--',
+        'sh',
+        '-lc',
+        'printf ok',
+      ]);
+
+      final wslWithGroup = buildBackgroundCommandInvocation(
+        BackgroundCommandTarget.local(
+          shell: const LocalShellOption(
+            id: 'wsl:ubuntu',
+            displayName: 'Ubuntu',
+            executable: 'wsl.exe',
+            isWsl: true,
+          ),
+          cwd: '/home/tester/project',
+          platform: BackgroundCommandPlatform.windows,
+        ),
+        'sleep 1',
+        wslProcessMarker: '/tmp/ssterm-test.pid',
+      );
+      expect(
+        wslWithGroup.arguments,
+        containsAllInOrder([
+          '--cd',
+          '/home/tester/project',
+          '--',
+          'sh',
+          '-lc',
+          contains(r'printf %s "$$" >'),
+        ]),
+      );
+    });
+
+    test('rejects known cmd probes in PowerShell before execution', () {
+      const shell = LocalShellOption(
+        id: 'powershell',
+        displayName: 'PowerShell',
+        executable: 'powershell.exe',
+        usePowerShellWrapper: true,
+      );
+      final target = BackgroundCommandTarget.local(
+        shell: shell,
+        cwd: r'C:\work',
+        platform: BackgroundCommandPlatform.windows,
+      );
+      expect(
+        validateBackgroundCommandSyntax(target, 'echo "x"; & ver'),
+        contains('cmd.exe'),
+      );
+      expect(
+        validateBackgroundCommandSyntax(target, 'echo; Get-Date'),
+        contains('bare `echo`'),
+      );
+      expect(
+        validateBackgroundCommandSyntax(target, 'Write-Output ok'),
+        isNull,
+      );
+    });
   });
 
   group('BackgroundCommandExecutor', () {
@@ -80,13 +260,20 @@ void main() {
     test(
       'returns stdout, stderr, and the shell exit code without a PTY',
       () async {
+        final shell = Platform.isWindows ? LocalShellDiscovery.fallback() : zsh;
+        final platform = Platform.isWindows
+            ? BackgroundCommandPlatform.windows
+            : BackgroundCommandPlatform.macos;
+        final command = Platform.isWindows
+            ? 'echo out & echo err 1>&2 & exit /b 7'
+            : 'printf out; printf err >&2; exit 7';
         final result = await const BackgroundCommandExecutor().executeLocal(
           BackgroundCommandTarget.local(
-            shell: zsh,
-            cwd: '/tmp',
-            platform: BackgroundCommandPlatform.macos,
+            shell: shell,
+            cwd: Directory.current.path,
+            platform: platform,
           ),
-          'printf out; printf err >&2; exit 7',
+          command,
         );
 
         expect(result.exitCode, 7);
@@ -94,23 +281,33 @@ void main() {
         expect(result.output, contains('[stderr]\nerr'));
         expect(result.truncated, isFalse);
       },
+      skip: Platform.isWindows
+          ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+          : false,
     );
 
-    test('cancels only the background child command', () async {
-      final result = await const BackgroundCommandExecutor(
-        timeout: Duration(seconds: 5),
-      ).executeLocal(
-        BackgroundCommandTarget.local(
-          shell: zsh,
-          cwd: '/tmp',
-          platform: BackgroundCommandPlatform.macos,
-        ),
-        'sleep 5',
-        isCancelled: () => true,
-      );
+    test(
+      'cancels only the background child command',
+      () async {
+        final result =
+            await const BackgroundCommandExecutor(
+              timeout: Duration(seconds: 5),
+            ).executeLocal(
+              BackgroundCommandTarget.local(
+                shell: zsh,
+                cwd: Directory.current.path,
+                platform: BackgroundCommandPlatform.macos,
+              ),
+              'sleep 5',
+              isCancelled: () => true,
+            );
 
-      expect(result.exitCode, isNull);
-      expect(result.output, contains('cancelled'));
-    });
+        expect(result.exitCode, isNull);
+        expect(result.output, contains('cancelled'));
+      },
+      skip: Platform.isWindows
+          ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+          : false,
+    );
   });
 }

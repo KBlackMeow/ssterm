@@ -55,6 +55,11 @@ class AgentToolRegistry {
             required: true,
             description: 'The shell command to run.',
           ),
+          'reason': AgentToolParameter.string(
+            required: true,
+            description:
+                'One short sentence explaining why this command is needed.',
+          ),
         },
       ),
       const AgentToolDefinition(

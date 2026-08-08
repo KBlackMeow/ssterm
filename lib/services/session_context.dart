@@ -78,6 +78,7 @@ class SessionContext {
     String? activeTab,
     String? cwd,
     String? home,
+    String? executionEnvironment,
     required DateTime now,
   }) {
     final buf = StringBuffer('<session_context>\n');
@@ -89,6 +90,9 @@ class SessionContext {
     }
     if (home != null && home.isNotEmpty) {
       buf.writeln('HOME: $home');
+    }
+    if (executionEnvironment != null && executionEnvironment.isNotEmpty) {
+      buf.writeln('Command environment: $executionEnvironment');
     }
     buf.writeln('Current date/time: ${formatDateTime(now)}');
     buf.write(

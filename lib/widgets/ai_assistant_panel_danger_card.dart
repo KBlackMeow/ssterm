@@ -92,6 +92,13 @@ class _DangerProposalCard extends StatelessWidget {
           const SizedBox(height: 6),
           // The actual command — monospace, selectable so the user can
           // copy-paste it into a different terminal to inspect first.
+          Text(
+            p.reason == null
+                ? 'Purpose: not supplied. Reject or ask the agent to explain before running.'
+                : 'Purpose: ${p.reason}',
+            style: TextStyle(color: dim, fontSize: 12, height: 1.35),
+          ),
+          const SizedBox(height: 6),
           Container(
             width: double.infinity,
             decoration: BoxDecoration(

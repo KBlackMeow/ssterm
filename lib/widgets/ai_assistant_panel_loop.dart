@@ -91,7 +91,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       final ctx = await _buildSessionContext();
       body = ctx == null ? userText : '$ctx\n\n$userText';
     } else {
-      body = userText;
+      // The system prompt describes the Flutter host, which can be Windows
+      // even when this panel executes commands inside WSL. Repeat the compact
+      // per-tab override on later turns so an already-open WSL conversation
+      // corrects its command dialect without requiring a new chat.
+      final environment = widget.executionEnvironment;
+      body = environment == null || environment.isEmpty
+          ? userText
+          : '<command_environment>$environment</command_environment>\n\n$userText';
     }
     _conversationHistory.add({'role': 'user', 'content': body});
 
@@ -126,6 +133,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       activeTab: adapter?.label,
       cwd: adapter?.currentDirectory,
       home: home,
+      executionEnvironment: widget.executionEnvironment,
       now: DateTime.now(),
     );
   }
@@ -733,6 +741,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (needsConfirm) {
           proposal = _DangerProposal(
             command: command,
+            reason: toolCall.reason,
             verdict: verdict,
             agentGeneration: gen,
           );

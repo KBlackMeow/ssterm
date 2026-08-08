@@ -450,6 +450,10 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   }
 
   bool _isWindowsAbsolute(String p) {
+    // A WSL distribution is exposed to Windows as a UNC share.  Treat it as
+    // absolute so the local adapter can safely perform atomic same-directory
+    // replacements on `\\wsl$\\<distro>\\...` too.
+    if (p.startsWith(r'\\') || p.startsWith('//')) return true;
     // `C:\` / `D:\` style — accept both forward and backslash separators.
     if (p.length < 3) return false;
     final c = p.codeUnitAt(0);
@@ -460,10 +464,147 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   }
 
   String _dirname(String p) {
-    final i = p.lastIndexOf('/');
+    final i = [
+      p.lastIndexOf('/'),
+      p.lastIndexOf(r'\\'),
+    ].reduce((a, b) => a > b ? a : b);
     if (i < 0) return '.';
     if (i == 0) return '/';
     return p.substring(0, i);
+  }
+}
+
+/// Windows-side adapter for files in one WSL distribution.
+///
+/// Commands keep POSIX paths, while Windows file APIs operate through the
+/// distribution's documented UNC share.  This avoids accidentally writing a
+/// path such as `/home/me/a.txt` on the Windows host.
+class WslFileSystemAdapter implements FileSystemAdapter {
+  WslFileSystemAdapter({required this.distribution, required this.cwdProvider})
+    : _local = LocalFileSystemAdapter();
+
+  final String distribution;
+  final String? Function() cwdProvider;
+  final LocalFileSystemAdapter _local;
+  String? _home;
+
+  @override
+  String get label => 'wsl: $distribution';
+
+  @override
+  bool get isAvailable => Platform.isWindows && distribution.isNotEmpty;
+
+  @override
+  String? get currentDirectory => cwdProvider();
+
+  @override
+  Future<String?> homeDirectory() async => _home ??= await _linuxHome();
+
+  @override
+  Future<FileWritePreview> preview(String path) async {
+    final linux = await _resolveLinuxPath(path);
+    final preview = await _local.preview(_uncPath(linux));
+    return FileWritePreview(
+      resolvedPath: linux,
+      exists: preview.exists,
+      mtime: preview.mtime,
+      existingSize: preview.existingSize,
+      existingLines: preview.existingLines,
+    );
+  }
+
+  @override
+  Future<String> readContent(String path) async =>
+      _local.readContent(_uncPath(await _resolveLinuxPath(path)));
+
+  @override
+  Future<FileWriteResult> commit(
+    String path,
+    String content, {
+    DateTime? expectedMtime,
+  }) async {
+    final linux = await _resolveLinuxPath(path);
+    final result = await _local.commit(
+      _uncPath(linux),
+      content,
+      expectedMtime: expectedMtime,
+    );
+    return FileWriteResult(
+      resolvedPath: linux,
+      bytesWritten: result.bytesWritten,
+      mtime: result.mtime,
+      created: result.created,
+    );
+  }
+
+  Future<String> _linuxHome() async {
+    if (!isAvailable) {
+      throw const FileWriteException(
+        FileWriteErrorKind.notSupported,
+        'WSL file access is available only on Windows.',
+      );
+    }
+    final root = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final result = await Process.run('$root\\System32\\wsl.exe', [
+      '-d',
+      distribution,
+      '--',
+      'sh',
+      '-lc',
+      r'printf %s "$HOME"',
+    ], runInShell: false);
+    final home = (result.stdout as String).trim();
+    if (result.exitCode != 0 || !home.startsWith('/')) {
+      throw FileWriteException(
+        FileWriteErrorKind.notSupported,
+        'Could not resolve HOME in WSL distribution $distribution: '
+        '${(result.stderr as String).trim()}',
+      );
+    }
+    return home;
+  }
+
+  Future<String> _resolveLinuxPath(String input) async {
+    var path = input.trim();
+    if (path.isEmpty) {
+      throw const FileWriteException(
+        FileWriteErrorKind.invalidPath,
+        'Path is empty.',
+      );
+    }
+    if (path == '~' || path.startsWith('~/')) {
+      final home = await homeDirectory();
+      path = path == '~' ? home! : '$home${path.substring(1)}';
+    } else if (!path.startsWith('/')) {
+      final cwd = cwdProvider();
+      if (cwd == '~') {
+        path = '${await homeDirectory()}/$path';
+      } else if (cwd == null || !cwd.startsWith('/')) {
+        throw const FileWriteException(
+          FileWriteErrorKind.invalidPath,
+          'Path must be absolute (start with `/` or `~`); WSL PWD is unknown.',
+        );
+      } else {
+        path = '$cwd/$path';
+      }
+    }
+    return _normalizePosix(path);
+  }
+
+  String _uncPath(String linuxPath) =>
+      r'\\wsl$\\' + distribution + linuxPath.replaceAll('/', r'\\');
+
+  String _normalizePosix(String path) {
+    final parts = <String>[];
+    for (final part in path.split('/')) {
+      if (part.isEmpty || part == '.') continue;
+      if (part == '..') {
+        if (parts.isNotEmpty) parts.removeLast();
+      } else {
+        parts.add(part);
+      }
+    }
+    return '/${parts.join('/')}';
   }
 }
 
@@ -560,8 +701,9 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   );
 
   @override
-  Future<FileWritePreview> preview(String path) =>
-      _previewImpl(path).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+  Future<FileWritePreview> preview(String path) => _previewImpl(
+    path,
+  ).timeout(opTimeout, onTimeout: () => throw _timeoutException());
 
   Future<FileWritePreview> _previewImpl(String path) async {
     final client = sftp;
@@ -635,8 +777,9 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   }
 
   @override
-  Future<String> readContent(String path) =>
-      _readContentImpl(path).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+  Future<String> readContent(String path) => _readContentImpl(
+    path,
+  ).timeout(opTimeout, onTimeout: () => throw _timeoutException());
 
   Future<String> _readContentImpl(String path) async {
     final client = sftp;
@@ -691,9 +834,11 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
     String path,
     String content, {
     DateTime? expectedMtime,
-  }) =>
-      _commitImpl(path, content, expectedMtime: expectedMtime)
-          .timeout(opTimeout, onTimeout: () => throw _timeoutException());
+  }) => _commitImpl(
+    path,
+    content,
+    expectedMtime: expectedMtime,
+  ).timeout(opTimeout, onTimeout: () => throw _timeoutException());
 
   Future<FileWriteResult> _commitImpl(
     String path,

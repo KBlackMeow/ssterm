@@ -20,3 +20,14 @@ if (ANDROID)
   # Support Android 15 16k page size.
   target_link_options(flutter_pty PRIVATE "-Wl,-z,max-page-size=16384")
 endif()
+
+if (WIN32)
+  # Source files are UTF-8; otherwise MSVC decodes comments/string literals
+  # through the active ANSI code page and emits C4819 on Chinese Windows.
+  target_compile_options(flutter_pty PRIVATE /utf-8)
+  # Owns the Job Object for non-PTY background commands. Keeping this as a
+  # small native process lets it create the real shell suspended, associate it
+  # with a Job Object, then resume it with no process-tree escape window.
+  add_executable(flutter_pty_job_runner "flutter_pty_job_runner_win.c")
+  target_compile_options(flutter_pty_job_runner PRIVATE /utf-8)
+endif()
