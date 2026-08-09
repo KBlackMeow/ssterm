@@ -28,8 +28,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     int gen,
     int historyLenBefore,
     _ChatMessage aiMsg,
-    AgentConfig config,
-  ) async {
+    AgentConfig config, {
+    required AgentStreamClientSession streamSession,
+  }) async {
     String fullText = '';
     String reasoningText = '';
     final nativeToolCalls = <AgentToolCall>[];
@@ -37,17 +38,22 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     var malformedEventCount = 0;
     int? exactReasoningTokenCount;
 
-    // Outer retry loop: at most one extra attempt, and only when the
-    // first attempt yielded zero content AND failed with a transient
-    // network error.  Anything more aggressive would risk duplicating
+    // Retry only when an attempt yielded zero content or tool calls and
+    // failed with a transient network error. Anything more aggressive
+    // would risk duplicating
     // half-streamed answers.
-    const maxAttempts = 2;
+    const retryDelays = [
+      Duration(milliseconds: 500),
+      Duration(milliseconds: 1500),
+    ];
+    const maxAttempts = 3;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
       try {
         result = LlmService.chatStream(
           config: config,
           messages: _conversationHistory,
+          session: streamSession,
         );
       } catch (e) {
         // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
@@ -146,17 +152,22 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
             attempt < maxAttempts &&
             fullText.isEmpty &&
             reasoningText.isEmpty &&
+            nativeToolCalls.isEmpty &&
             mounted &&
             gen == _generation &&
             _isTransientStreamError(e);
         if (canRetry) {
+          final provider = config.current;
+          final endpoint = _streamEndpoint(provider?.baseUrl);
           _logAgent(
             'stream_retry attempt=$attempt/$maxAttempts '
+            'provider=${_logQuote(provider?.id ?? 'unavailable')} '
+            'endpoint=${_logQuote(endpoint)} '
             'type=${e.runtimeType} msg=${_logQuote('$e')}',
           );
           _cancelStream = null;
-          // Brief backoff so we don't hammer a flapping endpoint.
-          await Future<void>.delayed(const Duration(milliseconds: 400));
+          streamSession.reset();
+          await Future<void>.delayed(retryDelays[attempt - 1]);
           if (!mounted || gen != _generation) return null;
           continue;
         }
@@ -192,6 +203,15 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       finishReason: finishReason,
       malformedEventCount: malformedEventCount,
     );
+  }
+
+  String _streamEndpoint(String? baseUrl) {
+    final uri = baseUrl == null ? null : Uri.tryParse(baseUrl);
+    if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
+      return 'unavailable';
+    }
+    final port = uri.hasPort ? ':${uri.port}' : '';
+    return '${uri.scheme}://${uri.host}$port';
   }
 
   Future<String?> _runWebSearch({

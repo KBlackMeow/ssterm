@@ -12,6 +12,7 @@ import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/agent_context_budget.dart';
+import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
 import '../services/command_risk.dart';
 import '../services/conversation_compactor.dart';

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/agent_config.dart';
@@ -9,6 +10,14 @@ import 'package:ssterm/services/skill_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('chatStream uses the supplied task-scoped client session', () {
+    final source = File('lib/services/llm_service.dart').readAsStringSync();
+
+    expect(source, contains('required AgentStreamClientSession session'));
+    expect(source, contains('session.client'));
+    expect(source, isNot(contains('final client = HttpClient();')));
+  });
 
   group('OpenAiStreamAccumulator', () {
     test('assembles tool arguments by index when later chunks omit id', () {

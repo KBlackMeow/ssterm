@@ -42,4 +42,26 @@ void main() {
     expect(widgets, contains("label: '危险'"));
     expect(content, contains('审慎模式：普通命令直接执行，警告和危险命令需要确认'));
   });
+
+  test('agent loop reuses one stream client session and hardens retries', () {
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+    final tooling = File(
+      'lib/widgets/ai_assistant_panel_tooling.dart',
+    ).readAsStringSync();
+
+    expect(loop, contains('final streamSession = AgentStreamClientSession();'));
+    expect(loop, contains('streamSession: streamSession'));
+    expect(loop, contains('streamSession.close();'));
+    expect(
+      tooling,
+      contains('required AgentStreamClientSession streamSession'),
+    );
+    expect(tooling, contains('session: streamSession'));
+    expect(tooling, contains('streamSession.reset();'));
+    expect(tooling, contains('Duration(milliseconds: 500)'));
+    expect(tooling, contains('Duration(milliseconds: 1500)'));
+    expect(tooling, contains('nativeToolCalls.isEmpty'));
+  });
 }

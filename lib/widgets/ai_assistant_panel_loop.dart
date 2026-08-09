@@ -45,7 +45,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     );
   }
 
-  /// Transient stream errors that we'll retry ONCE if nothing has been
+  /// Transient stream errors that we'll retry if nothing has been
   /// yielded yet.  Keeps the agent loop alive across DeepSeek's frequent
   /// "connection closed while receiving data" hiccups (and similar TLS /
   /// socket flakiness on the other providers) without retrying after the
@@ -154,8 +154,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   }
 
   Future<void> _continueAgentLoop(int gen, AgentConfig config) async {
+    final streamSession = AgentStreamClientSession();
     try {
-      await _continueAgentLoopBody(gen, config);
+      await _continueAgentLoopBody(gen, config, streamSession: streamSession);
     } catch (e, st) {
       _logAgent(
         'error scope=loop type=${e.runtimeType} msg=${_logQuote('$e')}',
@@ -169,6 +170,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
       }
     } finally {
+      streamSession.close();
       if (mounted && gen == _generation) {
         setState(() {
           _agentBusy = false;
@@ -179,7 +181,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     }
   }
 
-  Future<void> _continueAgentLoopBody(int gen, AgentConfig config) async {
+  Future<void> _continueAgentLoopBody(
+    int gen,
+    AgentConfig config, {
+    required AgentStreamClientSession streamSession,
+  }) async {
     // Per-process turn counter — bumps once per `_continueAgentLoopBody`
     // invocation (i.e. once per user message that drives an agent
     // loop).  Captured in the two closures below so every log line in
@@ -221,6 +227,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         historyLenBefore,
         aiMsg,
         config,
+        streamSession: streamSession,
       );
       if (streamResult == null) {
         stopIter(loopIterations, 'stream_error_or_cancelled');
