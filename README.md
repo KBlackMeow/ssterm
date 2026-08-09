@@ -27,9 +27,9 @@ The terminal-aware agent panel is the standout feature — converse with an AI a
 | **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local) |
 | **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
 | **Session context** | Active tab, working directory, and date/time sent on first turn |
-| **Auto-execute mode** | Agent runs commands and iterates on captured output automatically |
-| **Manual mode** | Agent proposes commands; click **Exec** to run with safety checks |
-| **Dangerous-command gate** | 25+ built-in safety rules; destructive commands pause for approval |
+| **Auto-execute mode** | Ordinary and warning commands run automatically; dangerous commands pause for approval |
+| **Cautious mode** | Ordinary commands run directly; warning and dangerous commands require confirmation |
+| **Three-level command risk** | AI classifies commands as normal, warning, or dangerous; host rules can only raise the level, and result cards show the final classification |
 | **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
 | **Web search** | Brave Search integration for current web results (configurable) |
 | **Custom skills** | Add user-defined skills from the Settings page; no built-in playbooks are enabled by default |
