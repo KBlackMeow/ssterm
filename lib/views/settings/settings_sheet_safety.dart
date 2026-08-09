@@ -127,9 +127,8 @@ extension _SafetySettingsExt on _SettingsPageState {
           style: TextStyle(color: _kFg, fontSize: 13),
         ),
         subtitle: const Text(
-          'Even in auto-execute mode, a confirmation card appears in the '
-          'chat before any matched destructive command runs. Reject sends '
-          "the agent feedback so it can choose a safer approach.",
+          'Controls optional built-in and custom danger rules. Catastrophic '
+          'rules always remain enabled and always require confirmation.',
           style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
         ),
         value: _dangerPolicy.agentConfirmEnabled,
@@ -159,28 +158,31 @@ extension _SafetySettingsExt on _SettingsPageState {
   }
 
   Widget _builtinRuleTile(String id, String label) {
+    final mandatory = CommandRisk.isMandatoryDangerRule(id);
     final disabled = _dangerPolicy.disabledBuiltins.contains(id);
     return SwitchListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       dense: true,
       title: Text(label, style: const TextStyle(color: _kFg, fontSize: 13)),
       subtitle: Text(
-        id,
+        mandatory ? '$id · mandatory' : id,
         style: const TextStyle(
           color: _kFgMuted,
           fontSize: 11,
           fontFamily: 'JetBrainsMono',
         ),
       ),
-      value: !disabled,
+      value: mandatory || !disabled,
       activeThumbColor: _kAccent,
-      onChanged: (enabled) => _updatePolicy((p) {
-        if (enabled) {
-          p.disabledBuiltins.remove(id);
-        } else {
-          p.disabledBuiltins.add(id);
-        }
-      }),
+      onChanged: mandatory
+          ? null
+          : (enabled) => _updatePolicy((p) {
+              if (enabled) {
+                p.disabledBuiltins.remove(id);
+              } else {
+                p.disabledBuiltins.add(id);
+              }
+            }),
     );
   }
 

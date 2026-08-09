@@ -475,8 +475,13 @@ class _RiskBadge extends StatelessWidget {
         color: const Color(0xFFFF6E67),
       ),
     };
+    final upgrade = assessment?.source == CommandRiskSource.hostOverride
+        ? 'AI ${assessment?.aiLevel?.name ?? 'unknown'} → host ${assessment!.level.name}. '
+        : '';
     return Tooltip(
-      message: assessment?.reason ?? '缺少风险分类，按警告处理',
+      message:
+          '$upgrade${assessment?.reason ?? '缺少风险分类，按警告处理'} '
+          '(source: ${assessment?.source.name ?? 'missingAiFallback'})',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(

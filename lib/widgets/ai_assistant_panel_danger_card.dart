@@ -154,10 +154,12 @@ class _DangerProposalCard extends StatelessWidget {
                     // sure?" right up until the click.  Ordinary
                     // commands get the same green the old Exec button
                     // used, so the action still reads as "go".
-                    backgroundColor: isDanger
+                    backgroundColor: (isDanger || isWarning)
                         ? const Color(0xFFE5C07B)
                         : const Color(0xFF2E7D32),
-                    foregroundColor: isDanger ? Colors.black : Colors.white,
+                    foregroundColor: (isDanger || isWarning)
+                        ? Colors.black
+                        : Colors.white,
                   ),
                   child: Text(isDanger ? 'Run anyway' : 'Run'),
                 ),

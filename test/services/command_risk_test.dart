@@ -58,6 +58,37 @@ void main() {
       }
     });
 
+    test('catastrophic shell syntax variants remain dangerous', () {
+      for (final command in [
+        'rm -rf "/"',
+        r'''rm -rf "$HOME"''',
+        r'rm -rf ${HOME}',
+        'git -C repo reset --hard',
+        'rm -rf \\\n/',
+      ]) {
+        final value = CommandRisk.assess(
+          command: command,
+          aiLevel: 'normal',
+          aiReason: 'cleanup',
+          policy: policy,
+        );
+        expect(value.level, CommandRiskLevel.dangerous, reason: command);
+      }
+    });
+
+    test('AI risk enum parsing is exact', () {
+      for (final level in [' NORMAL ', 'Normal', 'WARNING']) {
+        final value = CommandRisk.assess(
+          command: 'pwd',
+          aiLevel: level,
+          aiReason: 'read only',
+          policy: policy,
+        );
+        expect(value.level, CommandRiskLevel.warning, reason: level);
+        expect(value.source, CommandRiskSource.missingAiFallback);
+      }
+    });
+
     test('host warning rule upgrades AI normal', () {
       final value = CommandRisk.assess(
         command: 'rm -rf node_modules',

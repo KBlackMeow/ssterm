@@ -732,16 +732,19 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         // and can decide what to do (typically pick a different
         // approach or ask the user).
         final dangerPolicy = config.dangerousPolicy;
+        final operationalRejection = CommandSafety.reason(command);
         final assessment = CommandRisk.assess(
           command: command,
           aiLevel: toolCall.riskLevel,
           aiReason: toolCall.riskReason,
           policy: dangerPolicy,
         );
-        final needsConfirm = CommandRisk.needsConfirmation(
-          assessment.level,
-          autoExecute: _autoExecute,
-        );
+        final needsConfirm =
+            operationalRejection == null &&
+            CommandRisk.needsConfirmation(
+              assessment.level,
+              autoExecute: _autoExecute,
+            );
 
         bool approved = true;
         _DangerProposal? proposal;
@@ -762,7 +765,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           if (assessment.level == CommandRiskLevel.dangerous) {
             _logSafety(
               't=$turnId danger_detected side=agent iter=$loopIterations '
-              'source=${assessment.source.name}',
+              'rule=${assessment.hostPatternId ?? 'ai'} '
+              'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
             );
           } else {
             logIter(
@@ -786,7 +790,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           if (assessment.level == CommandRiskLevel.dangerous) {
             _logSafety(
               't=$turnId danger_rejected side=agent iter=$loopIterations '
-              'source=${assessment.source.name}',
+              'rule=${assessment.hostPatternId ?? 'ai'} '
+              'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
             );
           } else {
             logIter(
@@ -801,7 +806,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (assessment.level == CommandRiskLevel.dangerous) {
           _logSafety(
             't=$turnId danger_approved side=agent iter=$loopIterations '
-            'source=${assessment.source.name}',
+            'rule=${assessment.hostPatternId ?? 'ai'} '
+            'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
           );
         }
 

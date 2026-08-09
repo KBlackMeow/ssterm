@@ -11,6 +11,8 @@ class CommandRiskAssessment {
   final CommandRiskLevel? aiLevel;
   final CommandRiskLevel hostLevel;
   final CommandRiskSource source;
+  final String? hostPatternId;
+  final DangerRuleSource? hostRuleSource;
 
   const CommandRiskAssessment({
     required this.level,
@@ -18,6 +20,8 @@ class CommandRiskAssessment {
     required this.aiLevel,
     required this.hostLevel,
     required this.source,
+    this.hostPatternId,
+    this.hostRuleSource,
   });
 }
 
@@ -40,6 +44,9 @@ class CommandRisk {
     'git-reset-hard',
     'git-clean-force',
   };
+
+  static bool isMandatoryDangerRule(String id) =>
+      _mandatoryDangerRules.contains(id);
 
   static final _warningRules = <_WarningRule>[
     _WarningRule('Deletes files or directories', r'\brm\b'),
@@ -73,12 +80,23 @@ class CommandRisk {
     required DangerousCommandsPolicy policy,
   }) {
     final parsedAi = _parse(aiLevel);
-    final effectivePolicy = policy.copyWith(
-      disabledBuiltins: policy.disabledBuiltins.difference(
-        _mandatoryDangerRules,
-      ),
+    final allBuiltins = CommandSafety.builtinDangerRules
+        .map((rule) => rule.id)
+        .toSet();
+    final effectivePolicy = policy.agentConfirmEnabled
+        ? policy.copyWith(
+            disabledBuiltins: policy.disabledBuiltins.difference(
+              _mandatoryDangerRules,
+            ),
+          )
+        : policy.copyWith(
+            disabledBuiltins: allBuiltins.difference(_mandatoryDangerRules),
+            customPatterns: const [],
+          );
+    final danger = CommandSafety.danger(
+      _canonicalizeMandatorySyntax(command),
+      effectivePolicy,
     );
-    final danger = CommandSafety.danger(command, effectivePolicy);
     var hostLevel = CommandRiskLevel.normal;
     var hostReason = 'No host risk rule matched';
     if (danger != null) {
@@ -107,6 +125,8 @@ class CommandRisk {
         aiLevel: null,
         hostLevel: hostLevel,
         source: CommandRiskSource.missingAiFallback,
+        hostPatternId: danger?.patternId,
+        hostRuleSource: danger?.source,
       );
     }
 
@@ -117,6 +137,8 @@ class CommandRisk {
         aiLevel: parsedAi,
         hostLevel: hostLevel,
         source: CommandRiskSource.hostOverride,
+        hostPatternId: danger?.patternId,
+        hostRuleSource: danger?.source,
       );
     }
     return CommandRiskAssessment(
@@ -129,6 +151,8 @@ class CommandRisk {
       source: hostLevel == parsedAi && hostLevel != CommandRiskLevel.normal
           ? CommandRiskSource.hostFallback
           : CommandRiskSource.ai,
+      hostPatternId: danger?.patternId,
+      hostRuleSource: danger?.source,
     );
   }
 
@@ -140,12 +164,25 @@ class CommandRisk {
       (!autoExecute && level == CommandRiskLevel.warning);
 
   static CommandRiskLevel? _parse(String? value) {
-    final normalized = value?.trim().toLowerCase();
-    for (final level in CommandRiskLevel.values) {
-      if (level.name == normalized) return level;
-    }
-    return null;
+    return switch (value) {
+      'normal' => CommandRiskLevel.normal,
+      'warning' => CommandRiskLevel.warning,
+      'dangerous' => CommandRiskLevel.dangerous,
+      _ => null,
+    };
   }
+
+  static String _canonicalizeMandatorySyntax(String command) => command
+      .replaceAll(RegExp(r'\\\r?\n'), ' ')
+      .replaceAll('"/"', '/')
+      .replaceAll("'/'", '/')
+      .replaceAll(r'"$HOME"', r'$HOME')
+      .replaceAll(r''' '$HOME' ''', r' $HOME ')
+      .replaceAll(r'${HOME}', r'$HOME')
+      .replaceAllMapped(
+        RegExp(r'\bgit\s+(?:-C\s+\S+\s+)+(?=reset\b)', caseSensitive: false),
+        (_) => 'git ',
+      );
 
   static CommandRiskLevel _max(CommandRiskLevel a, CommandRiskLevel b) =>
       a.index >= b.index ? a : b;
