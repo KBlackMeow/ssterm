@@ -869,6 +869,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             _ChatMessage.system(
               text: result?.output ?? '',
               commandRun: command,
+              commandPurpose: toolCall.reason,
               commandExitCode: result?.exitCode,
               commandRisk: assessment,
             ),

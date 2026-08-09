@@ -66,4 +66,26 @@ void main() {
     expect(tooling, contains(r'backoff_ms=${retryDelay.inMilliseconds}'));
     expect(tooling, contains('AgentStreamLogSanitizer.message(e)'));
   });
+
+  test('every command result card carries and displays execution purpose', () {
+    final models = File(
+      'lib/widgets/ai_assistant_panel_models.dart',
+    ).readAsStringSync();
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final widgets = File(
+      'lib/widgets/ai_assistant_panel_widgets.dart',
+    ).readAsStringSync();
+
+    expect(models, contains('final String? commandPurpose;'));
+    expect(models, contains('commandPurpose: commandPurpose'));
+    expect(loop, contains('commandPurpose: toolCall.reason'));
+    expect(content, contains('purpose: msg.commandPurpose'));
+    expect(widgets, contains(r"'执行目的：$displayPurpose'"));
+    expect(widgets, contains("'AI 未提供'"));
+  });
 }

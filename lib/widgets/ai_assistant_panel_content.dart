@@ -596,6 +596,7 @@ class _AiPanelContent extends StatelessWidget {
         child: _CommandResultCard(
           command: msg.commandRun ?? '',
           output: msg.text,
+          purpose: msg.commandPurpose,
           exitCode: msg.commandExitCode,
           risk: msg.commandRisk,
         ),

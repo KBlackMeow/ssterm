@@ -61,6 +61,9 @@ class _ChatMessage {
   /// For system "command card" messages: the command that was executed.
   final String? commandRun;
 
+  /// AI-supplied explanation of why the command was executed.
+  final String? commandPurpose;
+
   /// For system "command card" messages: the exit code, or null when shell
   /// integration was not available and the code couldn't be captured.
   final int? commandExitCode;
@@ -117,6 +120,7 @@ class _ChatMessage {
     this.isNotice = false,
     this.error,
     this.commandRun,
+    this.commandPurpose,
     this.commandExitCode,
     this.commandRisk,
     this.writeProposal,
@@ -152,6 +156,7 @@ class _ChatMessage {
   factory _ChatMessage.system({
     required String text,
     required String commandRun,
+    String? commandPurpose,
     int? commandExitCode,
     CommandRiskAssessment? commandRisk,
   }) => _ChatMessage._(
@@ -159,6 +164,7 @@ class _ChatMessage {
     isUser: false,
     isSystem: true,
     commandRun: commandRun,
+    commandPurpose: commandPurpose,
     commandExitCode: commandExitCode,
     commandRisk: commandRisk,
   );

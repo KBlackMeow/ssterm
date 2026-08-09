@@ -339,12 +339,14 @@ class _CommandResultCard extends StatefulWidget {
   const _CommandResultCard({
     required this.command,
     required this.output,
+    required this.purpose,
     required this.exitCode,
     required this.risk,
   });
 
   final String command;
   final String output;
+  final String? purpose;
   final int? exitCode;
   final CommandRiskAssessment? risk;
 
@@ -363,6 +365,10 @@ class _CommandResultCardState extends State<_CommandResultCard> {
     final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
         .withValues(alpha: 0.6);
     final out = widget.output;
+    final purpose = widget.purpose?.trim();
+    final displayPurpose = purpose == null || purpose.isEmpty
+        ? 'AI 未提供'
+        : purpose;
     final lines = out.isEmpty ? const <String>[] : out.split('\n');
     final overflow = !_expanded && lines.length > _kCollapsedLines;
     final visible = overflow
@@ -399,6 +405,13 @@ class _CommandResultCardState extends State<_CommandResultCard> {
                 const SizedBox(width: 6),
                 _ExitBadge(exitCode: widget.exitCode),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+            child: SelectableText(
+              '执行目的：$displayPurpose',
+              style: TextStyle(color: dim, fontSize: 11, height: 1.35),
             ),
           ),
           if (out.isNotEmpty) ...[
