@@ -232,6 +232,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   var _autoExecute = false;
   String? _agentLoopStatus;
   void Function()? _cancelStream;
+  AgentStreamClientSession? _streamSession;
+  int? _streamSessionGeneration;
+  int? _streamSessionPausedGeneration;
   int _generation = 0;
 
   /// The `_QuestionProposal` currently awaiting an answer (option tap OR
@@ -241,6 +244,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// interception) and cleared the moment it's answered or goes stale
   /// (see `_decideQuestionProposal` in `ai_assistant_panel_tooling.dart`).
   _QuestionProposal? _pendingQuestionProposal;
+  _DangerProposal? _pendingDangerProposal;
 
   /// Focus target for the agent-mode chat `TextField`, used ONLY to
   /// hand focus back to the input when the user taps "Other" on a
@@ -290,6 +294,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   @override
   void dispose() {
     _cancelStream?.call();
+    _cancelPendingAgentDecisions();
+    _streamSession?.close(force: true);
+    _streamSession = null;
     _cmdController.dispose();
     _agentController.dispose();
     _scrollController.dispose();
@@ -301,6 +308,11 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _generation++;
     _cancelStream?.call();
     _cancelStream = null;
+    _cancelPendingAgentDecisions();
+    _streamSession?.close(force: true);
+    _streamSession = null;
+    _streamSessionGeneration = null;
+    _streamSessionPausedGeneration = null;
     setState(() {
       _agentBusy = false;
       _agentLoopStatus = null;
@@ -309,14 +321,25 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // force it to its stale terminal state here, same idea as the
       // lazy staleness check `_decideQuestionProposal` runs when a
       // card IS clicked after the fact, just done eagerly on cancel.
-      final pendingQuestion = _pendingQuestionProposal;
-      if (pendingQuestion != null && !pendingQuestion.decision.isCompleted) {
-        pendingQuestion.state = _QuestionProposalState.stale;
-        pendingQuestion.decision.complete(null);
-      }
       _pendingQuestionProposal = null;
     });
     _setTerminalLocked(false);
+  }
+
+  void _cancelPendingAgentDecisions() {
+    final pendingQuestion = _pendingQuestionProposal;
+    if (pendingQuestion != null && !pendingQuestion.decision.isCompleted) {
+      pendingQuestion.state = _QuestionProposalState.stale;
+      pendingQuestion.decision.complete(null);
+    }
+    _pendingQuestionProposal = null;
+
+    final pendingDanger = _pendingDangerProposal;
+    if (pendingDanger != null && !pendingDanger.decision.isCompleted) {
+      pendingDanger.state = _DangerProposalState.rejected;
+      pendingDanger.decision.complete(false);
+    }
+    _pendingDangerProposal = null;
   }
 
   void _send() {

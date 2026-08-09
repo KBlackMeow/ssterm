@@ -51,17 +51,19 @@ void main() {
       'lib/widgets/ai_assistant_panel_tooling.dart',
     ).readAsStringSync();
 
-    expect(loop, contains('final streamSession = AgentStreamClientSession();'));
+    expect(loop, contains('_streamSession = AgentStreamClientSession();'));
     expect(loop, contains('streamSession: streamSession'));
     expect(loop, contains('streamSession.close();'));
+    expect(loop, contains('_streamSessionPausedGeneration = gen'));
     expect(
       tooling,
       contains('required AgentStreamClientSession streamSession'),
     );
     expect(tooling, contains('session: streamSession'));
     expect(tooling, contains('streamSession.reset();'));
-    expect(tooling, contains('Duration(milliseconds: 500)'));
-    expect(tooling, contains('Duration(milliseconds: 1500)'));
-    expect(tooling, contains('nativeToolCalls.isEmpty'));
+    expect(tooling, contains('hasToolCalls: nativeToolCalls.isNotEmpty'));
+    expect(tooling, contains('identical(_cancelStream, cancelAttempt)'));
+    expect(tooling, contains(r'backoff_ms=${retryDelay.inMilliseconds}'));
+    expect(tooling, contains('AgentStreamLogSanitizer.message(e)'));
   });
 }

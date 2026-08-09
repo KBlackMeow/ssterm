@@ -42,10 +42,6 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // failed with a transient network error. Anything more aggressive
     // would risk duplicating
     // half-streamed answers.
-    const retryDelays = [
-      Duration(milliseconds: 500),
-      Duration(milliseconds: 1500),
-    ];
     const maxAttempts = 3;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
@@ -58,7 +54,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       } catch (e) {
         // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
         _logAgent(
-          'error scope=setup_stream type=${e.runtimeType} msg=${_logQuote('$e')}',
+          'error scope=setup_stream type=${e.runtimeType} '
+          'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
         );
         while (_conversationHistory.length > historyLenBefore) {
           _conversationHistory.removeLast();
@@ -72,7 +69,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         return null;
       }
 
-      _cancelStream = result.cancel;
+      final cancelAttempt = result.cancel;
+      _cancelStream = cancelAttempt;
 
       fullText = '';
       reasoningText = '';
@@ -148,31 +146,37 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       } catch (e) {
         streamDone = true;
         // Catch EVERYTHING — stream errors, SSE parse failures, etc.
-        final canRetry =
-            attempt < maxAttempts &&
-            fullText.isEmpty &&
-            reasoningText.isEmpty &&
-            nativeToolCalls.isEmpty &&
-            mounted &&
-            gen == _generation &&
-            _isTransientStreamError(e);
-        if (canRetry) {
+        final retryDelay = AgentStreamRetryPolicy.delayAfterAttempt(attempt);
+        final canRetry = AgentStreamRetryPolicy.canRetry(
+          attempt: attempt,
+          hasText: fullText.isNotEmpty,
+          hasReasoning: reasoningText.isNotEmpty,
+          hasToolCalls: nativeToolCalls.isNotEmpty,
+          isActive: mounted && gen == _generation,
+          isTransient: _isTransientStreamError(e),
+        );
+        if (canRetry && retryDelay != null) {
           final provider = config.current;
           final endpoint = _streamEndpoint(provider?.baseUrl);
           _logAgent(
             'stream_retry attempt=$attempt/$maxAttempts '
             'provider=${_logQuote(provider?.id ?? 'unavailable')} '
             'endpoint=${_logQuote(endpoint)} '
-            'type=${e.runtimeType} msg=${_logQuote('$e')}',
+            'backoff_ms=${retryDelay.inMilliseconds} '
+            'type=${e.runtimeType} '
+            'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
           );
-          _cancelStream = null;
+          if (identical(_cancelStream, cancelAttempt)) {
+            _cancelStream = null;
+          }
           streamSession.reset();
-          await Future<void>.delayed(retryDelays[attempt - 1]);
+          await Future<void>.delayed(retryDelay);
           if (!mounted || gen != _generation) return null;
           continue;
         }
         _logAgent(
-          'error scope=stream type=${e.runtimeType} msg=${_logQuote('$e')}',
+          'error scope=stream type=${e.runtimeType} '
+          'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
         );
         while (_conversationHistory.length > historyLenBefore) {
           _conversationHistory.removeLast();
@@ -191,7 +195,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         }
         return null;
       } finally {
-        _cancelStream = null;
+        if (identical(_cancelStream, cancelAttempt)) {
+          _cancelStream = null;
+        }
       }
     }
 

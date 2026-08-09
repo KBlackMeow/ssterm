@@ -154,7 +154,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   }
 
   Future<void> _continueAgentLoop(int gen, AgentConfig config) async {
-    final streamSession = AgentStreamClientSession();
+    if (_streamSessionGeneration != gen || _streamSession == null) {
+      _streamSession?.close(force: true);
+      _streamSession = AgentStreamClientSession();
+      _streamSessionGeneration = gen;
+    }
+    final streamSession = _streamSession!;
+    _streamSessionPausedGeneration = null;
     try {
       await _continueAgentLoopBody(gen, config, streamSession: streamSession);
     } catch (e, st) {
@@ -170,7 +176,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
       }
     } finally {
-      streamSession.close();
+      if (_streamSessionPausedGeneration != gen) {
+        streamSession.close();
+        if (identical(_streamSession, streamSession)) {
+          _streamSession = null;
+          _streamSessionGeneration = null;
+        }
+      }
       if (mounted && gen == _generation) {
         setState(() {
           _agentBusy = false;
@@ -591,6 +603,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             // `_continueAgentLoop`'s finally fires and unlocks the
             // terminal / clears _agentBusy; the Apply / Reject click
             // will call _continueAgentLoop again to resume.
+            _streamSessionPausedGeneration = gen;
             return;
         }
       }
@@ -619,6 +632,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             setState(() => _agentLoopStatus = null);
             continue;
           case _EditProposalOutcome.waitingForUser:
+            _streamSessionPausedGeneration = gen;
             return;
         }
       }
@@ -762,6 +776,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             assessment: assessment,
             agentGeneration: gen,
           );
+          _pendingDangerProposal = proposal;
           setState(() {
             _messages.add(_ChatMessage.dangerProposal(proposal!));
             _agentLoopStatus = assessment.level != CommandRiskLevel.normal
@@ -781,6 +796,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             );
           }
           approved = await proposal.decision.future;
+          if (identical(_pendingDangerProposal, proposal)) {
+            _pendingDangerProposal = null;
+          }
           // Generation may have flipped while the user was deciding —
           // bail out exactly like the post-execute staleness check
           // below.

@@ -63,5 +63,73 @@ void main() {
       expect(session.reset, returnsNormally);
       expect(closes, hasLength(1));
     });
+
+    test('stale request lease cannot reset a replacement client', () {
+      final session = createSession();
+      final first = session.client;
+      session.reset();
+      final second = session.client;
+
+      session.resetIfCurrent(first);
+
+      expect(identical(session.client, second), isTrue);
+      expect(closes, [(client: first, force: true)]);
+    });
+  });
+
+  group('AgentStreamRetryPolicy', () {
+    test('allows only two empty transient retries with exact delays', () {
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(1),
+        const Duration(milliseconds: 500),
+      );
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(2),
+        const Duration(milliseconds: 1500),
+      );
+      expect(AgentStreamRetryPolicy.delayAfterAttempt(3), isNull);
+      expect(
+        AgentStreamRetryPolicy.canRetry(
+          attempt: 1,
+          hasText: false,
+          hasReasoning: false,
+          hasToolCalls: false,
+          isActive: true,
+          isTransient: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('rejects retry after content, tool calls, or stale generation', () {
+      bool retry({
+        bool text = false,
+        bool reasoning = false,
+        bool tools = false,
+        bool active = true,
+      }) => AgentStreamRetryPolicy.canRetry(
+        attempt: 1,
+        hasText: text,
+        hasReasoning: reasoning,
+        hasToolCalls: tools,
+        isActive: active,
+        isTransient: true,
+      );
+
+      expect(retry(text: true), isFalse);
+      expect(retry(reasoning: true), isFalse);
+      expect(retry(tools: true), isFalse);
+      expect(retry(active: false), isFalse);
+    });
+  });
+
+  test('AgentStreamLogSanitizer redacts URI credentials and tokens', () {
+    final sanitized = AgentStreamLogSanitizer.message(
+      'HttpException: failed, uri=https://user:pass@example.com/v1?key=secret&token=also-secret',
+    );
+
+    expect(sanitized, isNot(contains('secret')));
+    expect(sanitized, isNot(contains('user:pass')));
+    expect(sanitized, contains('[REDACTED]'));
   });
 }
