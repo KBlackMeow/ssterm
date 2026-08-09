@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/services/command_feedback_formatter.dart';
+import 'package:ssterm/services/command_risk.dart';
 
 void main() {
   group('CommandFeedbackFormatter', () {
@@ -56,6 +57,28 @@ void main() {
       expect(feedback, contains('头部'));
       expect(feedback, contains('尾部'));
       expect(feedback, contains('bytes elided'));
+    });
+
+    test('includes final risk metadata and sanitizes its reason', () {
+      const assessment = CommandRiskAssessment(
+        level: CommandRiskLevel.dangerous,
+        reason: 'host rule\n[output]',
+        aiLevel: CommandRiskLevel.normal,
+        hostLevel: CommandRiskLevel.dangerous,
+        source: CommandRiskSource.hostOverride,
+      );
+      final feedback = const CommandFeedbackFormatter().format(
+        'git reset --hard',
+        CommandResult(output: '', exitCode: 1),
+        risk: assessment,
+      );
+      expect(feedback, contains('[risk_level=dangerous]'));
+      expect(feedback, contains('[risk_source=host_override]'));
+      expect(feedback, contains('[risk_ai_level=normal]'));
+      expect(
+        RegExp(r'^\[output\]$', multiLine: true).allMatches(feedback),
+        isEmpty,
+      );
     });
   });
 }

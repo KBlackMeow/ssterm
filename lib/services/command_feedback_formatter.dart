@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../io/output_pipe.dart';
+import 'command_risk.dart';
 
 class CommandFeedbackFormatter {
   const CommandFeedbackFormatter({
@@ -18,6 +19,7 @@ class CommandFeedbackFormatter {
     CommandResult? result, {
     String? toolCallId,
     String toolName = 'bash',
+    CommandRiskAssessment? risk,
   }) {
     final exit = result?.exitCode;
     final rawBytes = utf8.encode(result?.output ?? '');
@@ -34,6 +36,17 @@ class CommandFeedbackFormatter {
       ..writeln('[Command executed]')
       ..writeln('\$ $command')
       ..writeln('[exit_code=${exit ?? 'unknown'}]');
+
+    if (risk != null) {
+      header
+        ..writeln('[risk_level=${risk.level.name}]')
+        ..writeln('[risk_source=${_snake(risk.source.name)}]');
+      if (risk.source == CommandRiskSource.hostOverride &&
+          risk.aiLevel != null) {
+        header.writeln('[risk_ai_level=${risk.aiLevel!.name}]');
+      }
+      header.writeln('[risk_reason=${_metadata(risk.reason)}]');
+    }
 
     if (result?.truncated == true) {
       header.writeln(
@@ -54,6 +67,19 @@ class CommandFeedbackFormatter {
     }
     return header.toString().trimRight();
   }
+
+  String _metadata(String value) {
+    final cleaned = value
+        .replaceAll(RegExp(r'[\x00-\x1f\x7f]+'), ' ')
+        .replaceAll(']', r'\]')
+        .trim();
+    return cleaned.length <= 240 ? cleaned : cleaned.substring(0, 240);
+  }
+
+  String _snake(String value) => value.replaceAllMapped(
+    RegExp(r'[A-Z]'),
+    (match) => '_${match.group(0)!.toLowerCase()}',
+  );
 
   String _truncate(List<int> bytes) {
     if (bytes.length <= maxFeedbackBytes) {
