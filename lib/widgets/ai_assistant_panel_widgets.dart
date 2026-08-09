@@ -340,11 +340,13 @@ class _CommandResultCard extends StatefulWidget {
     required this.command,
     required this.output,
     required this.exitCode,
+    required this.risk,
   });
 
   final String command;
   final String output;
   final int? exitCode;
+  final CommandRiskAssessment? risk;
 
   @override
   State<_CommandResultCard> createState() => _CommandResultCardState();
@@ -393,6 +395,8 @@ class _CommandResultCardState extends State<_CommandResultCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                _RiskBadge(assessment: widget.risk),
+                const SizedBox(width: 6),
                 _ExitBadge(exitCode: widget.exitCode),
               ],
             ),
@@ -450,6 +454,43 @@ class _CommandResultCardState extends State<_CommandResultCard> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _RiskBadge extends StatelessWidget {
+  const _RiskBadge({required this.assessment});
+
+  final CommandRiskAssessment? assessment;
+
+  @override
+  Widget build(BuildContext context) {
+    final level = assessment?.level ?? CommandRiskLevel.warning;
+    final style = switch (level) {
+      CommandRiskLevel.normal => (label: '普通', color: const Color(0xFF98C379)),
+      CommandRiskLevel.warning => (label: '警告', color: const Color(0xFFE5C07B)),
+      CommandRiskLevel.dangerous => (
+        label: '危险',
+        color: const Color(0xFFFF6E67),
+      ),
+    };
+    return Tooltip(
+      message: assessment?.reason ?? '缺少风险分类，按警告处理',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: style.color.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          style.label,
+          style: TextStyle(
+            color: style.color,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

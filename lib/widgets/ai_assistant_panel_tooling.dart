@@ -756,7 +756,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       // reject, complete the future as false so the original loop's
       // staleness check fires and bails out cleanly.
       setState(() => proposal.state = _DangerProposalState.rejected);
-      _logAgent('danger_stale rule=${proposal.verdict?.patternId ?? 'none'}');
+      _logAgent('risk_stale level=${proposal.assessment.level.name}');
       proposal.decision.complete(false);
       return;
     }
@@ -766,9 +766,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           ? _DangerProposalState.running
           : _DangerProposalState.rejected;
     });
-    final ruleTag = proposal.verdict != null
-        ? 'rule=${proposal.verdict!.patternId}'
-        : 'rule=none';
+    final ruleTag =
+        'level=${proposal.assessment.level.name} '
+        'source=${proposal.assessment.source.name}';
     _logAgent(
       approve ? 'danger_approved $ruleTag' : 'danger_rejected $ruleTag',
     );

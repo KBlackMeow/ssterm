@@ -13,6 +13,7 @@ import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/agent_context_budget.dart';
 import '../services/command_safety.dart';
+import '../services/command_risk.dart';
 import '../services/conversation_compactor.dart';
 import '../services/llm_service.dart';
 import '../services/agent_tool_contract.dart';

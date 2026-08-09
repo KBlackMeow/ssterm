@@ -65,6 +65,8 @@ class _ChatMessage {
   /// integration was not available and the code couldn't be captured.
   final int? commandExitCode;
 
+  final CommandRiskAssessment? commandRisk;
+
   /// For "file write proposal" messages: the pending write the user
   /// must Apply or Reject before the agent loop resumes.  Mutable so
   /// the card UI can re-render through state transitions
@@ -116,6 +118,7 @@ class _ChatMessage {
     this.error,
     this.commandRun,
     this.commandExitCode,
+    this.commandRisk,
     this.writeProposal,
     this.editProposal,
     this.dangerProposal,
@@ -150,12 +153,14 @@ class _ChatMessage {
     required String text,
     required String commandRun,
     int? commandExitCode,
+    CommandRiskAssessment? commandRisk,
   }) => _ChatMessage._(
     text: text,
     isUser: false,
     isSystem: true,
     commandRun: commandRun,
     commandExitCode: commandExitCode,
+    commandRisk: commandRisk,
   );
 
   /// Client-side notice (slash-command output, status hints, etc.).
@@ -446,7 +451,7 @@ class _DangerProposal {
   /// section comment above [_DangerProposalState].  Carries the rule id
   /// (for logs) and the one-line human label (shown as the card's
   /// subtitle, e.g. "Recursive force-delete of / (root filesystem)").
-  final DangerVerdict? verdict;
+  final CommandRiskAssessment assessment;
 
   /// Generation counter snapshot.  Same staleness check as
   /// [_WriteProposal.agentGeneration]: if the user starts a fresh
@@ -468,7 +473,7 @@ class _DangerProposal {
   _DangerProposal({
     required this.command,
     required this.reason,
-    required this.verdict,
+    required this.assessment,
     required this.agentGeneration,
   });
 }

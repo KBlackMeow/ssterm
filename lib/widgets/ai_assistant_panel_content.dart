@@ -357,55 +357,60 @@ class _AiPanelContent extends StatelessWidget {
                             ),
                           ),
                           // Compact auto-execute chip inside the input field row
-                          GestureDetector(
-                            onTap: () =>
-                                onAutoExecuteChanged?.call(!autoExecute),
-                            child: Container(
-                              height: 20,
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: autoExecute
-                                    ? const Color(
-                                        0xFF2E7D32,
-                                      ).withValues(alpha: 0.3)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
+                          Tooltip(
+                            message: autoExecute
+                                ? '自动模式：仅危险命令需要确认'
+                                : '审慎模式：普通命令直接执行，警告和危险命令需要确认',
+                            child: GestureDetector(
+                              onTap: () =>
+                                  onAutoExecuteChanged?.call(!autoExecute),
+                              child: Container(
+                                height: 20,
+                                margin: const EdgeInsets.only(right: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
+                                decoration: BoxDecoration(
                                   color: autoExecute
                                       ? const Color(
                                           0xFF2E7D32,
-                                        ).withValues(alpha: 0.5)
-                                      : dimColor(
-                                          context,
-                                        ).withValues(alpha: 0.25),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.auto_awesome,
-                                    size: 10,
+                                        ).withValues(alpha: 0.3)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
                                     color: autoExecute
-                                        ? const Color(0xFF2EE767)
-                                        : dimColor(context),
+                                        ? const Color(
+                                            0xFF2E7D32,
+                                          ).withValues(alpha: 0.5)
+                                        : dimColor(
+                                            context,
+                                          ).withValues(alpha: 0.25),
+                                    width: 1,
                                   ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    'Auto',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.auto_awesome,
+                                      size: 10,
                                       color: autoExecute
-                                          ? const Color(0xFF2E7D32)
+                                          ? const Color(0xFF2EE767)
                                           : dimColor(context),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Auto',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: autoExecute
+                                            ? const Color(0xFF2E7D32)
+                                            : dimColor(context),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -592,6 +597,7 @@ class _AiPanelContent extends StatelessWidget {
           command: msg.commandRun ?? '',
           output: msg.text,
           exitCode: msg.commandExitCode,
+          risk: msg.commandRisk,
         ),
       );
     }

@@ -34,12 +34,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     CommandResult? result, {
     String? toolCallId,
     String toolName = 'bash',
+    CommandRiskAssessment? risk,
   }) {
     return _commandFeedbackFormatter.format(
       cmd,
       result,
       toolCallId: toolCallId,
       toolName: toolName,
+      risk: risk,
     );
   }
 
@@ -730,11 +732,16 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         // and can decide what to do (typically pick a different
         // approach or ask the user).
         final dangerPolicy = config.dangerousPolicy;
-        DangerVerdict? verdict;
-        if (dangerPolicy.agentConfirmEnabled) {
-          verdict = CommandSafety.danger(command, dangerPolicy);
-        }
-        final needsConfirm = verdict != null || !_autoExecute;
+        final assessment = CommandRisk.assess(
+          command: command,
+          aiLevel: toolCall.riskLevel,
+          aiReason: toolCall.riskReason,
+          policy: dangerPolicy,
+        );
+        final needsConfirm = CommandRisk.needsConfirmation(
+          assessment.level,
+          autoExecute: _autoExecute,
+        );
 
         bool approved = true;
         _DangerProposal? proposal;
@@ -742,21 +749,20 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           proposal = _DangerProposal(
             command: command,
             reason: toolCall.reason,
-            verdict: verdict,
+            assessment: assessment,
             agentGeneration: gen,
           );
           setState(() {
             _messages.add(_ChatMessage.dangerProposal(proposal!));
-            _agentLoopStatus = verdict != null
-                ? 'Awaiting approval: ${verdict.label}'
+            _agentLoopStatus = assessment.level != CommandRiskLevel.normal
+                ? 'Awaiting approval: ${assessment.reason}'
                 : 'Awaiting confirmation to run command';
           });
           _scrollToBottom();
-          if (verdict != null) {
+          if (assessment.level == CommandRiskLevel.dangerous) {
             _logSafety(
               't=$turnId danger_detected side=agent iter=$loopIterations '
-              'rule=${verdict.patternId} '
-              'source=${verdict.source.name}',
+              'source=${assessment.source.name}',
             );
           } else {
             logIter(
@@ -777,11 +783,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // No shell call.  The proposal card stays in the transcript,
           // flipped to its rejected state — that's the visible record
           // of what happened; no separate "system" card is added.
-          if (verdict != null) {
+          if (assessment.level == CommandRiskLevel.dangerous) {
             _logSafety(
               't=$turnId danger_rejected side=agent iter=$loopIterations '
-              'rule=${verdict.patternId} '
-              'source=${verdict.source.name}',
+              'source=${assessment.source.name}',
             );
           } else {
             logIter(
@@ -793,12 +798,18 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // trigger another LLM request with the rejected command as input.
           break agentLoop;
         }
-        if (verdict != null) {
+        if (assessment.level == CommandRiskLevel.dangerous) {
           _logSafety(
             't=$turnId danger_approved side=agent iter=$loopIterations '
-            'rule=${verdict.patternId} '
-            'source=${verdict.source.name}',
+            'source=${assessment.source.name}',
           );
+        }
+
+        if (proposal != null &&
+            (proposal.command != command ||
+                proposal.agentGeneration != _generation)) {
+          logIter('iter=$loopIterations exit stale_or_changed_command');
+          return;
         }
 
         setState(() => _agentLoopStatus = 'Executing: $command');
@@ -828,6 +839,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               text: result?.output ?? '',
               commandRun: command,
               commandExitCode: result?.exitCode,
+              commandRisk: assessment,
             ),
           );
         });
@@ -838,6 +850,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           result,
           toolCallId: toolCall.id,
           toolName: toolCall.name,
+          risk: assessment,
         );
         feedbacks.add(feedback);
         nativeResults.add(

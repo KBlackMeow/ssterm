@@ -39,8 +39,9 @@ class _DangerProposalCard extends StatelessWidget {
         .withValues(alpha: 0.7);
     final surface =
         AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
-    final verdict = p.verdict;
-    final isDanger = verdict != null;
+    final assessment = p.assessment;
+    final isDanger = assessment.level == CommandRiskLevel.dangerous;
+    final isWarning = assessment.level == CommandRiskLevel.warning;
 
     // State drives the accent colour exactly like [_WriteProposalCard]:
     // red/blue = pending (please decide — red for a flagged dangerous
@@ -49,7 +50,11 @@ class _DangerProposalCard extends StatelessWidget {
     // an error).
     final accent = switch (p.state) {
       _DangerProposalState.pending =>
-        isDanger ? const Color(0xFFFF6E67) : _kAccent,
+        isDanger
+            ? const Color(0xFFFF6E67)
+            : isWarning
+            ? const Color(0xFFE5C07B)
+            : _kAccent,
       _DangerProposalState.running => const Color(0xFF61AFEF), // blue
       _DangerProposalState.ran => const Color(0xFF98C379), // green
       _DangerProposalState.rejected => dim,
@@ -79,7 +84,7 @@ class _DangerProposalCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  verdict?.label ?? 'Run this command?',
+                  assessment.reason,
                   style: TextStyle(
                     color: fg,
                     fontSize: 13,
@@ -116,15 +121,15 @@ class _DangerProposalCard extends StatelessWidget {
               ),
             ),
           ),
-          if (isDanger) ...[
+          if (assessment.source == CommandRiskSource.hostOverride) ...[
             const SizedBox(height: 6),
             Text(
               // Rule-id hint helps the user correlate a card with the
               // Settings → Safety toggle that produced it.  Stays subtle
               // (dim text, small) — power-user info, not primary content.
-              verdict.source == DangerRuleSource.builtin
-                  ? 'Built-in rule: ${verdict.patternId.substring(8)}'
-                  : 'Custom rule: ${verdict.patternId}',
+              'Host safety raised AI risk from '
+              '${assessment.aiLevel?.name ?? 'unknown'} to '
+              '${assessment.level.name}',
               style: TextStyle(color: dim, fontSize: 11),
             ),
           ],
@@ -170,7 +175,7 @@ class _DangerProposalCard extends StatelessWidget {
     bool isDanger,
   ) {
     final label = switch (state) {
-      _DangerProposalState.pending => isDanger ? 'DANGEROUS' : 'CONFIRM',
+      _DangerProposalState.pending => isDanger ? 'DANGEROUS' : 'WARNING',
       _DangerProposalState.running => 'RUNNING…',
       _DangerProposalState.ran => 'APPROVED',
       _DangerProposalState.rejected => 'REJECTED',
