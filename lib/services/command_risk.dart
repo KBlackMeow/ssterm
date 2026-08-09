@@ -29,6 +29,18 @@ class _WarningRule {
 }
 
 class CommandRisk {
+  static const _mandatoryDangerRules = {
+    'rm-rf-root',
+    'rm-rf-home',
+    'dd-block-device',
+    'mkfs',
+    'fork-bomb',
+    'redirect-to-block-device',
+    'shutdown-or-reboot',
+    'git-reset-hard',
+    'git-clean-force',
+  };
+
   static final _warningRules = <_WarningRule>[
     _WarningRule('Deletes files or directories', r'\brm\b'),
     _WarningRule(
@@ -61,7 +73,12 @@ class CommandRisk {
     required DangerousCommandsPolicy policy,
   }) {
     final parsedAi = _parse(aiLevel);
-    final danger = CommandSafety.danger(command, policy);
+    final effectivePolicy = policy.copyWith(
+      disabledBuiltins: policy.disabledBuiltins.difference(
+        _mandatoryDangerRules,
+      ),
+    );
+    final danger = CommandSafety.danger(command, effectivePolicy);
     var hostLevel = CommandRiskLevel.normal;
     var hostReason = 'No host risk rule matched';
     if (danger != null) {

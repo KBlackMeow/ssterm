@@ -43,6 +43,21 @@ void main() {
       expect(value.source, CommandRiskSource.hostOverride);
     });
 
+    test('catastrophic host rules cannot be disabled', () {
+      final disabled = DangerousCommandsPolicy(
+        disabledBuiltins: {'rm-rf-root', 'git-reset-hard'},
+      );
+      for (final command in ['rm -rf /', 'git reset --hard']) {
+        final value = CommandRisk.assess(
+          command: command,
+          aiLevel: 'normal',
+          aiReason: 'cleanup',
+          policy: disabled,
+        );
+        expect(value.level, CommandRiskLevel.dangerous, reason: command);
+      }
+    });
+
     test('host warning rule upgrades AI normal', () {
       final value = CommandRisk.assess(
         command: 'rm -rf node_modules',
