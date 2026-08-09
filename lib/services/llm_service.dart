@@ -91,6 +91,16 @@ class ToolCall {
     return value is String && value.trim().isNotEmpty ? value.trim() : null;
   }
 
+  String? get riskLevel {
+    final value = arguments['risk_level'];
+    return value is String ? value : null;
+  }
+
+  String? get riskReason {
+    final value = arguments['risk_reason'];
+    return value is String ? value : null;
+  }
+
   bool get isShell =>
       name == 'bash' ||
       name == 'shell' ||

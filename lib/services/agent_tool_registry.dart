@@ -60,6 +60,18 @@ class AgentToolRegistry {
             description:
                 'One short sentence explaining why this command is needed.',
           ),
+          'risk_level': AgentToolParameter.stringEnum(
+            required: true,
+            values: ['normal', 'warning', 'dangerous'],
+            description:
+                'Command impact: normal (read-only/minimal), warning '
+                '(local recoverable side effect), or dangerous '
+                '(broad, irreversible, or high-cost impact).',
+          ),
+          'risk_reason': AgentToolParameter.string(
+            required: true,
+            description: 'One short sentence explaining the risk level.',
+          ),
         },
       ),
       const AgentToolDefinition(

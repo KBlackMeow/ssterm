@@ -19,6 +19,17 @@ void main() {
         'additionalProperties': false,
       });
     });
+
+    test('serialises string enum values', () {
+      const parameter = AgentToolParameter.stringEnum(
+        required: true,
+        values: ['normal', 'warning', 'dangerous'],
+      );
+      expect(parameter.toJsonSchema(), {
+        'type': 'string',
+        'enum': ['normal', 'warning', 'dangerous'],
+      });
+    });
   });
 
   group('AgentToolCall', () {

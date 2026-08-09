@@ -9,6 +9,16 @@ void main() {
       final registry = AgentToolRegistry.build();
 
       expect(registry.names, containsAll(['bash', 'ask_user_question']));
+      final schema = registry.byName('bash')!.toJsonSchema();
+      expect(
+        schema['required'],
+        containsAll(['command', 'risk_level', 'risk_reason']),
+      );
+      final properties = schema['properties']! as Map<String, Object>;
+      expect(
+        properties['risk_level'],
+        containsPair('enum', ['normal', 'warning', 'dangerous']),
+      );
     });
 
     test('does not expose disabled optional tools', () {

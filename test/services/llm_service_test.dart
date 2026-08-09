@@ -188,6 +188,15 @@ ls -la
       expect(LlmService.extractCommands(input), equals(['ls -la']));
     });
 
+    test('exposes structured command risk arguments', () {
+      const input = '''```tool_call
+{"id":"call_risk","name":"bash","arguments":{"command":"rm old.log","risk_level":"warning","risk_reason":"deletes a file"}}
+```''';
+      final call = LlmService.extractToolCalls(input).single;
+      expect(call.riskLevel, 'warning');
+      expect(call.riskReason, 'deletes a file');
+    });
+
     test(
       'IGNORES untagged code blocks (regression — previous regex used `?`)',
       () {

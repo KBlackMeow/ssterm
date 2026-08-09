@@ -9,16 +9,29 @@ class AgentToolParameter {
   final String? description;
   final bool required;
   final Map<String, Object>? items;
+  final List<String>? enumValues;
 
   const AgentToolParameter._({
     required this.type,
     required this.required,
     this.description,
     this.items,
+    this.enumValues,
   });
 
   const AgentToolParameter.string({bool required = false, String? description})
     : this._(type: 'string', required: required, description: description);
+
+  const AgentToolParameter.stringEnum({
+    bool required = false,
+    String? description,
+    required List<String> values,
+  }) : this._(
+         type: 'string',
+         required: required,
+         description: description,
+         enumValues: values,
+       );
 
   const AgentToolParameter.boolean({bool required = false, String? description})
     : this._(type: 'boolean', required: required, description: description);
@@ -41,6 +54,7 @@ class AgentToolParameter {
     'type': type,
     'description': ?description,
     'items': ?items,
+    'enum': ?enumValues,
   };
 }
 

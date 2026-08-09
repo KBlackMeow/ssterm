@@ -525,6 +525,9 @@ After every shell tool call you emit, you receive a user-role message in this EX
 [Command executed]
 \$ <the command you sent>
 [exit_code=<integer or "unknown">]
+[risk_level=<normal|warning|dangerous>]
+[risk_source=<ai|host_fallback|host_override|missing_ai_fallback>]
+[risk_reason=<single-line reason>]
 [output]
 <stdout/stderr — ANSI-stripped, possibly truncated>
 
@@ -568,8 +571,13 @@ Every turn you write MUST be exactly ONE of these four shapes. NEVER combine.
 
      Bash schema:
        ```tool_call
-       {"id":"call_<id>","name":"bash","arguments":{"command":"<non-interactive shell command>"}}
+       {"id":"call_<id>","name":"bash","arguments":{"command":"<non-interactive shell command>","risk_level":"<normal|warning|dangerous>","risk_reason":"<short reason>"}}
        ```
+
+     Classify every bash call by impact: `normal` for read-only or minimal
+     effects, `warning` for local/recoverable side effects, and `dangerous`
+     for broad, irreversible, or high-cost effects. If uncertain, choose
+     `warning`. The host may raise but never lower your classification.
 
      MCP schema:
        ```tool_call
@@ -610,7 +618,7 @@ Your turn 1 — INVESTIGATE:
 I'll list non-loopback IPv4 addresses.
 
 ```tool_call
-{"id":"call_lan_ip","name":"bash","arguments":{"command":"ifconfig | awk '/inet /{print \$2}' | grep -v 127.0.0.1"}}
+{"id":"call_lan_ip","name":"bash","arguments":{"command":"ifconfig | awk '/inet /{print \$2}' | grep -v 127.0.0.1","risk_level":"normal","risk_reason":"Reads network interface addresses"}}
 ```
 
 (ssterm replies on its turn with [Tool result], exit_code=0, output: 192.168.1.42)
@@ -630,7 +638,7 @@ Your turn 1 — INVESTIGATE:
 I'll factor 5040 with the `factor` utility.
 
 ```tool_call
-{"id":"call_factor_5040","name":"bash","arguments":{"command":"factor 5040"}}
+{"id":"call_factor_5040","name":"bash","arguments":{"command":"factor 5040","risk_level":"normal","risk_reason":"Computes and prints a number factorization"}}
 ```
 
 (ssterm replies: exit_code=127, output: "factor: command not found")
@@ -640,7 +648,7 @@ Your turn 2 — INVESTIGATE (pivot, do NOT re-run the same command):
 `factor` isn't installed; falling back to a Python one-liner.
 
 ```tool_call
-{"id":"call_factor_python","name":"bash","arguments":{"command":"python3 -c 'n=5040; p=[]\\nwhile n>1:\\n  for i in range(2, n+1):\\n    if n%i==0: p.append(i); n//=i; break\\nprint(p)'"}}
+{"id":"call_factor_python","name":"bash","arguments":{"command":"python3 -c 'n=5040; p=[]\\nwhile n>1:\\n  for i in range(2, n+1):\\n    if n%i==0: p.append(i); n//=i; break\\nprint(p)'","risk_level":"normal","risk_reason":"Runs a read-only calculation"}}
 ```
 
 (ssterm replies: exit_code=0, output: [2, 2, 2, 2, 3, 3, 5, 7])
