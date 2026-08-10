@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/services/command_execution_history.dart';
 
 void main() {
@@ -57,6 +58,24 @@ void main() {
     final records = (await file.readAsLines()).map(jsonDecode).toList();
     expect(records, hasLength(20));
     expect(records.every((record) => record is Map), isTrue);
+  });
+
+  test('preserves structured cancellation from the command result', () {
+    final record = CommandExecutionRecord.fromResult(
+      timestamp: DateTime.utc(2026),
+      agentId: 'agent',
+      target: 'ssh',
+      cwd: '/srv',
+      command: 'sleep 5',
+      result: CommandResult(
+        output: '[ssterm background] cancelled',
+        exitCode: null,
+        cancelled: true,
+      ),
+    );
+
+    expect(record.cancelled, isTrue);
+    expect(record.exitCode, isNull);
   });
 
   test('swallows filesystem failures after reporting them', () async {

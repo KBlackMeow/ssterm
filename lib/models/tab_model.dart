@@ -68,6 +68,9 @@ class AppTab {
   /// follows OSC-7 updates from the visible terminal.
   bool agentPanelVisible = false;
   String? agentCwd;
+  bool _agentExecutionCancelled = false;
+
+  bool get isAgentExecutionCancelled => _agentExecutionCancelled;
   TransferManager? transferManager;
 
   // ── Editor-tab-only state (AppTabKind.editor) ────────────────────────────
@@ -276,6 +279,7 @@ class AppTab {
   /// surviving tab can reclaim keyboard focus first (critical on Windows).
   void prepareForRemoval() {
     manuallyDisconnected = true;
+    _agentExecutionCancelled = true;
     keepaliveTimer?.cancel();
     keepaliveTimer = null;
     terminal?.onOutput = null;
@@ -297,6 +301,7 @@ class AppTab {
     // here — that would tear down the source SSH tab's live connection
     // out from under it.
     manuallyDisconnected = true;
+    _agentExecutionCancelled = true;
     keepaliveTimer?.cancel();
     keepaliveTimer = null;
     clearSplit();

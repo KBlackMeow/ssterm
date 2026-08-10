@@ -37,6 +37,10 @@ class CommandFeedbackFormatter {
       ..writeln('\$ $command')
       ..writeln('[exit_code=${exit ?? 'unknown'}]');
 
+    if (result?.cancelled == true) {
+      header.writeln('[cancelled=true]');
+    }
+
     if (risk != null) {
       header
         ..writeln('[risk_level=${risk.level.name}]')

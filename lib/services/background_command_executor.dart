@@ -154,6 +154,13 @@ class BackgroundCommandExecutor {
         exitCode: null,
       );
     }
+    if (isCancelled?.call() == true) {
+      return CommandResult(
+        output: '[ssterm background] cancelled',
+        exitCode: null,
+        cancelled: true,
+      );
+    }
 
     final wslMarker = target.shell.isWsl ? _wslMarkerPath() : null;
     final environment = _nonInteractiveEnvironment(target.shell.environment);
@@ -166,6 +173,7 @@ class BackgroundCommandExecutor {
         return CommandResult(
           output: '[ssterm background] cancelled',
           exitCode: null,
+          cancelled: true,
         );
       }
       environment.addAll(loginEnvironment);
@@ -277,6 +285,7 @@ class BackgroundCommandExecutor {
       output: _formatOutput(stdout, stderr, status),
       exitCode: status == null ? await process.exitCode : null,
       truncated: stdout.truncated || stderr.truncated,
+      cancelled: cancelled,
     );
   }
 
@@ -295,6 +304,13 @@ class BackgroundCommandExecutor {
       return CommandResult(
         output: '[ssterm safety check] $safetyReason',
         exitCode: null,
+      );
+    }
+    if (isCancelled?.call() == true) {
+      return CommandResult(
+        output: '[ssterm background] cancelled',
+        exitCode: null,
+        cancelled: true,
       );
     }
     final stdout = _BoundedOutput(outputLimitBytes);
@@ -342,6 +358,7 @@ class BackgroundCommandExecutor {
       output: _formatOutput(stdout, stderr, status),
       exitCode: status == null ? session.exitCode : null,
       truncated: stdout.truncated || stderr.truncated,
+      cancelled: cancelled,
     );
   }
 

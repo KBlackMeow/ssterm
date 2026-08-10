@@ -11,8 +11,7 @@ import 'package:xterm/xterm.dart';
 /// requires a live SSH transport to construct) isn't needed here.
 class FakeSftpClient implements SftpClient {
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -91,18 +90,21 @@ void main() {
       expect(tab.remotePath!.value, equals('/home/alice'));
     });
 
-    test('updates remotePath to pane-1 cwd when activeSshPane == 1 and split', () {
-      final tab = AppTab.ssh(title: 'srv');
-      tab.remotePath = ValueNotifier<String>('');
-      tab.remoteCwdPane0 = '/home/alice';
-      tab.remoteCwdPane1 = '/tmp';
-      tab.splitTerminal = Terminal(); // makes isSplit == true
-      tab.activeSshPane = 1;
+    test(
+      'updates remotePath to pane-1 cwd when activeSshPane == 1 and split',
+      () {
+        final tab = AppTab.ssh(title: 'srv');
+        tab.remotePath = ValueNotifier<String>('');
+        tab.remoteCwdPane0 = '/home/alice';
+        tab.remoteCwdPane1 = '/tmp';
+        tab.splitTerminal = Terminal(); // makes isSplit == true
+        tab.activeSshPane = 1;
 
-      tab.syncRemotePathToActivePane();
+        tab.syncRemotePathToActivePane();
 
-      expect(tab.remotePath!.value, equals('/tmp'));
-    });
+        expect(tab.remotePath!.value, equals('/tmp'));
+      },
+    );
 
     test('falls back to pane-0 cwd when pane-1 cwd is null', () {
       final tab = AppTab.ssh(title: 'srv');
@@ -161,6 +163,14 @@ void main() {
     });
   });
 
+  test('tab removal invalidates in-flight Agent command cancellation', () {
+    final tab = AppTab.local(title: 'test');
+
+    expect(tab.isAgentExecutionCancelled, isFalse);
+    tab.prepareForRemoval();
+    expect(tab.isAgentExecutionCancelled, isTrue);
+  });
+
   group('AppTab.icon', () {
     test('local tab has terminal icon', () {
       expect(AppTab.local(title: 'x').icon.codePoint, isNonZero);
@@ -172,23 +182,26 @@ void main() {
   });
 
   group('AppTab.editor', () {
-    test('factory sets kind, path, sftp, label, mtime, and initial content', () {
-      final mtime = DateTime.utc(2026, 1, 1);
-      final tab = AppTab.editor(
-        path: '/etc/hosts',
-        sftp: FakeSftpClient(),
-        label: 'ssh: prod-db',
-        mtime: mtime,
-        initialContent: 'localhost 127.0.0.1',
-      );
-      expect(tab.kind, equals(AppTabKind.editor));
-      expect(tab.editorPath, equals('/etc/hosts'));
-      expect(tab.editorSftp, isNotNull);
-      expect(tab.editorLabel, equals('ssh: prod-db'));
-      expect(tab.editorMtime, equals(mtime));
-      expect(tab.editorInitialContent, equals('localhost 127.0.0.1'));
-      expect(tab.title, equals('/etc/hosts'));
-    });
+    test(
+      'factory sets kind, path, sftp, label, mtime, and initial content',
+      () {
+        final mtime = DateTime.utc(2026, 1, 1);
+        final tab = AppTab.editor(
+          path: '/etc/hosts',
+          sftp: FakeSftpClient(),
+          label: 'ssh: prod-db',
+          mtime: mtime,
+          initialContent: 'localhost 127.0.0.1',
+        );
+        expect(tab.kind, equals(AppTabKind.editor));
+        expect(tab.editorPath, equals('/etc/hosts'));
+        expect(tab.editorSftp, isNotNull);
+        expect(tab.editorLabel, equals('ssh: prod-db'));
+        expect(tab.editorMtime, equals(mtime));
+        expect(tab.editorInitialContent, equals('localhost 127.0.0.1'));
+        expect(tab.title, equals('/etc/hosts'));
+      },
+    );
 
     test('starts not dirty', () {
       final tab = AppTab.editor(
@@ -203,9 +216,19 @@ void main() {
 
     test('editorViewKey is a fresh GlobalKey per tab', () {
       final a = AppTab.editor(
-          path: '/a', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+        path: '/a',
+        sftp: FakeSftpClient(),
+        label: 'x',
+        mtime: null,
+        initialContent: '',
+      );
       final b = AppTab.editor(
-          path: '/b', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+        path: '/b',
+        sftp: FakeSftpClient(),
+        label: 'x',
+        mtime: null,
+        initialContent: '',
+      );
       expect(identical(a.editorViewKey, b.editorViewKey), isFalse);
     });
   });
@@ -213,7 +236,12 @@ void main() {
   group('AppTab.icon', () {
     test('editor tab has edit icon', () {
       final tab = AppTab.editor(
-          path: '/a', sftp: FakeSftpClient(), label: 'x', mtime: null, initialContent: '');
+        path: '/a',
+        sftp: FakeSftpClient(),
+        label: 'x',
+        mtime: null,
+        initialContent: '',
+      );
       expect(tab.icon, equals(Icons.edit_note));
     });
   });

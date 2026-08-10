@@ -227,6 +227,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   @override
   void dispose() {
+    _generation++;
     _cancelStream?.call();
     _cancelPendingAgentDecisions();
     _streamSession?.close(force: true);

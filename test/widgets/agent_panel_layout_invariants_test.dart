@@ -67,6 +67,18 @@ void main() {
     expect(tooling, contains('AgentStreamLogSanitizer.message(e)'));
   });
 
+  test('panel disposal invalidates command cancellation generation', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+    final disposeBody = source.substring(
+      source.indexOf('void dispose() {'),
+      source.indexOf('void _cancelAgent()'),
+    );
+
+    expect(disposeBody, contains('_generation++;'));
+  });
+
   test('every command result card carries and displays execution purpose', () {
     final models = File(
       'lib/widgets/ai_assistant_panel_models.dart',

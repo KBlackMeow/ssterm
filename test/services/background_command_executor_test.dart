@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +12,42 @@ class _UnusedSshClient implements SSHClient {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('SSH client must not be used');
+}
+
+class _FakeSshSession implements SSHSession {
+  final _stdout = StreamController<Uint8List>();
+  final _stderr = StreamController<Uint8List>();
+  final _done = Completer<void>();
+
+  SSHSignal? killedWith;
+  bool closed = false;
+
+  @override
+  Stream<Uint8List> get stdout => _stdout.stream;
+
+  @override
+  Stream<Uint8List> get stderr => _stderr.stream;
+
+  @override
+  Future<void> get done => _done.future;
+
+  @override
+  int? get exitCode => null;
+
+  @override
+  void kill(SSHSignal signal) => killedWith = signal;
+
+  @override
+  void close() {
+    if (closed) return;
+    closed = true;
+    unawaited(_stdout.close());
+    unawaited(_stderr.close());
+    _done.complete();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -323,6 +361,29 @@ void main() {
     );
 
     test(
+      'does not open an SSH channel after cancellation was invalidated',
+      () async {
+        var starts = 0;
+        final executor = BackgroundCommandExecutor(
+          sshSessionStarter: (client, command) async {
+            starts++;
+            throw StateError('SSH channel starter must not be called');
+          },
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'printf ok',
+          isCancelled: () => true,
+        );
+
+        expect(starts, 0);
+        expect(result.cancelled, isTrue);
+      },
+    );
+
+    test(
       'returns stdout, stderr, and the shell exit code without a PTY',
       () async {
         final shell = Platform.isWindows ? LocalShellDiscovery.fallback() : zsh;
@@ -369,11 +430,36 @@ void main() {
 
         expect(result.exitCode, isNull);
         expect(result.output, contains('cancelled'));
+        expect(result.cancelled, isTrue);
       },
       skip: Platform.isWindows
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
           : false,
     );
+
+    test('cancels only the per-command SSH channel', () async {
+      final session = _FakeSshSession();
+      var cancelled = false;
+      final executor = BackgroundCommandExecutor(
+        timeout: const Duration(seconds: 5),
+        sshSessionStarter: (client, command) async {
+          cancelled = true;
+          return session;
+        },
+      );
+
+      final result = await executor.executeSsh(
+        _UnusedSshClient(),
+        '/srv',
+        'sleep 5',
+        isCancelled: () => cancelled,
+      );
+
+      expect(session.killedWith, SSHSignal.TERM);
+      expect(session.closed, isTrue);
+      expect(result.exitCode, isNull);
+      expect(result.cancelled, isTrue);
+    });
 
     test('uses the Agent cwd', () async {
       final dir = await Directory.systemTemp.createTemp('ssterm-agent-cwd-');

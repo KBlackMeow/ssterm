@@ -24,10 +24,14 @@ class CommandResult {
   /// True iff [output] was clipped by the background command executor.
   final bool truncated;
 
+  /// True iff the caller cancelled this command before it completed.
+  final bool cancelled;
+
   CommandResult({
     required this.output,
     required this.exitCode,
     this.truncated = false,
+    this.cancelled = false,
   });
 }
 

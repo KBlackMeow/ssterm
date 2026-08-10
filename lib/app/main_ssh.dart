@@ -723,6 +723,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     String command, {
     bool Function()? isCancelled,
   }) {
+    bool cancellationRequested() =>
+        tab.isAgentExecutionCancelled || isCancelled?.call() == true;
+
     if (tab.kind == _TabKind.ssh) {
       final client = tab.sshClient;
       if (client == null) {
@@ -737,7 +740,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         client,
         tab.agentCwd ?? '/',
         command,
-        isCancelled: isCancelled,
+        isCancelled: cancellationRequested,
       );
     }
     if (tab.kind != _TabKind.local || tab.localShell == null) {
@@ -755,7 +758,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         platform: BackgroundCommandTarget.hostPlatform,
       ),
       command,
-      isCancelled: isCancelled,
+      isCancelled: cancellationRequested,
     );
   }
 
@@ -766,16 +769,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   ) async {
     final result = await execute();
     await commandHistory.append(
-      CommandExecutionRecord(
+      CommandExecutionRecord.fromResult(
         timestamp: DateTime.now(),
         agentId: 'agent',
         target: tab.kind == _TabKind.ssh ? 'ssh' : 'local',
         cwd: tab.agentCwd,
         command: command,
-        exitCode: result?.exitCode,
-        truncated: result?.truncated ?? false,
-        output: result?.output ?? '',
-        cancelled: result == null,
+        result: result,
       ),
     );
     return result;

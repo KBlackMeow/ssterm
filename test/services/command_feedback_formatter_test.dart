@@ -80,5 +80,18 @@ void main() {
         isEmpty,
       );
     });
+
+    test('includes structured cancellation metadata', () {
+      final feedback = const CommandFeedbackFormatter().format(
+        'sleep 5',
+        CommandResult(
+          output: '[ssterm background] cancelled',
+          exitCode: null,
+          cancelled: true,
+        ),
+      );
+
+      expect(feedback, contains('[cancelled=true]'));
+    });
   });
 }
