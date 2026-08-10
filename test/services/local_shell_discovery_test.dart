@@ -86,7 +86,6 @@ void main() {
     ]);
     expect(arguments.last, contains('SHELL=/bin/zsh'));
     expect(arguments.last, contains(']7;file://'));
-    expect(arguments.last, isNot(contains(']133;')));
   });
 
   group(

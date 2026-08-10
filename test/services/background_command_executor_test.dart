@@ -311,8 +311,8 @@ void main() {
           : false,
     );
 
-    test('uses the Agent2 cwd', () async {
-      final dir = await Directory.systemTemp.createTemp('ssterm-agent2-cwd-');
+    test('uses the Agent cwd', () async {
+      final dir = await Directory.systemTemp.createTemp('ssterm-agent-cwd-');
       addTearDown(() => dir.delete(recursive: true));
 
       final result = await const BackgroundCommandExecutor().executeLocal(

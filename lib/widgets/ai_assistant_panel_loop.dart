@@ -713,7 +713,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // /v1/messages rejects that with `messages must alternate`.
       //
       // We deliberately DON'T log per-command "executing"/"result" lines
-      // here — the [capture] layer already logs `start`/`done` with the
+      // here — the background executor already logs `start`/`done` with the
       // exit code and byte count, so logging both ends would double the
       // noise without adding information.
       final feedbacks = <String>[];

@@ -8,9 +8,11 @@ _June 24, 2026_
 
 - **Structured tool calls** — The agent no longer relies on loose markdown-fence parsing. Commands, web searches, skill invocations, and file writes are now surfaced as structured `tool_call` blocks, making extraction reliable and eliminating false positives from code blocks in replies.
 
-- **Forged command feedback hardening** — Commands injected into the terminal by the agent now carry a fingerprint. The agent loop only feeds back output that is genuinely produced by its own commands, preventing it from being confused by coincidental terminal output or user keystrokes.
+- **Background-only command execution** — The single Agent now runs commands in isolated background processes or SSH channels and records their direct output. Visible-terminal command injection and its command-capture path have been removed.
 
 ## ⚡ Terminal & PTY
+
+- **Simpler shell integration** — Shell wrappers retain OSC 7 working-directory reporting while OSC 133 command-boundary hooks and parsing have been removed.
 
 - **Async PTY spawn** — `Pty.start` is now fully async and runs `pty_create` in a background isolate with a 30-second timeout. The UI thread never blocks on FFI, and failures surface as typed `PtyStartException` with a restart prompt instead of a silent hang.
 

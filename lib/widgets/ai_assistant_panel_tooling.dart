@@ -770,7 +770,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
   /// Idempotent (double-click on Approve is a no-op) and
   /// stale-conversation-safe (if the user fired a new agent turn
   /// between proposal time and click time, the older proposal
-  /// silently resolves as rejected without invoking the shell).
+  /// silently resolves as rejected without starting the command).
   void _decideDangerProposal(
     _DangerProposal proposal, {
     required bool approve,
@@ -799,32 +799,6 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       approve ? 'danger_approved $ruleTag' : 'danger_rejected $ruleTag',
     );
     proposal.decision.complete(approve);
-  }
-
-  /// Structured envelope handed back to the LLM when the user rejects
-  /// a dangerous agent command.  The shape mirrors the other agent
-  /// feedback envelopes (single bracketed header + key-value-ish body)
-  /// so the model's parser sees a familiar pattern.  Wording is
-  /// directive — we tell the model what we want it to do next.
-  String _formatDangerRejection(String cmd, DangerVerdict verdict) {
-    return '[Dangerous command rejected by user]\n'
-        'Command: $cmd\n'
-        'Matched safety rule: ${verdict.label} (${verdict.patternId})\n'
-        'Do NOT retry this command verbatim. '
-        'Either propose a safer alternative or ask the user to '
-        'clarify what they actually want changed.';
-  }
-
-  /// Structured envelope handed back to the LLM when the user rejects
-  /// an ORDINARY (non-dangerous) command proposed while auto-execute is
-  /// off.  Same shape as [_formatDangerRejection] minus the rule fields,
-  /// since there's no matched safety rule to report.
-  String _formatCommandRejection(String cmd) {
-    return '[Command rejected by user]\n'
-        'Command: $cmd\n'
-        'Do NOT retry this command verbatim. '
-        'Either propose a different approach or ask the user to '
-        'clarify what they actually want changed.';
   }
 
   /// Resolve a [_QuestionProposal] when the user taps an option button

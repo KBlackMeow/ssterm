@@ -6,10 +6,8 @@ void main() {
     late String script;
     setUpAll(() => script = buildInteractiveShellWrapper());
 
-    test('emits OSC 7 without OSC 133 hooks', () {
+    test('emits current-directory metadata without input hooks', () {
       expect(script, contains(']7;file://'));
-      expect(script, isNot(contains(']133;')));
-      expect(script, isNot(contains('__ssterm_osc133')));
       expect(script, isNot(contains('PS0=')));
     });
 

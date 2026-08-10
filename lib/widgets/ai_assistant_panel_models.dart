@@ -24,7 +24,7 @@ enum _WriteProposalOutcome {
 
   /// Preview succeeded; a chat card is displayed; loop should pause
   /// (return from the body so the wrapper's finally clears
-  /// `_agentBusy` and unlocks the terminal).  Resume happens on
+  /// `_agentBusy`). Resume happens on
   /// Apply / Reject via `_decideWriteProposal`.
   waitingForUser,
 }
@@ -64,8 +64,8 @@ class _ChatMessage {
   /// AI-supplied explanation of why the command was executed.
   final String? commandPurpose;
 
-  /// For system "command card" messages: the exit code, or null when shell
-  /// integration was not available and the code couldn't be captured.
+  /// For system "command card" messages: the exit code, or null when the
+  /// background command did not produce one.
   final int? commandExitCode;
 
   final CommandRiskAssessment? commandRisk;
@@ -88,8 +88,8 @@ class _ChatMessage {
   _EditProposal? editProposal;
 
   /// For "dangerous command proposal" messages: the pending agent-emitted
-  /// command the user must Approve or Reject before `_executeAndCapture`
-  /// is allowed to forward it to the shell.  Same nullable / hot-reload
+  /// command the user must Approve or Reject before the background executor
+  /// may start it. Same nullable / hot-reload
   /// rationale as [writeProposal].  Null for every other message kind.
   _DangerProposal? dangerProposal;
 
@@ -150,9 +150,9 @@ class _ChatMessage {
   );
 
   /// Inline "command card" inserted into the chat after the agent loop runs
-  /// a command.  [text] is the captured output (already cleaned of ANSI by
-  /// `_executeAndCapture`); [commandRun] is what was sent to the shell;
-  /// [commandExitCode] is null when shell integration was unavailable.
+  /// a command. [text] is the direct output, already cleaned of ANSI by the
+  /// background executor; [commandRun] is the command that ran;
+  /// [commandExitCode] is null when execution did not produce an exit code.
   factory _ChatMessage.system({
     required String text,
     required String commandRun,
@@ -422,7 +422,7 @@ enum _DangerProposalState {
   pending,
 
   /// Approved; the agent loop is in the process of executing the
-  /// command via `_executeAndCapture`.  Buttons disabled so a stray
+  /// command in the background. Buttons disabled so a stray
   /// double-tap can't kick off a second run.
   running,
 
@@ -431,7 +431,7 @@ enum _DangerProposalState {
   /// just shows a small "Approved" badge.
   ran,
 
-  /// User clicked Reject.  No command hits the shell.  The loop
+  /// User clicked Reject. No command starts. The loop
   /// receives a synthetic `[Dangerous command rejected by user]`
   /// envelope so the LLM can decide what to do next (typically: pick
   /// a less destructive alternative).
@@ -439,9 +439,8 @@ enum _DangerProposalState {
 }
 
 /// Per-proposal record for a dangerous agent command awaiting user
-/// confirmation.  Created in `_executeAndCapture` whenever
-/// `CommandSafety.danger(...)` returns non-null AND the policy's
-/// `agentConfirmEnabled` is true.  Mutable on purpose — the chat card
+/// confirmation. Created in the agent loop when command risk requires the
+/// user's approval. Mutable on purpose — the chat card
 /// re-renders via plain `setState` as the state field flips.
 class _DangerProposal {
   /// The full command line as emitted by the LLM.  Shown verbatim in

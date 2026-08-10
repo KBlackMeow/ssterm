@@ -14,11 +14,10 @@ void main() {
       },
     );
 
-    test('does not hook PSReadLine or emit OSC 133', () {
+    test('emits cwd metadata without modifying input handling', () {
       expect(script, contains('file:///'));
       expect(script, isNot(contains('PSReadLine')));
       expect(script, isNot(contains('Set-PSReadLineKeyHandler')));
-      expect(script, isNot(contains('133;')));
     });
 
     test('has no execution-policy or on-disk script dependency', () {

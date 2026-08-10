@@ -410,7 +410,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       visible: tab.agentPanelVisible,
       onExecuteAsync: (cmd, {isCancelled}) => _recordAgentCommand(
         tab,
-        'agent',
         cmd,
         () => _executeAgentCommand(tab, cmd, isCancelled: isCancelled),
       ),

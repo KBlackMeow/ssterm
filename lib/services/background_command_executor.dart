@@ -29,7 +29,7 @@ class BackgroundCommandSupport {
 ///
 /// This deliberately supports only the shells whose noninteractive semantics
 /// we define in v1.  Unsupported targets must remain explicit: falling back to
-/// terminal injection would violate Agent's isolation guarantee.
+/// the interactive terminal would violate Agent's isolation guarantee.
 class BackgroundCommandTarget {
   const BackgroundCommandTarget.local({
     required this.shell,

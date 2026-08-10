@@ -49,7 +49,7 @@ class AgentToolRegistry {
       const AgentToolDefinition(
         name: 'bash',
         description:
-            'Run one non-interactive shell command on the active terminal.',
+            "Run one non-interactive command in the Agent's background shell.",
         parameters: {
           'command': AgentToolParameter.string(
             required: true,

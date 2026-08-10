@@ -761,7 +761,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
   Future<CommandResult?> _recordAgentCommand(
     _Tab tab,
-    String agentId,
     String command,
     Future<CommandResult?> Function() execute,
   ) async {
@@ -769,13 +768,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     await commandHistory.append(
       CommandExecutionRecord(
         timestamp: DateTime.now(),
-        agentId: agentId,
+        agentId: 'agent',
         target: tab.kind == _TabKind.ssh ? 'ssh' : 'local',
-        cwd: agentId == 'agent'
-            ? tab.agentCwd
-            : (tab.kind == _TabKind.ssh
-                  ? tab.remotePath?.value
-                  : tab.localPath?.value),
+        cwd: tab.agentCwd,
         command: command,
         exitCode: result?.exitCode,
         truncated: result?.truncated ?? false,

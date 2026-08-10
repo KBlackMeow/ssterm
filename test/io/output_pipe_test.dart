@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -299,13 +298,6 @@ void main() {
 
         ctrl.close();
       });
-    });
-
-    test('does not provide OSC 133 command capture APIs', () {
-      final source = File('lib/io/output_pipe.dart').readAsStringSync();
-      expect(source, isNot(contains('hasOsc133')));
-      expect(source, isNot(contains('awaitNextCommand')));
-      expect(source, isNot(contains('scanOsc133')));
     });
 
     test('bind multiple streams — all chunks reach terminal', () {
