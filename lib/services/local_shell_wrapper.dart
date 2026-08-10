@@ -1,8 +1,9 @@
 /// Returns a POSIX shell script that launches the user's login shell inside
 /// a clean environment with OSC 7 working-directory reporting wired up.
 ///
-/// Handles zsh (ZDOTDIR isolation), bash (ENV fd trick), and a generic
-/// fallback for any other POSIX shell.
+/// Handles zsh (ZDOTDIR isolation) and bash (ENV fd trick). Other shells are
+/// rejected explicitly because launching them without a correct prompt hook
+/// would silently break OSC 7 cwd tracking.
 String buildInteractiveShellWrapper() => r'''
 shell="${SHELL:-/bin/sh}"
 shell_name="${shell##*/}"
@@ -25,7 +26,6 @@ __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
 HISTFILE="$HOME/.zsh_history"
-export SSTM_SHELL_BIN=zsh
 if [ -f "$HOME/.zshrc" ]; then
   . "$HOME/.zshrc"
 fi
@@ -49,7 +49,6 @@ set +o posix
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
-export SSTM_SHELL_BIN=bash
 if [ -f "$HOME/.bash_profile" ]; then
   . "$HOME/.bash_profile"
 elif [ -f "$HOME/.bash_login" ]; then
@@ -67,7 +66,8 @@ __ssterm_cwd
 RCEOF
     ;;
   *)
-    exec "$shell" -i
+    printf '%s\n' "ssterm: OSC 7 integration supports only bash and zsh (got $shell_name)." >&2
+    exit 64
     ;;
 esac
 ''';

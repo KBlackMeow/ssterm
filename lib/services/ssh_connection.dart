@@ -36,7 +36,9 @@ Future<ConnectResult> connectSshHost(
     } else if (jump.identityFile != null && jump.identityFile!.isNotEmpty) {
       final path = expandHomePath(jump.identityFile!);
       final f = File(path);
-      if (!await f.exists()) throw FormatException('Jump host key file not found:\n$path');
+      if (!await f.exists()) {
+        throw FormatException('Jump host key file not found:\n$path');
+      }
       jumpIdentities = SSHKeyPair.fromPem(await f.readAsString());
     } else {
       jumpIdentities = await _defaultIdentities();
@@ -113,10 +115,13 @@ Future<ConnectResult> connectSshHost(
     // catch handles it uniformly for ALL failure modes.
     final socket = jumpClient != null
         ? await jumpClient
-            .forwardLocal(host.hostname, host.port)
-            .timeout(const Duration(seconds: 10), onTimeout: () {
-            throw TimeoutException('Jump host tunnel timed out');
-          })
+              .forwardLocal(host.hostname, host.port)
+              .timeout(
+                const Duration(seconds: 10),
+                onTimeout: () {
+                  throw TimeoutException('Jump host tunnel timed out');
+                },
+              )
         : await NoDelaySocket.connect(
             host.hostname,
             host.port,
@@ -191,10 +196,6 @@ __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
 HISTFILE="$HOME/.zsh_history"
-# Tell the agent which shell binary to use when it needs to wrap a
-# multi-line command in `<shell> -c '…'`. Without this hint the agent would
-# default to `bash`, which is missing on Alpine / Termux / zsh-only systems.
-export SSTM_SHELL_BIN=zsh
 if [ -f "$HOME/.zshrc" ]; then
   . "$HOME/.zshrc"
 fi
@@ -218,8 +219,6 @@ set +o posix
 __ssterm_cwd() {
   printf '\033]7;file://%s\033\\' "$PWD"
 }
-# Tell the agent's wrapper to use bash when packaging multi-line cmds.
-export SSTM_SHELL_BIN=bash
 if [ -f /etc/profile ]; then
   . /etc/profile
 fi
@@ -251,7 +250,8 @@ esac
 RCEOF
     ;;
   *)
-    exec "$shell" -il
+    printf '%s\n' "ssterm: OSC 7 integration supports only bash and zsh (got $shell_name)." >&2
+    exit 64
     ;;
 esac
 ''';
@@ -283,15 +283,18 @@ Future<ConnectResult> connectSshParams({
   final keyPath = identityFile?.trim();
 
   final name = alias?.trim();
-  final resolvedAlias =
-      (name != null && name.isNotEmpty) ? name : (port == 22 ? host : '$host:$port');
+  final resolvedAlias = (name != null && name.isNotEmpty)
+      ? name
+      : (port == 22 ? host : '$host:$port');
 
   final sshHost = SshHost(
     alias: resolvedAlias,
     hostname: host,
     port: port,
     user: user,
-    identityFile: (keyPath != null && keyPath.isNotEmpty) ? expandHomePath(keyPath) : null,
+    identityFile: (keyPath != null && keyPath.isNotEmpty)
+        ? expandHomePath(keyPath)
+        : null,
     password: (pwd != null && pwd.isNotEmpty) ? pwd : null,
     jumpHost: jumpHost,
     keepaliveInterval: keepaliveInterval,
@@ -309,11 +312,7 @@ Future<ConnectResult> connectSshParams({
 Future<List<SSHKeyPair>?> _defaultIdentities() async {
   if (Platform.isIOS) return null;
   final ssh = userSshDir();
-  for (final p in [
-    '$ssh/id_ed25519',
-    '$ssh/id_rsa',
-    '$ssh/id_ecdsa',
-  ]) {
+  for (final p in ['$ssh/id_ed25519', '$ssh/id_rsa', '$ssh/id_ecdsa']) {
     final f = File(p);
     if (await f.exists()) {
       try {

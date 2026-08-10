@@ -3,9 +3,20 @@ import 'dart:io';
 
 import 'local_shell_wrapper.dart';
 
+String _wslShellBootstrap({bool changeToHome = false}) =>
+    '${changeToHome ? 'cd ~ 2>/dev/null\n' : ''}'
+    'export SHELL="\$1"\n${buildInteractiveShellWrapper()}';
+
+/// Whether [path] names one of the POSIX shells for which SSTerm installs a
+/// correct OSC 7 prompt hook.
+bool isOsc7CompatiblePosixShellPath(String path) {
+  final name = path.split(RegExp(r'[/\\]')).last.toLowerCase();
+  return name == 'bash' || name == 'zsh';
+}
+
 /// Builds the `wsl.exe` invocation used when a distribution has no dedicated
-/// launcher. The discovered login shell is kept in [SHELL], allowing the
-/// shared interactive wrapper to select it while adding OSC 7 cwd reporting.
+/// launcher. The discovered login shell is passed as `$1`, never interpolated
+/// into shell source.
 List<String> buildWslInteractiveShellArguments({
   required String distro,
   required String loginShell,
@@ -17,7 +28,19 @@ List<String> buildWslInteractiveShellArguments({
   '--',
   '/bin/sh',
   '-lc',
-  'SHELL=$loginShell\n${buildInteractiveShellWrapper()}',
+  _wslShellBootstrap(),
+  'ssterm-wsl',
+  loginShell,
+];
+
+/// Builds the equivalent invocation for Store/launcher-backed WSL distros.
+List<String> buildWslLauncherArguments({required String loginShell}) => [
+  'run',
+  '/bin/sh',
+  '-lc',
+  _wslShellBootstrap(changeToHome: true),
+  'ssterm-wsl',
+  loginShell,
 ];
 
 /// A local shell that can be launched in a PTY tab.
@@ -210,7 +233,19 @@ class LocalShellDiscovery {
           Platform.environment['COMSPEC'] ?? r'C:\Windows\System32\cmd.exe';
       return LocalShellOption(id: 'cmd', displayName: 'CMD', executable: cmd);
     }
-    final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    final configured = Platform.environment['SHELL'];
+    final candidates = <String>['/bin/zsh', '/bin/bash'];
+    if (configured != null && isOsc7CompatiblePosixShellPath(configured)) {
+      candidates.insert(0, configured);
+    } else if (configured != null) {
+      // Retaining the configured shell as a last resort ensures the wrapper
+      // can report its explicit unsupported-shell error on minimal systems.
+      candidates.add(configured);
+    }
+    final shell = candidates.firstWhere(
+      _fileExists,
+      orElse: () => candidates.first,
+    );
     return LocalShellOption(
       id: 'shell:${_normalizePath(shell)}',
       displayName: displayNameFor(shell),
@@ -363,6 +398,8 @@ class LocalShellDiscovery {
 
       final distros = _decodeWslDistroNames(result.stdout);
       for (final distro in distros) {
+        final loginShell = await _wslLoginShell(wsl, distro);
+        if (!isOsc7CompatiblePosixShellPath(loginShell)) continue;
         final launcher = _findDistroLauncher(distro);
         if (launcher != null) {
           // `<launcher> run <cmd>` executes non-interactively in the
@@ -376,16 +413,12 @@ class LocalShellDiscovery {
             id: 'wsl:$distro',
             displayName: distro,
             executable: launcher,
-            arguments: [
-              'run',
-              'cd ~ 2>/dev/null\n${buildInteractiveShellWrapper()}',
-            ],
+            arguments: buildWslLauncherArguments(loginShell: loginShell),
             isWsl: true,
           );
           continue;
         }
 
-        final loginShell = await _wslLoginShell(wsl, distro);
         _addShell(
           shells,
           seen,
@@ -520,13 +553,6 @@ class LocalShellDiscovery {
       '/usr/local/bin/bash',
       '/opt/homebrew/bin/zsh',
       '/opt/homebrew/bin/bash',
-      '/opt/homebrew/bin/fish',
-      '/usr/local/bin/fish',
-      '/usr/bin/fish',
-      '/bin/fish',
-      '/bin/sh',
-      '/bin/tcsh',
-      '/bin/ksh',
     ];
     paths.addAll(common);
 
@@ -556,9 +582,7 @@ class LocalShellDiscovery {
 
   static bool _isUsableUnixShell(String path) {
     if (!_fileExists(path)) return false;
-    final base = path.split('/').last;
-    const blocked = {'nologin', 'false', 'sync', 'halt', 'shutdown'};
-    return !blocked.contains(base);
+    return isOsc7CompatiblePosixShellPath(path);
   }
 
   static bool _isLaunchableExecutable(String executable) {

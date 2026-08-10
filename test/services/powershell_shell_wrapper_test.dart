@@ -15,7 +15,9 @@ void main() {
     );
 
     test('emits cwd metadata without modifying input handling', () {
+      final forbiddenOsc = '${100 + 33};';
       expect(script, contains('file:///'));
+      expect(script, isNot(contains(forbiddenOsc)));
       expect(script, isNot(contains('PSReadLine')));
       expect(script, isNot(contains('Set-PSReadLineKeyHandler')));
     });

@@ -7,7 +7,11 @@ void main() {
     setUpAll(() => script = buildInteractiveShellWrapper());
 
     test('emits current-directory metadata without input hooks', () {
+      final forbiddenOsc = ']${100 + 33};';
+      final forbiddenHook = ['__ssterm', 'osc', '${100 + 33}'].join('_');
       expect(script, contains(']7;file://'));
+      expect(script, isNot(contains(forbiddenOsc)));
+      expect(script, isNot(contains(forbiddenHook)));
       expect(script, isNot(contains('PS0=')));
     });
 
@@ -25,19 +29,17 @@ void main() {
       expect(script, contains('PROMPT_COMMAND'));
     });
 
-    test('falls back to exec shell -i for unknown shells', () {
-      expect(script, contains(r'exec "$shell" -i'));
-    });
-
     test(
-      'exports SSTM_SHELL_BIN so the agent wrapper knows which shell to use',
+      'rejects unknown shells instead of launching without cwd metadata',
       () {
-        // The agent wraps multi-line cmds in `\${SSTM_SHELL_BIN:-sh} -c '…'`.
-        // Without this export the agent would default to `sh`, losing
-        // bash/zsh aliases and arrays inside multi-line bodies.
-        expect(script, contains('export SSTM_SHELL_BIN=zsh'));
-        expect(script, contains('export SSTM_SHELL_BIN=bash'));
+        expect(script, isNot(contains(r'exec "$shell" -i')));
+        expect(script, contains('supports only bash and zsh'));
       },
     );
+
+    test('does not export the removed Agent shell hint', () {
+      final removedHint = ['SSTM', 'SHELL', 'BIN'].join('_');
+      expect(script, isNot(contains(removedHint)));
+    });
   });
 }

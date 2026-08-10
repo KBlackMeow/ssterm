@@ -69,10 +69,11 @@ void main() {
     },
   );
 
-  test('builds no-launcher WSL arguments with the OSC 7 shell wrapper', () {
+  test('passes a no-launcher WSL login shell as a positional argument', () {
+    const adversarialShell = "/bin/zsh'; printf injected; #";
     final arguments = buildWslInteractiveShellArguments(
       distro: 'Ubuntu',
-      loginShell: '/bin/zsh',
+      loginShell: adversarialShell,
     );
 
     expect(arguments.take(7), [
@@ -84,8 +85,35 @@ void main() {
       '/bin/sh',
       '-lc',
     ]);
-    expect(arguments.last, contains('SHELL=/bin/zsh'));
-    expect(arguments.last, contains(']7;file://'));
+    expect(arguments[7], contains(r'export SHELL="$1"'));
+    expect(arguments[7], isNot(contains(adversarialShell)));
+    expect(arguments[7], contains(']7;file://'));
+    expect(arguments[8], 'ssterm-wsl');
+    expect(arguments[9], adversarialShell);
+  });
+
+  test('passes a launcher-backed WSL login shell positionally too', () {
+    const adversarialShell = '/bin/bash\nprintf injected';
+    final arguments = buildWslLauncherArguments(loginShell: adversarialShell);
+
+    expect(arguments.take(4), ['run', '/bin/sh', '-lc', isA<String>()]);
+    expect(arguments[3], contains(r'export SHELL="$1"'));
+    expect(arguments[3], isNot(contains(adversarialShell)));
+    expect(arguments[4], 'ssterm-wsl');
+    expect(arguments[5], adversarialShell);
+  });
+
+  test('only bash and zsh qualify for OSC 7 POSIX shell discovery', () {
+    expect(isOsc7CompatiblePosixShellPath('/bin/bash'), isTrue);
+    expect(isOsc7CompatiblePosixShellPath('/usr/local/bin/zsh'), isTrue);
+    for (final path in const [
+      '/bin/sh',
+      '/usr/bin/fish',
+      '/bin/tcsh',
+      '/bin/ksh',
+    ]) {
+      expect(isOsc7CompatiblePosixShellPath(path), isFalse, reason: path);
+    }
   });
 
   group(
