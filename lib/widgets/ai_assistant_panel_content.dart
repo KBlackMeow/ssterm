@@ -283,16 +283,19 @@ class _AiPanelContent extends StatelessWidget {
             Expanded(
               child: messages.isEmpty
                   ? _agentEmptyState(context)
-                  : ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      itemCount: messages.length + (loopStatus != null ? 1 : 0),
-                      itemBuilder: (ctx, i) {
-                        if (loopStatus != null && i == messages.length) {
-                          return _loopStatusIndicator(context, loopStatus!);
-                        }
-                        return _buildAgentMessage(ctx, messages[i]);
-                      },
+                  : SelectionArea(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        itemCount:
+                            messages.length + (loopStatus != null ? 1 : 0),
+                        itemBuilder: (ctx, i) {
+                          if (loopStatus != null && i == messages.length) {
+                            return _loopStatusIndicator(context, loopStatus!);
+                          }
+                          return _buildAgentMessage(ctx, messages[i]);
+                        },
+                      ),
                     ),
             ),
             // Input bar — text field + auto-execute toggle + send/stop button
