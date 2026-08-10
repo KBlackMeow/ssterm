@@ -83,11 +83,8 @@ const _kPinnedHeadMessages = 2;
 
 const _commandFeedbackFormatter = CommandFeedbackFormatter();
 
-enum AiPanelMode { command, agent }
-
-/// Dock side for the AI assistant panel.  Mirrors [SftpPanelPosition] so the
-/// two side-by-side panels can both be toggled between the same two
-/// orientations and persisted the same way in [AppConfig].
+/// Dock side for the Agent panel. Mirrors [SftpPanelPosition] so both panels
+/// use the same orientation and persistence model.
 enum AiPanelPosition { bottom, right }
 
 class AiAssistantOverlay extends StatefulWidget {
@@ -95,35 +92,22 @@ class AiAssistantOverlay extends StatefulWidget {
     super.key,
     required this.child,
     required this.visible,
-    this.onInsert,
-    this.onExecute,
     this.onExecuteAsync,
     this.agentConfig,
-    this.onGetShellIntegrationActive,
     this.terminalBackground,
     this.terminalLineHeight,
-    this.onTerminalLockChanged,
     this.fileSystemAdapter,
     this.executionEnvironment,
     this.initialPosition = AiPanelPosition.right,
     this.initialSize,
     this.onLayoutChanged,
-    this.initialMode = AiPanelMode.command,
   });
 
   final Widget child;
   final bool visible;
 
-  /// Paste text into the active terminal (fill, no execute).
-  final ValueChanged<String>? onInsert;
-
-  /// Send text directly to the active session for execution.
-  final ValueChanged<String>? onExecute;
-
-  /// Execute a command and return its captured stdout/stderr + exit code
-  /// (for the auto-execute agent loop).  The host application captures via
-  /// OSC 133 shell integration when available, falling back to an
-  /// echo-sentinel poll for shells without hooks installed.
+  /// Execute a command in the Agent's background process and return its
+  /// captured stdout/stderr and exit code.
   final Future<CommandResult?> Function(
     String cmd, {
     bool Function()? isCancelled,
@@ -132,12 +116,6 @@ class AiAssistantOverlay extends StatefulWidget {
 
   /// Agent provider configuration.
   final AgentConfig? agentConfig;
-
-  /// Returns whether the active pane has OSC 133 shell integration active.
-  /// `true` → industry-standard capture path; `false` → echo-sentinel
-  /// fallback; `null` → no terminal pane.  The agent panel surfaces this so
-  /// users know which capture path the agent is using.
-  final bool? Function()? onGetShellIntegrationActive;
 
   /// The active terminal pane's background color, used as the surface fill
   /// for ```bash ``` code blocks rendered inside AI replies so the chat
@@ -151,18 +129,6 @@ class AiAssistantOverlay extends StatefulWidget {
   /// terminal pane next door — a fixed `height: 1.5` here was visibly airier
   /// than the terminal at 1.2.  Null falls back to 1.2.
   final double? terminalLineHeight;
-
-  /// Fires when the agent enters or leaves auto-execute mode and the
-  /// host should lock (or unlock) the terminal pane against user input.
-  ///
-  /// The host is responsible for wrapping JUST the terminal in an
-  /// `AbsorbPointer` — wrapping the whole session view here would also
-  /// swallow clicks for the SFTP floating overlay that sits on top of
-  /// the terminal in `SshSessionView`'s `Stack`, breaking the SFTP
-  /// upload/download/navigate buttons while the agent works (SFTP runs
-  /// on its own SSH channel and is unrelated to the PTY stdin we're
-  /// guarding).
-  final ValueChanged<bool>? onTerminalLockChanged;
 
   /// File-system backend used by the agent's `[WRITE_FILE_BEGIN]` /
   /// `[WRITE_FILE_END]` tool to materialise proposed file writes.
@@ -184,7 +150,7 @@ class AiAssistantOverlay extends StatefulWidget {
   /// Windows host).
   final String? executionEnvironment;
 
-  /// Initial dock side — restored from [AppConfig.aiPosition] on app
+  /// Initial dock side — restored from [AppConfig.agentPosition] on app
   /// launch.  The user can flip this from the in-panel toggle, which
   /// fires [onLayoutChanged] so the new value persists.
   final AiPanelPosition initialPosition;
@@ -196,18 +162,14 @@ class AiAssistantOverlay extends StatefulWidget {
 
   /// Fires whenever the user drags the resize handle OR flips the dock
   /// side via the toggle button.  Hosts wire this to
-  /// [AppConfig.aiPosition] / [AppConfig.aiSize] + `save()` so the
+  /// [AppConfig.agentPosition] / [AppConfig.agentSize] + `save()` so the
   /// layout sticks across launches.
   final void Function(AiPanelPosition position, double? size)? onLayoutChanged;
-  final AiPanelMode initialMode;
-
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
 
 class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
-  late AiPanelMode _mode;
-
   // Dock side + custom drag-resized extent.  Initialised in [initState]
   // from the host's persisted values; subsequent mutations notify the
   // host via `widget.onLayoutChanged` so the new value rides into config.
@@ -219,15 +181,11 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.initState();
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
-    _mode = widget.initialMode;
   }
 
-  // Separate state per mode
-  final _cmdController = TextEditingController();
   final _agentController = TextEditingController();
   final _scrollController = ScrollController();
   final _agentMessages = <_ChatMessage>[];
-  final _cmdMessages = <_ChatMessage>[];
   var _agentBusy = false;
   var _autoExecute = false;
   String? _agentLoopStatus;
@@ -263,33 +221,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
 
-  /// True while the agent is auto-executing commands — terminal input is
-  /// blocked to prevent the user from interfering with the agent's work.
-  ///
-  /// MUST only be mutated through [_setTerminalLocked] so the host overlay
-  /// (which actually applies the `AbsorbPointer` around just the terminal
-  /// pane — see `onTerminalLockChanged`) stays in sync.  Assigning this
-  /// field directly would leave the SFTP overlay incorrectly blocked or
-  /// the terminal incorrectly unlocked.
-  var _terminalLocked = false;
+  TextEditingController get _textController => _agentController;
 
-  /// Single mutation point for [_terminalLocked].  Updates the local
-  /// flag (so `_unfocusTerminalIfLocked` keeps working) AND notifies the
-  /// host via `widget.onTerminalLockChanged` so it can wrap the terminal
-  /// pane in an `AbsorbPointer`.  Keeping the two in lockstep here is
-  /// what makes the SFTP floating overlay stay interactive while the
-  /// agent is auto-executing.
-  void _setTerminalLocked(bool locked) {
-    if (_terminalLocked == locked) return;
-    _terminalLocked = locked;
-    widget.onTerminalLockChanged?.call(locked);
-  }
-
-  TextEditingController get _textController =>
-      _mode == AiPanelMode.command ? _cmdController : _agentController;
-
-  List<_ChatMessage> get _messages =>
-      _mode == AiPanelMode.command ? _cmdMessages : _agentMessages;
+  List<_ChatMessage> get _messages => _agentMessages;
 
   @override
   void dispose() {
@@ -297,7 +231,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _cancelPendingAgentDecisions();
     _streamSession?.close(force: true);
     _streamSession = null;
-    _cmdController.dispose();
     _agentController.dispose();
     _scrollController.dispose();
     _agentInputFocusNode.dispose();
@@ -323,7 +256,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // card IS clicked after the fact, just done eagerly on cancel.
       _pendingQuestionProposal = null;
     });
-    _setTerminalLocked(false);
   }
 
   void _cancelPendingAgentDecisions() {
@@ -365,16 +297,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // Intercept slash-commands BEFORE the LLM / shell receives anything.
     // Returning true means "fully handled — do not fall through to send".
     if (_handleSlashCommand(text)) return;
-
-    if (_mode == AiPanelMode.command) {
-      setState(() {
-        _messages.add(_ChatMessage.user(text));
-      });
-      _textController.clear();
-      widget.onExecute?.call(text);
-      _scrollToBottom();
-      return;
-    }
 
     // If busy, cancel in-flight and start fresh.
     if (_agentBusy) _cancelAgent();
@@ -427,14 +349,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // Conversation history feeds the LLM context — wiping the visible
       // transcript without wiping this would leave the AI "remembering"
       // the previous task on the next prompt, which is surprising.
-      if (_mode == AiPanelMode.agent) {
-        _conversationHistory.clear();
-        _agentLoopStatus = null;
-        // No per-conversation skill bookkeeping to reset anymore — the
-        // catalogue lives inside the system prompt (see
-        // [LlmService._buildSkillsBlock]) so a wipe of conversation
-        // history doesn't lose any skill visibility.
-      }
+      _conversationHistory.clear();
+      _agentLoopStatus = null;
+      // No per-conversation skill bookkeeping to reset anymore — the
+      // catalogue lives inside the system prompt (see
+      // [LlmService._buildSkillsBlock]) so a wipe of conversation
+      // history doesn't lose any skill visibility.
     });
   }
 
@@ -460,7 +380,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 **Tips**
 
 - Toggle **Auto-execute** to let the agent run commands automatically and iterate on the results.
-- Click **Exec** on any AI reply that contains a fenced bash block to run that command manually through the same OSC 133 capture pipeline.
 - Type a real prompt to talk to the agent. Anything that doesn't start with a recognised `/command` is sent to the LLM as-is.
 ''';
     setState(() {
@@ -468,16 +387,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       _textController.clear();
     });
     _scrollToBottom();
-  }
-
-  /// Unfocus the primary focused widget if the terminal is currently locked.
-  /// Called when locking starts and also from build() as a safety net.
-  void _unfocusTerminalIfLocked() {
-    if (!_terminalLocked || !mounted) return;
-    final focus = FocusManager.instance.primaryFocus;
-    if (focus != null && focus.hasFocus) {
-      focus.unfocus();
-    }
   }
 
   void _scrollToBottom() {
@@ -584,7 +493,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
                   _kAiPanelMargin,
                 ),
           child: _AiPanelContent(
-            mode: _mode,
             busy: _agentBusy,
             autoExecute: _autoExecute,
             loopStatus: _agentLoopStatus,
@@ -595,10 +503,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onSend: _send,
             onCancel: _cancelAgent,
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
-            onInsert: widget.onInsert,
-            onSendToTerminal: widget.onExecute,
-            onModeChanged: (m) => setState(() => _mode = m),
-            shellIntegrationActive: widget.onGetShellIntegrationActive?.call(),
             // Mirror `AgentConfig.markdownEnabled`'s true default so the
             // very first frame (before agentConfig has been wired in)
             // doesn't flash plain-text rendering and then "snap" to
@@ -681,19 +585,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     );
   }
 
-  /// Returns the host-provided child unchanged.  The actual
-  /// pointer-blocking `AbsorbPointer` that protects the terminal pane
-  /// while the agent auto-executes lives in the HOST (see
-  /// `main_views.dart`), driven by `onTerminalLockChanged`.  Wrapping
-  /// `widget.child` here would also swallow clicks for the SFTP floating
-  /// overlay that `SshSessionView` Stacks on top of the terminal —
-  /// breaking the SFTP upload/download/navigate buttons whenever the
-  /// agent runs a command.  SFTP traffic flows on its own SSH channel
-  /// and has nothing to do with the PTY stdin we're guarding, so it
-  /// must stay interactive.
-  ///
-  /// Progress is already surfaced inside the agent panel
-  /// (`_agentLoopStatus` row), so no terminal-side scrim is needed.
+  /// Returns the host-provided terminal unchanged. Agent commands run in a
+  /// separate background process or SSH channel and never write to its PTY.
   Widget _buildTerminalBody() => widget.child;
 }
 

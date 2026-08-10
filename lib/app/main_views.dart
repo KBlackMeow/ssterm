@@ -91,23 +91,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                   _tabs.isNotEmpty && _tabs[_active].terminal != null
                   ? _insertCommand
                   : null,
-              aiPanelVisible:
-                  _tabs.isNotEmpty &&
-                  _active < _tabs.length &&
-                  _tabs[_active].aiPanelVisible,
-              onToggleAiPanel: () {
-                if (_tabs.isNotEmpty && _active < _tabs.length) {
-                  setState(
-                    () => _tabs[_active].aiPanelVisible =
-                        !_tabs[_active].aiPanelVisible,
-                  );
-                }
-              },
-              agent2PanelVisible:
+              agentPanelVisible:
                   _tabs.isNotEmpty &&
                   _active < _tabs.length &&
                   _tabs[_active].agentPanelVisible,
-              onToggleAgent2Panel: () {
+              onToggleAgentPanel: () {
                 if (_tabs.isNotEmpty && _active < _tabs.length) {
                   setState(
                     () => _tabs[_active].agentPanelVisible =
@@ -247,15 +235,12 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                         }
                       },
                       onInsertCommand: hasTerminal ? _insertCommand : null,
-                      // Mirror the desktop _TabBar wiring so mobile and
-                      // chrome stay in sync — without this the AI panel
-                      // could be opened only on desktop.
-                      aiPanelVisible:
-                          hasTerminal && _tabs[_active].aiPanelVisible,
-                      onToggleAiPanel: hasTerminal
+                      agentPanelVisible:
+                          hasTerminal && _tabs[_active].agentPanelVisible,
+                      onToggleAgentPanel: hasTerminal
                           ? () => setState(
-                              () => _tabs[_active].aiPanelVisible =
-                                  !_tabs[_active].aiPanelVisible,
+                              () => _tabs[_active].agentPanelVisible =
+                                  !_tabs[_active].agentPanelVisible,
                             )
                           : null,
                       terminalBody: _buildTerminalArea(),
@@ -390,21 +375,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       );
     }
 
-    // Wrap JUST the terminal pane (and any SplitView around it) in an
-    // AbsorbPointer driven by `tab.terminalLocked`.  This MUST happen
-    // BEFORE the SshSessionView wrap below — SshSessionView stacks the
-    // SFTP floating overlay on top of `body`, and the lock should NOT
-    // apply to that overlay (SFTP runs on its own SSH channel and stays
-    // usable while the agent works).  Locking up here, around the
-    // terminal only, was the fix for SFTP buttons going dead whenever
-    // the agent auto-executed a command.
-    body = ValueListenableBuilder<bool>(
-      valueListenable: tab.terminalLocked,
-      builder: (_, locked, child) =>
-          AbsorbPointer(absorbing: locked, child: child),
-      child: body,
-    );
-
     if (tab.kind == _TabKind.ssh &&
         tab.sftp != null &&
         tab.transferManager != null) {
@@ -436,93 +406,13 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     }
 
     body = AiAssistantOverlay(
-      visible: tab.aiPanelVisible,
-      onInsert: tab.terminal != null ? (cmd) => tab.terminal!.paste(cmd) : null,
-      onExecute: tab.terminal != null ? _executeOnTab(tab) : null,
-      onExecuteAsync: tab.terminal != null
-          ? (String cmd, {isCancelled}) => _recordAgentCommand(
-              tab,
-              'agent1',
-              cmd,
-              () => _executeAndCapture(tab, cmd, isCancelled: isCancelled),
-            )
-          : null,
-      agentConfig: _config.agent,
-      onGetShellIntegrationActive: tab.terminal != null
-          ? () => _activePaneHasShellIntegration(tab)
-          : null,
-      // Pass the terminal pane's background through so AI-reply code
-      // blocks render on the SAME color as the terminal next to them
-      // (via a Theme override that swaps `colorScheme.onInverseSurface`
-      // — see `_buildMarkdown` in ai_assistant_panel.dart).
-      terminalBackground: _config.terminal.chromeBackground,
-      // ...and the line-height too, so the AI chat reads at the same
-      // density as the terminal — defaults to 1.2 but the user can tune
-      // it from Settings → Terminal → Line height.
-      terminalLineHeight: _config.terminal.lineHeight,
-      // Route the agent's auto-execute lock through the per-tab notifier
-      // so the AbsorbPointer above wraps only the terminal — leaving the
-      // SFTP overlay buttons (which we Stack on top in SshSessionView)
-      // fully clickable while the agent runs commands.
-      onTerminalLockChanged: (locked) => tab.terminalLocked.value = locked,
-      // Filesystem adapter for the agent's `[WRITE_FILE_BEGIN]` tool.
-      // Picked per active-tab kind:
-      //   • LOCAL → dart:io writer (atomic temp+rename on the host).
-      //   • SSH with a live SFTP channel → SFTP writer (atomic
-      //     temp+rename over the same session that runs the user's
-      //     terminal commands).
-      //   • SSH still connecting / SSH error / Settings tab → null;
-      //     the agent panel surfaces a "filesystem not available"
-      //     envelope to the model when it tries to write.
-      // Filesystem adapter for the agent's `[WRITE_FILE_BEGIN]` tool.
-      //
-      // The `cwdProvider:` closure is what makes the adapter aware of
-      // the active terminal pane's working directory at WRITE time
-      // (not at adapter-construction time): the OSC 7 listener on each
-      // pane updates `tab.localPath` / `tab.remoteCwdPane*` continuously
-      // without rebuilding this widget, so a snapshot captured here
-      // would go stale the moment the user `cd`'s.  Reading via a
-      // closure keeps the adapter resolving relative + `~/…` paths
-      // against the SAME directory the user sees in their shell.
-      fileSystemAdapter: switch (tab.kind) {
-        _TabKind.local => _localFileAdapter(tab, () => tab.localPath?.value),
-        _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
-          sftp: tab.sftp,
-          label: 'ssh: ${tab.title}',
-          cwdProvider: () => tab.activeSshPane == 1 && tab.isSplit
-              ? (tab.remoteCwdPane1 ?? tab.remoteCwdPane0)
-              : tab.remoteCwdPane0,
-        ),
-        _ => null,
-      },
-      executionEnvironment: _commandEnvironmentFor(tab),
-      // Persist dock side + drag-resized extent the same way SFTP does
-      // (see `initialPosition` / `initialSize` / `onLayoutChanged` on
-      // `SshSessionView` above) — the AI panel's in-panel toggle and
-      // resize handle fire `onLayoutChanged`, which lands in config so
-      // the layout sticks across launches.
-      initialPosition: _config.aiPosition,
-      initialSize: _config.aiSize,
-      onLayoutChanged: (pos, size) {
-        _config.aiPosition = pos;
-        _config.aiSize = size;
-        _config.save();
-      },
-      child: body,
-    );
-
-    // Agent2 deliberately owns a second overlay state (history, cancellation,
-    // cwd and executor).  Its default bottom dock complements Agent1's right
-    // dock, so nesting consumes distinct axes rather than hiding either panel.
-    body = AiAssistantOverlay(
-      key: ValueKey('agent2-${tab.hashCode}'),
+      key: ValueKey('agent-${tab.hashCode}'),
       visible: tab.agentPanelVisible,
-      onExecute: (cmd) => unawaited(_executeAgent2Command(tab, cmd)),
       onExecuteAsync: (cmd, {isCancelled}) => _recordAgentCommand(
         tab,
         'agent',
         cmd,
-        () => _executeAgent2Command(tab, cmd, isCancelled: isCancelled),
+        () => _executeAgentCommand(tab, cmd, isCancelled: isCancelled),
       ),
       agentConfig: _config.agent,
       terminalBackground: _config.terminal.chromeBackground,
@@ -539,13 +429,8 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       executionEnvironment: _commandEnvironmentFor(tab),
       initialPosition: _config.agentPosition,
       initialSize: _config.agentSize,
-      initialMode: AiPanelMode.agent,
       onLayoutChanged: (pos, size) {
-        _config.agentPosition = pos == _config.aiPosition
-            ? (pos == AiPanelPosition.right
-                  ? AiPanelPosition.bottom
-                  : AiPanelPosition.right)
-            : pos;
+        _config.agentPosition = pos;
         _config.agentSize = size;
         _config.save();
       },

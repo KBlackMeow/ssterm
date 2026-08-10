@@ -521,7 +521,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // The loop's generation hasn't changed (we checked above), so
     // _continueAgentLoop will pick up from this synthetic user turn.
     _conversationHistory.add({'role': 'user', 'content': envelope});
-    _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
+    _markAgentBusy();
     await _continueAgentLoop(_generation, config);
   }
 
@@ -756,7 +756,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     }
 
     _conversationHistory.add({'role': 'user', 'content': envelope});
-    _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
+    _markAgentBusy();
     await _continueAgentLoop(_generation, config);
   }
 

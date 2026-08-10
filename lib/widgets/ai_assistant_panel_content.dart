@@ -1,7 +1,7 @@
 part of 'ai_assistant_panel.dart';
 
 // ───────────────────────────────────────────────────────────────────────────
-// _AiPanelContent — the stateless body of the AI panel (mode switch,
+// _AiPanelContent — the stateless body of the AI panel (header,
 // chat list, input bar, markdown rendering).
 //
 // Extracted from `ai_assistant_panel.dart` to keep that file under the
@@ -13,7 +13,6 @@ part of 'ai_assistant_panel.dart';
 
 class _AiPanelContent extends StatelessWidget {
   const _AiPanelContent({
-    required this.mode,
     required this.busy,
     required this.autoExecute,
     this.loopStatus,
@@ -24,10 +23,6 @@ class _AiPanelContent extends StatelessWidget {
     required this.onSend,
     required this.onCancel,
     this.onAutoExecuteChanged,
-    required this.onInsert,
-    required this.onSendToTerminal,
-    required this.onModeChanged,
-    this.shellIntegrationActive,
     required this.markdownEnabled,
     this.terminalBackground,
     this.terminalLineHeight,
@@ -41,7 +36,6 @@ class _AiPanelContent extends StatelessWidget {
     this.onPositionToggle,
   });
 
-  final AiPanelMode mode;
   final bool busy;
   final bool autoExecute;
   final String? loopStatus;
@@ -56,18 +50,6 @@ class _AiPanelContent extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onCancel;
   final ValueChanged<bool>? onAutoExecuteChanged;
-  final ValueChanged<String>? onInsert;
-
-  /// Command-mode "send & forget": user typed a literal command and pressed
-  /// Enter — bytes go straight to the active terminal pane, NOT through the
-  /// agent.  This is intentionally separate from the agent execution path.
-  final ValueChanged<String>? onSendToTerminal;
-
-  final ValueChanged<AiPanelMode> onModeChanged;
-
-  /// `true` → OSC 133 shell integration is active on the current pane.
-  /// `false` → echo-sentinel fallback path will be used.  `null` → no pane.
-  final bool? shellIntegrationActive;
 
   /// When `true`, AI replies are rendered with `gpt_markdown` (bold, lists,
   /// code blocks, …).  When `false`, they fall back to a plain `Text` —
@@ -131,8 +113,8 @@ class _AiPanelContent extends StatelessWidget {
   ///
   /// The pause-in-place design deliberately keeps [busy] `true` for the
   /// entire time a question card is on screen (including while the user
-  /// types a custom "Other" answer), so the terminal stays locked and the
-  /// loop stays suspended in place. But the single shared send/cancel
+  /// types a custom "Other" answer), so the loop stays suspended in place.
+  /// But the single shared send/cancel
   /// button below must NOT show as a red "Stop" affordance in that state:
   /// tapping Stop there would call [onCancel], marking the question stale
   /// and discarding whatever the user just typed, directly contradicting
@@ -211,242 +193,168 @@ class _AiPanelContent extends StatelessWidget {
       backdropBlur: 0,
       child: Column(
         children: [
-          _ModeSwitch(
-            mode: mode,
-            onChanged: onModeChanged,
-            shellIntegrationActive: shellIntegrationActive,
-            position: position,
-            onPositionToggle: onPositionToggle,
+          _AgentHeader(position: position, onPositionToggle: onPositionToggle),
+          // Conversation area
+          Expanded(
+            child: messages.isEmpty
+                ? _agentEmptyState(context)
+                : SelectionArea(
+                    child: ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      itemCount: messages.length + (loopStatus != null ? 1 : 0),
+                      itemBuilder: (ctx, i) {
+                        if (loopStatus != null && i == messages.length) {
+                          return _loopStatusIndicator(context, loopStatus!);
+                        }
+                        return _buildAgentMessage(ctx, messages[i]);
+                      },
+                    ),
+                  ),
           ),
-          // Command mode: multi-line input fills available space
-          if (mode == AiPanelMode.command)
-            Expanded(
-              child: Stack(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-                    child: TextField(
-                      controller: textController,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
-                      style: TextStyle(
-                        color:
-                            AppColors.maybeOf(context)?.foreground ??
-                            _kFgActive,
-                        fontSize: 13,
-                        fontFamily: 'JetBrainsMono',
-                        height: 1.4,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Type your command (multi-line supported)…',
-                        hintStyle: TextStyle(
-                          color:
-                              (AppColors.maybeOf(context)?.foregroundDim ??
-                                      _kFgInactive)
-                                  .withValues(alpha: 0.5),
-                          fontSize: 13,
-                        ),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: GestureDetector(
-                      onTap: onSend,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2472C8),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Icon(
-                          Icons.send_rounded,
-                          size: 15,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // Agent mode: chat layout
-          if (mode == AiPanelMode.agent) ...[
-            // Conversation area
-            Expanded(
-              child: messages.isEmpty
-                  ? _agentEmptyState(context)
-                  : SelectionArea(
-                      child: ListView.builder(
-                        controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                        itemCount:
-                            messages.length + (loopStatus != null ? 1 : 0),
-                        itemBuilder: (ctx, i) {
-                          if (loopStatus != null && i == messages.length) {
-                            return _loopStatusIndicator(context, loopStatus!);
-                          }
-                          return _buildAgentMessage(ctx, messages[i]);
-                        },
-                      ),
-                    ),
-            ),
-            // Input bar — text field + auto-execute toggle + send/stop button
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              decoration: BoxDecoration(
-                color: popupColor,
-                border: Border(
-                  top: BorderSide(
-                    color:
-                        (AppColors.maybeOf(context)?.foregroundDim ??
-                                _kFgInactive)
-                            .withValues(alpha: 0.15),
-                  ),
+          // Input bar — text field + auto-execute toggle + send/stop button
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            decoration: BoxDecoration(
+              color: popupColor,
+              border: Border(
+                top: BorderSide(
+                  color:
+                      (AppColors.maybeOf(context)?.foregroundDim ??
+                              _kFgInactive)
+                          .withValues(alpha: 0.15),
                 ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: const Color(0xFF2472C8).withValues(alpha: 0.3),
-                          width: 1,
-                        ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF2472C8).withValues(alpha: 0.3),
+                        width: 1,
                       ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: textController,
-                              focusNode: agentInputFocusNode,
-                              textInputAction: TextInputAction.send,
-                              style: TextStyle(
-                                color:
-                                    AppColors.maybeOf(context)?.foreground ??
-                                    _kFgActive,
-                                fontSize: 13,
-                                height: 1.2,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: 'Ask AI anything…',
-                                hintStyle: TextStyle(
-                                  color: Color(0xFF8E8E8E),
-                                  fontSize: 13,
-                                ),
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.fromLTRB(
-                                  12,
-                                  0,
-                                  8,
-                                  0,
-                                ),
-                                isDense: true,
-                              ),
-                              onSubmitted: (_) => onSend(),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: textController,
+                            focusNode: agentInputFocusNode,
+                            textInputAction: TextInputAction.send,
+                            style: TextStyle(
+                              color:
+                                  AppColors.maybeOf(context)?.foreground ??
+                                  _kFgActive,
+                              fontSize: 13,
+                              height: 1.2,
                             ),
+                            decoration: const InputDecoration(
+                              hintText: 'Ask AI anything…',
+                              hintStyle: TextStyle(
+                                color: Color(0xFF8E8E8E),
+                                fontSize: 13,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.fromLTRB(12, 0, 8, 0),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => onSend(),
                           ),
-                          // Compact auto-execute chip inside the input field row
-                          Tooltip(
-                            message: autoExecute
-                                ? '自动模式：仅危险命令需要确认'
-                                : '审慎模式：普通命令直接执行，警告和危险命令需要确认',
-                            child: GestureDetector(
-                              onTap: () =>
-                                  onAutoExecuteChanged?.call(!autoExecute),
-                              child: Container(
-                                height: 20,
-                                margin: const EdgeInsets.only(right: 4),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                ),
-                                decoration: BoxDecoration(
+                        ),
+                        // Compact auto-execute chip inside the input field row
+                        Tooltip(
+                          message: autoExecute
+                              ? '自动模式：仅危险命令需要确认'
+                              : '审慎模式：普通命令直接执行，警告和危险命令需要确认',
+                          child: GestureDetector(
+                            onTap: () =>
+                                onAutoExecuteChanged?.call(!autoExecute),
+                            child: Container(
+                              height: 20,
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: autoExecute
+                                    ? const Color(
+                                        0xFF2E7D32,
+                                      ).withValues(alpha: 0.3)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
                                   color: autoExecute
                                       ? const Color(
                                           0xFF2E7D32,
-                                        ).withValues(alpha: 0.3)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: autoExecute
-                                        ? const Color(
-                                            0xFF2E7D32,
-                                          ).withValues(alpha: 0.5)
-                                        : dimColor(
-                                            context,
-                                          ).withValues(alpha: 0.25),
-                                    width: 1,
-                                  ),
+                                        ).withValues(alpha: 0.5)
+                                      : dimColor(
+                                          context,
+                                        ).withValues(alpha: 0.25),
+                                  width: 1,
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.auto_awesome,
-                                      size: 10,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome,
+                                    size: 10,
+                                    color: autoExecute
+                                        ? const Color(0xFF2EE767)
+                                        : dimColor(context),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'Auto',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
                                       color: autoExecute
-                                          ? const Color(0xFF2EE767)
+                                          ? const Color(0xFF2E7D32)
                                           : dimColor(context),
                                     ),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      'Auto',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: autoExecute
-                                            ? const Color(0xFF2E7D32)
-                                            : dimColor(context),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          GestureDetector(
-                            onTap: showStopButton ? onCancel : onSend,
-                            child: Container(
-                              width: 26,
-                              height: 26,
-                              margin: const EdgeInsets.only(right: 4),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: showStopButton
-                                    ? const Color(0xFFFF6E67)
-                                    : const Color(0xFF2472C8),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Icon(
-                                showStopButton
-                                    ? Icons.stop_rounded
-                                    : Icons.send_rounded,
-                                size: 13,
-                                color: Colors.white,
-                              ),
+                        ),
+                        GestureDetector(
+                          onTap: showStopButton ? onCancel : onSend,
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            margin: const EdgeInsets.only(right: 4),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: showStopButton
+                                  ? const Color(0xFFFF6E67)
+                                  : const Color(0xFF2472C8),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(
+                              showStopButton
+                                  ? Icons.stop_rounded
+                                  : Icons.send_rounded,
+                              size: 13,
+                              color: Colors.white,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -496,7 +404,7 @@ class _AiPanelContent extends StatelessWidget {
           Icon(Icons.auto_awesome, size: 28, color: dim),
           const SizedBox(height: 12),
           Text(
-            'What can the terminal AI agent\nhelp you with today?',
+            'What can the Agent\nhelp you with today?',
             textAlign: TextAlign.center,
             style: TextStyle(color: dim, fontSize: 13, height: 1.5),
           ),

@@ -21,8 +21,8 @@ class _TerminalPage extends StatelessWidget {
     required this.onNewSsh,
     required this.onInsertCommand,
     required this.terminalBody,
-    this.aiPanelVisible = false,
-    this.onToggleAiPanel,
+    this.agentPanelVisible = false,
+    this.onToggleAgentPanel,
     this.chromeBackground = const Color(0xFF111113),
   });
 
@@ -33,11 +33,11 @@ class _TerminalPage extends StatelessWidget {
   final VoidCallback onNewSsh;
   final ValueChanged<String>? onInsertCommand;
   final Widget terminalBody;
-  final bool aiPanelVisible;
+  final bool agentPanelVisible;
 
-  /// Toggles the AI assistant panel for the active tab.  Null on tabs that
+  /// Toggles the Agent panel for the active tab. Null on tabs that
   /// have no terminal yet (connecting / error state) so the icon is hidden.
-  final VoidCallback? onToggleAiPanel;
+  final VoidCallback? onToggleAgentPanel;
   final Color chromeBackground;
 
   @override
@@ -57,8 +57,8 @@ class _TerminalPage extends StatelessWidget {
           onCommands: onInsertCommand != null
               ? (ctx) => _showCommandsSheet(ctx, onInsertCommand!)
               : null,
-          aiPanelVisible: aiPanelVisible,
-          onToggleAiPanel: onToggleAiPanel,
+          agentPanelVisible: agentPanelVisible,
+          onToggleAgentPanel: onToggleAgentPanel,
           chromeBackground: chromeBackground,
         ),
         Expanded(child: terminalBody),
@@ -108,8 +108,8 @@ class _SessionTabStrip extends StatelessWidget {
     required this.onAdd,
     required this.chromeBackground,
     this.onCommands,
-    this.aiPanelVisible = false,
-    this.onToggleAiPanel,
+    this.agentPanelVisible = false,
+    this.onToggleAgentPanel,
   });
 
   final List<_Tab> tabs;
@@ -118,8 +118,8 @@ class _SessionTabStrip extends StatelessWidget {
   final ValueChanged<int> onClose;
   final VoidCallback onAdd;
   final void Function(BuildContext)? onCommands;
-  final bool aiPanelVisible;
-  final VoidCallback? onToggleAiPanel;
+  final bool agentPanelVisible;
+  final VoidCallback? onToggleAgentPanel;
   final Color chromeBackground;
 
   @override
@@ -161,13 +161,13 @@ class _SessionTabStrip extends StatelessWidget {
                     tooltip: 'Commands',
                   ),
                 ),
-              // AI assistant — same affordance as desktop _TabBar's AiAssistantButton.
-              if (onToggleAiPanel != null)
+              // Agent — same affordance as the desktop tab bar.
+              if (onToggleAgentPanel != null)
                 _StripIconBtn(
                   icon: Icons.auto_awesome,
-                  onTap: onToggleAiPanel!,
-                  tooltip: aiPanelVisible ? 'Hide AI Assistant' : 'Show AI Assistant',
-                  activeColor: aiPanelVisible ? _kAccent : null,
+                  onTap: onToggleAgentPanel!,
+                  tooltip: 'Toggle Agent',
+                  activeColor: agentPanelVisible ? _kAccent : null,
                 ),
               const SizedBox(width: 4),
             ],

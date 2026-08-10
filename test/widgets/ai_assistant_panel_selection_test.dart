@@ -13,7 +13,6 @@ void main() {
         home: Scaffold(
           body: AiAssistantOverlay(
             visible: true,
-            initialMode: AiPanelMode.agent,
             initialPosition: AiPanelPosition.bottom,
             child: SizedBox.expand(),
           ),

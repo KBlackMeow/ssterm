@@ -200,7 +200,7 @@ When NOT to use the tool (these are the ONLY exceptions):
 - Anything the user has NOT asked for or implied. File writes are irreversible; when uncertain, [ASK_USER] first.
 
 Hard rules:
-- Path resolution: absolute (`/etc/x`) is always safe. `~/…` expands to the active session's HOME (local AND SSH — ssterm resolves it for you over SFTP). Relative paths (e.g. `foo.sh`, `src/main.py`, `./bar`) resolve against the active terminal pane's working directory (PWD). If the user's first message includes a `<session_context>` block, it tells you exactly what PWD, HOME, and the current local date/time are for this session — quote them when in doubt instead of guessing (especially "today's date" — the block's clock is authoritative; do NOT fall back to training-data assumptions).
+- Path resolution: absolute (`/etc/x`) is always safe. `~/…` expands to the active session's HOME (local AND SSH — ssterm resolves it for you over SFTP). Relative paths (e.g. `foo.sh`, `src/main.py`, `./bar`) resolve against the Agent session's independent working directory (PWD). If the user's first message includes a `<session_context>` block, it tells you exactly what PWD, HOME, and the current local date/time are for this session — quote them when in doubt instead of guessing (especially "today's date" — the block's clock is authoritative; do NOT fall back to training-data assumptions).
 - ONE write proposal per turn. The Apply card needs an individual decision per file.
 - A `write_file` tool call turn MUST NOT also contain a shell `tool_call`, `edit_file`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, `use_skill`, or `web_search` — the agent loop intercepts the write BEFORE running anything, so combining silently drops later actions.
 - After a `[File write rejected by user]` envelope, DO NOT re-emit the same write for the same path. Either ask the user what to change, propose a different path, or abandon the write.
@@ -401,7 +401,7 @@ The SSTerm UI is running on:
 - Arch:   $arch
 - Locale: $locale
 
-When the active tab is a LOCAL terminal, commands run on THIS host — pick the right tool family (macOS uses BSD `sed` / `awk` / `find`; Linux uses GNU coreutils; Windows may need PowerShell).$dialectBlock
+When the Agent targets a LOCAL session, commands run in a background process on THIS host — pick the right tool family (macOS uses BSD `sed` / `awk` / `find`; Linux uses GNU coreutils; Windows may need PowerShell).$dialectBlock
 
 When the active tab is an SSH session, commands run on the REMOTE — if behaviour is OS-specific, run `uname -srm` (or `cat /etc/os-release`) FIRST to detect the remote platform, THEN issue the OS-appropriate command. Do NOT assume the dialect tips above apply to the remote.
 </host_environment>''';
@@ -546,8 +546,8 @@ Truncation flags appear (when present) BEFORE [output]:
 - [feedback_truncated=true …]  Capture was complete; the MIDDLE was elided to fit the context window. Head and tail are exact; only the middle is missing.
 
 Notes:
-- Output is captured via OSC 133 shell integration (same protocol as iTerm2, VS Code, Warp, Zed). It contains only the command's stdout/stderr — NEVER the prompt, the echoed command, or color codes.
-- exit_code=0 → success. Non-zero → failure. "unknown" → shell integration unavailable.
+- Commands run in the Agent's background process or SSH channel. Output is the command's direct stdout/stderr, ANSI-stripped and without terminal prompts or echoed input.
+- exit_code=0 → success. Non-zero → failure. "unknown" → the background executor could not determine an exit code.
 - Total output is capped at ~8 KB; longer outputs surface `[feedback_truncated=true …]`.
 
 When you call an MCP tool (`"name":"mcp"`), the feedback shape is identical except `[tool_name=mcp]` and the output comes from the server rather than a shell:

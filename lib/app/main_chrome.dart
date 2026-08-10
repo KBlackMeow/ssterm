@@ -22,10 +22,8 @@ class _TabBar extends StatefulWidget {
     required this.sftpVisible,
     required this.onToggleSftp,
     this.transferManager,
-    required this.aiPanelVisible,
-    required this.onToggleAiPanel,
-    required this.agent2PanelVisible,
-    required this.onToggleAgent2Panel,
+    required this.agentPanelVisible,
+    required this.onToggleAgentPanel,
     required this.canSplit,
     required this.isSplit,
     this.splitAxis,
@@ -54,10 +52,8 @@ class _TabBar extends StatefulWidget {
   final bool sftpVisible;
   final VoidCallback onToggleSftp;
   final TransferManager? transferManager;
-  final bool aiPanelVisible;
-  final VoidCallback onToggleAiPanel;
-  final bool agent2PanelVisible;
-  final VoidCallback onToggleAgent2Panel;
+  final bool agentPanelVisible;
+  final VoidCallback onToggleAgentPanel;
   final bool canSplit;
   final bool isSplit;
   final Axis? splitAxis;
@@ -208,14 +204,9 @@ class _TabBarState extends State<_TabBar> with WindowListener {
             ),
             CmdPickerButton(onInsert: widget.onInsertCommand),
             AiAssistantButton(
-              visible: widget.aiPanelVisible,
-              onToggle: widget.onToggleAiPanel,
-            ),
-            AiAssistantButton(
-              visible: widget.agent2PanelVisible,
-              onToggle: widget.onToggleAgent2Panel,
-              tooltip: 'Toggle Agent2 background assistant',
-              icon: Icons.auto_awesome_outlined,
+              visible: widget.agentPanelVisible,
+              onToggle: widget.onToggleAgentPanel,
+              tooltip: 'Toggle Agent',
             ),
             if (widget.hasSftp) ...[
               _SftpButton(

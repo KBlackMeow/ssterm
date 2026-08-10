@@ -844,7 +844,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     ).execute(target, command, isCancelled: isCancelled);
   }
 
-  Future<CommandResult?> _executeAgent2Command(
+  Future<CommandResult?> _executeAgentCommand(
     _Tab tab,
     String command, {
     bool Function()? isCancelled,
@@ -869,7 +869,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     if (tab.kind != _TabKind.local || tab.localShell == null) {
       return Future.value(
         CommandResult(
-          output: '[ssterm background] Agent2 cannot execute on this tab.',
+          output: '[ssterm background] Agent cannot execute on this tab.',
           exitCode: null,
         ),
       );

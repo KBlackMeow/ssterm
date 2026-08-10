@@ -8,7 +8,7 @@ import '../io/output_pipe.dart';
 import 'login_shell_environment.dart';
 import 'local_shell_discovery.dart';
 
-/// Host platform used to decide whether Agent2 can safely start a local,
+/// Host platform used to decide whether Agent can safely start a local,
 /// non-terminal shell.  Kept injectable so the policy has deterministic tests.
 enum BackgroundCommandPlatform { macos, linux, windows, other }
 
@@ -25,11 +25,11 @@ class BackgroundCommandSupport {
   final String? reason;
 }
 
-/// A local non-PTY execution target for Agent2.
+/// A local non-PTY execution target for Agent.
 ///
 /// This deliberately supports only the shells whose noninteractive semantics
 /// we define in v1.  Unsupported targets must remain explicit: falling back to
-/// terminal injection would violate Agent2's isolation guarantee.
+/// terminal injection would violate Agent's isolation guarantee.
 class BackgroundCommandTarget {
   const BackgroundCommandTarget.local({
     required this.shell,
@@ -51,18 +51,18 @@ class BackgroundCommandTarget {
         return const BackgroundCommandSupport.supported();
       }
       return const BackgroundCommandSupport.unsupported(
-        'Agent2 background execution does not support this Windows shell.',
+        'Agent background execution does not support this Windows shell.',
       );
     }
     if (platform != BackgroundCommandPlatform.macos &&
         platform != BackgroundCommandPlatform.linux) {
       return const BackgroundCommandSupport.unsupported(
-        'Agent2 background execution is supported only on macOS and Linux.',
+        'Agent background execution is supported only on macOS and Linux.',
       );
     }
     if (shell.isWsl || shell.usePowerShellCwdWrapper) {
       return const BackgroundCommandSupport.unsupported(
-        'This shell requires a terminal wrapper and cannot run in Agent2.',
+        'This shell requires a terminal wrapper and cannot run in Agent.',
       );
     }
 
@@ -73,7 +73,7 @@ class BackgroundCommandTarget {
         .toLowerCase();
     if (executable != 'bash' && executable != 'zsh') {
       return BackgroundCommandSupport.unsupported(
-        'Agent2 background execution supports bash and zsh, not '
+        'Agent background execution supports bash and zsh, not '
         '${shell.displayName}.',
       );
     }
@@ -88,10 +88,10 @@ class BackgroundCommandTarget {
   }
 }
 
-/// Runs one supported Agent2 local command outside the visible terminal.
+/// Runs one supported Agent local command outside the visible terminal.
 ///
 /// The executor deliberately uses a normal child process, not a detached
-/// process: Agent2 must receive a bounded final result and retain cancellation
+/// process: Agent must receive a bounded final result and retain cancellation
 /// ownership of the child it started.
 class BackgroundCommandExecutor {
   const BackgroundCommandExecutor({
@@ -171,7 +171,7 @@ class BackgroundCommandExecutor {
                 ...invocation.arguments,
               ],
         // WSL receives its Linux working directory through its own arguments.
-        // Passing Agent2's POSIX path to CreateProcess would instead be treated
+        // Passing Agent's POSIX path to CreateProcess would instead be treated
         // as a Windows path and can prevent wsl.exe from starting.
         workingDirectory: target.shell.isWsl ? null : target.cwd,
         runInShell: false,
@@ -339,7 +339,7 @@ class BackgroundCommandExecutor {
       'flutter_pty_job_runner.exe';
 
   String _wslMarkerPath() =>
-      '/tmp/ssterm-agent2-$pid-${DateTime.now().microsecondsSinceEpoch}.pid';
+      '/tmp/ssterm-agent-$pid-${DateTime.now().microsecondsSinceEpoch}.pid';
 
   Future<void> _terminateWslProcessGroup(
     LocalShellOption shell,
@@ -387,7 +387,7 @@ class BackgroundCommandExecutor {
   }
 }
 
-/// Wraps an Agent2 SSH command in its independent working directory without
+/// Wraps an Agent SSH command in its independent working directory without
 /// interpreting the command itself. Only [cwd] is shell-quoted here.
 String buildSshBackgroundCommand(String cwd, String command) =>
     'cd -- ${BackgroundCommandExecutor.shellQuotePosix(cwd)} && $command';

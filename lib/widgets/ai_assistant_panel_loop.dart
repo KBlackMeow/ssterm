@@ -69,12 +69,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       return;
     }
 
-    _markAgentBusy(autoExecuteLockTerminal: _autoExecute);
+    _markAgentBusy();
 
-    // The agent loop relies entirely on OSC 133 shell-integration capture
-    // (with an echo-sentinel fallback) to surface terminal state to the
-    // LLM — we no longer prepend a raw terminal-buffer snapshot, which
-    // used to duplicate the same data in two formats and bloat context.
+    // The agent loop receives direct stdout/stderr from the independent
+    // background executor. Visible-terminal scrollback is never included.
     //
     // Skill catalogue: lives inside the system prompt (see
     // [LlmService._buildSkillsBlock]) — Cursor-style.  No per-turn
@@ -140,17 +138,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     );
   }
 
-  void _markAgentBusy({required bool autoExecuteLockTerminal}) {
+  void _markAgentBusy() {
     setState(() {
       _agentBusy = true;
     });
-    if (autoExecuteLockTerminal) {
-      _setTerminalLocked(true);
-      // Post-frame so focus settles before we yank it from the terminal.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _unfocusTerminalIfLocked();
-      });
-    }
   }
 
   Future<void> _continueAgentLoop(int gen, AgentConfig config) async {
@@ -188,7 +179,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _agentBusy = false;
           _agentLoopStatus = null;
         });
-        _setTerminalLocked(false);
       }
     }
   }
@@ -715,7 +705,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // WHETHER this loop runs, only whether an ORDINARY (non-dangerous)
       // command pauses for confirmation.  Dangerous commands always
       // pause; with auto-execute off, EVERY command pauses (this is
-      // what replaced the old bare "Exec" button — see the
+      // what replaced the old direct-execution affordance — see the
       // [_DangerProposal] section comment in ai_assistant_panel_models.dart).
       //
       // Collect every command's structured feedback into ONE user-role
