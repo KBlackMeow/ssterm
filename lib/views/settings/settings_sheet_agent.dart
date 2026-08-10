@@ -8,6 +8,27 @@
 
 part of 'settings_sheet.dart';
 
+String _compactTokenCount(int tokens) {
+  if (tokens == 1000000 || tokens == 1048576) return '1M';
+  if (tokens % 1024 == 0) return '${tokens ~/ 1024}K';
+  if (tokens % 1000 == 0) return '${tokens ~/ 1000}K';
+  return '$tokens';
+}
+
+String _modelLabel(
+  String modelId,
+  int? contextWindowTokens,
+  int? maxOutputTokens,
+) {
+  final limits = <String>[
+    if (contextWindowTokens != null && contextWindowTokens > 0)
+      _compactTokenCount(contextWindowTokens),
+    if (maxOutputTokens != null && maxOutputTokens > 0)
+      _compactTokenCount(maxOutputTokens),
+  ];
+  return limits.isEmpty ? modelId : '$modelId [${limits.join(' / ')}]';
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Agent settings tab — providers, models, skills, web search, file write.
 //
@@ -586,11 +607,26 @@ extension _AgentSettingsExt on _SettingsPageState {
                 style: const TextStyle(color: _kFg, fontSize: 13),
                 dropdownColor: _kSurface,
                 hint: Text(
-                  allModels.isNotEmpty ? allModels.first : 'No models',
+                  allModels.isNotEmpty
+                      ? _modelLabel(
+                          allModels.first,
+                          currentProvider.modelContextWindows[allModels.first],
+                          currentProvider.modelMaxOutputTokens[allModels.first],
+                        )
+                      : 'No models',
                   style: const TextStyle(color: _kFgMuted, fontSize: 13),
                 ),
                 items: allModels.map((m) {
-                  return DropdownMenuItem(value: m, child: Text(m));
+                  return DropdownMenuItem(
+                    value: m,
+                    child: Text(
+                      _modelLabel(
+                        m,
+                        currentProvider.modelContextWindows[m],
+                        currentProvider.modelMaxOutputTokens[m],
+                      ),
+                    ),
+                  );
                 }).toList(),
                 onChanged: (v) {
                   if (v == null) return;

@@ -31,7 +31,7 @@ Future<LlmResponse> _callOpenAiCompatible(
       {'role': 'system', 'content': systemPrompt},
       ...AgentProviderTools.openAiMessages(messages),
     ],
-    'max_tokens': 4096,
+    'max_tokens': provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
     if (tools.isNotEmpty) 'tool_choice': 'auto',
     if (tools.isNotEmpty) 'parallel_tool_calls': false,
@@ -399,7 +399,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
       {'role': 'system', 'content': systemPrompt},
       ...AgentProviderTools.openAiMessages(messages),
     ],
-    'max_tokens': 4096,
+    'max_tokens': provider.maxOutputTokensFor(model),
     'stream': true,
     // Chat Completions sends stream usage only when explicitly requested.
     // Limit this extension to our known OpenAI-compatible providers so custom

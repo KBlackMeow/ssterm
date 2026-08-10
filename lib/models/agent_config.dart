@@ -106,6 +106,7 @@ class ProviderConfig {
   String? baseUrl;
   List<String> models;
   Map<String, int> modelContextWindows;
+  Map<String, int> modelMaxOutputTokens;
 
   /// True iff this provider requires a per-user API key.  Cloud providers
   /// (OpenAI/Anthropic/Gemini/DeepSeek) all do; local-only providers like
@@ -127,9 +128,13 @@ class ProviderConfig {
     this.baseUrl,
     List<String>? models,
     Map<String, int>? modelContextWindows,
+    Map<String, int>? modelMaxOutputTokens,
     this.requiresApiKey = true,
   }) : models = models ?? [],
-       modelContextWindows = modelContextWindows ?? {};
+       modelContextWindows = modelContextWindows ?? {},
+       modelMaxOutputTokens = modelMaxOutputTokens ?? {};
+
+  int maxOutputTokensFor(String model) => modelMaxOutputTokens[model] ?? 4096;
 
   factory ProviderConfig.chatgpt() => ProviderConfig(
     id: 'chatgpt',
@@ -163,9 +168,9 @@ class ProviderConfig {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     models: ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
     modelContextWindows: {
-      'gemini-3.6-flash': 128000,
-      'gemini-3.5-flash': 128000,
-      'gemini-3.5-flash-lite': 128000,
+      'gemini-3.6-flash': 1048576,
+      'gemini-3.5-flash': 1000000,
+      'gemini-3.5-flash-lite': 1048576,
     },
   );
 
@@ -176,8 +181,12 @@ class ProviderConfig {
     baseUrl: 'https://api.deepseek.com',
     models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
     modelContextWindows: {
-      'deepseek-v4-pro': 128000,
-      'deepseek-v4-flash': 128000,
+      'deepseek-v4-pro': 1000000,
+      'deepseek-v4-flash': 1000000,
+    },
+    modelMaxOutputTokens: {
+      'deepseek-v4-pro': 32768,
+      'deepseek-v4-flash': 32768,
     },
   );
 
@@ -249,7 +258,7 @@ class ProviderConfig {
     protocol: ProviderProtocol.openAiCompatible,
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: ['qwen3.7-plus'],
-    modelContextWindows: {'qwen3.7-plus': 128000},
+    modelContextWindows: {'qwen3.7-plus': 1000000},
   );
 
   factory ProviderConfig.glm() => ProviderConfig(
@@ -389,6 +398,8 @@ class ProviderConfig {
     'models': models,
     if (modelContextWindows.isNotEmpty)
       'modelContextWindows': modelContextWindows,
+    if (modelMaxOutputTokens.isNotEmpty)
+      'modelMaxOutputTokens': modelMaxOutputTokens,
     // Persisted so a user-defined provider's "no-auth" flag round-trips.
     // Built-in providers don't strictly need it (the factory hard-codes
     // their `requiresApiKey`) but it keeps the JSON self-describing.
@@ -432,6 +443,9 @@ class ProviderConfig {
       modelContextWindows: _parseModelContextWindows(
         json['modelContextWindows'],
       ),
+      modelMaxOutputTokens: _parseModelContextWindows(
+        json['modelMaxOutputTokens'],
+      ),
       requiresApiKey: json['requiresApiKey'] as bool? ?? fallbackRequiresKey,
     );
   }
@@ -450,6 +464,7 @@ class ProviderConfig {
     String? baseUrl,
     List<String>? models,
     Map<String, int>? modelContextWindows,
+    Map<String, int>? modelMaxOutputTokens,
     bool? requiresApiKey,
   }) => ProviderConfig(
     id: id,
@@ -460,6 +475,8 @@ class ProviderConfig {
     models: models ?? List.of(this.models),
     modelContextWindows:
         modelContextWindows ?? Map.of(this.modelContextWindows),
+    modelMaxOutputTokens:
+        modelMaxOutputTokens ?? Map.of(this.modelMaxOutputTokens),
     requiresApiKey: requiresApiKey ?? this.requiresApiKey,
   );
 }
@@ -790,6 +807,24 @@ class AgentConfig {
         provider.models
           ..clear()
           ..addAll([...defaults.models, ...custom]);
+        final customContextWindows = Map<String, int>.fromEntries(
+          provider.modelContextWindows.entries.where(
+            (entry) => !defaults.models.contains(entry.key),
+          ),
+        );
+        provider.modelContextWindows
+          ..clear()
+          ..addAll(customContextWindows)
+          ..addAll(defaults.modelContextWindows);
+        final customMaxOutputTokens = Map<String, int>.fromEntries(
+          provider.modelMaxOutputTokens.entries.where(
+            (entry) => !defaults.models.contains(entry.key),
+          ),
+        );
+        provider.modelMaxOutputTokens
+          ..clear()
+          ..addAll(customMaxOutputTokens)
+          ..addAll(defaults.modelMaxOutputTokens);
       } catch (_) {
         // Unknown provider id — leave its model list untouched.
       }

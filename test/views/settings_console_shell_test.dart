@@ -28,7 +28,7 @@ void main() {
     await tester.pumpWidget(const _Harness(width: 1100));
 
     await tester.tap(find.text('Agent'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('Agent content'), findsOneWidget);
   });
@@ -80,6 +80,34 @@ void main() {
     );
 
     expect(find.byKey(const Key('settings-console-rail')), findsOneWidget);
+  });
+
+  testWidgets('default model menu shows limits without changing its value', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+
+    expect(find.text('deepseek-v4-pro [1M / 32K]'), findsOneWidget);
+    expect(agent.defaultModel, 'deepseek-v4-pro');
   });
 
   testWidgets('skills and MCP are independent settings destinations', (

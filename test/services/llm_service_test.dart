@@ -1590,6 +1590,57 @@ Done.
       );
     });
 
+    test('audited provider context windows match official specifications', () {
+      expect(ProviderConfig.deepseek().modelContextWindows, {
+        'deepseek-v4-pro': 1000000,
+        'deepseek-v4-flash': 1000000,
+      });
+      expect(ProviderConfig.gemini().modelContextWindows, {
+        'gemini-3.6-flash': 1048576,
+        'gemini-3.5-flash': 1000000,
+        'gemini-3.5-flash-lite': 1048576,
+      });
+      expect(
+        ProviderConfig.qwen().modelContextWindows['qwen3.7-plus'],
+        1000000,
+      );
+    });
+
+    test('DeepSeek uses a 32K output cap with a 4K fallback', () {
+      final deepseek = ProviderConfig.deepseek();
+      expect(deepseek.maxOutputTokensFor('deepseek-v4-pro'), 32768);
+      expect(deepseek.maxOutputTokensFor('deepseek-v4-flash'), 32768);
+      expect(deepseek.maxOutputTokensFor('custom-model'), 4096);
+    });
+
+    test('reload refreshes built-in limits and preserves custom limits', () {
+      final config = AgentConfig.fromJson({
+        'providers': [
+          {
+            'id': 'deepseek',
+            'models': ['deepseek-v4-pro', 'my-deepseek-model'],
+            'modelContextWindows': {
+              'deepseek-v4-pro': 128000,
+              'my-deepseek-model': 64000,
+            },
+            'modelMaxOutputTokens': {
+              'deepseek-v4-pro': 4096,
+              'my-deepseek-model': 8192,
+            },
+          },
+        ],
+      });
+      final deepseek = config.providers.firstWhere(
+        (provider) => provider.id == 'deepseek',
+      );
+      expect(deepseek.modelContextWindows['deepseek-v4-pro'], 1000000);
+      expect(deepseek.modelContextWindows['deepseek-v4-flash'], 1000000);
+      expect(deepseek.modelContextWindows['my-deepseek-model'], 64000);
+      expect(deepseek.modelMaxOutputTokens['deepseek-v4-pro'], 32768);
+      expect(deepseek.modelMaxOutputTokens['deepseek-v4-flash'], 32768);
+      expect(deepseek.modelMaxOutputTokens['my-deepseek-model'], 8192);
+    });
+
     test(
       'reloading a saved configuration promotes defaults and keeps custom models',
       () {
@@ -1674,18 +1725,20 @@ Done.
       },
     );
 
-    test('ProviderConfig persists per-model context windows', () {
+    test('ProviderConfig persists per-model token limits', () {
       final original = ProviderConfig(
         id: 'ollama',
         displayName: 'Ollama',
         requiresApiKey: false,
         models: ['qwen'],
         modelContextWindows: {'qwen': 65536},
+        modelMaxOutputTokens: {'qwen': 8192},
       );
 
       final decoded = ProviderConfig.fromJson(original.toJson());
 
       expect(decoded.modelContextWindows, {'qwen': 65536});
+      expect(decoded.modelMaxOutputTokens, {'qwen': 8192});
     });
 
     test(
