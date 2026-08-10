@@ -19,7 +19,7 @@
 - Qwen `qwen3.7-plus` is exactly `1,000,000` tokens.
 - Unverified provider values, custom metadata, and the unknown-model 32K fallback remain unchanged.
 - Context suffixes are display-only and never enter persisted IDs or API payloads.
-- DeepSeek V4 Pro and Flash send a client-side `max_tokens` value of `32,768`; models without configured output metadata retain the `4,096` fallback.
+- Every provider defaults to a client-side output limit of `32,768`; per-model metadata may override it.
 
 ---
 

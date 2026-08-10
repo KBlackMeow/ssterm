@@ -134,7 +134,7 @@ class ProviderConfig {
        modelContextWindows = modelContextWindows ?? {},
        modelMaxOutputTokens = modelMaxOutputTokens ?? {};
 
-  int maxOutputTokensFor(String model) => modelMaxOutputTokens[model] ?? 4096;
+  int maxOutputTokensFor(String model) => modelMaxOutputTokens[model] ?? 32768;
 
   factory ProviderConfig.chatgpt() => ProviderConfig(
     id: 'chatgpt',

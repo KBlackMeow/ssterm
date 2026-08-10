@@ -1606,11 +1606,14 @@ Done.
       );
     });
 
-    test('DeepSeek uses a 32K output cap with a 4K fallback', () {
+    test('all models default to a 32K output cap', () {
       final deepseek = ProviderConfig.deepseek();
       expect(deepseek.maxOutputTokensFor('deepseek-v4-pro'), 32768);
       expect(deepseek.maxOutputTokensFor('deepseek-v4-flash'), 32768);
-      expect(deepseek.maxOutputTokensFor('custom-model'), 4096);
+      expect(deepseek.maxOutputTokensFor('custom-model'), 32768);
+      expect(ProviderConfig.claude().maxOutputTokensFor('claude'), 32768);
+      expect(ProviderConfig.gemini().maxOutputTokensFor('gemini'), 32768);
+      expect(ProviderConfig.ollama().maxOutputTokensFor('local'), 32768);
     });
 
     test('reload refreshes built-in limits and preserves custom limits', () {

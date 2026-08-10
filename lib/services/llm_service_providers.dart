@@ -115,7 +115,7 @@ Future<LlmResponse> _callAnthropic(
     'model': model,
     'system': _anthropicSystemBlock(systemPrompt),
     'messages': apiMessages,
-    'max_tokens': 4096,
+    'max_tokens': provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
     if (tools.isNotEmpty)
       'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
@@ -180,7 +180,7 @@ Future<LlmResponse> _callGemini(
       ],
     },
     'contents': contents,
-    'generationConfig': {'maxOutputTokens': 4096},
+    'generationConfig': {'maxOutputTokens': provider.maxOutputTokensFor(model)},
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
@@ -469,7 +469,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
     'model': model,
     'system': _anthropicSystemBlock(systemPrompt),
     'messages': apiMessages,
-    'max_tokens': 4096,
+    'max_tokens': provider.maxOutputTokensFor(model),
     'stream': true,
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
     if (tools.isNotEmpty)
@@ -579,7 +579,7 @@ Stream<LlmStreamEvent> _streamGemini(
       ],
     },
     'contents': contents,
-    'generationConfig': {'maxOutputTokens': 4096},
+    'generationConfig': {'maxOutputTokens': provider.maxOutputTokensFor(model)},
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
@@ -694,7 +694,12 @@ Future<LlmResponse> _callOllama(
     ...AgentProviderTools.legacyMessages(messages),
   ];
 
-  final body = {'model': model, 'messages': apiMessages, 'stream': false};
+  final body = {
+    'model': model,
+    'messages': apiMessages,
+    'stream': false,
+    'options': {'num_predict': provider.maxOutputTokensFor(model)},
+  };
 
   final client = HttpClient();
   try {
@@ -735,7 +740,12 @@ Stream<LlmStreamEvent> _streamOllama(
     ...AgentProviderTools.legacyMessages(messages),
   ];
 
-  final body = {'model': model, 'messages': apiMessages, 'stream': true};
+  final body = {
+    'model': model,
+    'messages': apiMessages,
+    'stream': true,
+    'options': {'num_predict': provider.maxOutputTokensFor(model)},
+  };
 
   final request = await client.postUrl(Uri.parse(url));
   request.headers.set('Content-Type', 'application/json; charset=utf-8');

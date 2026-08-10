@@ -118,9 +118,10 @@ are not appended to model names.
 ## Request output limit
 
 `ProviderConfig.modelMaxOutputTokens` maps exact model IDs to SSTerm's desired
-per-response output cap. Provider requests use the selected model's configured
-value and fall back to the existing 4,096-token cap when no value is present.
-For direct DeepSeek V4 Pro and Flash, the request sends `max_tokens: 32768`.
+per-response output cap. All providers default to 32,768 tokens when no
+per-model value is present. OpenAI-compatible and Anthropic requests use
+`max_tokens`, Gemini uses `generationConfig.maxOutputTokens`, and Ollama uses
+`options.num_predict`.
 Saved built-in values are refreshed using the same ownership rules as context
 windows; custom model values remain unchanged.
 
@@ -130,8 +131,7 @@ windows; custom model values remain unchanged.
 - A migration test loads a built-in provider with stale context metadata and
   confirms current built-in values are refreshed.
 - The same migration test confirms custom model context metadata is preserved.
-- Request tests assert DeepSeek sends `max_tokens: 32768` and an unconfigured
-  model retains the 4,096 fallback.
+- Tests assert built-in and custom models default to a 32,768-token output cap.
 - Provider request tests continue to assert that the exact model ID, without a
   display suffix, is sent to the API.
 - A widget test confirms model selectors show the raw model ID.
