@@ -155,9 +155,9 @@ abstract class FileSystemAdapter {
   /// paths AND `~/…` expansions.  Null when unknown; in that case the
   /// adapter falls back to its "absolute paths only" policy.
   ///
-  /// LOCAL adapter: the active terminal pane's PWD (via OSC 7) when
-  /// known, else the host process HOME, else null.
-  /// SFTP  adapter: the active SSH pane's PWD (via OSC 7) when known.
+  /// LOCAL adapter: the Agent's independent cwd when known, else the host
+  /// process HOME, else null.
+  /// SFTP adapter: the Agent's independent remote cwd when known.
   ///
   /// Exposed for [AiAssistantOverlay] so it can advertise the working
   /// directory to the LLM in a `<session_context>` block — telling the
@@ -220,10 +220,9 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   /// without touching the real one.  Production code leaves null.
   final String? homeOverride;
 
-  /// Snapshot supplier for the active terminal pane's PWD.  Called on
-  /// every preview / commit so a `cd` issued between operations is
-  /// reflected immediately, without the host needing to rebuild the
-  /// adapter on each OSC 7 update.
+  /// Snapshot supplier for the Agent's independent cwd. Called on every
+  /// preview / commit so a successful Agent `cd` is reflected immediately
+  /// without rebuilding the adapter.
   ///
   /// Returning null means "PWD unknown" — relative paths then fall
   /// back to the existing `invalidPath` error.
@@ -387,16 +386,15 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   }
 
   /// Expand a leading `~` to the user's HOME, join relative paths to
-  /// the active terminal pane's PWD (when [cwdProvider] supplies one),
+  /// the Agent's independent cwd (when [cwdProvider] supplies one),
   /// and reject everything else.
   ///
   /// Relative paths used to be a hard error here: the Flutter process
-  /// CWD is usually `/` (or the .app bundle), NOT the terminal's PWD,
+  /// CWD is usually `/` (or the .app bundle), NOT the Agent's cwd,
   /// so any resolution against `Directory.current` would land the
   /// file somewhere the user doesn't expect.  Now we ALSO accept
-  /// relatives WHEN we know the terminal's PWD (OSC 7 reported it),
-  /// because then the resolution matches what the user sees in their
-  /// shell — same semantics as if they'd typed the path into bash.
+  /// relatives WHEN the background executor has verified the Agent cwd,
+  /// so shell commands and file tools share the same independent location.
   String _resolvePath(String input) {
     var p = input.trim();
     if (p.isEmpty) {
@@ -416,7 +414,7 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       p = p == '~' ? home : '$home${p.substring(1)}';
     }
     if (!p.startsWith('/') && !_isWindowsAbsolute(p)) {
-      // Try resolving against the terminal pane's PWD.  We only do
+      // Try resolving against the Agent's cwd. We only do
       // this when the host supplied a `cwdProvider` AND it returns a
       // non-empty value — falling back to `Directory.current` would
       // resolve to the .app bundle on macOS, which is never what the
@@ -432,8 +430,8 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
           cwd == null || cwd.isEmpty
               ? 'Path must be absolute (start with `/`, `~`, or a '
                     'drive letter): $p\n'
-                    '(Terminal PWD is not known yet — type a command in '
-                    'the shell so OSC 7 reports it, then retry.)'
+                    '(Agent working directory is not known yet — run `pwd` '
+                    'or `cd` through Agent, then retry.)'
               : 'Path must be absolute (start with `/`, `~`, or a '
                     'drive letter): $p',
         );
@@ -582,7 +580,8 @@ class WslFileSystemAdapter implements FileSystemAdapter {
       } else if (cwd == null || !cwd.startsWith('/')) {
         throw const FileWriteException(
           FileWriteErrorKind.invalidPath,
-          'Path must be absolute (start with `/` or `~`); WSL PWD is unknown.',
+          'Path must be absolute (start with `/` or `~`); the Agent WSL '
+          'working directory is unknown.',
         );
       } else {
         path = '$cwd/$path';
@@ -631,14 +630,11 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   @override
   final String label;
 
-  /// Snapshot supplier for the active SSH pane's PWD (typically
-  /// surfaced via the `__ssterm_cwd` shell hook → OSC 7 → the host's
-  /// `tab.remoteCwdPane*` field).  Called on every preview / commit
-  /// so a `cd` issued mid-conversation is reflected immediately,
-  /// without the host needing to rebuild the adapter on each
-  /// OSC 7 update.
+  /// Snapshot supplier for the Agent's independent SSH cwd. Called on every
+  /// preview / commit so a successful Agent `cd` is reflected immediately
+  /// without rebuilding the adapter.
   ///
-  /// Returning null means "remote PWD unknown" — the model is then
+  /// Returning null means "Agent remote cwd unknown" — the model is then
   /// told to use an absolute path in the error envelope, INCLUDING
   /// the SFTP HOME we discovered so it has a concrete starting point.
   final String? Function()? cwdProvider;
@@ -957,9 +953,9 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   ///   • Absolute (`/etc/hosts`)         → returned as-is.
   ///   • Tilde   (`~`, `~/foo`)          → expanded via [homeDirectory]
   ///     (lazily discovered with `SSH_FXP_REALPATH('.')` and cached).
-  ///   • Relative (`foo`, `./foo`, `a/b`) → joined to the SSH pane's
-  ///     PWD when [cwdProvider] supplies one; falls back to HOME if
-  ///     PWD is unknown but HOME was discovered (best-effort — better
+  ///   • Relative (`foo`, `./foo`, `a/b`) → joined to the Agent's remote
+  ///     cwd when [cwdProvider] supplies one; falls back to HOME if
+  ///     that cwd is unknown but HOME was discovered (best-effort — better
   ///     than refusing).  When neither is available, throws
   ///     `invalidPath` with a helpful message naming the discovered
   ///     HOME (if any) so the model has a concrete absolute path to
@@ -967,8 +963,8 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   ///
   /// We deliberately do NOT delegate to `client.absolute(p)` for
   /// relative paths — that returns the CHANNEL's CWD which on most
-  /// servers is HOME, not the shell's PWD.  Using the shell's PWD
-  /// matches what `cat > foo` would do in the same terminal pane.
+  /// servers is HOME, not the Agent's cwd. Using the Agent cwd matches what
+  /// its next background `cat > foo` command would do.
   Future<String> _resolveRemotePath(String path) async {
     final p = path.trim();
     if (p.isEmpty) {
@@ -1000,9 +996,8 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
       return _joinPath(cwd, rel);
     }
 
-    // No cwd reported via OSC 7 yet — fall back to HOME (the
-    // user's working dir at connect time, equivalent to the very
-    // first PWD a fresh shell sees).  Better than refusing AND
+    // No verified Agent cwd yet — fall back to HOME (the user's working dir
+    // at connect time). Better than refusing AND
     // accidentally lands close to the right place on a brand-new
     // session.
     final home = await homeDirectory();
@@ -1012,8 +1007,8 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
 
     throw FileWriteException(
       FileWriteErrorKind.invalidPath,
-      'Remote path is relative but the SSH PWD is not known yet '
-      '(no OSC 7 update received, and SFTP HOME probe failed). '
+      'Remote path is relative but the Agent SSH working directory is not '
+      'known yet and the SFTP HOME probe failed. '
       'Use an absolute path starting with `/`. Got: $p',
     );
   }
@@ -1071,7 +1066,7 @@ class FileWriteService {
   static String formatErrorForLlm(String path, FileWriteException e) {
     final recovery = switch (e.kind) {
       FileWriteErrorKind.invalidPath =>
-        'Path resolution failed. Prefer an ABSOLUTE path (starting with `/`). `~/…` works on BOTH local and SSH tabs (ssterm expands it for you over SFTP). Relative paths resolve against the active terminal pane\'s PWD only when OSC 7 has reported one — the upstream `message` above says whether the PWD was known. When unsure, reuse the absolute PWD or HOME shown in the `<session_context>` block from earlier in this conversation.',
+        'Path resolution failed. Prefer an ABSOLUTE path (starting with `/`). `~/…` works on BOTH local and SSH tabs (ssterm expands it for you over SFTP). Relative paths resolve against the Agent\'s independent working directory only after a successful background command has verified it — the upstream `message` says whether it was known. When unsure, reuse the absolute PWD or HOME shown in the `<session_context>` block.',
       FileWriteErrorKind.parentMissing =>
         'Run `mkdir -p <parent>` via bash FIRST, then retry write_file.',
       FileWriteErrorKind.mtimeMismatch =>

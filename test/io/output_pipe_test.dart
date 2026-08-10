@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -16,6 +17,22 @@ class _LogStub implements LogSink {
 }
 
 void main() {
+  test('source exposes no terminal command-capture API', () {
+    final source = File('lib/io/output_pipe.dart').readAsStringSync();
+    final removedApis = [
+      ['has', 'Osc', '${100 + 33}'].join(),
+      ['command', 'Finished'].join(),
+      ['command', 'Results'].join(),
+      ['await', 'Next', 'Command'].join(),
+      ['reset', 'Capture'].join(),
+      ['captured', 'Output'].join('_'),
+    ];
+
+    for (final api in removedApis) {
+      expect(source, isNot(contains(api)), reason: api);
+    }
+  });
+
   group('OutputPipe', () {
     test('buffers incoming chunks and flushes to terminal after 16 ms', () {
       fakeAsync((fake) {

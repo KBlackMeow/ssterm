@@ -428,9 +428,9 @@ String? _buildMcpToolsBlock() {
   buf.writeln('<mcp_tools>');
   buf.writeln(
     'You have access to MCP (Model Context Protocol) tools. '
-    'Call them with the same \`\`\`tool_call JSON format you use for '
-    '\`bash\`, but use \`"name":"mcp"\` and put \`server\`, '
-    '\`tool\`, and \`params\` in the arguments.',
+    'Call them with the same ```tool_call JSON format you use for '
+    '`bash`, but use `"name":"mcp"` and put `server`, '
+    '`tool`, and `params` in the arguments.',
   );
   buf.writeln();
   buf.writeln('Schema:');
@@ -452,7 +452,7 @@ String? _buildMcpToolsBlock() {
       final properties = schema['properties'];
       if (properties is Map) {
         final required = (schema['required'] as List?)?.cast<String>() ?? [];
-        for (final name in (properties as Map).keys) {
+        for (final name in properties.keys) {
           final isReq = required.contains(name);
           params.add('$name (${isReq ? "required" : "optional"})');
         }
@@ -476,9 +476,9 @@ String? _buildMcpToolsBlock() {
   );
   buf.writeln('```');
   buf.writeln(
-    'Results arrive as a \`[Tool result]\` envelope '
-    '(same format as bash, with \`[tool_name=mcp]\`). '
-    'Do NOT combine with \`[TASK_COMPLETE]\` in the same turn.',
+    'Results arrive as a `[Tool result]` envelope '
+    '(same format as bash, with `[tool_name=mcp]`). '
+    'Do NOT combine with `[TASK_COMPLETE]` in the same turn.',
   );
   buf.write('</mcp_tools>');
   return buf.toString();
@@ -529,7 +529,7 @@ After every shell tool call you emit, you receive a user-role message in this EX
 [risk_source=<ai|host_fallback|host_override|missing_ai_fallback>]
 [risk_reason=<single-line reason>]
 [output]
-<stdout/stderr — ANSI-stripped, possibly truncated>
+<stdout/stderr — raw decoded output, possibly truncated>
 
 Or, when the command produced nothing:
 
@@ -546,7 +546,7 @@ Truncation flags appear (when present) BEFORE [output]:
 - [feedback_truncated=true …]  Capture was complete; the MIDDLE was elided to fit the context window. Head and tail are exact; only the middle is missing.
 
 Notes:
-- Commands run in the Agent's background process or SSH channel. Output is the command's direct stdout/stderr, ANSI-stripped and without terminal prompts or echoed input.
+- Commands run in the Agent's background process or SSH channel. Output is direct stdout/stderr and may contain ANSI escape sequences; because execution has no visible PTY, it arrives without a visible terminal prompt or echoed input.
 - exit_code=0 → success. Non-zero → failure. "unknown" → the background executor could not determine an exit code.
 - Total output is capped at ~8 KB; longer outputs surface `[feedback_truncated=true …]`.
 

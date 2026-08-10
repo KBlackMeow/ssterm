@@ -62,7 +62,6 @@ class AppTab {
   /// the hard retry ceiling in `_reconnectTab`.
   int reconnectAttempt = 0;
   bool sftpPanelVisible = false;
-  bool aiPanelVisible = false;
 
   /// The agent is a separate host from the visible terminal. Its cwd never
   /// follows OSC-7 updates from the visible terminal.

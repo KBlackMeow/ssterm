@@ -13,14 +13,14 @@
 - **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Concurrent transfers with a live progress queue. Drag-and-drop upload support.
 - **🔐 Full SSH Client** — Password and private-key auth, `~/.ssh/config` import, jump host / ProxyJump, port forwarding (local, remote, SOCKS5), keepalive with auto-reconnect, and session logging.
 - **🎨 Deep Customization** — 9 terminal theme presets, custom colors, JetBrains Mono / SF Mono / Monaco with CJK fallback, cursor shape & blink, wallpaper with frosted glass blur and opacity.
-- **⚡ Local Shell** — PTY-backed with TrueColor, auto shell discovery (zsh, bash, fish, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
+- **⚡ Local Shell** — PTY-backed with TrueColor, OSC 7-integrated shell discovery (zsh, bash, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
 - **🖥️ Cross-Platform** — macOS (primary), Windows, Linux. Mobile (iOS/Android) for SSH & SFTP.
 
 ---
 
 ## 🤖 AI Agent
 
-The terminal-aware agent panel is the standout feature — converse with an AI assistant that sees your active terminal, executes commands, and iterates on results.
+The tab-scoped agent panel is the standout feature — converse with an AI assistant that executes commands in its own background session and iterates on structured results.
 
 | Capability | Description |
 |---|---|
@@ -97,10 +97,11 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 ## ⚡ Local Shell
 
 - PTY-backed with `xterm-256color` and TrueColor (24-bit).
-- Auto-detects zsh, bash, fish, tcsh, ksh, sh, dash on macOS/Linux; WSL distros, CMD, PowerShell, and Git Bash on Windows.
-- Shell integration uses OSC 7 for working-directory tracking. Agent commands
-  run in background processes or SSH channels, never through visible-terminal
-  injection or terminal-output capture.
+- Auto-detects OSC 7-integrated zsh and bash on macOS/Linux; compatible WSL distros, CMD, PowerShell, and Git Bash on Windows.
+- Visible terminal shells use OSC 7 for their own working-directory tracking.
+  Agent commands run in independent background processes or SSH channels, and
+  their verified cwd drives later Agent commands and relative file operations;
+  it never follows the active terminal's OSC 7 updates.
 - Pre-raises `RLIMIT_NOFILE` at startup to prevent fd exhaustion with plugin-heavy shells.
 
 ---

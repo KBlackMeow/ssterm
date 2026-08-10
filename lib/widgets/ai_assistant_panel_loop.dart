@@ -712,10 +712,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // message so we never emit consecutive 'user' messages — Anthropic's
       // /v1/messages rejects that with `messages must alternate`.
       //
-      // We deliberately DON'T log per-command "executing"/"result" lines
-      // here — the background executor already logs `start`/`done` with the
-      // exit code and byte count, so logging both ends would double the
-      // noise without adding information.
+      // We deliberately don't add duplicate chat-log lines here. Structured
+      // feedback and command history already retain the final result.
       final feedbacks = <String>[];
       final nativeResults = <AgentToolResult>[];
       for (var i = 0; i < shellToolCalls.length; i++) {

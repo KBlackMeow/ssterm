@@ -1161,6 +1161,14 @@ Done.
       expect(identical(a, b), isFalse);
     });
 
+    test('command feedback accurately describes raw background output', () {
+      final prompt = LlmService.systemPromptFor(enabledSkillIds: <String>{});
+
+      expect(prompt, contains('may contain ANSI escape sequences'));
+      expect(prompt, isNot(contains('ANSI-stripped')));
+      expect(prompt, contains('without a visible terminal prompt'));
+    });
+
     test('disabled set never embeds <agent_skills>', () async {
       // With NO skills enabled, the `<agent_skills>` block must be
       // omitted entirely so the model isn't tempted to call a tool it

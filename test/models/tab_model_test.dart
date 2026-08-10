@@ -18,6 +18,12 @@ class FakeSftpClient implements SftpClient {
 }
 
 void main() {
+  test('tab model has no obsolete pre-promotion Agent panel flag', () {
+    final source = File('lib/models/tab_model.dart').readAsStringSync();
+    final obsoleteField = ['ai', 'Panel', 'Visible'].join();
+    expect(source, isNot(contains(obsoleteField)));
+  });
+
   // GlobalKey requires a binding to be initialized.
   setUpAll(() => WidgetsFlutterBinding.ensureInitialized());
 
