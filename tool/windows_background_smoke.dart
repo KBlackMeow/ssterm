@@ -185,7 +185,7 @@ Future<void> _run(List<String> arguments) async {
         id: 'wsl:Ubuntu',
         displayName: 'Ubuntu',
         // Deliberately terminal-only arguments: the executor must not reuse
-        // them for a noninteractive Agent2 command.
+        // them for a noninteractive Agent command.
         executable: 'ubuntu.exe',
         arguments: ['run', 'interactive wrapper'],
         isWsl: true,

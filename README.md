@@ -98,7 +98,9 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 
 - PTY-backed with `xterm-256color` and TrueColor (24-bit).
 - Auto-detects zsh, bash, fish, tcsh, ksh, sh, dash on macOS/Linux; WSL distros, CMD, PowerShell, and Git Bash on Windows.
-- Shell integration via OSC 7 (working directory tracking) and OSC 133 (command boundary markers for the AI agent).
+- Shell integration uses OSC 7 for working-directory tracking. Agent commands
+  run in background processes or SSH channels, never through visible-terminal
+  injection or terminal-output capture.
 - Pre-raises `RLIMIT_NOFILE` at startup to prevent fd exhaustion with plugin-heavy shells.
 
 ---
