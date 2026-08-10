@@ -255,8 +255,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final home = userHomeDir();
     final env = _environmentForLocalShell(shell);
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
-    final usePowerShellWrapper =
-        shell.usePowerShellWrapper && Platform.isWindows;
+    final usePowerShellCwdWrapper =
+        shell.usePowerShellCwdWrapper && Platform.isWindows;
 
     final Pty pty;
     try {
@@ -275,8 +275,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           workingDirectory: workingDirectory ?? home,
           ackRead: true,
         );
-      } else if (usePowerShellWrapper) {
-        final encoded = encodePowerShellCommand(buildPowerShellOsc133Prelude());
+      } else if (usePowerShellCwdWrapper) {
+        final encoded = encodePowerShellCommand(buildPowerShellOsc7Prelude());
         pty = await Pty.start(
           shell.executable,
           arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],

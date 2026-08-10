@@ -12,7 +12,7 @@ class LocalShellOption {
     this.arguments = const [],
     this.environment,
     this.useUnixWrapper = false,
-    this.usePowerShellWrapper = false,
+    this.usePowerShellCwdWrapper = false,
     this.isWsl = false,
   });
 
@@ -23,11 +23,11 @@ class LocalShellOption {
   final Map<String, String>? environment;
   final bool useUnixWrapper;
 
-  /// Whether to inject the OSC 133 PowerShell prelude at spawn time (see
-  /// `powershell_shell_wrapper.dart`). Only ever set for native
+  /// Whether to inject the OSC 7 PowerShell prelude at spawn time (see
+  /// `powershell_shell_wrapper.dart`). Only set for native
   /// `powershell`/`pwsh` candidates, never for `cmd` (which has no
   /// programmable prompt-execution hook to build one on).
-  final bool usePowerShellWrapper;
+  final bool usePowerShellCwdWrapper;
   final bool isWsl;
 
   @override
@@ -49,23 +49,23 @@ class LocalShellOption {
         displayName == other.displayName &&
         executable == other.executable &&
         useUnixWrapper == other.useUnixWrapper &&
-        usePowerShellWrapper == other.usePowerShellWrapper &&
+        usePowerShellCwdWrapper == other.usePowerShellCwdWrapper &&
         isWsl == other.isWsl &&
         _listEquals(arguments, other.arguments) &&
         _mapEquals(environment, other.environment);
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'displayName': displayName,
-        'executable': executable,
-        if (arguments.isNotEmpty) 'arguments': arguments,
-        if (environment != null && environment!.isNotEmpty)
-          'environment': environment,
-        if (useUnixWrapper) 'useUnixWrapper': true,
-        if (usePowerShellWrapper) 'usePowerShellWrapper': true,
-        if (isWsl) 'isWsl': true,
-      };
+    'id': id,
+    'displayName': displayName,
+    'executable': executable,
+    if (arguments.isNotEmpty) 'arguments': arguments,
+    if (environment != null && environment!.isNotEmpty)
+      'environment': environment,
+    if (useUnixWrapper) 'useUnixWrapper': true,
+    if (usePowerShellCwdWrapper) 'usePowerShellCwdWrapper': true,
+    if (isWsl) 'isWsl': true,
+  };
 
   static LocalShellOption? fromJson(Map<String, dynamic> json) {
     final id = json['id'];
@@ -74,7 +74,8 @@ class LocalShellOption {
     if (id is! String || displayName is! String || executable is! String) {
       return null;
     }
-    final args = (json['arguments'] as List?)?.whereType<String>().toList() ??
+    final args =
+        (json['arguments'] as List?)?.whereType<String>().toList() ??
         const <String>[];
     Map<String, String>? env;
     final rawEnv = json['environment'];
@@ -92,7 +93,10 @@ class LocalShellOption {
       arguments: args,
       environment: env,
       useUnixWrapper: json['useUnixWrapper'] as bool? ?? false,
-      usePowerShellWrapper: json['usePowerShellWrapper'] as bool? ?? false,
+      usePowerShellCwdWrapper:
+          json['usePowerShellCwdWrapper'] as bool? ??
+          json['usePowerShellWrapper'] as bool? ??
+          false,
       isWsl: json['isWsl'] as bool? ?? false,
     );
   }
@@ -225,7 +229,7 @@ class LocalShellDiscovery {
             String path,
             List<String> args,
             Map<String, String>? env,
-            bool usePowerShellWrapper,
+            bool usePowerShellCwdWrapper,
           })
         >[
           (
@@ -236,7 +240,7 @@ class LocalShellDiscovery {
                 r'$systemRoot\System32\cmd.exe',
             args: const <String>[],
             env: null,
-            usePowerShellWrapper: false,
+            usePowerShellCwdWrapper: false,
           ),
           (
             id: 'powershell',
@@ -244,7 +248,7 @@ class LocalShellDiscovery {
             path: r'$systemRoot\System32\WindowsPowerShell\v1.0\powershell.exe',
             args: const <String>[],
             env: null,
-            usePowerShellWrapper: true,
+            usePowerShellCwdWrapper: true,
           ),
           (
             id: 'pwsh',
@@ -252,7 +256,7 @@ class LocalShellDiscovery {
             path: r'C:\Program Files\PowerShell\7\pwsh.exe',
             args: const <String>[],
             env: null,
-            usePowerShellWrapper: true,
+            usePowerShellCwdWrapper: true,
           ),
           (
             id: 'pwsh-x86',
@@ -260,7 +264,7 @@ class LocalShellDiscovery {
             path: r'C:\Program Files (x86)\PowerShell\7\pwsh.exe',
             args: const <String>[],
             env: null,
-            usePowerShellWrapper: true,
+            usePowerShellCwdWrapper: true,
           ),
           (
             id: 'git-bash',
@@ -284,7 +288,7 @@ class LocalShellDiscovery {
               // "cannot execute binary file".
               'SHELL': '/usr/bin/bash',
             },
-            usePowerShellWrapper: false,
+            usePowerShellCwdWrapper: false,
           ),
           (
             id: 'git-bash-x86',
@@ -305,7 +309,7 @@ class LocalShellDiscovery {
               'CHERE_INVOKING': '1',
               'SHELL': '/usr/bin/bash',
             },
-            usePowerShellWrapper: false,
+            usePowerShellCwdWrapper: false,
           ),
         ];
 
@@ -319,7 +323,7 @@ class LocalShellDiscovery {
         executable: path,
         arguments: c.args,
         environment: c.env,
-        usePowerShellWrapper: c.usePowerShellWrapper,
+        usePowerShellCwdWrapper: c.usePowerShellCwdWrapper,
       );
     }
   }
@@ -554,7 +558,7 @@ class LocalShellDiscovery {
     List<String> arguments = const [],
     Map<String, String>? environment,
     bool useUnixWrapper = false,
-    bool usePowerShellWrapper = false,
+    bool usePowerShellCwdWrapper = false,
     bool isWsl = false,
   }) {
     final key = isWsl ? id : _normalizePath(executable);
@@ -570,7 +574,7 @@ class LocalShellDiscovery {
         arguments: arguments,
         environment: environment,
         useUnixWrapper: useUnixWrapper,
-        usePowerShellWrapper: usePowerShellWrapper,
+        usePowerShellCwdWrapper: usePowerShellCwdWrapper,
         isWsl: isWsl,
       ),
     );

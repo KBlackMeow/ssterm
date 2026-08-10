@@ -4,20 +4,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/local_shell_discovery.dart';
 
 void main() {
-  group('LocalShellOption.usePowerShellWrapper JSON round-trip', () {
+  group('LocalShellOption.usePowerShellCwdWrapper JSON round-trip', () {
     test('round-trips true', () {
       const shell = LocalShellOption(
         id: 'pwsh',
         displayName: 'PowerShell 7',
         executable: r'C:\Program Files\PowerShell\7\pwsh.exe',
-        usePowerShellWrapper: true,
+        usePowerShellCwdWrapper: true,
       );
 
       final json = shell.toJson();
-      expect(json['usePowerShellWrapper'], true);
+      expect(json['usePowerShellCwdWrapper'], true);
 
       final restored = LocalShellOption.fromJson(json)!;
-      expect(restored.usePowerShellWrapper, true);
+      expect(restored.usePowerShellCwdWrapper, true);
     });
 
     test('omits the key when false, and defaults to false on decode', () {
@@ -28,29 +28,46 @@ void main() {
       );
 
       final json = shell.toJson();
-      expect(json.containsKey('usePowerShellWrapper'), isFalse);
+      expect(json.containsKey('usePowerShellCwdWrapper'), isFalse);
 
       final restored = LocalShellOption.fromJson(json)!;
-      expect(restored.usePowerShellWrapper, false);
+      expect(restored.usePowerShellCwdWrapper, false);
+    });
+
+    test('reads the legacy wrapper key and writes the cwd-wrapper key', () {
+      final restored = LocalShellOption.fromJson({
+        'id': 'powershell',
+        'displayName': 'Windows PowerShell',
+        'executable':
+            r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+        'usePowerShellWrapper': true,
+      })!;
+
+      expect(restored.usePowerShellCwdWrapper, isTrue);
+      expect(restored.toJson(), containsPair('usePowerShellCwdWrapper', true));
+      expect(restored.toJson().containsKey('usePowerShellWrapper'), isFalse);
     });
   });
 
-  test('structuralEquals distinguishes shells that only differ by usePowerShellWrapper', () {
-    const a = LocalShellOption(
-      id: 'powershell',
-      displayName: 'PowerShell',
-      executable: r'C:\powershell.exe',
-      usePowerShellWrapper: false,
-    );
-    const b = LocalShellOption(
-      id: 'powershell',
-      displayName: 'PowerShell',
-      executable: r'C:\powershell.exe',
-      usePowerShellWrapper: true,
-    );
+  test(
+    'structuralEquals distinguishes shells that only differ by usePowerShellCwdWrapper',
+    () {
+      const a = LocalShellOption(
+        id: 'powershell',
+        displayName: 'PowerShell',
+        executable: r'C:\powershell.exe',
+        usePowerShellCwdWrapper: false,
+      );
+      const b = LocalShellOption(
+        id: 'powershell',
+        displayName: 'PowerShell',
+        executable: r'C:\powershell.exe',
+        usePowerShellCwdWrapper: true,
+      );
 
-    expect(a.structuralEquals(b), isFalse);
-  });
+      expect(a.structuralEquals(b), isFalse);
+    },
+  );
 
   group(
     'LocalShellDiscovery.discoverSync on Windows',
@@ -65,29 +82,29 @@ void main() {
         return null;
       }
 
-      test('powershell/pwsh candidates opt into the OSC133 prelude', () {
+      test('powershell/pwsh candidates opt into the OSC 7 prelude', () {
         for (final id in const ['powershell', 'pwsh', 'pwsh-x86']) {
           final shell = byId(id);
           if (shell == null) continue; // not installed on this machine
           expect(
-            shell.usePowerShellWrapper,
+            shell.usePowerShellCwdWrapper,
             isTrue,
-            reason: '$id should use the PowerShell OSC133 wrapper',
+            reason: '$id should use the PowerShell OSC 7 wrapper',
           );
         }
       });
 
-      test('cmd does not opt into the PowerShell OSC133 prelude', () {
+      test('cmd does not opt into the PowerShell OSC 7 prelude', () {
         final cmd = byId('cmd');
         expect(cmd, isNotNull);
-        expect(cmd!.usePowerShellWrapper, isFalse);
+        expect(cmd!.usePowerShellCwdWrapper, isFalse);
       });
 
       test('git-bash candidates do not opt into the PowerShell prelude', () {
         for (final id in const ['git-bash', 'git-bash-x86']) {
           final shell = byId(id);
           if (shell == null) continue; // not installed on this machine
-          expect(shell.usePowerShellWrapper, isFalse);
+          expect(shell.usePowerShellCwdWrapper, isFalse);
         }
       });
     },
