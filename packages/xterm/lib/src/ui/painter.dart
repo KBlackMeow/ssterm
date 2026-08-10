@@ -230,6 +230,11 @@ class TerminalPainter {
     final isItalic = cellData.flags & CellFlags.italic != 0;
     final cellClip = _cellSize.width * (charWidth >= 2 ? 2 : 1);
     final glyphWidth = paragraph.maxIntrinsicWidth;
+    // Skia can place the antialiased edge of an otherwise upright glyph just
+    // outside the paragraph origin after device-pixel snapping (noticeable on
+    // the left stem of Consolas `d` on Windows). Keep a one-pixel allowance
+    // on the leading edge instead of cutting that coverage off at the cell.
+    const glyphBleedLeft = 1.0;
     final italicBleedX =
         isItalic ? (_cellSize.width * 0.20).ceilToDouble() : 0.0;
     final italicBleedTop = isItalic ? 1.0 : 0.0;
@@ -238,9 +243,9 @@ class TerminalPainter {
     canvas.save();
     canvas.clipRect(
       Rect.fromLTWH(
-        offset.dx,
+        offset.dx - glyphBleedLeft,
         offset.dy - italicBleedTop,
-        clipWidth,
+        clipWidth + glyphBleedLeft,
         _cellSize.height + italicBleedTop,
       ),
     );

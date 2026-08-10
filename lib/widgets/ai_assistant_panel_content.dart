@@ -262,15 +262,22 @@ class _AiPanelContent extends StatelessWidget {
                                   _kFgActive,
                               fontSize: 13,
                               height: 1.2,
+                              fontFamily: _agentBodyFontFamily,
+                              fontFamilyFallback: _agentBodyFontFallback,
+                              fontWeight: FontWeight.w400,
                             ),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: 'Ask AI anything…',
                               hintStyle: TextStyle(
-                                color: Color(0xFF8E8E8E),
+                                color: const Color(0xFF8E8E8E),
                                 fontSize: 13,
+                                fontFamily: _agentBodyFontFamily,
+                                fontFamilyFallback: _agentBodyFontFallback,
+                                fontWeight: FontWeight.w400,
                               ),
                               border: InputBorder.none,
-                              contentPadding: EdgeInsets.fromLTRB(12, 0, 8, 0),
+                              contentPadding:
+                                  const EdgeInsets.fromLTRB(12, 0, 8, 0),
                               isDense: true,
                             ),
                             onSubmitted: (_) => onSend(),
@@ -469,7 +476,9 @@ class _AiPanelContent extends StatelessWidget {
     final bodyMedium = (base.textTheme.bodyMedium ?? const TextStyle())
         .copyWith(
           fontSize: 13,
-          fontFamily: 'JetBrainsMono',
+          fontFamily: _agentBodyFontFamily,
+          fontFamilyFallback: _agentBodyFontFallback,
+          fontWeight: FontWeight.w400,
           color: fg,
           height: lh,
         );
@@ -480,7 +489,14 @@ class _AiPanelContent extends StatelessWidget {
       ),
       child: GptMarkdown(
         text,
-        style: TextStyle(color: fg, fontSize: 13, height: lh),
+        style: TextStyle(
+          color: fg,
+          fontSize: 13,
+          height: lh,
+          fontFamily: _agentBodyFontFamily,
+          fontFamilyFallback: _agentBodyFontFallback,
+          fontWeight: FontWeight.w400,
+        ),
         // We override fenced-code-block rendering for two reasons:
         //   1. `gpt_markdown` 1.1.7's `CodeBlockMd` regex captures the
         //      `\n` BEFORE the closing fence into the body string, then
@@ -680,7 +696,14 @@ class _AiPanelContent extends StatelessWidget {
             Expanded(
               child: Text(
                 msg.text,
-                style: TextStyle(color: fg, fontSize: 13, height: 1.5),
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 13,
+                  height: 1.5,
+                  fontFamily: _agentBodyFontFamily,
+                  fontFamilyFallback: _agentBodyFontFallback,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
             ),
           ],

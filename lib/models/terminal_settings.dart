@@ -9,28 +9,25 @@ import 'terminal_theme_presets.dart';
 /// User preferences for terminal appearance and cursor behavior.
 class TerminalSettings {
   /// Defaults match each platform's native terminal conventions:
-  ///   Windows → SFMonoPowerline (bundled — Apple's SF Mono + Powerline
-  ///                              patches; native ➜/Powerline glyphs)
+  ///   Windows → Consolas         (native Windows terminal face)
   ///   macOS   → Monaco           (classic Mac terminal face, system font)
   ///   Linux   → JetBrainsMono    (bundled — distros vary too much to rely on)
   /// Family names must match the font's actual registered family
   /// (e.g. pubspec's `family:` for bundled faces).
   static String get defaultFontFamily {
-    if (Platform.isWindows) return 'SFMonoPowerline';
+    if (Platform.isWindows) return 'Consolas';
     if (Platform.isMacOS) return 'Monaco';
     return 'JetBrainsMono';
   }
 
-  /// Default body weight. Windows uses Medium (500) — the SF Mono Powerline
-  /// Regular cut reads a touch thin under Skia's grayscale AA, so Medium
-  /// matches the visual density of native Windows terminals more closely.
-  /// Other platforms use Regular (400).
+  /// Windows uses Medium to compensate for Consolas appearing lighter under
+  /// Skia's grayscale antialiasing than under DirectWrite/ClearType.
   static FontWeight get defaultFontWeight =>
       Platform.isWindows ? FontWeight.w500 : FontWeight.w400;
 
   /// Fallback face for CJK and other non-Latin glyphs in the terminal.
   static String get defaultCjkFontFamily {
-    if (Platform.isWindows) return 'Microsoft YaHei UI';
+    if (Platform.isWindows) return 'Microsoft YaHei';
     if (Platform.isMacOS) return 'PingFang SC';
     return 'Noto Sans Mono CJK SC';
   }
@@ -156,12 +153,12 @@ class TerminalSettings {
   static List<String> get fontOptions {
     if (Platform.isWindows) {
       return const [
-        'SFMonoPowerline',   // bundled — default
+        'Consolas',          // system — default
         'JetBrainsMono',     // bundled
+        'SFMonoPowerline',   // bundled
         'MonacoBundled',     // bundled
         'Cascadia Mono',     // system (Win10 1809+/Win11)
         'Cascadia Code',     // system
-        'Consolas',          // system
         'Courier New',       // system
       ];
     }
@@ -209,7 +206,6 @@ class TerminalSettings {
   static List<String> get cjkFontOptions {
     if (Platform.isWindows) {
       return const [
-        'Microsoft YaHei UI',
         'Microsoft YaHei',
         'SimSun',
         'NSimSun',
@@ -228,6 +224,14 @@ class TerminalSettings {
       'Noto Sans Mono CJK TC',
       'Noto Sans Mono CJK JP',
     ];
+  }
+
+  /// Migrate the former Windows UI variant to the full Microsoft YaHei face.
+  static String resolveCjkFontFamily(String? savedFont) {
+    if (Platform.isWindows && savedFont == 'Microsoft YaHei UI') {
+      return 'Microsoft YaHei';
+    }
+    return savedFont ?? defaultCjkFontFamily;
   }
 
   List<String> buildFontFamilyFallback() {
@@ -249,7 +253,7 @@ class TerminalSettings {
         // CJK (SF Mono has no CJK glyphs).
         if (fontFamily != 'Cascadia Mono') 'Cascadia Mono',
         if (fontFamily != 'Cascadia Code') 'Cascadia Code',
-        'Consolas',
+        if (fontFamily != 'Consolas') 'Consolas',
         ...bundledSymbols,
         cjkFontFamily,
         if (cjkFontFamily != 'Microsoft YaHei') 'Microsoft YaHei',
@@ -426,8 +430,7 @@ class TerminalSettings {
       themePresetId: preset,
       customTheme: custom,
       fontFamily: fontFamily,
-      cjkFontFamily:
-          json['cjkFontFamily'] as String? ?? defaultCjkFontFamily,
+      cjkFontFamily: resolveCjkFontFamily(json['cjkFontFamily'] as String?),
       fontSize: (json['fontSize'] as num?)?.toDouble() ?? defaultFontSize,
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       fontWeight: _fontWeightFromString(json['fontWeight'] as String?),

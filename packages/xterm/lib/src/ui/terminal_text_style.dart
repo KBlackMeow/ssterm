@@ -24,7 +24,6 @@ const _kDefaultFontFamilyFallback = [
   'Monaco',
   'Courier New',
   'Liberation Mono',
-  'Microsoft YaHei UI',
   'Microsoft YaHei',
   'NSimSun',
   'MingLiU',

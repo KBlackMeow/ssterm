@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show stdout, HttpException, SocketException;
+import 'dart:io' show stdout, HttpException, Platform, SocketException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -48,6 +48,13 @@ part 'ai_assistant_panel_loop.dart';
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
+
+String get _agentBodyFontFamily =>
+    Platform.isWindows ? 'Consolas' : 'JetBrainsMono';
+
+List<String> get _agentBodyFontFallback => Platform.isWindows
+    ? const ['Microsoft YaHei']
+    : const ['Noto Sans Mono CJK SC', 'sans-serif'];
 
 /// Minimum side (height when docked at bottom, width when docked right).
 ///
