@@ -376,12 +376,4 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
     return start;
   }
 
-  @Deprecated('Use _safeCompactionStart instead')
-  int _summaryIndexAfter(int pinned) {
-    if (pinned < _items.length &&
-        ConversationCompactor.unwrap(_items[pinned].content) != null) {
-      return pinned + 1;
-    }
-    return pinned;
-  }
 }

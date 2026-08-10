@@ -102,18 +102,4 @@ void main() {
     expect(reported, isNotNull);
   });
 
-  test('legacy agent identities remain readable in historical JSONL', () {
-    const history = '''
-{"agentId":"agent1","command":"first"}
-{"agentId":"agent2","command":"second"}
-''';
-
-    final records = history
-        .trim()
-        .split('\n')
-        .map((line) => jsonDecode(line) as Map<String, dynamic>)
-        .toList();
-
-    expect(records.map((record) => record['agentId']), ['agent1', 'agent2']);
-  });
 }

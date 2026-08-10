@@ -477,7 +477,7 @@ class FlutterPtyBindings {
   late final _pty_error =
       _pty_errorPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
 
-  /// Windows Job Object helpers used by non-PTY Agent2 processes.  On other
+  /// Windows Job Object helpers used by non-PTY Agent processes.  On other
   /// platforms these return null/false so callers can retain a single FFI API.
   ffi.Pointer<JobHandle> job_create_kill_on_close() {
     return _job_create_kill_on_close();

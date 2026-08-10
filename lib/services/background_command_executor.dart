@@ -629,20 +629,6 @@ class BackgroundCommandExecutor {
   }
 }
 
-String _wrapPosixCommandForCwd(String command, String marker) {
-  final begin = BackgroundCommandExecutor.shellQuotePosix('${marker}BEGIN__');
-  final end = BackgroundCommandExecutor.shellQuotePosix('${marker}END__');
-  return '$command\n'
-      '__ssterm_exit=\$?\n'
-      '__ssterm_had_xtrace=0\n'
-      'case \$- in *x*) __ssterm_had_xtrace=1; set +x ;; esac\n'
-      'printf %s $begin >&2\n'
-      'printf %s "\$PWD" >&2\n'
-      'printf %s $end >&2\n'
-      'if [ "\$__ssterm_had_xtrace" = 1 ]; then set -x; fi\n'
-      'exit "\$__ssterm_exit"';
-}
-
 String _wrapPosixCommandForCwdResult(String command, String resultPath) {
   final result = BackgroundCommandExecutor.shellQuotePosix(resultPath);
   return '$command\n'
@@ -713,23 +699,6 @@ String _posixProcessTreeSupervisor() {
       'exit "\$__ssterm_status"';
 }
 
-String _wrapCmdCommandForCwd(String command, String marker) =>
-    '$command\r\n'
-    'set "__ssterm_exit=%errorlevel%"\r\n'
-    '>&2 <nul set /p "=${marker}BEGIN__%CD%${marker}END__"\r\n'
-    'exit /b %__ssterm_exit%';
-
-String _wrapPowerShellCommandForCwd(String command, String marker) {
-  final quotedMarker = marker.replaceAll("'", "''");
-  return '& { $command }\n'
-      r'$__ssterm_exit = if ($?) { 0 } elseif ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }'
-      '\n[Console]::Error.Write(\'${quotedMarker}BEGIN__\')\n'
-      r'[Console]::Error.Write((Get-Location).ProviderPath)'
-      '\n'
-      '[Console]::Error.Write(\'${quotedMarker}END__\')\n'
-      r'exit $__ssterm_exit';
-}
-
 String _wrapCmdCommandForCwdResult(String command, String resultPath) {
   final quotedPath = resultPath.replaceAll('"', '""');
   return '$command\r\n'
@@ -768,39 +737,16 @@ String _wrapCommandForCwdResult(
   return command;
 }
 
-String _wrapCommandForCwd(
-  BackgroundCommandTarget target,
-  String command,
-  String marker,
-) {
-  if (target.platform != BackgroundCommandPlatform.windows ||
-      target.shell.isWsl ||
-      target.shell.id.startsWith('git-bash') ||
-      target.shell.executable.toLowerCase().endsWith('bash.exe')) {
-    return _wrapPosixCommandForCwd(command, marker);
-  }
-  if (target.shell.id == 'cmd') {
-    return _wrapCmdCommandForCwd(command, marker);
-  }
-  if (target.shell.usePowerShellCwdWrapper) {
-    return _wrapPowerShellCommandForCwd(command, marker);
-  }
-  return command;
-}
-
 /// Wraps an Agent SSH command in its independent working directory without
 /// interpreting the command itself. Only [cwd] is shell-quoted here.
 String buildSshBackgroundCommand(
   String cwd,
   String command, {
-  String? completionMarker,
   String? cwdResultPath,
 }) {
   final executionCommand = cwdResultPath != null
       ? _wrapPosixCommandForCwdResult(command, cwdResultPath)
-      : completionMarker == null
-      ? command
-      : _wrapPosixCommandForCwd(command, completionMarker);
+      : command;
   return 'cd -- ${BackgroundCommandExecutor.shellQuotePosix(cwd)} && '
       '$executionCommand';
 }
@@ -846,15 +792,12 @@ String? validateBackgroundCommandSyntax(
   String command, {
   String? wslProcessMarker,
   String? posixProcessMarker,
-  String? completionMarker,
   String? cwdResultPath,
 }) {
   final shell = target.shell;
   final executionCommand = cwdResultPath != null
       ? _wrapCommandForCwdResult(target, command, cwdResultPath)
-      : completionMarker == null
-      ? command
-      : _wrapCommandForCwd(target, command, completionMarker);
+      : command;
   if (target.platform != BackgroundCommandPlatform.windows) {
     return (
       executable: posixProcessMarker == null ? shell.executable : '/bin/sh',

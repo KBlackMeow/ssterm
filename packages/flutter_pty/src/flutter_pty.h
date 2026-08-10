@@ -52,7 +52,7 @@ FFI_PLUGIN_EXPORT int pty_getpid(PtyHandle *handle);
 
 FFI_PLUGIN_EXPORT char *pty_error(void);
 
-/// Windows Job Object helpers used by non-PTY Agent2 processes.  On other
+/// Windows Job Object helpers used by non-PTY Agent processes.  On other
 /// platforms these return null/false so callers can retain a single FFI API.
 FFI_PLUGIN_EXPORT JobHandle *job_create_kill_on_close(void);
 FFI_PLUGIN_EXPORT int job_assign_pid(JobHandle *handle, int pid);

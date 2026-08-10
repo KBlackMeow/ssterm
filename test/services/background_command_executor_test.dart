@@ -319,8 +319,8 @@ void main() {
       );
     });
 
-    test('adds a cwd completion envelope for every Windows shell route', () {
-      const marker = '__SSTERM_CWD_TEST__';
+    test('writes cwd to a private result file for every Windows shell route', () {
+      const resultPath = r'C:\temp\ssterm-cwd-result';
       BackgroundCommandTarget windows(LocalShellOption shell) =>
           BackgroundCommandTarget.local(
             shell: shell,
@@ -337,9 +337,9 @@ void main() {
           ),
         ),
         'cd child',
-        completionMarker: marker,
+        cwdResultPath: resultPath,
       ).arguments.last;
-      expect(cmd, contains(marker));
+      expect(cmd, contains(resultPath));
       expect(cmd, contains('%CD%'));
 
       final powershell = buildBackgroundCommandInvocation(
@@ -352,9 +352,9 @@ void main() {
           ),
         ),
         'Set-Location child',
-        completionMarker: marker,
+        cwdResultPath: resultPath,
       ).arguments.last;
-      expect(powershell, contains(marker));
+      expect(powershell, contains(resultPath));
       expect(powershell, contains(r'(Get-Location).ProviderPath'));
 
       final gitBash = buildBackgroundCommandInvocation(
@@ -367,9 +367,9 @@ void main() {
           ),
         ),
         'cd child',
-        completionMarker: marker,
+        cwdResultPath: resultPath,
       ).arguments.last;
-      expect(gitBash, contains(marker));
+      expect(gitBash, contains(resultPath));
       expect(gitBash, contains(r'"$PWD"'));
 
       final wsl = buildBackgroundCommandInvocation(
@@ -382,9 +382,9 @@ void main() {
           ),
         ),
         'cd child',
-        completionMarker: marker,
+        cwdResultPath: resultPath,
       ).arguments.last;
-      expect(wsl, contains(marker));
+      expect(wsl, contains(resultPath));
       expect(wsl, contains(r'"$PWD"'));
     });
 
