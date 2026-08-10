@@ -369,7 +369,7 @@ class LocalShellDiscovery {
           // launcher's own (Windows-side) CWD rather than the Linux
           // $HOME the no-args interactive form uses, so `cd ~` first to
           // match today's behavior before handing off to the OSC 7 cwd
-          // wrapper used by macOS/Linux native shells.
+          // bootstrap shared with macOS/Linux native shells.
           _addShell(
             shells,
             seen,

@@ -860,7 +860,7 @@ class _PlusMenu extends StatelessWidget {
       );
 
   String _shellSubtitle(LocalShellOption shell) {
-    // Some WSL entries embed the whole OSC 7 cwd bootstrap script as an
+    // Some WSL entries embed the full OSC 7 cwd bootstrap script as an
     // argument (see
     // `local_shell_discovery.dart`'s `_discoverWsl`); that's not meant for
     // display, so drop any argument containing a newline before joining.
