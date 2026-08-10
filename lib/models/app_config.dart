@@ -16,8 +16,8 @@ class AppConfig {
     this.sftpSize,
     AiPanelPosition? aiPosition,
     this.aiSize,
-    AiPanelPosition? agent2Position,
-    this.agent2Size,
+    AiPanelPosition? agentPosition,
+    this.agentSize,
     List<LocalShellOption>? cachedShells,
     this.agent,
   }) : terminal = terminal ?? TerminalSettings(),
@@ -26,7 +26,7 @@ class AppConfig {
        // tall-and-narrow, so a side panel preserves more vertical lines
        // for shell output than a bottom strip would.
        aiPosition = aiPosition ?? AiPanelPosition.right,
-       agent2Position = agent2Position ?? AiPanelPosition.bottom,
+       agentPosition = agentPosition ?? AiPanelPosition.bottom,
        cachedShells = cachedShells ?? const <LocalShellOption>[];
 
   TerminalSettings terminal;
@@ -34,8 +34,8 @@ class AppConfig {
   double? sftpSize;
   AiPanelPosition aiPosition;
   double? aiSize;
-  AiPanelPosition agent2Position;
-  double? agent2Size;
+  AiPanelPosition agentPosition;
+  double? agentSize;
   List<LocalShellOption> cachedShells;
   AgentConfig? agent;
 
@@ -49,54 +49,59 @@ class AppConfig {
     if (!await f.exists()) return AppConfig();
     try {
       final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      return AppConfig(
-        terminal: TerminalSettings.fromJson(
-          json['terminal'] as Map<String, dynamic>?,
-        ),
-        sftpPosition: json['sftpPosition'] == 'bottom'
-            ? SftpPanelPosition.bottom
-            : SftpPanelPosition.right,
-        sftpSize: (json['sftpSize'] as num?)?.toDouble(),
-        // AI panel: default to right when the key is missing (fresh
-        // install OR a config saved before this field existed).  Only
-        // an explicit `bottom` opts out.
-        aiPosition: json['aiPosition'] == 'bottom'
-            ? AiPanelPosition.bottom
-            : AiPanelPosition.right,
-        aiSize: (json['aiSize'] as num?)?.toDouble(),
-        agent2Position: json['agent2Position'] == 'right'
-            ? AiPanelPosition.right
-            : AiPanelPosition.bottom,
-        agent2Size: (json['agent2Size'] as num?)?.toDouble(),
-        cachedShells: _decodeShells(json['cachedShells']),
-        agent: AgentConfig.fromJson(json['agent'] as Map<String, dynamic>?),
-      );
+      return AppConfig.fromJson(json);
     } catch (_) {
       return AppConfig();
     }
   }
 
-  Future<void> save() async {
-    final f = await _file();
-    await f.writeAsString(
-      const JsonEncoder.withIndent('  ').convert({
-        'terminal': terminal.toJson(),
-        'sftpPosition': sftpPosition == SftpPanelPosition.bottom
-            ? 'bottom'
-            : 'right',
-        if (sftpSize != null) 'sftpSize': sftpSize,
-        'aiPosition': aiPosition == AiPanelPosition.bottom ? 'bottom' : 'right',
-        if (aiSize != null) 'aiSize': aiSize,
-        'agent2Position': agent2Position == AiPanelPosition.bottom
-            ? 'bottom'
-            : 'right',
-        if (agent2Size != null) 'agent2Size': agent2Size,
-        if (cachedShells.isNotEmpty)
-          'cachedShells': cachedShells.map((s) => s.toJson()).toList(),
-        if (agent != null) 'agent': agent!.toJson(),
-      }),
+  factory AppConfig.fromJson(Map<String, dynamic> json) {
+    final agentPosition =
+        json['agentPosition'] ?? json['agent2Position'] ?? json['aiPosition'];
+    final agentSize = json['agentSize'] ?? json['agent2Size'] ?? json['aiSize'];
+    return AppConfig(
+      terminal: TerminalSettings.fromJson(
+        json['terminal'] as Map<String, dynamic>?,
+      ),
+      sftpPosition: json['sftpPosition'] == 'bottom'
+          ? SftpPanelPosition.bottom
+          : SftpPanelPosition.right,
+      sftpSize: (json['sftpSize'] as num?)?.toDouble(),
+      // AI panel: default to right when the key is missing (fresh
+      // install OR a config saved before this field existed).  Only
+      // an explicit `bottom` opts out.
+      aiPosition: json['aiPosition'] == 'bottom'
+          ? AiPanelPosition.bottom
+          : AiPanelPosition.right,
+      aiSize: (json['aiSize'] as num?)?.toDouble(),
+      agentPosition: agentPosition == 'right'
+          ? AiPanelPosition.right
+          : AiPanelPosition.bottom,
+      agentSize: (agentSize as num?)?.toDouble(),
+      cachedShells: _decodeShells(json['cachedShells']),
+      agent: AgentConfig.fromJson(json['agent'] as Map<String, dynamic>?),
     );
   }
+
+  Future<void> save() async {
+    final f = await _file();
+    await f.writeAsString(const JsonEncoder.withIndent('  ').convert(toJson()));
+  }
+
+  Map<String, dynamic> toJson() => {
+    'terminal': terminal.toJson(),
+    'sftpPosition': sftpPosition == SftpPanelPosition.bottom
+        ? 'bottom'
+        : 'right',
+    if (sftpSize != null) 'sftpSize': sftpSize,
+    'agentPosition': agentPosition == AiPanelPosition.bottom
+        ? 'bottom'
+        : 'right',
+    if (agentSize != null) 'agentSize': agentSize,
+    if (cachedShells.isNotEmpty)
+      'cachedShells': cachedShells.map((s) => s.toJson()).toList(),
+    if (agent != null) 'agent': agent!.toJson(),
+  };
 
   static List<LocalShellOption> _decodeShells(Object? raw) {
     if (raw is! List) return const [];

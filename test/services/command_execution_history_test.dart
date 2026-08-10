@@ -14,7 +14,7 @@ void main() {
     await history.append(
       CommandExecutionRecord(
         timestamp: DateTime.utc(2026),
-        agentId: 'agent2',
+        agentId: 'agent',
         target: 'local',
         cwd: '/tmp',
         command: 'echo secret',
@@ -27,7 +27,7 @@ void main() {
 
     final record = jsonDecode((await file.readAsLines()).single) as Map;
     expect(record['output'], 'all output\nincluding every line');
-    expect(record['agentId'], 'agent2');
+    expect(record['agentId'], 'agent');
     expect(record['command'], 'echo secret');
   });
 
@@ -42,7 +42,7 @@ void main() {
         history.append(
           CommandExecutionRecord(
             timestamp: DateTime.utc(2026),
-            agentId: 'agent2',
+            agentId: 'agent',
             target: 'local',
             cwd: '/tmp',
             command: 'echo $i',
@@ -69,7 +69,7 @@ void main() {
     await history.append(
       CommandExecutionRecord(
         timestamp: DateTime.utc(2026),
-        agentId: 'agent1',
+        agentId: 'agent',
         target: 'local',
         cwd: '/tmp',
         command: 'false',
@@ -81,5 +81,20 @@ void main() {
     );
 
     expect(reported, isNotNull);
+  });
+
+  test('legacy agent identities remain readable in historical JSONL', () {
+    const history = '''
+{"agentId":"agent1","command":"first"}
+{"agentId":"agent2","command":"second"}
+''';
+
+    final records = history
+        .trim()
+        .split('\n')
+        .map((line) => jsonDecode(line) as Map<String, dynamic>)
+        .toList();
+
+    expect(records.map((record) => record['agentId']), ['agent1', 'agent2']);
   });
 }

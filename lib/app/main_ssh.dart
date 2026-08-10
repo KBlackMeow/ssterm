@@ -193,7 +193,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     tab.transferManager = transferManager;
     tab.remotePath = remotePath;
     tab.remoteCwdPane0 = remotePath.value;
-    tab.agent2Cwd = remotePath.value;
+    tab.agentCwd = remotePath.value;
     tab.sshProfile = r.profile;
     tab.activeSshPane = 0;
     tab.pipe = pipe;
@@ -861,7 +861,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       }
       return const BackgroundCommandExecutor().executeSsh(
         client,
-        tab.agent2Cwd ?? '/',
+        tab.agentCwd ?? '/',
         command,
         isCancelled: isCancelled,
       );
@@ -877,7 +877,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     return const BackgroundCommandExecutor().executeLocal(
       BackgroundCommandTarget.local(
         shell: tab.localShell!,
-        cwd: tab.agent2Cwd ?? '/',
+        cwd: tab.agentCwd ?? '/',
         platform: BackgroundCommandTarget.hostPlatform,
       ),
       command,
@@ -897,8 +897,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         timestamp: DateTime.now(),
         agentId: agentId,
         target: tab.kind == _TabKind.ssh ? 'ssh' : 'local',
-        cwd: agentId == 'agent2'
-            ? tab.agent2Cwd
+        cwd: agentId == 'agent'
+            ? tab.agentCwd
             : (tab.kind == _TabKind.ssh
                   ? tab.remotePath?.value
                   : tab.localPath?.value),

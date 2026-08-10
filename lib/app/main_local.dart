@@ -646,11 +646,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final home = userHomeDir();
     // The Windows HOME is not meaningful inside a WSL distribution.  Keep a
     // POSIX cwd sentinel; the WSL adapter resolves `~` in that distribution.
-    final agent2Cwd = shell.isWsl ? '~' : (home ?? '/');
+    final agentCwd = shell.isWsl ? '~' : (home ?? '/');
     final tab = _Tab.local(title: shell.displayName, shell: shell)
       ..terminal = _createTerminal()
       ..localPath = ValueNotifier<String>(home ?? '/')
-      ..agent2Cwd = agent2Cwd;
+      ..agentCwd = agentCwd;
     _wireDeferredLocalPty(
       tab,
       terminal: tab.terminal!,

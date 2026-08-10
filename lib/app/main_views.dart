@@ -106,12 +106,12 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
               agent2PanelVisible:
                   _tabs.isNotEmpty &&
                   _active < _tabs.length &&
-                  _tabs[_active].agent2PanelVisible,
+                  _tabs[_active].agentPanelVisible,
               onToggleAgent2Panel: () {
                 if (_tabs.isNotEmpty && _active < _tabs.length) {
                   setState(
-                    () => _tabs[_active].agent2PanelVisible =
-                        !_tabs[_active].agent2PanelVisible,
+                    () => _tabs[_active].agentPanelVisible =
+                        !_tabs[_active].agentPanelVisible,
                   );
                 }
               },
@@ -516,11 +516,11 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     // dock, so nesting consumes distinct axes rather than hiding either panel.
     body = AiAssistantOverlay(
       key: ValueKey('agent2-${tab.hashCode}'),
-      visible: tab.agent2PanelVisible,
+      visible: tab.agentPanelVisible,
       onExecute: (cmd) => unawaited(_executeAgent2Command(tab, cmd)),
       onExecuteAsync: (cmd, {isCancelled}) => _recordAgentCommand(
         tab,
-        'agent2',
+        'agent',
         cmd,
         () => _executeAgent2Command(tab, cmd, isCancelled: isCancelled),
       ),
@@ -528,25 +528,25 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
       terminalBackground: _config.terminal.chromeBackground,
       terminalLineHeight: _config.terminal.lineHeight,
       fileSystemAdapter: switch (tab.kind) {
-        _TabKind.local => _localFileAdapter(tab, () => tab.agent2Cwd),
+        _TabKind.local => _localFileAdapter(tab, () => tab.agentCwd),
         _TabKind.ssh when tab.sftp != null => SftpFileSystemAdapter(
           sftp: tab.sftp,
           label: 'ssh: ${tab.title}',
-          cwdProvider: () => tab.agent2Cwd,
+          cwdProvider: () => tab.agentCwd,
         ),
         _ => null,
       },
       executionEnvironment: _commandEnvironmentFor(tab),
-      initialPosition: _config.agent2Position,
-      initialSize: _config.agent2Size,
+      initialPosition: _config.agentPosition,
+      initialSize: _config.agentSize,
       initialMode: AiPanelMode.agent,
       onLayoutChanged: (pos, size) {
-        _config.agent2Position = pos == _config.aiPosition
+        _config.agentPosition = pos == _config.aiPosition
             ? (pos == AiPanelPosition.right
                   ? AiPanelPosition.bottom
                   : AiPanelPosition.right)
             : pos;
-        _config.agent2Size = size;
+        _config.agentSize = size;
         _config.save();
       },
       child: body,

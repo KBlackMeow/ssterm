@@ -64,10 +64,10 @@ class AppTab {
   bool sftpPanelVisible = false;
   bool aiPanelVisible = false;
 
-  /// Experimental Agent2 is a separate agent host, not a second view of
-  /// Agent1. Its cwd never follows OSC-7 updates from the visible terminal.
-  bool agent2PanelVisible = false;
-  String? agent2Cwd;
+  /// The agent is a separate host from the visible terminal. Its cwd never
+  /// follows OSC-7 updates from the visible terminal.
+  bool agentPanelVisible = false;
+  String? agentCwd;
   TransferManager? transferManager;
 
   // ── Editor-tab-only state (AppTabKind.editor) ────────────────────────────
