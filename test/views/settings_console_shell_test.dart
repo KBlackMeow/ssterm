@@ -82,9 +82,7 @@ void main() {
     expect(find.byKey(const Key('settings-console-rail')), findsOneWidget);
   });
 
-  testWidgets('default model menu shows limits without changing its value', (
-    tester,
-  ) async {
+  testWidgets('default model menu shows the raw model id', (tester) async {
     var agent = AgentConfig(
       defaultProvider: 'deepseek',
       defaultModel: 'deepseek-v4-pro',
@@ -106,7 +104,8 @@ void main() {
     await tester.tap(find.text('Agent'));
     await tester.pump();
 
-    expect(find.text('deepseek-v4-pro [1M / 32K]'), findsOneWidget);
+    expect(find.text('deepseek-v4-pro'), findsWidgets);
+    expect(find.text('deepseek-v4-pro [1M / 32K]'), findsNothing);
     expect(agent.defaultModel, 'deepseek-v4-pro');
   });
 

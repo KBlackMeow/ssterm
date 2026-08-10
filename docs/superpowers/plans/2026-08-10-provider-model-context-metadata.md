@@ -2,9 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Correct audited context windows, add DeepSeek's 32K client output cap, refresh stale built-in metadata, and display both values without changing API model IDs.
+**Goal:** Correct audited context windows, add DeepSeek's 32K client output cap, refresh stale built-in metadata, and keep model names unchanged in the UI.
 
-**Architecture:** Exact API IDs remain in `ProviderConfig.models`; context and output limits live in separate maps. Loading refreshes factory-owned metadata but preserves custom entries. Requests use the selected output limit with a 4K fallback, while settings derive labels without changing dropdown values.
+**Architecture:** Exact API IDs remain in `ProviderConfig.models`; context and output limits live in separate maps. Loading refreshes factory-owned metadata but preserves custom entries. Requests use the selected output limit with a 4K fallback, while settings continue to display raw model IDs.
+
+> **Approved amendment:** Task 3's context-label implementation is superseded.
+> The final UI must show only raw model IDs; its regression test asserts that
+> `[1M / 32K]` is absent.
 
 **Tech Stack:** Dart, Flutter, `flutter_test`
 

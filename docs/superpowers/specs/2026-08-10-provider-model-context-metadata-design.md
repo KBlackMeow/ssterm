@@ -4,8 +4,8 @@
 
 Keep SSTerm's built-in model IDs and context-window budgets aligned with the
 official data published by each configured provider. Model IDs sent to APIs
-must remain exact; context size is separate metadata and may be shown as a UI
-label. DeepSeek additionally uses a configurable 32K client-side maximum for
+must remain exact; context size is separate internal metadata. DeepSeek
+additionally uses a configurable 32K client-side maximum for
 each response instead of the existing hard-coded 4K request limit.
 
 ## Source policy
@@ -22,9 +22,8 @@ each response instead of the existing hard-coded 4K request limit.
 
 ## Catalogue representation
 
-`ProviderConfig.models` contains only API model IDs. A label such as
-`deepseek-v4-pro [1M]` is presentation text and must never be sent as the
-`model` request parameter.
+`ProviderConfig.models` contains only API model IDs. Model names are displayed,
+persisted, and sent without context or output-limit suffixes.
 
 `ProviderConfig.modelContextWindows` maps the exact model ID to its documented
 context-window token count. DeepSeek's current direct API catalogue remains:
@@ -112,14 +111,9 @@ providers are left untouched.
 
 ## UI
 
-Model selectors derive a compact context suffix from
-`modelContextWindows` and `modelMaxOutputTokens`, for example `[1M / 32K]`.
-Selection and persistence continue to use the exact underlying model ID. The
-label must not become part of the API model ID.
-
-For example, the selector renders `deepseek-v4-pro [1M / 32K]` while its
-selected value and API request model remain `deepseek-v4-pro`. Models without
-explicit metadata render only their model ID.
+Model selectors display only the exact model ID, for example
+`deepseek-v4-pro`. Context and output limits remain internal configuration and
+are not appended to model names.
 
 ## Request output limit
 
@@ -140,5 +134,4 @@ windows; custom model values remain unchanged.
   model retains the 4,096 fallback.
 - Provider request tests continue to assert that the exact model ID, without a
   display suffix, is sent to the API.
-- Formatting tests cover the compact context labels and confirm that they do
-  not become persisted model IDs.
+- A widget test confirms model selectors show the raw model ID.
