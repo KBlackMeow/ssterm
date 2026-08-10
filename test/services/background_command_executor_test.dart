@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -599,6 +600,131 @@ void main() {
     );
 
     test(
+      'escalates to SIGKILL for a pipe-holding descendant that ignores TERM',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'ssterm-cancel-ignore-term-',
+        );
+        final helper = File('${root.path}/spawn-descendant.sh');
+        final pidFile = File('${root.path}/descendant.pid');
+        await helper.writeAsString(r'''#!/bin/sh
+(trap '' TERM; exec sleep 6) &
+printf %s "$!" > "$1"
+exit 0
+''');
+        addTearDown(() => root.delete(recursive: true));
+        var cancelled = false;
+        final stopwatch = Stopwatch()..start();
+
+        final pending =
+            const BackgroundCommandExecutor(
+              timeout: Duration(seconds: 10),
+            ).executeLocal(
+              BackgroundCommandTarget.local(
+                shell: zsh,
+                cwd: root.path,
+                platform: BackgroundCommandPlatform.macos,
+              ),
+              '/bin/sh ${BackgroundCommandExecutor.shellQuotePosix(helper.path)} '
+              '${BackgroundCommandExecutor.shellQuotePosix(pidFile.path)}',
+              isCancelled: () => cancelled,
+            );
+
+        for (
+          var attempt = 0;
+          attempt < 200 && !await pidFile.exists();
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(await pidFile.exists(), isTrue);
+        final descendantPid = int.parse((await pidFile.readAsString()).trim());
+        cancelled = true;
+        final result = await pending;
+        stopwatch.stop();
+
+        expect(result.cancelled, isTrue);
+        expect(stopwatch.elapsed, lessThan(const Duration(seconds: 4)));
+        final stillRunning = await Process.run('/bin/kill', [
+          '-0',
+          descendantPid.toString(),
+        ]);
+        expect(stillRunning.exitCode, isNot(0));
+      },
+      skip: Platform.isWindows
+          ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+          : false,
+    );
+
+    test(
+      'does not release a POSIX command before delayed PGID publication',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'ssterm-cancel-before-ready-',
+        );
+        final pidFile = File('${root.path}/command.pid');
+        addTearDown(() => root.delete(recursive: true));
+        final processStarted = Completer<void>();
+        var cancelled = false;
+        final stopwatch = Stopwatch()..start();
+        final executor = BackgroundCommandExecutor(
+          timeout: const Duration(seconds: 10),
+          processStarter:
+              (
+                executable,
+                arguments, {
+                workingDirectory,
+                runInShell = false,
+                includeParentEnvironment = true,
+                environment,
+              }) async {
+                const markerWrite = r'''printf %s "$__ssterm_child" > "$3"''';
+                final delayedArguments = List<String>.from(arguments);
+                delayedArguments[1] = delayedArguments[1].replaceFirst(
+                  markerWrite,
+                  'sleep 3\n$markerWrite',
+                );
+                final process = await Process.start(
+                  executable,
+                  delayedArguments,
+                  workingDirectory: workingDirectory,
+                  runInShell: runInShell,
+                  includeParentEnvironment: includeParentEnvironment,
+                  environment: environment,
+                );
+                processStarted.complete();
+                return process;
+              },
+        );
+
+        final pending = executor.executeLocal(
+          BackgroundCommandTarget.local(
+            shell: zsh,
+            cwd: root.path,
+            platform: BackgroundCommandPlatform.macos,
+          ),
+          "trap '' TERM\n"
+          'printf %s "\$\$" > '
+          '${BackgroundCommandExecutor.shellQuotePosix(pidFile.path)}\n'
+          'exec sleep 6',
+          isCancelled: () => cancelled,
+        );
+
+        await processStarted.future;
+        cancelled = true;
+        final result = await pending;
+        stopwatch.stop();
+
+        expect(result.cancelled, isTrue);
+        expect(stopwatch.elapsed, lessThan(const Duration(seconds: 5)));
+        expect(await pidFile.exists(), isFalse);
+      },
+      skip: Platform.isWindows
+          ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+          : false,
+    );
+
+    test(
       'cancels a local command invalidated while Process.start completes',
       () async {
         final process = _FakeProcess();
@@ -755,6 +881,78 @@ void main() {
       },
     );
 
+    test('does not accept DEBUG-trap stderr as the command cwd', () async {
+      final root = await Directory.systemTemp.createTemp(
+        'ssterm-cwd-debug-trap-',
+      );
+      final child = await Directory('${root.path}/child').create();
+      addTearDown(() => root.delete(recursive: true));
+
+      final result = await const BackgroundCommandExecutor().executeLocal(
+        BackgroundCommandTarget.local(
+          shell: const LocalShellOption(
+            id: 'bash',
+            displayName: 'Bash',
+            executable: '/bin/bash',
+          ),
+          cwd: root.path,
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        "trap 'printf /debug-trap >&2' DEBUG\ncd child",
+      );
+
+      expect(result.exitCode, 0);
+      expect(result.effectiveCwd, await child.resolveSymbolicLinks());
+      expect(result.output, contains('/debug-trap'));
+    });
+
+    test('does not accept asynchronous stderr as the command cwd', () async {
+      final root = await Directory.systemTemp.createTemp(
+        'ssterm-cwd-async-stderr-',
+      );
+      final child = await Directory('${root.path}/child').create();
+      final helper = File('${root.path}/write-stderr.sh');
+      final ready = File('${root.path}/writer.ready');
+      await helper.writeAsString(r'''#!/bin/sh
+ready=$1
+(
+  printf /async-stderr >&2
+  : > "$ready"
+  i=0
+  while [ "$i" -lt 20000 ]; do
+    printf /async-stderr >&2
+    i=$((i + 1))
+  done
+) &
+while [ ! -e "$ready" ]; do :; done
+exit 0
+''');
+      addTearDown(() => root.delete(recursive: true));
+
+      final result =
+          await const BackgroundCommandExecutor(
+            outputLimitBytes: 4096,
+          ).executeLocal(
+            BackgroundCommandTarget.local(
+              shell: const LocalShellOption(
+                id: 'bash',
+                displayName: 'Bash',
+                executable: '/bin/bash',
+              ),
+              cwd: root.path,
+              platform: BackgroundCommandPlatform.macos,
+            ),
+            'cd child\n/bin/sh '
+            '${BackgroundCommandExecutor.shellQuotePosix(helper.path)} '
+            '${BackgroundCommandExecutor.shellQuotePosix(ready.path)}',
+          );
+
+      expect(result.exitCode, 0);
+      expect(result.effectiveCwd, await child.resolveSymbolicLinks());
+      expect(result.output, contains('/async-stderr'));
+      expect(result.truncated, isTrue);
+    });
+
     test('uses the resolved login-shell PATH for a POSIX command', () async {
       final resolver = LoginShellEnvironmentResolver(
         readPath: (_) async => '/ssterm-login-shell-path',
@@ -847,20 +1045,15 @@ void main() {
     });
 
     test(
-      'returns the remote cwd from a verified completion envelope',
+      'returns the remote cwd from the private result reader',
       () async {
         final session = _FakeSshSession();
         final executor = BackgroundCommandExecutor(
           sshSessionStarter: (client, command) async {
-            final marker = RegExp(
-              r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
-            ).firstMatch(command)?.group(1);
-            if (marker == null) throw StateError('missing cwd envelope');
-            session.complete(
-              stderr: '${marker}BEGIN__/srv/project${marker}END__',
-            );
+            session.complete(stderr: '/ordinary-stderr');
             return session;
           },
+          sshCwdResultReader: (client, path) async => utf8.encode('/srv/project'),
         );
 
         final result = await executor.executeSsh(
@@ -871,27 +1064,49 @@ void main() {
 
         expect(result.exitCode, 0);
         expect(result.effectiveCwd, '/srv/project');
-        expect(result.output, isNot(contains('__SSTERM_CWD_')));
+        expect(result.output, contains('/ordinary-stderr'));
       },
     );
 
+    test('reads SSH cwd outside the command stderr stream', () async {
+      final session = _FakeSshSession();
+      String? launchedCommand;
+      String? resultPath;
+      final executor = BackgroundCommandExecutor(
+        sshSessionStarter: (client, command) async {
+          launchedCommand = command;
+          session.complete(stderr: '/stderr-path');
+          return session;
+        },
+        sshCwdResultReader: (client, path) async {
+          resultPath = path;
+          return utf8.encode('/srv/project');
+        },
+      );
+
+      final result = await executor.executeSsh(
+        _UnusedSshClient(),
+        '/srv',
+        'cd project',
+      );
+
+      expect(result.exitCode, 0);
+      expect(result.effectiveCwd, '/srv/project');
+      expect(result.output, contains('/stderr-path'));
+      expect(resultPath, isNotNull);
+      expect(launchedCommand, contains(resultPath!));
+    });
+
     test(
-      'uses the last valid complete cwd frame and strips only frames',
+      'does not parse stderr as a remote cwd result',
       () async {
         final session = _FakeSshSession();
         final executor = BackgroundCommandExecutor(
           sshSessionStarter: (client, command) async {
-            final marker = RegExp(
-              r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
-            ).firstMatch(command)?.group(1);
-            if (marker == null) throw StateError('missing cwd envelope');
-            session.complete(
-              stderr:
-                  'before${marker}BEGIN__/first${marker}END__middle'
-                  '${marker}BEGIN__/last${marker}END__after',
-            );
+            session.complete(stderr: 'before/stderr/after');
             return session;
           },
+          sshCwdResultReader: (client, path) async => utf8.encode('/last'),
         );
 
         final result = await executor.executeSsh(
@@ -901,25 +1116,19 @@ void main() {
         );
 
         expect(result.effectiveCwd, '/last');
-        expect(result.output, contains('beforemiddleafter'));
-        expect(result.output, isNot(contains('__SSTERM_CWD_')));
+        expect(result.output, contains('before/stderr/after'));
       },
     );
 
-    test('applies the output cap to bytes after a cwd frame', () async {
+    test('applies the output cap while reading remote cwd separately', () async {
       final session = _FakeSshSession();
       final executor = BackgroundCommandExecutor(
         outputLimitBytes: 4,
         sshSessionStarter: (client, command) async {
-          final marker = RegExp(
-            r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
-          ).firstMatch(command)?.group(1);
-          if (marker == null) throw StateError('missing cwd envelope');
-          session.complete(
-            stderr: '${marker}BEGIN__/srv/project${marker}END__0123456789',
-          );
+          session.complete(stderr: '0123456789');
           return session;
         },
+        sshCwdResultReader: (client, path) async => utf8.encode('/srv/project'),
       );
 
       final result = await executor.executeSsh(
