@@ -100,18 +100,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   }
 
   void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
-    if (tab.manuallyDisconnected) return;
-    // After retainPane1 the surviving shell still reports as pane 1 in its pipe
-    // transform; map to pane 0 storage while no longer split.
-    final storagePane = !tab.isSplit && pane == 1 ? 0 : pane;
-    if (storagePane == 0) {
-      tab.remoteCwdPane0 = cwd;
-    } else {
-      tab.remoteCwdPane1 = cwd;
-    }
-    if (!tab.isSplit || tab.activeSshPane == storagePane) {
-      tab.remotePath?.value = cwd;
-    }
+    tab.noteRemoteCwd(pane: pane, cwd: cwd);
   }
 
   /// Which pane owns [terminal] right now (0 or 1). Resolves after split collapse.

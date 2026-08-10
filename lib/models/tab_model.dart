@@ -63,8 +63,8 @@ class AppTab {
   int reconnectAttempt = 0;
   bool sftpPanelVisible = false;
 
-  /// The agent is a separate host from the visible terminal. Its cwd never
-  /// follows OSC-7 updates from the visible terminal.
+  /// The Agent executes in separate background processes, but its starting
+  /// cwd follows the active terminal pane's OSC-7 reports.
   bool agentPanelVisible = false;
   String? agentCwd;
   bool _agentExecutionCancelled = false;
@@ -210,13 +210,36 @@ class AppTab {
   }
 
   void syncRemotePathToActivePane() {
-    if (remotePath == null || manuallyDisconnected) return;
+    if (manuallyDisconnected) return;
     final cwd = activeSshPane == 1 && isSplit
         ? (remoteCwdPane1 ?? remoteCwdPane0)
         : remoteCwdPane0;
     if (cwd != null && cwd.isNotEmpty) {
-      remotePath!.value = cwd;
+      _applyActiveRemoteCwd(cwd);
     }
+  }
+
+  /// Records an OSC-7 cwd report from an SSH terminal pane. The active pane
+  /// is the shared location context: SFTP, Agent commands, and the Agent's
+  /// initial session context must all agree on it.
+  void noteRemoteCwd({required int pane, required String cwd}) {
+    if (manuallyDisconnected || cwd.isEmpty) return;
+    // After retainPane1 the surviving shell still reports as pane 1; map it
+    // to pane 0 storage after the split has collapsed.
+    final storagePane = !isSplit && pane == 1 ? 0 : pane;
+    if (storagePane == 0) {
+      remoteCwdPane0 = cwd;
+    } else {
+      remoteCwdPane1 = cwd;
+    }
+    if (!isSplit || activeSshPane == storagePane) {
+      _applyActiveRemoteCwd(cwd);
+    }
+  }
+
+  void _applyActiveRemoteCwd(String cwd) {
+    remotePath?.value = cwd;
+    agentCwd = cwd;
   }
 
   /// Pane 0 exited while split — move pane 1 into the single-pane slot.

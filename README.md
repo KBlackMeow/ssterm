@@ -101,7 +101,7 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 - Visible terminal shells use OSC 7 for their own working-directory tracking.
   Agent commands run in independent background processes or SSH channels, and
   their verified cwd drives later Agent commands and relative file operations;
-  it never follows the active terminal's OSC 7 updates.
+  the active terminal pane's OSC 7 cwd is used as their starting context.
 - Pre-raises `RLIMIT_NOFILE` at startup to prevent fd exhaustion with plugin-heavy shells.
 
 ---

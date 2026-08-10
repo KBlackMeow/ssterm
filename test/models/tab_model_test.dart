@@ -138,6 +138,32 @@ void main() {
     });
   });
 
+  group('AppTab.noteRemoteCwd', () {
+    test('uses the active terminal cwd as the Agent and SFTP context', () {
+      final tab = AppTab.ssh(title: 'srv')
+        ..remotePath = ValueNotifier<String>('/root')
+        ..agentCwd = '/root';
+
+      tab.noteRemoteCwd(pane: 0, cwd: '/srv/project');
+
+      expect(tab.remotePath!.value, '/srv/project');
+      expect(tab.agentCwd, '/srv/project');
+    });
+
+    test('does not replace Agent cwd with an inactive split pane cwd', () {
+      final tab = AppTab.ssh(title: 'srv')
+        ..remotePath = ValueNotifier<String>('/srv/project')
+        ..agentCwd = '/srv/project'
+        ..splitTerminal = Terminal()
+        ..activeSshPane = 0;
+
+      tab.noteRemoteCwd(pane: 1, cwd: '/var/log');
+
+      expect(tab.remotePath!.value, '/srv/project');
+      expect(tab.agentCwd, '/srv/project');
+    });
+  });
+
   group('AppTab.isSplit', () {
     test('false when splitTerminal is null', () {
       expect(AppTab.local(title: 'x').isSplit, isFalse);
