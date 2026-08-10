@@ -69,6 +69,26 @@ void main() {
     },
   );
 
+  test('builds no-launcher WSL arguments with the OSC 7 shell wrapper', () {
+    final arguments = buildWslInteractiveShellArguments(
+      distro: 'Ubuntu',
+      loginShell: '/bin/zsh',
+    );
+
+    expect(arguments.take(7), [
+      '-d',
+      'Ubuntu',
+      '--cd',
+      '~',
+      '--',
+      '/bin/sh',
+      '-lc',
+    ]);
+    expect(arguments.last, contains('SHELL=/bin/zsh'));
+    expect(arguments.last, contains(']7;file://'));
+    expect(arguments.last, isNot(contains(']133;')));
+  });
+
   group(
     'LocalShellDiscovery.discoverSync on Windows',
     () {

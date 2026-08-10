@@ -37,7 +37,7 @@ void main() {
         id: 'powershell',
         displayName: 'PowerShell',
         executable: 'powershell.exe',
-        usePowerShellWrapper: true,
+        usePowerShellCwdWrapper: true,
       );
       const wsl = LocalShellOption(
         id: 'wsl:ubuntu',
@@ -117,7 +117,7 @@ void main() {
               id: 'pwsh',
               displayName: 'PowerShell',
               executable: 'pwsh.exe',
-              usePowerShellWrapper: true,
+              usePowerShellCwdWrapper: true,
             ),
           ),
           'Write-Output ok',
@@ -131,7 +131,7 @@ void main() {
               id: 'pwsh',
               displayName: 'PowerShell',
               executable: 'pwsh.exe',
-              usePowerShellWrapper: true,
+              usePowerShellCwdWrapper: true,
             ),
           ),
           'Write-Output ok',
@@ -229,7 +229,7 @@ void main() {
         id: 'powershell',
         displayName: 'PowerShell',
         executable: 'powershell.exe',
-        usePowerShellWrapper: true,
+        usePowerShellCwdWrapper: true,
       );
       final target = BackgroundCommandTarget.local(
         shell: shell,

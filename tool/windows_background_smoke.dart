@@ -28,7 +28,7 @@ Future<void> _run(List<String> arguments) async {
     displayName: 'PowerShell',
     executable: r'$systemRoot\System32\WindowsPowerShell\v1.0\powershell.exe'
         .replaceFirst(r'$systemRoot', systemRoot),
-    usePowerShellWrapper: true,
+    usePowerShellCwdWrapper: true,
   );
   final target = BackgroundCommandTarget.local(
     shell: shell,
@@ -147,7 +147,7 @@ Future<void> _run(List<String> arguments) async {
         id: 'powershell',
         displayName: 'Missing PowerShell',
         executable: r'Z:\missing\powershell.exe',
-        usePowerShellWrapper: true,
+        usePowerShellCwdWrapper: true,
       ),
       cwd: cwd,
       platform: BackgroundCommandPlatform.windows,

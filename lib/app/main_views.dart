@@ -29,7 +29,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
           'the Linux distribution, not Windows cmd.exe or PowerShell. Use '
           'POSIX/Linux commands (for example `ip addr`, not `ipconfig`).';
     }
-    if (shell.usePowerShellWrapper) {
+    if (shell.usePowerShellCwdWrapper) {
       return 'Windows PowerShell (${shell.displayName}). Use PowerShell syntax '
           'and cmdlets; do not use cmd.exe command separators such as `& ver` '
           'as a shell probe. For a blank line use `Write-Output \'\'` or '

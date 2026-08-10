@@ -44,7 +44,7 @@ class BackgroundCommandTarget {
   BackgroundCommandSupport get support {
     if (platform == BackgroundCommandPlatform.windows) {
       if (shell.id == 'cmd' ||
-          shell.usePowerShellWrapper ||
+          shell.usePowerShellCwdWrapper ||
           shell.isWsl ||
           shell.id.startsWith('git-bash') ||
           shell.executable.toLowerCase().endsWith('bash.exe')) {
@@ -60,7 +60,7 @@ class BackgroundCommandTarget {
         'Agent2 background execution is supported only on macOS and Linux.',
       );
     }
-    if (shell.isWsl || shell.usePowerShellWrapper) {
+    if (shell.isWsl || shell.usePowerShellCwdWrapper) {
       return const BackgroundCommandSupport.unsupported(
         'This shell requires a terminal wrapper and cannot run in Agent2.',
       );
@@ -400,7 +400,7 @@ String? validateBackgroundCommandSyntax(
   BackgroundCommandTarget target,
   String command,
 ) {
-  if (!target.shell.usePowerShellWrapper) return null;
+  if (!target.shell.usePowerShellCwdWrapper) return null;
   if (RegExp(
     r'(^|[;\r\n])\s*&\s*ver\b',
     caseSensitive: false,
@@ -436,7 +436,7 @@ String? validateBackgroundCommandSyntax(
       arguments: ['/d', '/s', '/c', command],
     );
   }
-  if (shell.usePowerShellWrapper) {
+  if (shell.usePowerShellCwdWrapper) {
     final utf8Prelude =
         r'''[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; ''';
     return (

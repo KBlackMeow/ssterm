@@ -811,7 +811,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   CommandSentinelDialect _sentinelDialectFor(LocalShellOption? shell) {
     if (shell == null) return CommandSentinelDialect.posix;
     if (shell.id == 'cmd') return CommandSentinelDialect.cmd;
-    if (shell.usePowerShellWrapper) return CommandSentinelDialect.powershell;
+    if (shell.usePowerShellCwdWrapper) {
+      return CommandSentinelDialect.powershell;
+    }
     return CommandSentinelDialect.posix;
   }
 

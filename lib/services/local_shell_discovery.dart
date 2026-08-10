@@ -3,6 +3,23 @@ import 'dart:io';
 
 import 'local_shell_wrapper.dart';
 
+/// Builds the `wsl.exe` invocation used when a distribution has no dedicated
+/// launcher. The discovered login shell is kept in [SHELL], allowing the
+/// shared interactive wrapper to select it while adding OSC 7 cwd reporting.
+List<String> buildWslInteractiveShellArguments({
+  required String distro,
+  required String loginShell,
+}) => [
+  '-d',
+  distro,
+  '--cd',
+  '~',
+  '--',
+  '/bin/sh',
+  '-lc',
+  'SHELL=$loginShell\n${buildInteractiveShellWrapper()}',
+];
+
 /// A local shell that can be launched in a PTY tab.
 class LocalShellOption {
   const LocalShellOption({
@@ -351,10 +368,8 @@ class LocalShellDiscovery {
           // `<launcher> run <cmd>` executes non-interactively in the
           // launcher's own (Windows-side) CWD rather than the Linux
           // $HOME the no-args interactive form uses, so `cd ~` first to
-          // match today's behavior before handing off to the OSC 133
-          // wrapper — the same hook macOS/Linux native shells get, wired
-          // up here so WSL tabs stop being stuck on the echo-sentinel
-          // fallback (see CommandSentinelDialect.posix).
+          // match today's behavior before handing off to the OSC 7 cwd
+          // wrapper used by macOS/Linux native shells.
           _addShell(
             shells,
             seen,
@@ -377,7 +392,10 @@ class LocalShellDiscovery {
           id: 'wsl:$distro',
           displayName: 'WSL $distro',
           executable: wsl,
-          arguments: ['-d', distro, '--cd', '~', '--', loginShell, '-li'],
+          arguments: buildWslInteractiveShellArguments(
+            distro: distro,
+            loginShell: loginShell,
+          ),
           isWsl: true,
         );
       }
