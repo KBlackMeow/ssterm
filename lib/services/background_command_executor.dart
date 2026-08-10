@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -163,6 +164,7 @@ class BackgroundCommandExecutor {
     }
 
     final wslMarker = target.shell.isWsl ? _wslMarkerPath() : null;
+    final completionMarker = _completionMarker();
     final environment = _nonInteractiveEnvironment(target.shell.environment);
     if (target.platform == BackgroundCommandPlatform.macos ||
         target.platform == BackgroundCommandPlatform.linux) {
@@ -184,6 +186,7 @@ class BackgroundCommandExecutor {
         target,
         command,
         wslProcessMarker: wslMarker,
+        completionMarker: completionMarker,
       );
       final usesWindowsJobRunner =
           target.platform == BackgroundCommandPlatform.windows;
@@ -223,8 +226,11 @@ class BackgroundCommandExecutor {
     }
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
+    final stderrEnvelope = _CwdEnvelopeOutput(stderr, completionMarker);
     final stdoutDone = process.stdout.listen(stdout.add).asFuture<void>();
-    final stderrDone = process.stderr.listen(stderr.add).asFuture<void>();
+    final stderrDone = process.stderr
+        .listen(stderrEnvelope.add)
+        .asFuture<void>();
     final completed = Future.wait<void>([
       process.exitCode.then<void>((_) {}),
       stdoutDone,
@@ -274,6 +280,7 @@ class BackgroundCommandExecutor {
       if (!stopped) process.kill(ProcessSignal.sigkill);
     }
     await completed;
+    stderrEnvelope.close();
     cancellationPoll.cancel();
     if (wslMarker != null) unawaited(_removeWslMarker(target.shell, wslMarker));
     final status = cancelled
@@ -281,11 +288,13 @@ class BackgroundCommandExecutor {
         : timedOut
         ? 'timed out after ${timeout.inSeconds}s'
         : null;
+    final exitCode = status == null ? await process.exitCode : null;
     return CommandResult(
       output: _formatOutput(stdout, stderr, status),
-      exitCode: status == null ? await process.exitCode : null,
+      exitCode: exitCode,
       truncated: stdout.truncated || stderr.truncated,
       cancelled: cancelled,
+      effectiveCwd: exitCode == 0 ? stderrEnvelope.effectiveCwd : null,
     );
   }
 
@@ -313,13 +322,19 @@ class BackgroundCommandExecutor {
         cancelled: true,
       );
     }
+    final completionMarker = _completionMarker();
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
+    final stderrEnvelope = _CwdEnvelopeOutput(stderr, completionMarker);
     late final SSHSession session;
     try {
       session = await (sshSessionStarter ?? _startSshSession)(
         client,
-        buildSshBackgroundCommand(cwd, command),
+        buildSshBackgroundCommand(
+          cwd,
+          command,
+          completionMarker: completionMarker,
+        ),
       );
     } catch (error) {
       return CommandResult(
@@ -329,7 +344,9 @@ class BackgroundCommandExecutor {
     }
 
     final stdoutDone = session.stdout.listen(stdout.add).asFuture<void>();
-    final stderrDone = session.stderr.listen(stderr.add).asFuture<void>();
+    final stderrDone = session.stderr
+        .listen(stderrEnvelope.add)
+        .asFuture<void>();
     final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
     var cancelled = false;
     final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
@@ -348,17 +365,20 @@ class BackgroundCommandExecutor {
       session.close();
     }
     await completed;
+    stderrEnvelope.close();
     poll.cancel();
     final status = cancelled
         ? 'cancelled'
         : timedOut
         ? 'timed out after ${timeout.inSeconds}s'
         : null;
+    final exitCode = status == null ? session.exitCode : null;
     return CommandResult(
       output: _formatOutput(stdout, stderr, status),
-      exitCode: status == null ? session.exitCode : null,
+      exitCode: exitCode,
       truncated: stdout.truncated || stderr.truncated,
       cancelled: cancelled,
+      effectiveCwd: exitCode == 0 ? stderrEnvelope.effectiveCwd : null,
     );
   }
 
@@ -395,6 +415,15 @@ class BackgroundCommandExecutor {
 
   String _wslMarkerPath() =>
       '/tmp/ssterm-agent-$pid-${DateTime.now().microsecondsSinceEpoch}.pid';
+
+  String _completionMarker() {
+    final random = Random.secure();
+    final nonce = List.generate(
+      4,
+      (_) => random.nextInt(0x100000000).toRadixString(16).padLeft(8, '0'),
+    ).join();
+    return '__SSTERM_CWD_${nonce}__';
+  }
 
   Future<void> _terminateWslProcessGroup(
     LocalShellOption shell,
@@ -442,10 +471,62 @@ class BackgroundCommandExecutor {
   }
 }
 
+String _wrapPosixCommandForCwd(String command, String marker) =>
+    '$command\n'
+    '__ssterm_exit=\$?\n'
+    'printf %s ${BackgroundCommandExecutor.shellQuotePosix(marker)} >&2\n'
+    'printf %s "\$PWD" >&2\n'
+    'exit "\$__ssterm_exit"';
+
+String _wrapCmdCommandForCwd(String command, String marker) =>
+    '$command\r\n'
+    'set "__ssterm_exit=%errorlevel%"\r\n'
+    '>&2 <nul set /p "=$marker%CD%"\r\n'
+    'exit /b %__ssterm_exit%';
+
+String _wrapPowerShellCommandForCwd(String command, String marker) {
+  final quotedMarker = marker.replaceAll("'", "''");
+  return '& { $command }\n'
+      r'$__ssterm_exit = if ($?) { 0 } elseif ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }'
+      '\n[Console]::Error.Write(\'$quotedMarker\')\n'
+      r'[Console]::Error.Write((Get-Location).ProviderPath)'
+      '\n'
+      r'exit $__ssterm_exit';
+}
+
+String _wrapCommandForCwd(
+  BackgroundCommandTarget target,
+  String command,
+  String marker,
+) {
+  if (target.platform != BackgroundCommandPlatform.windows ||
+      target.shell.isWsl ||
+      target.shell.id.startsWith('git-bash') ||
+      target.shell.executable.toLowerCase().endsWith('bash.exe')) {
+    return _wrapPosixCommandForCwd(command, marker);
+  }
+  if (target.shell.id == 'cmd') {
+    return _wrapCmdCommandForCwd(command, marker);
+  }
+  if (target.shell.usePowerShellCwdWrapper) {
+    return _wrapPowerShellCommandForCwd(command, marker);
+  }
+  return command;
+}
+
 /// Wraps an Agent SSH command in its independent working directory without
 /// interpreting the command itself. Only [cwd] is shell-quoted here.
-String buildSshBackgroundCommand(String cwd, String command) =>
-    'cd -- ${BackgroundCommandExecutor.shellQuotePosix(cwd)} && $command';
+String buildSshBackgroundCommand(
+  String cwd,
+  String command, {
+  String? completionMarker,
+}) {
+  final executionCommand = completionMarker == null
+      ? command
+      : _wrapPosixCommandForCwd(command, completionMarker);
+  return 'cd -- ${BackgroundCommandExecutor.shellQuotePosix(cwd)} && '
+      '$executionCommand';
+}
 
 /// Reject known cross-shell probes before execution. This is deliberately
 /// narrow: valid commands must remain the shell's responsibility, but these
@@ -480,15 +561,19 @@ String? validateBackgroundCommandSyntax(
   BackgroundCommandTarget target,
   String command, {
   String? wslProcessMarker,
+  String? completionMarker,
 }) {
   final shell = target.shell;
+  final executionCommand = completionMarker == null
+      ? command
+      : _wrapCommandForCwd(target, command, completionMarker);
   if (target.platform != BackgroundCommandPlatform.windows) {
-    return (executable: shell.executable, arguments: ['-c', command]);
+    return (executable: shell.executable, arguments: ['-c', executionCommand]);
   }
   if (shell.id == 'cmd') {
     return (
       executable: shell.executable,
-      arguments: ['/d', '/s', '/c', command],
+      arguments: ['/d', '/s', '/c', executionCommand],
     );
   }
   if (shell.usePowerShellCwdWrapper) {
@@ -500,14 +585,14 @@ String? validateBackgroundCommandSyntax(
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        '$utf8Prelude& { $command }',
+        '$utf8Prelude$executionCommand',
       ],
     );
   }
   if (shell.id.startsWith('git-bash')) {
     return (
       executable: shell.executable,
-      arguments: _gitBashCommandArguments(shell.arguments, command),
+      arguments: _gitBashCommandArguments(shell.arguments, executionCommand),
     );
   }
   if (shell.isWsl) {
@@ -528,14 +613,14 @@ String? validateBackgroundCommandSyntax(
         'sh',
         '-lc',
         wslProcessMarker == null
-            ? command
+            ? executionCommand
             : 'printf %s "\$\$" > '
                   '${BackgroundCommandExecutor.shellQuotePosix(wslProcessMarker)}; '
-                  'exec sh -lc ${BackgroundCommandExecutor.shellQuotePosix(command)}',
+                  'exec sh -lc ${BackgroundCommandExecutor.shellQuotePosix(executionCommand)}',
       ],
     );
   }
-  return (executable: shell.executable, arguments: ['-c', command]);
+  return (executable: shell.executable, arguments: ['-c', executionCommand]);
 }
 
 List<String> _gitBashCommandArguments(
@@ -603,4 +688,62 @@ class _BoundedOutput {
     for (var i = 0; i + 1 < bytes.length; i += 2)
       (bytes[i] << 8) | bytes[i + 1],
   ]);
+}
+
+class _CwdEnvelopeOutput {
+  _CwdEnvelopeOutput(this.output, String marker)
+    : _marker = utf8.encode(marker);
+
+  final _BoundedOutput output;
+  final List<int> _marker;
+  List<int> _pending = const [];
+  final BytesBuilder _cwd = BytesBuilder(copy: false);
+  bool _found = false;
+
+  void add(List<int> chunk) {
+    if (_found) {
+      _cwd.add(chunk);
+      return;
+    }
+    final combined = <int>[..._pending, ...chunk];
+    final markerIndex = _indexOf(combined, _marker);
+    if (markerIndex >= 0) {
+      output.add(combined.sublist(0, markerIndex));
+      _cwd.add(combined.sublist(markerIndex + _marker.length));
+      _pending = const [];
+      _found = true;
+      return;
+    }
+
+    final retained = min(_marker.length - 1, combined.length);
+    final safeLength = combined.length - retained;
+    if (safeLength > 0) output.add(combined.sublist(0, safeLength));
+    _pending = combined.sublist(safeLength);
+  }
+
+  void close() {
+    if (!_found && _pending.isNotEmpty) output.add(_pending);
+    _pending = const [];
+  }
+
+  String? get effectiveCwd {
+    if (!_found) return null;
+    final cwd = utf8.decode(_cwd.toBytes(), allowMalformed: false);
+    return cwd.isEmpty || cwd.contains('\u0000') ? null : cwd;
+  }
+
+  int _indexOf(List<int> bytes, List<int> pattern) {
+    if (pattern.isEmpty || bytes.length < pattern.length) return -1;
+    for (var i = 0; i <= bytes.length - pattern.length; i++) {
+      var matches = true;
+      for (var j = 0; j < pattern.length; j++) {
+        if (bytes[i + j] != pattern[j]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) return i;
+    }
+    return -1;
+  }
 }

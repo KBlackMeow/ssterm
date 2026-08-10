@@ -1,9 +1,12 @@
-import 'package:flutter/widgets.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/models/ssh_host.dart';
 import 'package:ssterm/models/tab_model.dart';
+import 'package:ssterm/services/file_write_service.dart';
 import 'package:xterm/xterm.dart';
 
 /// Minimal no-op stand-in — `AppTab.editor` only stores the reference,
@@ -169,6 +172,24 @@ void main() {
     expect(tab.isAgentExecutionCancelled, isFalse);
     tab.prepareForRemoval();
     expect(tab.isAgentExecutionCancelled, isTrue);
+  });
+
+  test('verified command cwd updates Agent-relative file operations', () async {
+    final root = await Directory.systemTemp.createTemp('ssterm-tab-cwd-');
+    final child = await Directory('${root.path}/child').create();
+    final target = File('${child.path}/note.txt');
+    await target.writeAsString('hello');
+    addTearDown(() => root.delete(recursive: true));
+    final tab = AppTab.local(title: 'test')..agentCwd = root.path;
+
+    tab.applyAgentCommandResult(
+      CommandResult(output: '', exitCode: 0, effectiveCwd: child.path),
+    );
+    final adapter = LocalFileSystemAdapter(cwdProvider: () => tab.agentCwd);
+    final preview = await adapter.preview('note.txt');
+
+    expect(tab.agentCwd, child.path);
+    expect(preview.resolvedPath, target.path);
   });
 
   group('AppTab.icon', () {

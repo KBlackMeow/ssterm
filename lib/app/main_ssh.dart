@@ -725,6 +725,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   }) {
     bool cancellationRequested() =>
         tab.isAgentExecutionCancelled || isCancelled?.call() == true;
+    Future<CommandResult> applyResult(Future<CommandResult> pending) async {
+      final result = await pending;
+      tab.applyAgentCommandResult(result);
+      return result;
+    }
 
     if (tab.kind == _TabKind.ssh) {
       final client = tab.sshClient;
@@ -736,11 +741,13 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           ),
         );
       }
-      return const BackgroundCommandExecutor().executeSsh(
-        client,
-        tab.agentCwd ?? '/',
-        command,
-        isCancelled: cancellationRequested,
+      return applyResult(
+        const BackgroundCommandExecutor().executeSsh(
+          client,
+          tab.agentCwd ?? '/',
+          command,
+          isCancelled: cancellationRequested,
+        ),
       );
     }
     if (tab.kind != _TabKind.local || tab.localShell == null) {
@@ -751,14 +758,16 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         ),
       );
     }
-    return const BackgroundCommandExecutor().executeLocal(
-      BackgroundCommandTarget.local(
-        shell: tab.localShell!,
-        cwd: tab.agentCwd ?? '/',
-        platform: BackgroundCommandTarget.hostPlatform,
+    return applyResult(
+      const BackgroundCommandExecutor().executeLocal(
+        BackgroundCommandTarget.local(
+          shell: tab.localShell!,
+          cwd: tab.agentCwd ?? '/',
+          platform: BackgroundCommandTarget.hostPlatform,
+        ),
+        command,
+        isCancelled: cancellationRequested,
       ),
-      command,
-      isCancelled: cancellationRequested,
     );
   }
 
@@ -767,13 +776,14 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     String command,
     Future<CommandResult?> Function() execute,
   ) async {
+    final executionCwd = tab.agentCwd;
     final result = await execute();
     await commandHistory.append(
       CommandExecutionRecord.fromResult(
         timestamp: DateTime.now(),
         agentId: 'agent',
         target: tab.kind == _TabKind.ssh ? 'ssh' : 'local',
-        cwd: tab.agentCwd,
+        cwd: executionCwd,
         command: command,
         result: result,
       ),

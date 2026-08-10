@@ -27,11 +27,17 @@ class CommandResult {
   /// True iff the caller cancelled this command before it completed.
   final bool cancelled;
 
+  /// Final working directory verified by the executor's private completion
+  /// envelope. Null when execution failed, was cancelled, or no envelope was
+  /// observed.
+  final String? effectiveCwd;
+
   CommandResult({
     required this.output,
     required this.exitCode,
     this.truncated = false,
     this.cancelled = false,
+    this.effectiveCwd,
   });
 }
 

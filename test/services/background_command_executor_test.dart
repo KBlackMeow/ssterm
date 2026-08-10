@@ -21,6 +21,7 @@ class _FakeSshSession implements SSHSession {
 
   SSHSignal? killedWith;
   bool closed = false;
+  int? exitCodeValue;
 
   @override
   Stream<Uint8List> get stdout => _stdout.stream;
@@ -32,7 +33,7 @@ class _FakeSshSession implements SSHSession {
   Future<void> get done => _done.future;
 
   @override
-  int? get exitCode => null;
+  int? get exitCode => exitCodeValue;
 
   @override
   void kill(SSHSignal signal) => killedWith = signal;
@@ -44,6 +45,17 @@ class _FakeSshSession implements SSHSession {
     unawaited(_stdout.close());
     unawaited(_stderr.close());
     _done.complete();
+  }
+
+  void complete({String stdout = '', String stderr = '', int? exitCode = 0}) {
+    scheduleMicrotask(() async {
+      exitCodeValue = exitCode;
+      if (stdout.isNotEmpty) _stdout.add(Uint8List.fromList(stdout.codeUnits));
+      if (stderr.isNotEmpty) _stderr.add(Uint8List.fromList(stderr.codeUnits));
+      await _stdout.close();
+      await _stderr.close();
+      if (!_done.isCompleted) _done.complete();
+    });
   }
 
   @override
@@ -269,6 +281,75 @@ void main() {
       );
     });
 
+    test('adds a cwd completion envelope for every Windows shell route', () {
+      const marker = '__SSTERM_CWD_TEST__';
+      BackgroundCommandTarget windows(LocalShellOption shell) =>
+          BackgroundCommandTarget.local(
+            shell: shell,
+            cwd: r'C:\work',
+            platform: BackgroundCommandPlatform.windows,
+          );
+
+      final cmd = buildBackgroundCommandInvocation(
+        windows(
+          const LocalShellOption(
+            id: 'cmd',
+            displayName: 'CMD',
+            executable: 'cmd.exe',
+          ),
+        ),
+        'cd child',
+        completionMarker: marker,
+      ).arguments.last;
+      expect(cmd, contains(marker));
+      expect(cmd, contains('%CD%'));
+
+      final powershell = buildBackgroundCommandInvocation(
+        windows(
+          const LocalShellOption(
+            id: 'pwsh',
+            displayName: 'PowerShell',
+            executable: 'pwsh.exe',
+            usePowerShellCwdWrapper: true,
+          ),
+        ),
+        'Set-Location child',
+        completionMarker: marker,
+      ).arguments.last;
+      expect(powershell, contains(marker));
+      expect(powershell, contains(r'(Get-Location).ProviderPath'));
+
+      final gitBash = buildBackgroundCommandInvocation(
+        windows(
+          const LocalShellOption(
+            id: 'git-bash',
+            displayName: 'Git Bash',
+            executable: 'env.exe',
+            arguments: ['/usr/bin/bash', '--login', '-i'],
+          ),
+        ),
+        'cd child',
+        completionMarker: marker,
+      ).arguments.last;
+      expect(gitBash, contains(marker));
+      expect(gitBash, contains(r'"$PWD"'));
+
+      final wsl = buildBackgroundCommandInvocation(
+        windows(
+          const LocalShellOption(
+            id: 'wsl:ubuntu',
+            displayName: 'Ubuntu',
+            executable: 'wsl.exe',
+            isWsl: true,
+          ),
+        ),
+        'cd child',
+        completionMarker: marker,
+      ).arguments.last;
+      expect(wsl, contains(marker));
+      expect(wsl, contains(r'"$PWD"'));
+    });
+
     test('rejects known cmd probes in PowerShell before execution', () {
       const shell = LocalShellOption(
         id: 'powershell',
@@ -477,6 +558,36 @@ void main() {
       expect(result.output, contains(dir.path));
     });
 
+    test('returns a verified cwd for the next local command', () async {
+      final root = await Directory.systemTemp.createTemp('ssterm-agent-cwd-');
+      final child = await Directory('${root.path}/child').create();
+      addTearDown(() => root.delete(recursive: true));
+      const executor = BackgroundCommandExecutor();
+
+      final changed = await executor.executeLocal(
+        BackgroundCommandTarget.local(
+          shell: zsh,
+          cwd: root.path,
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        'cd child',
+      );
+      final verifiedCwd = changed.effectiveCwd;
+      final canonicalChild = await child.resolveSymbolicLinks();
+      expect(verifiedCwd, canonicalChild);
+
+      final next = await executor.executeLocal(
+        BackgroundCommandTarget.local(
+          shell: zsh,
+          cwd: verifiedCwd!,
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        'pwd',
+      );
+
+      expect(next.output, contains(canonicalChild));
+    });
+
     test('uses the resolved login-shell PATH for a POSIX command', () async {
       final resolver = LoginShellEnvironmentResolver(
         readPath: (_) async => '/ssterm-login-shell-path',
@@ -567,5 +678,32 @@ void main() {
         "cd -- '/srv/O'\\''Reilly project' && printf ok",
       );
     });
+
+    test(
+      'returns the remote cwd from a verified completion envelope',
+      () async {
+        final session = _FakeSshSession();
+        final executor = BackgroundCommandExecutor(
+          sshSessionStarter: (client, command) async {
+            final marker = RegExp(
+              r"printf %s '([^']+)' >&2",
+            ).firstMatch(command)?.group(1);
+            if (marker == null) throw StateError('missing cwd envelope');
+            session.complete(stderr: '$marker/srv/project');
+            return session;
+          },
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'cd project',
+        );
+
+        expect(result.exitCode, 0);
+        expect(result.effectiveCwd, '/srv/project');
+        expect(result.output, isNot(contains('__SSTERM_CWD_')));
+      },
+    );
   });
 }

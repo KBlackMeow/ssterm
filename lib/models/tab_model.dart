@@ -71,6 +71,19 @@ class AppTab {
   bool _agentExecutionCancelled = false;
 
   bool get isAgentExecutionCancelled => _agentExecutionCancelled;
+
+  void applyAgentCommandResult(CommandResult result) {
+    final cwd = result.effectiveCwd;
+    if (_agentExecutionCancelled ||
+        result.cancelled ||
+        result.exitCode != 0 ||
+        cwd == null ||
+        cwd.isEmpty) {
+      return;
+    }
+    agentCwd = cwd;
+  }
+
   TransferManager? transferManager;
 
   // ── Editor-tab-only state (AppTabKind.editor) ────────────────────────────

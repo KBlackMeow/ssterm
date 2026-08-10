@@ -10,5 +10,6 @@ void main() {
 
     final host = File('lib/app/main_ssh.dart').readAsStringSync();
     expect(host, contains('tab.isAgentExecutionCancelled'));
+    expect(host, contains('tab.applyAgentCommandResult(result)'));
   });
 }
