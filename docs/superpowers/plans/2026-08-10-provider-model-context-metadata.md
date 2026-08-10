@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Correct audited context windows, refresh stale built-in metadata, and display context labels without changing API model IDs.
+**Goal:** Correct audited context windows, add DeepSeek's 32K client output cap, refresh stale built-in metadata, and display both values without changing API model IDs.
 
-**Architecture:** Exact API IDs remain in `ProviderConfig.models`; token counts remain in `modelContextWindows`. Loading refreshes factory-owned metadata but preserves custom entries. The settings UI derives labels at rendering time while dropdown values remain raw IDs.
+**Architecture:** Exact API IDs remain in `ProviderConfig.models`; context and output limits live in separate maps. Loading refreshes factory-owned metadata but preserves custom entries. Requests use the selected output limit with a 4K fallback, while settings derive labels without changing dropdown values.
 
 **Tech Stack:** Dart, Flutter, `flutter_test`
 
@@ -15,6 +15,7 @@
 - Qwen `qwen3.7-plus` is exactly `1,000,000` tokens.
 - Unverified provider values, custom metadata, and the unknown-model 32K fallback remain unchanged.
 - Context suffixes are display-only and never enter persisted IDs or API payloads.
+- DeepSeek V4 Pro and Flash send a client-side `max_tokens` value of `32,768`; models without configured output metadata retain the `4,096` fallback.
 
 ---
 

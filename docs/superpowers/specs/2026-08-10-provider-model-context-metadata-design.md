@@ -5,7 +5,8 @@
 Keep SSTerm's built-in model IDs and context-window budgets aligned with the
 official data published by each configured provider. Model IDs sent to APIs
 must remain exact; context size is separate metadata and may be shown as a UI
-label such as `[1M]`.
+label. DeepSeek additionally uses a configurable 32K client-side maximum for
+each response instead of the existing hard-coded 4K request limit.
 
 ## Source policy
 
@@ -34,7 +35,14 @@ modelContextWindows: {
   'deepseek-v4-pro': 1000000,
   'deepseek-v4-flash': 1000000,
 },
+modelMaxOutputTokens: {
+  'deepseek-v4-pro': 32768,
+  'deepseek-v4-flash': 32768,
+},
 ```
+
+The 32K value is an SSTerm client default, not a claim about DeepSeek's model
+maximum. Context-window metadata and maximum-output metadata remain separate.
 
 The retired `deepseek-chat` and `deepseek-reasoner` aliases are not restored to
 the built-in catalogue.
@@ -105,13 +113,22 @@ providers are left untouched.
 ## UI
 
 Model selectors derive a compact context suffix from
-`modelContextWindows`, for example `[1M]`, `[256K]`, or `[200K]`. Selection and
-persistence continue to use the exact underlying model ID. This display change
-must not alter API payloads.
+`modelContextWindows` and `modelMaxOutputTokens`, for example `[1M / 32K]`.
+Selection and persistence continue to use the exact underlying model ID. The
+label must not become part of the API model ID.
 
-For example, the selector renders `deepseek-v4-pro [1M]` while its selected
-value and API request remain `deepseek-v4-pro`. Models without explicit
-metadata render only their model ID.
+For example, the selector renders `deepseek-v4-pro [1M / 32K]` while its
+selected value and API request model remain `deepseek-v4-pro`. Models without
+explicit metadata render only their model ID.
+
+## Request output limit
+
+`ProviderConfig.modelMaxOutputTokens` maps exact model IDs to SSTerm's desired
+per-response output cap. Provider requests use the selected model's configured
+value and fall back to the existing 4,096-token cap when no value is present.
+For direct DeepSeek V4 Pro and Flash, the request sends `max_tokens: 32768`.
+Saved built-in values are refreshed using the same ownership rules as context
+windows; custom model values remain unchanged.
 
 ## Verification
 
@@ -119,6 +136,8 @@ metadata render only their model ID.
 - A migration test loads a built-in provider with stale context metadata and
   confirms current built-in values are refreshed.
 - The same migration test confirms custom model context metadata is preserved.
+- Request tests assert DeepSeek sends `max_tokens: 32768` and an unconfigured
+  model retains the 4,096 fallback.
 - Provider request tests continue to assert that the exact model ID, without a
   display suffix, is sent to the API.
 - Formatting tests cover the compact context labels and confirm that they do
