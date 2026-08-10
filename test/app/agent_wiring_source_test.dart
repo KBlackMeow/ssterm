@@ -37,6 +37,22 @@ void main() {
     expect(host, contains('tab.applyAgentCommandResult(result)'));
   });
 
+  test('Agent header exposes the existing clear-chat action', () {
+    final panel = File('lib/widgets/ai_assistant_panel.dart').readAsStringSync();
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final widgets = File(
+      'lib/widgets/ai_assistant_panel_widgets.dart',
+    ).readAsStringSync();
+
+    expect(panel, contains('onClear: _clearChat'));
+    expect(content, contains('required this.onClear'));
+    expect(content, contains('onClear: onClear'));
+    expect(widgets, contains('final VoidCallback onClear'));
+    expect(widgets, contains("message: 'Clear conversation'"));
+  });
+
   test('Git Bash file tools normalize the shell cwd for host I/O', () {
     final source = File('lib/app/main_views.dart').readAsStringSync();
 

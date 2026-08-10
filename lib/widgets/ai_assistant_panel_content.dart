@@ -33,6 +33,7 @@ class _AiPanelContent extends StatelessWidget {
     this.onQuestionProposalOther,
     this.hasPendingQuestion = false,
     required this.position,
+    required this.onClear,
     this.onPositionToggle,
   });
 
@@ -128,6 +129,9 @@ class _AiPanelContent extends StatelessWidget {
   /// button so it reads "switch to the OTHER side".
   final AiPanelPosition position;
 
+  /// Clears the current Agent conversation and all of its LLM context.
+  final VoidCallback onClear;
+
   /// Tap handler for the position toggle in the mode-switch row.  Null
   /// hides the button (used in tests / hosts that don't persist
   /// layout).
@@ -193,7 +197,11 @@ class _AiPanelContent extends StatelessWidget {
       backdropBlur: 0,
       child: Column(
         children: [
-          _AgentHeader(position: position, onPositionToggle: onPositionToggle),
+          _AgentHeader(
+            position: position,
+            onClear: onClear,
+            onPositionToggle: onPositionToggle,
+          ),
           // Conversation area
           Expanded(
             child: messages.isEmpty

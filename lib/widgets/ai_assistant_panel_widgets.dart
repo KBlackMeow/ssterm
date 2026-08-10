@@ -14,9 +14,14 @@ part of 'ai_assistant_panel.dart';
 // ── Agent header ──────────────────────────────────────────────────────────
 
 class _AgentHeader extends StatelessWidget {
-  const _AgentHeader({required this.position, this.onPositionToggle});
+  const _AgentHeader({
+    required this.position,
+    required this.onClear,
+    this.onPositionToggle,
+  });
 
   final AiPanelPosition position;
+  final VoidCallback onClear;
   final VoidCallback? onPositionToggle;
 
   @override
@@ -39,6 +44,17 @@ class _AgentHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          Tooltip(
+            message: 'Clear conversation',
+            child: InkWell(
+              onTap: onClear,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.delete_outline, size: 14, color: dim),
+              ),
+            ),
+          ),
           if (onPositionToggle != null)
             _PositionToggle(
               position: position,

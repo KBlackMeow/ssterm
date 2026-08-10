@@ -518,6 +518,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onQuestionProposalOther: _beginCustomQuestionAnswer,
             hasPendingQuestion: _pendingQuestionProposal != null,
             position: _position,
+            onClear: _clearChat,
             onPositionToggle: _togglePosition,
           ),
         );
