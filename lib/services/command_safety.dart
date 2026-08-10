@@ -2,8 +2,8 @@
 /// shell.
 ///
 /// Rejection reasons:
-///   1. Background EOL `&` — output leaks past our OSC 133 D capture
-///      window so the next capture is corrupted.
+///   1. Background EOL `&` — detached child processes outlive the direct
+///      process Agent tracks, so their output and cancellation are unreliable.
 ///   2. Always-interactive programs (`vim`, `less`, `top`, …) — block the
 ///      agent loop until the user manually exits.
 ///   3. REPLs (`python`, `node`, …) invoked WITHOUT a script / `-c`
@@ -295,8 +295,8 @@ class CommandSafety {
   ///
   /// Lives here — next to the `_alwaysInteractive` list — so the
   /// "what counts as a TUI" policy stays in one file.  The actual
-  /// detection (xterm's `Terminal.isUsingAltBuffer`) is performed at
-  /// the call site in `_executeAndCapture`: this string is pure data
+  /// detection (xterm's `Terminal.isUsingAltBuffer`) is performed by the
+  /// terminal UI: this string is pure data
   /// so the LLM-facing wording can be regression-tested without
   /// spinning up a Terminal instance.
   static const altScreenReason =
@@ -337,9 +337,9 @@ class CommandSafety {
 
       if (_bgRe.hasMatch(line)) {
         return 'Background commands ("…&") are not supported by the agent — '
-            'OSC 133 D fires the moment the foreground job exits, so the '
-            'real output (still being produced by the backgrounded process) '
-            'leaks into the NEXT capture and corrupts it. '
+            'Agent tracks one direct background process at a time, while a '
+            'detached child can outlive it and escape output collection and '
+            'cancellation. '
             'Use `nohup … > /tmp/out.log 2>&1 & disown` and then read '
             '/tmp/out.log on a later turn.';
       }
@@ -364,7 +364,8 @@ class CommandSafety {
       if (name != null) {
         if (_alwaysInteractive.contains(name)) {
           return '"$name" is interactive and will block the agent loop — '
-              'no OSC 133 D will fire until the user manually exits it. '
+              'the background process has no interactive terminal input and '
+              'will wait until it is cancelled. '
               'Use a non-interactive equivalent: '
               '`cat`/`grep` instead of `less`/`more`, '
               '`ps`/`pgrep` instead of `top`, '

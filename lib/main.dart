@@ -36,7 +36,6 @@ import 'services/llm_service.dart';
 import 'services/mcp_service.dart';
 import 'services/skill_service.dart';
 import 'services/ssh_connection.dart';
-import 'services/terminal_command_executor.dart';
 import 'services/background_command_executor.dart';
 import 'services/command_execution_history.dart';
 import 'services/wallpaper_storage.dart';
