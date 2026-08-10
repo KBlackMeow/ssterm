@@ -5,8 +5,25 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import '../io/output_pipe.dart';
+import 'command_safety.dart';
 import 'login_shell_environment.dart';
 import 'local_shell_discovery.dart';
+
+typedef BackgroundProcessStarter =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+      Map<String, String>? environment,
+      bool includeParentEnvironment,
+      bool runInShell,
+    });
+
+typedef BackgroundSshSessionStarter =
+    Future<SSHSession> Function(SSHClient client, String command);
+
+Future<SSHSession> _startSshSession(SSHClient client, String command) =>
+    client.execute(command);
 
 /// Host platform used to decide whether Agent can safely start a local,
 /// non-terminal shell.  Kept injectable so the policy has deterministic tests.
@@ -98,11 +115,15 @@ class BackgroundCommandExecutor {
     this.timeout = const Duration(seconds: 120),
     this.outputLimitBytes = 256 * 1024,
     this.loginEnvironmentResolver,
+    this.processStarter,
+    this.sshSessionStarter,
   });
 
   final Duration timeout;
   final int outputLimitBytes;
   final LoginShellEnvironmentResolver? loginEnvironmentResolver;
+  final BackgroundProcessStarter? processStarter;
+  final BackgroundSshSessionStarter? sshSessionStarter;
 
   static final _defaultLoginEnvironmentResolver =
       LoginShellEnvironmentResolver();
@@ -112,6 +133,13 @@ class BackgroundCommandExecutor {
     String command, {
     bool Function()? isCancelled,
   }) async {
+    final safetyReason = CommandSafety.reason(command);
+    if (safetyReason != null) {
+      return CommandResult(
+        output: '[ssterm safety check] $safetyReason',
+        exitCode: null,
+      );
+    }
     final support = target.support;
     if (!support.isSupported) {
       return CommandResult(
@@ -159,7 +187,7 @@ class BackgroundCommandExecutor {
           exitCode: null,
         );
       }
-      process = await Process.start(
+      process = await (processStarter ?? Process.start)(
         runner ?? invocation.executable,
         runner == null
             ? invocation.arguments
@@ -262,11 +290,21 @@ class BackgroundCommandExecutor {
     String command, {
     bool Function()? isCancelled,
   }) async {
+    final safetyReason = CommandSafety.reason(command);
+    if (safetyReason != null) {
+      return CommandResult(
+        output: '[ssterm safety check] $safetyReason',
+        exitCode: null,
+      );
+    }
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
     late final SSHSession session;
     try {
-      session = await client.execute(buildSshBackgroundCommand(cwd, command));
+      session = await (sshSessionStarter ?? _startSshSession)(
+        client,
+        buildSshBackgroundCommand(cwd, command),
+      );
     } catch (error) {
       return CommandResult(
         output: '[ssterm background] Could not start SSH command: $error',

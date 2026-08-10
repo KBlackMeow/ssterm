@@ -1,9 +1,16 @@
 import 'dart:io';
 
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/background_command_executor.dart';
 import 'package:ssterm/services/login_shell_environment.dart';
 import 'package:ssterm/services/local_shell_discovery.dart';
+
+class _UnusedSshClient implements SSHClient {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw StateError('SSH client must not be used');
+}
 
 void main() {
   group('BackgroundCommandTarget.local', () {
@@ -256,6 +263,63 @@ void main() {
       id: 'zsh',
       displayName: 'Zsh',
       executable: '/bin/zsh',
+    );
+
+    test(
+      'rejects operationally unsafe commands before starting a process',
+      () async {
+        var starts = 0;
+        final executor = BackgroundCommandExecutor(
+          processStarter:
+              (
+                executable,
+                arguments, {
+                workingDirectory,
+                runInShell = false,
+                includeParentEnvironment = true,
+                environment,
+              }) async {
+                starts++;
+                throw StateError('process starter must not be called');
+              },
+        );
+
+        final result = await executor.executeLocal(
+          BackgroundCommandTarget.local(
+            shell: zsh,
+            cwd: Directory.current.path,
+            platform: BackgroundCommandPlatform.macos,
+          ),
+          'sleep 1 &',
+        );
+
+        expect(starts, 0);
+        expect(result.exitCode, isNull);
+        expect(result.output, contains('[ssterm safety check]'));
+      },
+    );
+
+    test(
+      'rejects operationally unsafe commands before opening an SSH channel',
+      () async {
+        var starts = 0;
+        final executor = BackgroundCommandExecutor(
+          sshSessionStarter: (client, command) async {
+            starts++;
+            throw StateError('SSH channel starter must not be called');
+          },
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'tail -f app.log',
+        );
+
+        expect(starts, 0);
+        expect(result.exitCode, isNull);
+        expect(result.output, contains('[ssterm safety check]'));
+      },
     );
 
     test(
