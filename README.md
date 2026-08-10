@@ -8,7 +8,7 @@
 
 ## ✨ Highlights
 
-- **🤖 AI Agent** — Chat with an AI assistant beside your terminal. Auto-execute commands, capture output, review dangerous operations, and let the agent write files — all with full terminal context.
+- **🤖 AI Agent** — Chat with an AI assistant beside your terminal. Auto-execute commands, capture output, review dangerous operations, and let the agent write files — all with tab-scoped session context.
 - **🔀 Split Panes** — Horizontal and vertical splits within every tab. Run a local shell and an SSH session side-by-side, or monitor logs while editing remotely.
 - **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Concurrent transfers with a live progress queue. Drag-and-drop upload support.
 - **🔐 Full SSH Client** — Password and private-key auth, `~/.ssh/config` import, jump host / ProxyJump, port forwarding (local, remote, SOCKS5), keepalive with auto-reconnect, and session logging.

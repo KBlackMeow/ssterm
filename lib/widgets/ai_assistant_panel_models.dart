@@ -150,8 +150,8 @@ class _ChatMessage {
   );
 
   /// Inline "command card" inserted into the chat after the agent loop runs
-  /// a command. [text] is the direct output, already cleaned of ANSI by the
-  /// background executor; [commandRun] is the command that ran;
+  /// a command. [text] may still contain ANSI escape sequences;
+  /// [commandRun] is the command that ran;
   /// [commandExitCode] is null when execution did not produce an exit code.
   factory _ChatMessage.system({
     required String text,

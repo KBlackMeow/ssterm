@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/app_config.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
@@ -23,5 +25,13 @@ void main() {
 
     expect(config.agentPosition, AiPanelPosition.bottom);
     expect(config.agentSize, 300);
+  });
+
+  test('does not retain dead pre-Agent layout fields', () {
+    final source = File('lib/models/app_config.dart').readAsStringSync();
+
+    expect(source, isNot(contains('AiPanelPosition aiPosition;')));
+    expect(source, isNot(contains('double? aiSize;')));
+    expect(source, isNot(contains('this.aiSize')));
   });
 }

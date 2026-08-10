@@ -137,6 +137,36 @@ void main() {
     );
   });
 
+  test('builds an env.exe-compatible Git Bash OSC 7 wrapper launch', () {
+    final arguments = buildGitBashInteractiveShellArguments(const [
+      'MSYSTEM=MINGW64',
+      'MSYS=enable_pcon winsymlink:nativestrict',
+      'CHERE_INVOKING=1',
+      'SHELL=/usr/bin/bash',
+      '/usr/bin/bash',
+      '--login',
+      '-i',
+    ]);
+
+    expect(arguments.take(4), [
+      'MSYSTEM=MINGW64',
+      'MSYS=enable_pcon winsymlink:nativestrict',
+      'CHERE_INVOKING=1',
+      'SHELL=/usr/bin/bash',
+    ]);
+    expect(arguments.sublist(4, 9), [
+      '/usr/bin/bash',
+      '--noprofile',
+      '--norc',
+      '-c',
+      isA<String>(),
+    ]);
+    final script = arguments.last;
+    expect(script, contains(r"printf '\033]7;file://%s\033\\'"));
+    expect(script, contains('PROMPT_COMMAND'));
+    expect(script, contains(r'$HOME/.bash_profile'));
+  });
+
   group(
     'LocalShellDiscovery.discoverSync on Windows',
     () {

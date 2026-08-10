@@ -43,4 +43,20 @@ void main() {
     expect(source, contains('pathNormalizer:'));
     expect(source, contains('nativePathForLocalShell(shell, path)'));
   });
+
+  test('README describes Agent context as scoped rather than complete', () {
+    final readme = File('README.md').readAsStringSync();
+
+    expect(readme, isNot(contains('all with full terminal context')));
+    expect(readme, contains('tab-scoped session context'));
+  });
+
+  test('command message docs do not claim ANSI-clean output', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel_models.dart',
+    ).readAsStringSync();
+
+    expect(source, isNot(contains('already cleaned of ANSI')));
+    expect(source, contains('may still contain ANSI escape sequences'));
+  });
 }

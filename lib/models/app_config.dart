@@ -14,26 +14,18 @@ class AppConfig {
     TerminalSettings? terminal,
     SftpPanelPosition? sftpPosition,
     this.sftpSize,
-    AiPanelPosition? aiPosition,
-    this.aiSize,
     AiPanelPosition? agentPosition,
     this.agentSize,
     List<LocalShellOption>? cachedShells,
     this.agent,
   }) : terminal = terminal ?? TerminalSettings(),
        sftpPosition = sftpPosition ?? SftpPanelPosition.bottom,
-       // AI panel defaults to the right: terminal sessions are already
-       // tall-and-narrow, so a side panel preserves more vertical lines
-       // for shell output than a bottom strip would.
-       aiPosition = aiPosition ?? AiPanelPosition.right,
        agentPosition = agentPosition ?? AiPanelPosition.bottom,
        cachedShells = cachedShells ?? const <LocalShellOption>[];
 
   TerminalSettings terminal;
   SftpPanelPosition sftpPosition;
   double? sftpSize;
-  AiPanelPosition aiPosition;
-  double? aiSize;
   AiPanelPosition agentPosition;
   double? agentSize;
   List<LocalShellOption> cachedShells;
@@ -67,13 +59,6 @@ class AppConfig {
           ? SftpPanelPosition.bottom
           : SftpPanelPosition.right,
       sftpSize: (json['sftpSize'] as num?)?.toDouble(),
-      // AI panel: default to right when the key is missing (fresh
-      // install OR a config saved before this field existed).  Only
-      // an explicit `bottom` opts out.
-      aiPosition: json['aiPosition'] == 'bottom'
-          ? AiPanelPosition.bottom
-          : AiPanelPosition.right,
-      aiSize: (json['aiSize'] as num?)?.toDouble(),
       agentPosition: agentPosition == 'right'
           ? AiPanelPosition.right
           : AiPanelPosition.bottom,

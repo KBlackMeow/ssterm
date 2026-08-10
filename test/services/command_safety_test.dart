@@ -323,6 +323,9 @@ void main() {
       final r = CommandSafety.reason('ls > /tmp/out &');
       expect(r, isNotNull);
       expect(r, contains('Background'));
+      expect(r, isNot(contains('nohup')));
+      expect(r, isNot(contains('disown')));
+      expect(r, contains('visible terminal'));
     });
 
     test('per-line check: background on first of two lines is caught', () {

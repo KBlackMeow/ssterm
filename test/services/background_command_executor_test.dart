@@ -905,5 +905,33 @@ void main() {
         expect(result.output, isNot(contains('__SSTERM_CWD_')));
       },
     );
+
+    test('applies the output cap to bytes after a cwd frame', () async {
+      final session = _FakeSshSession();
+      final executor = BackgroundCommandExecutor(
+        outputLimitBytes: 4,
+        sshSessionStarter: (client, command) async {
+          final marker = RegExp(
+            r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
+          ).firstMatch(command)?.group(1);
+          if (marker == null) throw StateError('missing cwd envelope');
+          session.complete(
+            stderr: '${marker}BEGIN__/srv/project${marker}END__0123456789',
+          );
+          return session;
+        },
+      );
+
+      final result = await executor.executeSsh(
+        _UnusedSshClient(),
+        '/srv',
+        'cd project',
+      );
+
+      expect(result.effectiveCwd, '/srv/project');
+      expect(result.output, contains('0123'));
+      expect(result.output, isNot(contains('456789')));
+      expect(result.truncated, isTrue);
+    });
   });
 }

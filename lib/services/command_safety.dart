@@ -323,8 +323,8 @@ class CommandSafety {
             'Agent tracks one direct background process at a time, while a '
             'detached child can outlive it and escape output collection and '
             'cancellation. '
-            'Use `nohup … > /tmp/out.log 2>&1 & disown` and then read '
-            '/tmp/out.log on a later turn.';
+            'Run long-lived tasks in the visible terminal; Agent commands '
+            'must remain bounded foreground work.';
       }
 
       // Defence in depth: a parser crash MUST NOT propagate up — the agent

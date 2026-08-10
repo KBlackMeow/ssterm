@@ -52,6 +52,26 @@ String nativePathForLocalShell(LocalShellOption shell, String cwd) {
   return '$gitRoot\\${cwd.substring(1).replaceAll('/', r'\')}';
 }
 
+/// Replaces Git Bash's ordinary `--login -i` tail with SSTerm's bash
+/// bootstrap while retaining the environment assignments consumed by
+/// Git-for-Windows `env.exe`.
+List<String> buildGitBashInteractiveShellArguments(
+  List<String> discoveredArguments,
+) {
+  final bashIndex = discoveredArguments.indexOf('/usr/bin/bash');
+  final environment = bashIndex < 0
+      ? const <String>[]
+      : discoveredArguments.take(bashIndex).toList(growable: false);
+  return [
+    ...environment,
+    '/usr/bin/bash',
+    '--noprofile',
+    '--norc',
+    '-c',
+    buildInteractiveShellWrapper(),
+  ];
+}
+
 /// Builds the `wsl.exe` invocation used when a distribution has no dedicated
 /// launcher. The discovered login shell is passed as `$1`, never interpolated
 /// into shell source.
@@ -311,6 +331,15 @@ class LocalShellDiscovery {
     Set<String> seen,
   ) {
     final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final gitBashArguments = buildGitBashInteractiveShellArguments(const [
+      'MSYSTEM=MINGW64',
+      'MSYS=enable_pcon winsymlink:nativestrict',
+      'CHERE_INVOKING=1',
+      'SHELL=/usr/bin/bash',
+      '/usr/bin/bash',
+      '--login',
+      '-i',
+    ]);
     final candidates =
         <
           ({
@@ -360,15 +389,7 @@ class LocalShellDiscovery {
             id: 'git-bash',
             name: 'Git Bash',
             path: r'C:\Program Files\Git\usr\bin\env.exe',
-            args: const [
-              'MSYSTEM=MINGW64',
-              'MSYS=enable_pcon winsymlink:nativestrict',
-              'CHERE_INVOKING=1',
-              'SHELL=/usr/bin/bash',
-              '/usr/bin/bash',
-              '--login',
-              '-i',
-            ],
+            args: gitBashArguments,
             env: {
               'MSYSTEM': 'MINGW64',
               // ConPTY pseudo-console support; winsymlink alone is not enough.
@@ -384,15 +405,7 @@ class LocalShellDiscovery {
             id: 'git-bash-x86',
             name: 'Git Bash',
             path: r'C:\Program Files (x86)\Git\usr\bin\env.exe',
-            args: const [
-              'MSYSTEM=MINGW64',
-              'MSYS=enable_pcon winsymlink:nativestrict',
-              'CHERE_INVOKING=1',
-              'SHELL=/usr/bin/bash',
-              '/usr/bin/bash',
-              '--login',
-              '-i',
-            ],
+            args: gitBashArguments,
             env: {
               'MSYSTEM': 'MINGW64',
               'MSYS': 'enable_pcon winsymlink:nativestrict',

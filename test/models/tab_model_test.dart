@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/models/ssh_host.dart';
 import 'package:ssterm/models/tab_model.dart';
+import 'package:ssterm/services/background_command_executor.dart';
 import 'package:ssterm/services/file_write_service.dart';
+import 'package:ssterm/services/local_shell_discovery.dart';
 import 'package:xterm/xterm.dart';
 
 /// Minimal no-op stand-in — `AppTab.editor` only stores the reference,
@@ -196,6 +198,28 @@ void main() {
 
     expect(tab.agentCwd, child.path);
     expect(preview.resolvedPath, target.path);
+  });
+
+  test('a Git Bash cwd is retained for the next command in native form', () {
+    const shell = LocalShellOption(
+      id: 'git-bash',
+      displayName: 'Git Bash',
+      executable: r'C:\Program Files\Git\usr\bin\env.exe',
+    );
+    final tab = AppTab.local(title: 'Git Bash', shell: shell)
+      ..agentCwd = '/c/work';
+
+    tab.applyAgentCommandResult(
+      CommandResult(output: '', exitCode: 0, effectiveCwd: '/d/next'),
+    );
+    final nextTarget = BackgroundCommandTarget.local(
+      shell: tab.localShell!,
+      cwd: tab.agentCwd!,
+      platform: BackgroundCommandPlatform.windows,
+    );
+
+    expect(nextTarget.cwd, '/d/next');
+    expect(nextTarget.processWorkingDirectory, r'D:\next');
   });
 
   group('AppTab.icon', () {

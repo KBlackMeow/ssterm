@@ -1167,6 +1167,8 @@ Done.
       expect(prompt, contains('may contain ANSI escape sequences'));
       expect(prompt, isNot(contains('ANSI-stripped')));
       expect(prompt, contains('without a visible terminal prompt'));
+      expect(prompt, isNot(contains('nohup cmd')));
+      expect(prompt, contains('Run long-lived tasks in the visible terminal'));
     });
 
     test('disabled set never embeds <agent_skills>', () async {
