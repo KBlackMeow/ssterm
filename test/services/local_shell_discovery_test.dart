@@ -116,6 +116,27 @@ void main() {
     }
   });
 
+  test('maps Git Bash MSYS cwd paths to native Windows paths', () {
+    const shell = LocalShellOption(
+      id: 'git-bash',
+      displayName: 'Git Bash',
+      executable: r'C:\Program Files\Git\usr\bin\env.exe',
+    );
+
+    expect(
+      nativePathForLocalShell(shell, '/c/Users/Alice/project'),
+      r'C:\Users\Alice\project',
+    );
+    expect(
+      nativePathForLocalShell(shell, '/home/Alice'),
+      r'C:\Program Files\Git\home\Alice',
+    );
+    expect(
+      nativePathForLocalShell(shell, '//server/share/project'),
+      r'\\server\share\project',
+    );
+  });
+
   group(
     'LocalShellDiscovery.discoverSync on Windows',
     () {

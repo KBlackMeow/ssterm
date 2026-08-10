@@ -14,6 +14,44 @@ bool isOsc7CompatiblePosixShellPath(String path) {
   return name == 'bash' || name == 'zsh';
 }
 
+bool isGitBashShell(LocalShellOption shell) {
+  final executable = shell.executable.toLowerCase().replaceAll('/', r'\');
+  return shell.id.startsWith('git-bash') ||
+      executable.endsWith(r'\bin\bash.exe') ||
+      executable.endsWith(r'\usr\bin\bash.exe');
+}
+
+/// Converts a Git Bash/MSYS view of a cwd to the native path required by
+/// Windows filesystem APIs and `CreateProcess`.
+///
+/// The shell-facing cwd remains unchanged; only host-side consumers use this
+/// mapping. Drive mounts (`/c/...`), UNC paths, and paths below the Git for
+/// Windows installation root are all supported.
+String nativePathForLocalShell(LocalShellOption shell, String cwd) {
+  if (!isGitBashShell(shell) || cwd.isEmpty) return cwd;
+  if (RegExp(r'^[A-Za-z]:[/\\]').hasMatch(cwd)) {
+    return cwd.replaceAll('/', r'\');
+  }
+  if (cwd.startsWith('//')) {
+    return r'\\' + cwd.substring(2).replaceAll('/', r'\');
+  }
+  final drive = RegExp(r'^/([A-Za-z])(?:/(.*))?$').firstMatch(cwd);
+  if (drive != null) {
+    final suffix = drive.group(2);
+    return '${drive.group(1)!.toUpperCase()}:\\'
+        '${suffix == null ? '' : suffix.replaceAll('/', r'\')}';
+  }
+  if (!cwd.startsWith('/')) return cwd;
+
+  final executable = shell.executable.replaceAll('/', r'\');
+  final gitRoot = executable
+      .replaceFirst(RegExp(r'\\usr\\bin\\env\.exe$', caseSensitive: false), '')
+      .replaceFirst(RegExp(r'\\bin\\bash\.exe$', caseSensitive: false), '');
+  if (gitRoot == executable) return cwd;
+  if (cwd == '/') return gitRoot;
+  return '$gitRoot\\${cwd.substring(1).replaceAll('/', r'\')}';
+}
+
 /// Builds the `wsl.exe` invocation used when a distribution has no dedicated
 /// launcher. The discovered login shell is passed as `$1`, never interpolated
 /// into shell source.

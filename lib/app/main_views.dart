@@ -55,7 +55,12 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
         cwdProvider: cwd,
       );
     }
-    return LocalFileSystemAdapter(cwdProvider: cwd);
+    return LocalFileSystemAdapter(
+      cwdProvider: cwd,
+      pathNormalizer: shell != null && isGitBashShell(shell)
+          ? (path) => nativePathForLocalShell(shell, path)
+          : null,
+    );
   }
 
   // ── Desktop layout ─────────────────────────────────────────────────────────

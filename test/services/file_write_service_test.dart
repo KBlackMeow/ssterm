@@ -348,6 +348,18 @@ void main() {
       expect(preview.exists, isFalse);
     });
 
+    test('normalizes a shell cwd before resolving a relative path', () async {
+      final adapter = LocalFileSystemAdapter(
+        cwdProvider: () => '/c/work',
+        pathNormalizer: (path) => path == '/c/work' ? tempRoot.path : path,
+      );
+
+      final preview = await adapter.preview('new.txt');
+
+      expect(preview.resolvedPath, '${tempRoot.path}/new.txt');
+      expect(adapter.currentDirectory, tempRoot.path);
+    });
+
     test('strips a leading `./` before joining against cwd', () async {
       // Matches what shell users type by reflex — the adapter must
       // treat `./foo` and `foo` identically when joining.

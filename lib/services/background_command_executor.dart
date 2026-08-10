@@ -59,6 +59,9 @@ class BackgroundCommandTarget {
   final String cwd;
   final BackgroundCommandPlatform platform;
 
+  String? get processWorkingDirectory =>
+      shell.isWsl ? null : nativePathForLocalShell(shell, cwd);
+
   BackgroundCommandSupport get support {
     if (platform == BackgroundCommandPlatform.windows) {
       if (shell.id == 'cmd' ||
@@ -164,6 +167,11 @@ class BackgroundCommandExecutor {
     }
 
     final wslMarker = target.shell.isWsl ? _wslMarkerPath() : null;
+    final posixMarker =
+        target.platform == BackgroundCommandPlatform.macos ||
+            target.platform == BackgroundCommandPlatform.linux
+        ? _posixMarkerPath()
+        : null;
     final completionMarker = _completionMarker();
     final environment = _nonInteractiveEnvironment(target.shell.environment);
     if (target.platform == BackgroundCommandPlatform.macos ||
@@ -186,6 +194,7 @@ class BackgroundCommandExecutor {
         target,
         command,
         wslProcessMarker: wslMarker,
+        posixProcessMarker: posixMarker,
         completionMarker: completionMarker,
       );
       final usesWindowsJobRunner =
@@ -212,7 +221,7 @@ class BackgroundCommandExecutor {
         // WSL receives its Linux working directory through its own arguments.
         // Passing Agent's POSIX path to CreateProcess would instead be treated
         // as a Windows path and can prevent wsl.exe from starting.
-        workingDirectory: target.shell.isWsl ? null : target.cwd,
+        workingDirectory: target.processWorkingDirectory,
         runInShell: false,
         includeParentEnvironment: true,
         environment: environment,
@@ -224,6 +233,7 @@ class BackgroundCommandExecutor {
         exitCode: null,
       );
     }
+    var cancelled = isCancelled?.call() == true;
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
     final stderrEnvelope = _CwdEnvelopeOutput(stderr, completionMarker);
@@ -237,20 +247,21 @@ class BackgroundCommandExecutor {
       stderrDone,
     ]);
 
-    var cancelled = false;
+    Future<void>? termination;
+    Future<void> terminate(ProcessSignal signal) => _terminateLocalProcess(
+      process,
+      target,
+      signal,
+      wslMarker: wslMarker,
+      posixMarker: posixMarker,
+    );
+    if (cancelled) termination = terminate(ProcessSignal.sigterm);
     final cancellationPoll = Timer.periodic(const Duration(milliseconds: 50), (
       timer,
     ) {
       if (isCancelled?.call() != true || cancelled) return;
       cancelled = true;
-      if (wslMarker != null) {
-        unawaited(_terminateWslProcessGroup(target.shell, wslMarker));
-      }
-      process.kill(
-        target.platform == BackgroundCommandPlatform.windows
-            ? ProcessSignal.sigkill
-            : ProcessSignal.sigterm,
-      );
+      termination = terminate(ProcessSignal.sigterm);
       timer.cancel();
     });
 
@@ -259,30 +270,22 @@ class BackgroundCommandExecutor {
       Future<bool>.delayed(timeout, () => true),
     ]);
     if (timedOut) {
-      if (wslMarker != null) {
-        unawaited(_terminateWslProcessGroup(target.shell, wslMarker));
-      }
-      process.kill(
-        target.platform == BackgroundCommandPlatform.windows
-            ? ProcessSignal.sigkill
-            : ProcessSignal.sigterm,
-      );
+      termination ??= terminate(ProcessSignal.sigterm);
     }
+    await termination;
 
-    // A SIGTERM-resistant direct child still gets a final hard kill. This is
-    // intentionally direct-child cleanup only; process-tree containment is a
-    // later native-helper enhancement, not a claim made by this v1 executor.
     if (timedOut || cancelled) {
       final stopped = await Future.any<bool>([
         completed.then((_) => true),
         Future<bool>.delayed(const Duration(seconds: 2), () => false),
       ]);
-      if (!stopped) process.kill(ProcessSignal.sigkill);
+      if (!stopped) await terminate(ProcessSignal.sigkill);
     }
     await completed;
     stderrEnvelope.close();
     cancellationPoll.cancel();
     if (wslMarker != null) unawaited(_removeWslMarker(target.shell, wslMarker));
+    if (posixMarker != null) unawaited(_removePosixMarker(posixMarker));
     final status = cancelled
         ? 'cancelled'
         : timedOut
@@ -343,12 +346,16 @@ class BackgroundCommandExecutor {
       );
     }
 
+    var cancelled = isCancelled?.call() == true;
+    if (cancelled) {
+      session.kill(SSHSignal.TERM);
+      session.close();
+    }
     final stdoutDone = session.stdout.listen(stdout.add).asFuture<void>();
     final stderrDone = session.stderr
         .listen(stderrEnvelope.add)
         .asFuture<void>();
     final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
-    var cancelled = false;
     final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       if (isCancelled?.call() != true || cancelled) return;
       cancelled = true;
@@ -416,6 +423,10 @@ class BackgroundCommandExecutor {
   String _wslMarkerPath() =>
       '/tmp/ssterm-agent-$pid-${DateTime.now().microsecondsSinceEpoch}.pid';
 
+  String _posixMarkerPath() =>
+      '${Directory.systemTemp.path}/ssterm-agent-$pid-'
+      '${DateTime.now().microsecondsSinceEpoch}.pgid';
+
   String _completionMarker() {
     final random = Random.secure();
     final nonce = List.generate(
@@ -469,28 +480,106 @@ class BackgroundCommandExecutor {
       marker,
     ], runInShell: false);
   }
+
+  Future<void> _terminateLocalProcess(
+    Process process,
+    BackgroundCommandTarget target,
+    ProcessSignal signal, {
+    required String? wslMarker,
+    required String? posixMarker,
+  }) async {
+    if (wslMarker != null) {
+      await _terminateWslProcessGroup(target.shell, wslMarker);
+      process.kill(ProcessSignal.sigkill);
+      return;
+    }
+    if (posixMarker != null) {
+      final signalled = await _signalPosixProcessGroup(posixMarker, signal);
+      if (!signalled) process.kill(signal);
+      return;
+    }
+    process.kill(ProcessSignal.sigkill);
+  }
+
+  Future<bool> _signalPosixProcessGroup(
+    String marker,
+    ProcessSignal signal,
+  ) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      try {
+        final processGroup = int.tryParse(await File(marker).readAsString());
+        if (processGroup != null && processGroup > 1) {
+          return Process.killPid(-processGroup, signal);
+        }
+      } on FileSystemException {
+        // The wrapper writes the process-group id immediately after launch.
+      }
+      if (attempt < 9) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
+    return false;
+  }
+
+  Future<void> _removePosixMarker(String marker) async {
+    try {
+      await File(marker).delete();
+    } on FileSystemException {
+      // The shell wrapper normally removes its marker before it exits.
+    }
+  }
 }
 
-String _wrapPosixCommandForCwd(String command, String marker) =>
-    '$command\n'
-    '__ssterm_exit=\$?\n'
-    'printf %s ${BackgroundCommandExecutor.shellQuotePosix(marker)} >&2\n'
-    'printf %s "\$PWD" >&2\n'
-    'exit "\$__ssterm_exit"';
+String _wrapPosixCommandForCwd(String command, String marker) {
+  final begin = BackgroundCommandExecutor.shellQuotePosix('${marker}BEGIN__');
+  final end = BackgroundCommandExecutor.shellQuotePosix('${marker}END__');
+  return '$command\n'
+      '__ssterm_exit=\$?\n'
+      '__ssterm_had_xtrace=0\n'
+      'case \$- in *x*) __ssterm_had_xtrace=1; set +x ;; esac\n'
+      'printf %s $begin >&2\n'
+      'printf %s "\$PWD" >&2\n'
+      'printf %s $end >&2\n'
+      'if [ "\$__ssterm_had_xtrace" = 1 ]; then set -x; fi\n'
+      'exit "\$__ssterm_exit"';
+}
+
+String _posixProcessTreeSupervisor() {
+  return 'set -m\n'
+      '"\$1" -c "\$2" &\n'
+      '__ssterm_child=\$!\n'
+      'set +m\n'
+      'printf %s "\$__ssterm_child" > "\$3"\n'
+      '__ssterm_stop() {\n'
+      '  trap - TERM INT HUP\n'
+      '  kill -TERM -- "-\$__ssterm_child" 2>/dev/null || '
+      'kill -TERM "\$__ssterm_child" 2>/dev/null\n'
+      '  wait "\$__ssterm_child" 2>/dev/null\n'
+      '  rm -f -- "\$3"\n'
+      '  exit 143\n'
+      '}\n'
+      'trap __ssterm_stop TERM INT HUP\n'
+      'wait "\$__ssterm_child"\n'
+      '__ssterm_status=\$?\n'
+      'trap - TERM INT HUP\n'
+      'rm -f -- "\$3"\n'
+      'exit "\$__ssterm_status"';
+}
 
 String _wrapCmdCommandForCwd(String command, String marker) =>
     '$command\r\n'
     'set "__ssterm_exit=%errorlevel%"\r\n'
-    '>&2 <nul set /p "=$marker%CD%"\r\n'
+    '>&2 <nul set /p "=${marker}BEGIN__%CD%${marker}END__"\r\n'
     'exit /b %__ssterm_exit%';
 
 String _wrapPowerShellCommandForCwd(String command, String marker) {
   final quotedMarker = marker.replaceAll("'", "''");
   return '& { $command }\n'
       r'$__ssterm_exit = if ($?) { 0 } elseif ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 1 }'
-      '\n[Console]::Error.Write(\'$quotedMarker\')\n'
+      '\n[Console]::Error.Write(\'${quotedMarker}BEGIN__\')\n'
       r'[Console]::Error.Write((Get-Location).ProviderPath)'
       '\n'
+      '[Console]::Error.Write(\'${quotedMarker}END__\')\n'
       r'exit $__ssterm_exit';
 }
 
@@ -561,6 +650,7 @@ String? validateBackgroundCommandSyntax(
   BackgroundCommandTarget target,
   String command, {
   String? wslProcessMarker,
+  String? posixProcessMarker,
   String? completionMarker,
 }) {
   final shell = target.shell;
@@ -568,7 +658,21 @@ String? validateBackgroundCommandSyntax(
       ? command
       : _wrapCommandForCwd(target, command, completionMarker);
   if (target.platform != BackgroundCommandPlatform.windows) {
-    return (executable: shell.executable, arguments: ['-c', executionCommand]);
+    return (
+      executable: posixProcessMarker == null ? shell.executable : '/bin/sh',
+      arguments: [
+        '-c',
+        posixProcessMarker == null
+            ? executionCommand
+            : _posixProcessTreeSupervisor(),
+        if (posixProcessMarker != null) ...[
+          'ssterm-process-supervisor',
+          shell.executable,
+          executionCommand,
+          posixProcessMarker,
+        ],
+      ],
+    );
   }
   if (shell.id == 'cmd') {
     return (
@@ -692,44 +796,67 @@ class _BoundedOutput {
 
 class _CwdEnvelopeOutput {
   _CwdEnvelopeOutput(this.output, String marker)
-    : _marker = utf8.encode(marker);
+    : _begin = utf8.encode('${marker}BEGIN__'),
+      _end = utf8.encode('${marker}END__');
 
   final _BoundedOutput output;
-  final List<int> _marker;
-  List<int> _pending = const [];
-  final BytesBuilder _cwd = BytesBuilder(copy: false);
-  bool _found = false;
+  final List<int> _begin;
+  final List<int> _end;
+  List<int> _pending = <int>[];
+  List<int>? _cwd;
+  bool _insideFrame = false;
 
   void add(List<int> chunk) {
-    if (_found) {
-      _cwd.add(chunk);
-      return;
-    }
-    final combined = <int>[..._pending, ...chunk];
-    final markerIndex = _indexOf(combined, _marker);
-    if (markerIndex >= 0) {
-      output.add(combined.sublist(0, markerIndex));
-      _cwd.add(combined.sublist(markerIndex + _marker.length));
-      _pending = const [];
-      _found = true;
-      return;
-    }
+    _pending.addAll(chunk);
+    while (true) {
+      if (!_insideFrame) {
+        final beginIndex = _indexOf(_pending, _begin);
+        if (beginIndex < 0) {
+          final retained = min(_begin.length - 1, _pending.length);
+          final safeLength = _pending.length - retained;
+          if (safeLength > 0) output.add(_pending.sublist(0, safeLength));
+          _pending = _pending.sublist(safeLength);
+          return;
+        }
+        output.add(_pending.sublist(0, beginIndex));
+        _pending = _pending.sublist(beginIndex + _begin.length);
+        _insideFrame = true;
+      }
 
-    final retained = min(_marker.length - 1, combined.length);
-    final safeLength = combined.length - retained;
-    if (safeLength > 0) output.add(combined.sublist(0, safeLength));
-    _pending = combined.sublist(safeLength);
+      final endIndex = _indexOf(_pending, _end);
+      if (endIndex < 0) return;
+      final candidate = _pending.sublist(0, endIndex);
+      final trailing = _pending.sublist(endIndex + _end.length);
+      if (_validCwd(candidate)) {
+        _cwd = candidate;
+      } else {
+        output.add([..._begin, ...candidate, ..._end]);
+      }
+      _insideFrame = false;
+      _pending = trailing;
+    }
   }
 
   void close() {
-    if (!_found && _pending.isNotEmpty) output.add(_pending);
-    _pending = const [];
+    if (_pending.isNotEmpty) {
+      output.add([if (_insideFrame) ..._begin, ..._pending]);
+    }
+    _pending = <int>[];
   }
 
   String? get effectiveCwd {
-    if (!_found) return null;
-    final cwd = utf8.decode(_cwd.toBytes(), allowMalformed: false);
-    return cwd.isEmpty || cwd.contains('\u0000') ? null : cwd;
+    final cwd = _cwd;
+    return cwd == null ? null : utf8.decode(cwd, allowMalformed: false);
+  }
+
+  bool _validCwd(List<int> candidate) {
+    if (candidate.isEmpty || candidate.contains(0)) return false;
+    try {
+      utf8.decode(candidate, allowMalformed: false);
+      return true;
+    } on FormatException {
+      return false;
+    }
   }
 
   int _indexOf(List<int> bytes, List<int> pattern) {

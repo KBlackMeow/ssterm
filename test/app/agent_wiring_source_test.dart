@@ -36,4 +36,11 @@ void main() {
     expect(host, contains('tab.isAgentExecutionCancelled'));
     expect(host, contains('tab.applyAgentCommandResult(result)'));
   });
+
+  test('Git Bash file tools normalize the shell cwd for host I/O', () {
+    final source = File('lib/app/main_views.dart').readAsStringSync();
+
+    expect(source, contains('pathNormalizer:'));
+    expect(source, contains('nativePathForLocalShell(shell, path)'));
+  });
 }

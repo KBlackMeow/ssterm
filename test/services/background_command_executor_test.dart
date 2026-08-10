@@ -62,6 +62,43 @@ class _FakeSshSession implements SSHSession {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _FakeProcess implements Process {
+  final _stdout = StreamController<List<int>>();
+  final _stderr = StreamController<List<int>>();
+  final _exitCode = Completer<int>();
+
+  bool killed = false;
+
+  @override
+  Stream<List<int>> get stdout => _stdout.stream;
+
+  @override
+  Stream<List<int>> get stderr => _stderr.stream;
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  int get pid => 4242;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    return true;
+  }
+
+  void complete([int code = 0]) {
+    scheduleMicrotask(() async {
+      if (!_exitCode.isCompleted) _exitCode.complete(code);
+      await _stdout.close();
+      await _stderr.close();
+    });
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   group('BackgroundCommandTarget.local', () {
     const zsh = LocalShellOption(
@@ -375,6 +412,22 @@ void main() {
         isNull,
       );
     });
+
+    test('uses a native working directory while retaining Git Bash cwd', () {
+      const shell = LocalShellOption(
+        id: 'git-bash',
+        displayName: 'Git Bash',
+        executable: r'C:\Program Files\Git\usr\bin\env.exe',
+      );
+      final target = BackgroundCommandTarget.local(
+        shell: shell,
+        cwd: '/d/work/project',
+        platform: BackgroundCommandPlatform.windows,
+      );
+
+      expect(target.processWorkingDirectory, r'D:\work\project');
+      expect(target.cwd, '/d/work/project');
+    });
   });
 
   group('BackgroundCommandExecutor', () {
@@ -494,28 +547,92 @@ void main() {
     );
 
     test(
-      'cancels only the background child command',
+      'cancels and awaits an in-flight POSIX command process tree',
       () async {
-        final result =
-            await const BackgroundCommandExecutor(
-              timeout: Duration(seconds: 5),
+        final root = await Directory.systemTemp.createTemp(
+          'ssterm-cancel-tree-',
+        );
+        final pidFile = File('${root.path}/child.pid');
+        addTearDown(() => root.delete(recursive: true));
+        var cancelled = false;
+        final stopwatch = Stopwatch()..start();
+
+        final pending =
+            const BackgroundCommandExecutor(
+              timeout: Duration(seconds: 10),
             ).executeLocal(
               BackgroundCommandTarget.local(
                 shell: zsh,
                 cwd: Directory.current.path,
                 platform: BackgroundCommandPlatform.macos,
               ),
-              'sleep 5',
-              isCancelled: () => true,
+              'sh -c ${BackgroundCommandExecutor.shellQuotePosix('printf %s "\$\$" > ${BackgroundCommandExecutor.shellQuotePosix(pidFile.path)}; exec sleep 5')}',
+              isCancelled: () => cancelled,
             );
+
+        for (
+          var attempt = 0;
+          attempt < 200 && !await pidFile.exists();
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(await pidFile.exists(), isTrue);
+        final childPid = int.parse((await pidFile.readAsString()).trim());
+        cancelled = true;
+        final result = await pending;
+        stopwatch.stop();
 
         expect(result.exitCode, isNull);
         expect(result.output, contains('cancelled'));
         expect(result.cancelled, isTrue);
+        expect(stopwatch.elapsed, lessThan(const Duration(seconds: 3)));
+        final stillRunning = await Process.run('/bin/kill', [
+          '-0',
+          childPid.toString(),
+        ]);
+        expect(stillRunning.exitCode, isNot(0));
       },
       skip: Platform.isWindows
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
           : false,
+    );
+
+    test(
+      'cancels a local command invalidated while Process.start completes',
+      () async {
+        final process = _FakeProcess();
+        var cancelled = false;
+        final executor = BackgroundCommandExecutor(
+          processStarter:
+              (
+                executable,
+                arguments, {
+                workingDirectory,
+                runInShell = false,
+                includeParentEnvironment = true,
+                environment,
+              }) async {
+                cancelled = true;
+                process.complete();
+                return process;
+              },
+        );
+
+        final result = await executor.executeLocal(
+          BackgroundCommandTarget.local(
+            shell: zsh,
+            cwd: Directory.current.path,
+            platform: BackgroundCommandPlatform.macos,
+          ),
+          'printf ok',
+          isCancelled: () => cancelled,
+        );
+
+        expect(process.killed, isTrue);
+        expect(result.cancelled, isTrue);
+        expect(result.exitCode, isNull);
+      },
     );
 
     test('cancels only the per-command SSH channel', () async {
@@ -541,6 +658,33 @@ void main() {
       expect(result.exitCode, isNull);
       expect(result.cancelled, isTrue);
     });
+
+    test(
+      'cancels an SSH command invalidated while session start completes',
+      () async {
+        final session = _FakeSshSession();
+        var cancelled = false;
+        final executor = BackgroundCommandExecutor(
+          sshSessionStarter: (client, command) async {
+            cancelled = true;
+            session.complete();
+            return session;
+          },
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'printf ok',
+          isCancelled: () => cancelled,
+        );
+
+        expect(session.killedWith, SSHSignal.TERM);
+        expect(session.closed, isTrue);
+        expect(result.cancelled, isTrue);
+        expect(result.exitCode, isNull);
+      },
+    );
 
     test('uses the Agent cwd', () async {
       final dir = await Directory.systemTemp.createTemp('ssterm-agent-cwd-');
@@ -587,6 +731,29 @@ void main() {
 
       expect(next.output, contains(canonicalChild));
     });
+
+    test(
+      'uses a complete cwd frame and preserves later traced stderr',
+      () async {
+        final root = await Directory.systemTemp.createTemp('ssterm-cwd-frame-');
+        final child = await Directory('${root.path}/child').create();
+        addTearDown(() => root.delete(recursive: true));
+
+        final result = await const BackgroundCommandExecutor().executeLocal(
+          BackgroundCommandTarget.local(
+            shell: zsh,
+            cwd: root.path,
+            platform: BackgroundCommandPlatform.macos,
+          ),
+          "set -x\ntrap 'printf late-trap >&2' EXIT\ncd child",
+        );
+
+        expect(result.exitCode, 0);
+        expect(result.effectiveCwd, await child.resolveSymbolicLinks());
+        expect(result.output, contains('late-trap'));
+        expect(result.output, isNot(contains('__SSTERM_CWD_')));
+      },
+    );
 
     test('uses the resolved login-shell PATH for a POSIX command', () async {
       final resolver = LoginShellEnvironmentResolver(
@@ -686,10 +853,12 @@ void main() {
         final executor = BackgroundCommandExecutor(
           sshSessionStarter: (client, command) async {
             final marker = RegExp(
-              r"printf %s '([^']+)' >&2",
+              r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
             ).firstMatch(command)?.group(1);
             if (marker == null) throw StateError('missing cwd envelope');
-            session.complete(stderr: '$marker/srv/project');
+            session.complete(
+              stderr: '${marker}BEGIN__/srv/project${marker}END__',
+            );
             return session;
           },
         );
@@ -702,6 +871,37 @@ void main() {
 
         expect(result.exitCode, 0);
         expect(result.effectiveCwd, '/srv/project');
+        expect(result.output, isNot(contains('__SSTERM_CWD_')));
+      },
+    );
+
+    test(
+      'uses the last valid complete cwd frame and strips only frames',
+      () async {
+        final session = _FakeSshSession();
+        final executor = BackgroundCommandExecutor(
+          sshSessionStarter: (client, command) async {
+            final marker = RegExp(
+              r"printf %s '(__SSTERM_CWD_[^']+__)BEGIN__' >&2",
+            ).firstMatch(command)?.group(1);
+            if (marker == null) throw StateError('missing cwd envelope');
+            session.complete(
+              stderr:
+                  'before${marker}BEGIN__/first${marker}END__middle'
+                  '${marker}BEGIN__/last${marker}END__after',
+            );
+            return session;
+          },
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'cd project',
+        );
+
+        expect(result.effectiveCwd, '/last');
+        expect(result.output, contains('beforemiddleafter'));
         expect(result.output, isNot(contains('__SSTERM_CWD_')));
       },
     );

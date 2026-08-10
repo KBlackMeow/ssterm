@@ -228,7 +228,16 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   /// back to the existing `invalidPath` error.
   final String? Function()? cwdProvider;
 
-  const LocalFileSystemAdapter({this.homeOverride, this.cwdProvider});
+  /// Converts shell-visible absolute paths to the host filesystem's form.
+  /// Git Bash supplies an MSYS-to-Windows mapper; native shells leave this
+  /// unset.
+  final String Function(String path)? pathNormalizer;
+
+  const LocalFileSystemAdapter({
+    this.homeOverride,
+    this.cwdProvider,
+    this.pathNormalizer,
+  });
 
   @override
   String get label => 'local';
@@ -237,8 +246,11 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
   bool get isAvailable => true;
 
   @override
-  String? get currentDirectory =>
-      cwdProvider?.call() ?? homeOverride ?? userHomeDir();
+  String? get currentDirectory {
+    final cwd = cwdProvider?.call();
+    if (cwd != null) return pathNormalizer?.call(cwd) ?? cwd;
+    return homeOverride ?? userHomeDir();
+  }
 
   @override
   Future<String?> homeDirectory() async => homeOverride ?? userHomeDir();
@@ -413,13 +425,17 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
       }
       p = p == '~' ? home : '$home${p.substring(1)}';
     }
+    p = pathNormalizer?.call(p) ?? p;
     if (!p.startsWith('/') && !_isWindowsAbsolute(p)) {
       // Try resolving against the Agent's cwd. We only do
       // this when the host supplied a `cwdProvider` AND it returns a
       // non-empty value — falling back to `Directory.current` would
       // resolve to the .app bundle on macOS, which is never what the
       // user wants.
-      final cwd = cwdProvider?.call();
+      final shellCwd = cwdProvider?.call();
+      final cwd = shellCwd == null
+          ? null
+          : (pathNormalizer?.call(shellCwd) ?? shellCwd);
       if (cwd != null &&
           cwd.isNotEmpty &&
           (cwd.startsWith('/') || _isWindowsAbsolute(cwd))) {
