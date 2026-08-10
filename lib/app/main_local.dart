@@ -323,6 +323,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         }
         if (cwd != null && tab.localPath != null && !tab.manuallyDisconnected) {
           tab.localPath!.value = cwd;
+          // Keep the Agent's independent execution context aligned with the
+          // visible local shell. SSH tabs do this through noteRemoteCwd(); the
+          // local OSC-7 path must update both consumers as well.
+          tab.agentCwd = cwd;
         }
         return parsed.cleaned;
       },

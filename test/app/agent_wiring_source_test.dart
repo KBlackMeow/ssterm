@@ -60,6 +60,20 @@ void main() {
     expect(source, contains('nativePathForLocalShell(shell, path)'));
   });
 
+  test('local OSC 7 cwd updates the Agent execution context', () {
+    final source = File('lib/app/main_local.dart').readAsStringSync();
+
+    final localCwdUpdate = source.substring(
+      source.indexOf('if (cwd != null && tab.localPath != null'),
+      source.indexOf(
+        'return parsed.cleaned;',
+        source.indexOf('if (cwd != null && tab.localPath != null'),
+      ),
+    );
+    expect(localCwdUpdate, contains('tab.localPath!.value = cwd;'));
+    expect(localCwdUpdate, contains('tab.agentCwd = cwd;'));
+  });
+
   test('README describes Agent context as scoped rather than complete', () {
     final readme = File('README.md').readAsStringSync();
 
