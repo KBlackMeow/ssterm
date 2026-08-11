@@ -425,10 +425,103 @@ typedef struct PtyHandle
 
 } PtyHandle;
 
-char *error_message = NULL;
+static __declspec(thread) char error_buffer[1024];
+static __declspec(thread) BOOL has_error = FALSE;
+
+static void set_windows_error(const char *stage, DWORD code)
+{
+    WCHAR wide_message[512] = {0};
+    char utf8_message[768] = {0};
+    DWORD length = FormatMessageW(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        code,
+        0,
+        wide_message,
+        (DWORD)(sizeof(wide_message) / sizeof(wide_message[0])),
+        NULL);
+
+    while (length > 0 && (wide_message[length - 1] == L'\r' ||
+                          wide_message[length - 1] == L'\n' ||
+                          wide_message[length - 1] == L' '))
+    {
+        wide_message[--length] = L'\0';
+    }
+
+    if (length > 0)
+    {
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            wide_message,
+            -1,
+            utf8_message,
+            (int)sizeof(utf8_message),
+            NULL,
+            NULL);
+    }
+
+    if (utf8_message[0] != '\0')
+    {
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "%s (Windows error %lu: %s)", stage,
+                 (unsigned long)code, utf8_message);
+    }
+    else
+    {
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "%s (Windows error %lu)", stage, (unsigned long)code);
+    }
+    has_error = TRUE;
+}
+
+static void set_hresult_error(const char *stage, HRESULT result)
+{
+    DWORD message_code = HRESULT_FACILITY(result) == FACILITY_WIN32
+        ? HRESULT_CODE(result)
+        : (DWORD)result;
+    WCHAR wide_message[512] = {0};
+    char utf8_message[768] = {0};
+    DWORD length = FormatMessageW(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        message_code,
+        0,
+        wide_message,
+        (DWORD)(sizeof(wide_message) / sizeof(wide_message[0])),
+        NULL);
+
+    while (length > 0 && (wide_message[length - 1] == L'\r' ||
+                          wide_message[length - 1] == L'\n' ||
+                          wide_message[length - 1] == L' '))
+    {
+        wide_message[--length] = L'\0';
+    }
+    if (length > 0)
+    {
+        WideCharToMultiByte(
+            CP_UTF8, 0, wide_message, -1, utf8_message,
+            (int)sizeof(utf8_message), NULL, NULL);
+    }
+
+    if (utf8_message[0] != '\0')
+    {
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "%s (HRESULT 0x%08lX: %s)", stage,
+                 (unsigned long)(DWORD)result, utf8_message);
+    }
+    else
+    {
+        snprintf(error_buffer, sizeof(error_buffer),
+                 "%s (HRESULT 0x%08lX)", stage,
+                 (unsigned long)(DWORD)result);
+    }
+    has_error = TRUE;
+}
 
 FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 {
+    has_error = FALSE;
     HANDLE inputReadSide = NULL;
     HANDLE inputWriteSide = NULL;
     HANDLE outputReadSide = NULL;
@@ -448,13 +541,13 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     // --- create pipes ---
     if (!CreatePipe(&inputReadSide, &inputWriteSide, NULL, 0))
     {
-        error_message = "Failed to create input pipe";
+        set_windows_error("CreatePipe(input) failed", GetLastError());
         goto cleanup;
     }
 
     if (!CreatePipe(&outputReadSide, &outputWriteSide, NULL, 0))
     {
-        error_message = "Failed to create output pipe";
+        set_windows_error("CreatePipe(output) failed", GetLastError());
         goto cleanup;
     }
 
@@ -467,7 +560,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 
     if (FAILED(result))
     {
-        error_message = "Failed to create pseudo console";
+        set_hresult_error("CreatePseudoConsole failed", result);
         goto cleanup;
     }
 
@@ -485,9 +578,19 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     InitializeProcThreadAttributeList(NULL, 1, 0, &bytesRequired);
     lpAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST)malloc(bytesRequired);
 
+    if (lpAttributeList == NULL)
+    {
+        set_windows_error(
+            "Allocating process attribute list failed",
+            ERROR_NOT_ENOUGH_MEMORY);
+        goto cleanup;
+    }
+
     if (!InitializeProcThreadAttributeList(lpAttributeList, 1, 0, &bytesRequired))
     {
-        error_message = "Failed to initialize proc thread attribute list";
+        set_windows_error(
+            "InitializeProcThreadAttributeList failed",
+            GetLastError());
         goto cleanup;
     }
     startupInfo.lpAttributeList = lpAttributeList;
@@ -500,7 +603,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
                                    NULL,
                                    NULL))
     {
-        error_message = "Failed to update proc thread attribute list";
+        set_windows_error("UpdateProcThreadAttribute failed", GetLastError());
         goto cleanup;
     }
 
@@ -530,9 +633,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 
     if (!ok)
     {
-        error_message = "Failed to create process";
-        DWORD error = GetLastError();
-        printf("error no: %d\n", error);
+        set_windows_error("CreateProcessW failed", GetLastError());
         goto cleanup;
     }
 
@@ -547,18 +648,23 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     CloseHandle(outputWriteSide);
     outputWriteSide = NULL;
 
-    mutex = CreateSemaphore(NULL, 1, 1, NULL);
-
-    start_read_thread(outputReadSide, options->stdout_port, mutex, options->ackRead);
-    start_wait_exit_thread(processInfo.hProcess, options->exit_port, mutex);
-
     pty = malloc(sizeof(PtyHandle));
 
     if (pty == NULL)
     {
-        error_message = "Failed to allocate pty handle";
+        set_windows_error("Allocating PTY handle failed", ERROR_NOT_ENOUGH_MEMORY);
         goto cleanup;
     }
+
+    mutex = CreateSemaphore(NULL, 1, 1, NULL);
+    if (mutex == NULL)
+    {
+        set_windows_error("CreateSemaphore failed", GetLastError());
+        goto cleanup;
+    }
+
+    start_read_thread(outputReadSide, options->stdout_port, mutex, options->ackRead);
+    start_wait_exit_thread(processInfo.hProcess, options->exit_port, mutex);
 
     pty->inputWriteSide = inputWriteSide;
     pty->outputReadSide = outputReadSide;
@@ -589,7 +695,7 @@ cleanup:
     free(command);
     free(environment_block);
     free(working_directory);
-    // pty is NULL here so nothing to free
+    free(pty);
     return NULL;
 }
 
@@ -706,7 +812,7 @@ FFI_PLUGIN_EXPORT int pty_getpid(PtyHandle *handle)
 
 FFI_PLUGIN_EXPORT char *pty_error()
 {
-    return error_message;
+    return has_error ? error_buffer : NULL;
 }
 
 typedef struct JobHandle

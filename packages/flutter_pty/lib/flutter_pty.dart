@@ -84,10 +84,10 @@ class PtyStartException implements Exception {
 }
 
 /// Runs [pty_create] inside a background isolate so the main isolate never
-/// blocks on the FFI call.  Returns the raw pointer address on success or -1
-/// on failure (caller reads [pty_error] for the message).
+/// blocks on the FFI call. Copies [pty_error] in that same isolate because
+/// FFI library state is not reliable when read later from the main isolate.
 @pragma('vm:entry-point')
-int _ptyCreateInIsolate({
+({int handleAddr, String? error}) _ptyCreateInIsolate({
   required int stdoutPort,
   required int exitPort,
   required String executable,
@@ -151,8 +151,25 @@ int _ptyCreateInIsolate({
     calloc.free(envp);
   }
 
-  if (handle == nullptr) return -1;
-  return handle.address;
+  if (handle == nullptr) {
+    return (handleAddr: -1, error: _getPtyError());
+  }
+  return (handleAddr: handle.address, error: null);
+}
+
+/// Formats safe launch context for a PTY startup error. Argument values and
+/// environment contents are deliberately omitted because they can contain
+/// encoded scripts, commands, credentials, and other sensitive data.
+String formatPtyStartContext({
+  required String executable,
+  required List<String> arguments,
+  required String? workingDirectory,
+}) {
+  final lengths = arguments.map((argument) => argument.length).join(', ');
+  return 'executable=$executable, '
+      'cwd=${workingDirectory ?? '<inherited>'}, '
+      'argumentCount=${arguments.length}, '
+      'argumentLengths=[$lengths]';
 }
 
 /// Pty represents a process running in a pseudo-terminal.
@@ -254,7 +271,7 @@ class Pty {
     final exitPortId = exitPort.sendPort.nativePort;
 
     try {
-      final handleAddr = await Isolate.run(() => _ptyCreateInIsolate(
+      final nativeResult = await Isolate.run(() => _ptyCreateInIsolate(
             stdoutPort: stdoutPortId,
             exitPort: exitPortId,
             executable: executable,
@@ -266,14 +283,20 @@ class Pty {
             ackRead: ackRead,
           )).timeout(const Duration(seconds: 30));
 
-      if (handleAddr == -1) {
-        final err = _getPtyError();
+      if (nativeResult.handleAddr == -1) {
+        final err = nativeResult.error;
+        final context = formatPtyStartContext(
+          executable: executable,
+          arguments: arguments,
+          workingDirectory: workingDirectory,
+        );
         throw PtyStartException(
-          err != null ? 'Failed to create PTY: $err' : 'Failed to create PTY',
+          '${err != null ? 'Failed to create PTY: $err' : 'Failed to create PTY'}\n'
+          'Launch context: $context',
         );
       }
 
-      final handle = Pointer<PtyHandle>.fromAddress(handleAddr);
+      final handle = Pointer<PtyHandle>.fromAddress(nativeResult.handleAddr);
       return Pty._(
         executable: executable,
         arguments: arguments,
