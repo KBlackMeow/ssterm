@@ -246,8 +246,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
     final usePowerShellCwdWrapper =
         shell.usePowerShellCwdWrapper && Platform.isWindows;
+    var powerShellPolicyFallback = false;
 
-    final Pty pty;
+    late Pty pty;
     try {
       if (useUnixWrapper) {
         // On iOS login-shell flag (-l) causes /bin/sh to source system profile
@@ -266,15 +267,31 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         );
       } else if (usePowerShellCwdWrapper) {
         final encoded = encodePowerShellCommand(buildPowerShellOsc7Prelude());
-        pty = await Pty.start(
-          shell.executable,
-          arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],
-          columns: columns,
-          rows: rows,
-          environment: env,
-          workingDirectory: workingDirectory ?? home,
-          ackRead: true,
-        );
+        try {
+          pty = await Pty.start(
+            shell.executable,
+            arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],
+            columns: columns,
+            rows: rows,
+            environment: env,
+            workingDirectory: workingDirectory ?? home,
+            ackRead: true,
+          );
+        } on PtyStartException catch (error) {
+          if (!isPowerShellEncodedCommandPolicyError(error.toString())) {
+            rethrow;
+          }
+          pty = await Pty.start(
+            shell.executable,
+            arguments: shell.arguments,
+            columns: columns,
+            rows: rows,
+            environment: env,
+            workingDirectory: workingDirectory ?? home,
+            ackRead: true,
+          );
+          powerShellPolicyFallback = true;
+        }
       } else {
         pty = await Pty.start(
           shell.executable,
@@ -302,6 +319,13 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.pty?.kill();
       tab.pty?.dispose();
       tab.pty = pty;
+    }
+
+    if (powerShellPolicyFallback) {
+      terminal.write(
+        '\r\n[PowerShell started in compatibility mode: your Windows policy '
+        'blocked the startup hook, so automatic working-directory sync is off.]\r\n',
+      );
     }
 
     final cwdParser = RemoteCwdParser();

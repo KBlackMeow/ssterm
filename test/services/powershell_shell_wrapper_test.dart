@@ -2,6 +2,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/powershell_shell_wrapper.dart';
 
 void main() {
+  group('isPowerShellEncodedCommandPolicyError', () {
+    test('recognizes the Windows policy error that blocks encoded startup', () {
+      expect(
+        isPowerShellEncodedCommandPolicyError(
+          'CreateProcessW failed (Windows error 786: access restricted)',
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not retry unrelated PowerShell startup errors', () {
+      expect(
+        isPowerShellEncodedCommandPolicyError(
+          'CreateProcessW failed (Windows error 267: invalid directory)',
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('buildPowerShellOsc7Prelude', () {
     late String script;
     setUpAll(() => script = buildPowerShellOsc7Prelude());
