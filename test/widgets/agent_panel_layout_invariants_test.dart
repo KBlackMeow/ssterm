@@ -3,6 +3,20 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('tool-call expansion tile has a local Material surface', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final toolCallCard = source.substring(
+      source.indexOf('class _ToolCallCard'),
+      source.indexOf('class _McpResultCard'),
+    );
+
+    expect(toolCallCard, contains('return Material('));
+    expect(toolCallCard, contains('clipBehavior: Clip.antiAlias'));
+    expect(toolCallCard, contains('child: ExpansionTile('));
+  });
+
   test('top-level collapsible cards have no assistant-body indentation', () {
     final source = File(
       'lib/widgets/ai_assistant_panel_content.dart',

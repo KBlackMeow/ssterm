@@ -785,12 +785,13 @@ class _ToolCallCard extends StatelessWidget {
     final surface =
         AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: surface.withValues(alpha: 0.4),
+    return Material(
+      color: surface.withValues(alpha: 0.4),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blue.withValues(alpha: 0.22)),
+        side: BorderSide(color: Colors.blue.withValues(alpha: 0.22)),
       ),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         dense: true,
         leading: Icon(
