@@ -20,7 +20,6 @@ import '../../models/skill.dart';
 import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
-import '../../services/image_file_picker.dart';
 import '../../services/mcp_service.dart';
 import '../../services/skill_service.dart';
 import '../../services/skill_archive_importer.dart';
@@ -765,17 +764,7 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _pickWallpaper() async {
-    if (!ImageFilePicker.isSupported) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Image picker is not available on this platform.'),
-        ),
-      );
-      return;
-    }
-
-    final path = await ImageFilePicker.pickPath();
+    final path = await FilePickerService.pickImageFile();
     if (path == null) return;
 
     final id = await WallpaperStorage.importFrom(path);
