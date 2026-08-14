@@ -83,12 +83,17 @@ may consume it. This keeps the first delivery safe across local and SSH tabs.
 
 1. **Delivered:** Introduce pure budget primitives and enforce them in the
    loop, including a structured cancellation/limit terminal event.
-2. Add safe, atomic session serialization and restore idle transcripts.
-3. Add bounded output artifacts and preview references.
+2. **Delivered:** add safe, atomic session serialization and restore idle
+   transcripts only. Tool calls, approvals, runtime environment blocks, and
+   command execution state never resume after restart.
+3. **Delivered:** add bounded output artifacts and preview references, with
+   opaque IDs, range-limited reads, owner-only POSIX permissions, and cleanup
+   when the owning session is cleared.
 4. **Partially delivered:** thread provider-reported prompt, completion, and
    reasoning usage through OpenAI-compatible, Anthropic, and Gemini adapters
    into context compaction. A durable cross-turn usage ledger, hard preflight,
-   and reactive compaction retry remain future work.
+   and reactive compaction retry remain future work. A hard preflight now
+   stops an unsafe request after compaction when context remains too large.
 5. Add UI affordances for current budget, interrupted state, persisted-session
    restore, and artifact references.
 

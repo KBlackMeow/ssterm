@@ -80,8 +80,9 @@ class AgentOutputStore {
       throw ArgumentError('Invalid artifact read range');
     }
     final target = File('${(await _directory()).path}/$id.bin');
-    if (!await target.exists())
+    if (!await target.exists()) {
       throw StateError('Agent output artifact missing');
+    }
     final bytes = await target.readAsBytes();
     if (offset >= bytes.length) return '';
     final end = min(bytes.length, offset + maxBytes);

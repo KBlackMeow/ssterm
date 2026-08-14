@@ -16,7 +16,7 @@ void main() {
     tearDown(() => directory.delete(recursive: true));
 
     test('stores a bounded artifact with a compact preview', () async {
-      final reference = await store.save('alpha\n' + ('x' * 20000));
+      final reference = await store.save('alpha\n${'x' * 20000}');
 
       expect(reference.id, matches(RegExp(r'^out-[a-f0-9]+$')));
       expect(reference.storedBytes, lessThanOrEqualTo(store.maxArtifactBytes));
