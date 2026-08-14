@@ -413,10 +413,15 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     body = AiAssistantOverlay(
       key: ValueKey('agent-${tab.hashCode}'),
       visible: tab.agentPanelVisible,
-      onExecuteAsync: (cmd, {isCancelled}) => _recordAgentCommand(
+      onExecuteAsync: (cmd, {isCancelled, onUpdate}) => _recordAgentCommand(
         tab,
         cmd,
-        () => _executeAgentCommand(tab, cmd, isCancelled: isCancelled),
+        () => _executeAgentCommand(
+          tab,
+          cmd,
+          isCancelled: isCancelled,
+          onUpdate: onUpdate,
+        ),
       ),
       agentConfig: _config.agent,
       terminalBackground: _config.terminal.chromeBackground,

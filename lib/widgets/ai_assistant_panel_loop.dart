@@ -832,11 +832,28 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
 
         setState(() => _agentLoopStatus = 'Executing: $command');
+        final commandMessage = _ChatMessage.system(
+          text: '',
+          commandRun: command,
+          commandPurpose: toolCall.reason,
+          commandExitCode: null,
+          commandRisk: assessment,
+          commandLastThreeLines: const [],
+          commandRunning: true,
+        );
+        setState(() => _messages.add(commandMessage));
         _scrollToBottom();
 
         final result = await widget.onExecuteAsync!(
           command,
           isCancelled: () => gen != _generation,
+          onUpdate: (update) {
+            if (!mounted || gen != _generation) return;
+            setState(() {
+              commandMessage.commandLastThreeLines = update.lastThreeLines;
+            });
+            _scrollToBottom();
+          },
         );
         if (!mounted || gen != _generation) {
           logIter('iter=$loopIterations exit stale_generation');
@@ -853,15 +870,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
 
         setState(() {
-          _messages.add(
-            _ChatMessage.system(
-              text: result?.output ?? '',
-              commandRun: command,
-              commandPurpose: toolCall.reason,
-              commandExitCode: result?.exitCode,
-              commandRisk: assessment,
-            ),
-          );
+          commandMessage.text = result?.output ?? '';
+          commandMessage.commandExitCode = result?.exitCode;
+          commandMessage.commandRunning = false;
         });
         _scrollToBottom();
 

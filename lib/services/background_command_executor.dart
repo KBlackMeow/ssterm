@@ -12,6 +12,17 @@ import 'local_shell_discovery.dart';
 
 const _maxCwdResultBytes = 16 * 1024;
 
+/// Incremental background-command output suitable for a live Agent card.
+class CommandExecutionUpdate {
+  const CommandExecutionUpdate(this.lastThreeLines);
+
+  final List<String> lastThreeLines;
+}
+
+typedef CommandExecutionUpdateListener = void Function(
+  CommandExecutionUpdate update,
+);
+
 typedef BackgroundProcessStarter =
     Future<Process> Function(
       String executable,
@@ -143,6 +154,7 @@ class BackgroundCommandExecutor {
     BackgroundCommandTarget target,
     String command, {
     bool Function()? isCancelled,
+    CommandExecutionUpdateListener? onUpdate,
   }) async {
     final safetyReason = CommandSafety.reason(command);
     if (safetyReason != null) {
@@ -247,8 +259,15 @@ class BackgroundCommandExecutor {
       var cancelled = isCancelled?.call() == true;
       final stdout = _BoundedOutput(outputLimitBytes);
       final stderr = _BoundedOutput(outputLimitBytes);
-      final stdoutDone = process.stdout.listen(stdout.add).asFuture<void>();
-      final stderrDone = process.stderr.listen(stderr.add).asFuture<void>();
+      final liveOutput = _LiveOutputTail(onUpdate);
+      final stdoutDone = process.stdout.listen((chunk) {
+        stdout.add(chunk);
+        liveOutput.add(chunk);
+      }).asFuture<void>();
+      final stderrDone = process.stderr.listen((chunk) {
+        stderr.add(chunk);
+        liveOutput.add(chunk);
+      }).asFuture<void>();
       final completed = Future.wait<void>([
         process.exitCode.then<void>((_) {}),
         stdoutDone,
@@ -337,6 +356,7 @@ class BackgroundCommandExecutor {
     String cwd,
     String command, {
     bool Function()? isCancelled,
+    CommandExecutionUpdateListener? onUpdate,
   }) async {
     final safetyReason = CommandSafety.reason(command);
     if (safetyReason != null) {
@@ -355,6 +375,7 @@ class BackgroundCommandExecutor {
     final cwdResultPath = _sshCwdResultPath();
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
+    final liveOutput = _LiveOutputTail(onUpdate);
     late final SSHSession session;
     try {
       session = await (sshSessionStarter ?? _startSshSession)(
@@ -373,8 +394,14 @@ class BackgroundCommandExecutor {
       session.kill(SSHSignal.TERM);
       session.close();
     }
-    final stdoutDone = session.stdout.listen(stdout.add).asFuture<void>();
-    final stderrDone = session.stderr.listen(stderr.add).asFuture<void>();
+    final stdoutDone = session.stdout.listen((chunk) {
+      stdout.add(chunk);
+      liveOutput.add(chunk);
+    }).asFuture<void>();
+    final stderrDone = session.stderr.listen((chunk) {
+      stderr.add(chunk);
+      liveOutput.add(chunk);
+    }).asFuture<void>();
     final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
     final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       if (isCancelled?.call() != true || cancelled) return;
@@ -888,6 +915,29 @@ List<String> _gitBashCommandArguments(
     '-lc',
     command,
   ];
+}
+
+class _LiveOutputTail {
+  _LiveOutputTail(this.onUpdate);
+
+  final CommandExecutionUpdateListener? onUpdate;
+  final List<String> _lines = [];
+  String _partial = '';
+
+  void add(List<int> chunk) {
+    if (onUpdate == null || chunk.isEmpty) return;
+    final text = utf8.decode(chunk, allowMalformed: true);
+    final parts = ('$_partial$text').split('\n');
+    _partial = parts.removeLast();
+    _lines.addAll(parts.map((line) => line.replaceFirst(RegExp(r'\r$'), '')));
+    if (_partial.isNotEmpty) {
+      if (_lines.isEmpty || _lines.last != _partial) _lines.add(_partial);
+    }
+    while (_lines.length > 3) {
+      _lines.removeAt(0);
+    }
+    onUpdate!(CommandExecutionUpdate(List.unmodifiable(_lines)));
+  }
 }
 
 class _BoundedOutput {

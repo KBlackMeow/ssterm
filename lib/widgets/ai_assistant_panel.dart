@@ -11,6 +11,8 @@ import '../models/agent_config.dart';
 import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
+import '../services/background_command_executor.dart'
+    show CommandExecutionUpdateListener;
 import '../services/agent_context_budget.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
@@ -118,6 +120,7 @@ class AiAssistantOverlay extends StatefulWidget {
   final Future<CommandResult?> Function(
     String cmd, {
     bool Function()? isCancelled,
+    CommandExecutionUpdateListener? onUpdate,
   })?
   onExecuteAsync;
 
@@ -405,6 +408,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // animateTo on a disposed ScrollController.
       if (!mounted) return;
       if (_scrollController.hasClients) {
+        final position = _scrollController.position;
+        if (position.maxScrollExtent - position.pixels > 24) return;
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),

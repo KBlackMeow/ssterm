@@ -209,6 +209,8 @@ class _CommandResultCard extends StatefulWidget {
     required this.output,
     required this.purpose,
     required this.exitCode,
+    required this.lastThreeLines,
+    required this.running,
     required this.risk,
   });
 
@@ -216,6 +218,8 @@ class _CommandResultCard extends StatefulWidget {
   final String output;
   final String? purpose;
   final int? exitCode;
+  final List<String> lastThreeLines;
+  final bool running;
   final CommandRiskAssessment? risk;
 
   @override
@@ -232,7 +236,9 @@ class _CommandResultCardState extends State<_CommandResultCard> {
     final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
     final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
         .withValues(alpha: 0.6);
-    final out = widget.output;
+    final out = widget.running
+        ? widget.lastThreeLines.join('\n')
+        : widget.output;
     final purpose = widget.purpose?.trim();
     final displayPurpose = purpose == null || purpose.isEmpty
         ? 'AI 未提供'
@@ -271,7 +277,9 @@ class _CommandResultCardState extends State<_CommandResultCard> {
                 const SizedBox(width: 8),
                 _RiskBadge(assessment: widget.risk),
                 const SizedBox(width: 6),
-                _ExitBadge(exitCode: widget.exitCode),
+                widget.running
+                    ? Text('运行中', style: TextStyle(color: dim, fontSize: 11))
+                    : _ExitBadge(exitCode: widget.exitCode),
               ],
             ),
           ),

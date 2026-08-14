@@ -66,7 +66,11 @@ class _ChatMessage {
 
   /// For system "command card" messages: the exit code, or null when the
   /// background command did not produce one.
-  final int? commandExitCode;
+  int? commandExitCode;
+
+  /// Live output tail shown while a command is running.
+  List<String>? commandLastThreeLines;
+  bool? commandRunning;
 
   final CommandRiskAssessment? commandRisk;
 
@@ -122,6 +126,8 @@ class _ChatMessage {
     this.commandRun,
     this.commandPurpose,
     this.commandExitCode,
+    this.commandLastThreeLines,
+    this.commandRunning,
     this.commandRisk,
     this.writeProposal,
     this.editProposal,
@@ -158,6 +164,8 @@ class _ChatMessage {
     required String commandRun,
     String? commandPurpose,
     int? commandExitCode,
+    List<String>? commandLastThreeLines,
+    bool? commandRunning,
     CommandRiskAssessment? commandRisk,
   }) => _ChatMessage._(
     text: text,
@@ -166,6 +174,8 @@ class _ChatMessage {
     commandRun: commandRun,
     commandPurpose: commandPurpose,
     commandExitCode: commandExitCode,
+    commandLastThreeLines: commandLastThreeLines,
+    commandRunning: commandRunning,
     commandRisk: commandRisk,
   );
 

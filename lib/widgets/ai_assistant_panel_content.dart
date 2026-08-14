@@ -533,6 +533,8 @@ class _AiPanelContent extends StatelessWidget {
           output: msg.text,
           purpose: msg.commandPurpose,
           exitCode: msg.commandExitCode,
+          lastThreeLines: msg.commandLastThreeLines ?? const [],
+          running: msg.commandRunning == true,
           risk: msg.commandRisk,
         ),
       );

@@ -544,8 +544,34 @@ void main() {
       },
       skip: Platform.isWindows
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
-          : false,
+      : false,
     );
+
+    test('reports a rolling three-line output tail while a command runs', () async {
+      final updates = <CommandExecutionUpdate>[];
+      final shell = Platform.isWindows ? LocalShellDiscovery.fallback() : zsh;
+      final platform = Platform.isWindows
+          ? BackgroundCommandPlatform.windows
+          : BackgroundCommandPlatform.macos;
+      final command = Platform.isWindows
+          ? 'echo one & echo two & echo three & echo four'
+          : 'printf "one\\ntwo\\nthree\\nfour\\n"';
+
+      await const BackgroundCommandExecutor().executeLocal(
+        BackgroundCommandTarget.local(
+          shell: shell,
+          cwd: Directory.current.path,
+          platform: platform,
+        ),
+        command,
+        onUpdate: updates.add,
+      );
+
+      expect(updates, isNotEmpty);
+      expect(updates.last.lastThreeLines, const ['two', 'three', 'four']);
+    }, skip: Platform.isWindows
+        ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+        : false);
 
     test(
       'cancels and awaits an in-flight POSIX command process tree',
