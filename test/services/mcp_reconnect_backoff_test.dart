@@ -2,14 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/mcp_service.dart';
 
 void main() {
-  test('MCP reconnect backoff caps repeated retry delays at 30 seconds', () {
+  test('MCP reconnect retries every three seconds after any failure', () {
     expect(List.generate(6, McpReconnectBackoff.delayForFailure), const [
-      Duration(seconds: 2),
-      Duration(seconds: 4),
-      Duration(seconds: 8),
-      Duration(seconds: 16),
-      Duration(seconds: 30),
-      Duration(seconds: 30),
+      Duration(seconds: 3),
+      Duration(seconds: 3),
+      Duration(seconds: 3),
+      Duration(seconds: 3),
+      Duration(seconds: 3),
+      Duration(seconds: 3),
     ]);
   });
 }

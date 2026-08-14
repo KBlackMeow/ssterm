@@ -791,16 +791,21 @@ class _PlusMenu extends StatelessWidget {
 
   PopupMenuItem<String> _sectionHeader(String label) => PopupMenuItem<String>(
     enabled: false,
-    height: 28,
+    height: 40,
+    padding: EdgeInsets.zero,
     child: Builder(
-      builder: (ctx) => Text(
-        label,
-        style: TextStyle(
-          color:
-              AppColors.maybeOf(ctx)?.foregroundDim ?? const Color(0xFF6E6E6E),
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Text(
+          label,
+          style: TextStyle(
+            color:
+                AppColors.maybeOf(ctx)?.foregroundDim ??
+                const Color(0xFF6E6E6E),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
         ),
       ),
     ),
@@ -810,41 +815,45 @@ class _PlusMenu extends StatelessWidget {
       PopupMenuItem<String>(
         value: '$prefix:${h.profileKey}',
         height: 36,
+        padding: EdgeInsets.zero,
         child: Builder(
           builder: (ctx) {
             final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
             final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-            return Row(
-              children: [
-                Icon(
-                  prefix == 'saved'
-                      ? Icons.bookmark_outline
-                      : Icons.description_outlined,
-                  size: 13,
-                  color: dim,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        h.alias,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: fg, fontSize: 13),
-                      ),
-                      Text(
-                        h.displayInfo,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: dim, fontSize: 11),
-                      ),
-                    ],
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(
+                    prefix == 'saved'
+                        ? Icons.bookmark_outline
+                        : Icons.description_outlined,
+                    size: 13,
+                    color: dim,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          h.alias,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fg, fontSize: 13),
+                        ),
+                        Text(
+                          h.displayInfo,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: dim, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             );
           },
         ),
@@ -863,44 +872,48 @@ class _PlusMenu extends StatelessWidget {
   PopupMenuItem<String> _shellItem(LocalShellOption shell) => PopupMenuItem(
     value: 'shell:${shell.id}',
     height: 48,
+    padding: EdgeInsets.zero,
     child: Builder(
       builder: (ctx) {
         final fg = AppColors.maybeOf(ctx)?.foreground ?? _kFgActive;
         final dim = AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
         final subtitle = _shellSubtitle(shell);
-        return Row(
-          children: [
-            Icon(
-              shell.isWsl ? Icons.laptop_windows : Icons.terminal,
-              size: 13,
-              color: dim,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Tooltip(
-                message: subtitle,
-                waitDuration: const Duration(milliseconds: 500),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      shell.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: fg, fontSize: 13),
-                    ),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: dim, fontSize: 11),
-                    ),
-                  ],
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Icon(
+                shell.isWsl ? Icons.laptop_windows : Icons.terminal,
+                size: 13,
+                color: dim,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Tooltip(
+                  message: subtitle,
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        shell.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: fg, fontSize: 13),
+                      ),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: dim, fontSize: 11),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     ),

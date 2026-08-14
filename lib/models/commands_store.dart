@@ -5,7 +5,12 @@ import '../utils/app_dir.dart';
 import 'command.dart';
 
 class CommandsStore {
+  /// Isolates file-backed command tests from the user's real command list.
+  static File? debugFileOverride;
+
   static Future<File> _file() async {
+    final override = debugFileOverride;
+    if (override != null) return override;
     final dir = await appDataDir();
     return File('${dir.path}/commands.json');
   }
@@ -28,8 +33,9 @@ class CommandsStore {
   static Future<void> save(List<Command> commands) async {
     final f = await _file();
     await f.writeAsString(
-      const JsonEncoder.withIndent('  ')
-          .convert(commands.map((c) => c.toJson()).toList()),
+      const JsonEncoder.withIndent(
+        '  ',
+      ).convert(commands.map((c) => c.toJson()).toList()),
     );
   }
 }

@@ -523,12 +523,10 @@ class _ServerEntry {
   }
 }
 
-/// Backoff for failed MCP reconnections: 2, 4, 8, 16, then 30 seconds.
+/// Fixed three-second interval for failed MCP reconnections.
 class McpReconnectBackoff {
   const McpReconnectBackoff._();
 
-  static Duration delayForFailure(int failureIndex) {
-    final seconds = 2 << failureIndex.clamp(0, 4).toInt();
-    return Duration(seconds: seconds > 30 ? 30 : seconds);
-  }
+  static Duration delayForFailure(int failureIndex) =>
+      const Duration(seconds: 3);
 }

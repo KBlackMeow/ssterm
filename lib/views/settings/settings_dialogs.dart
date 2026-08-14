@@ -60,8 +60,14 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Pick color',
-                    style: TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600)),
+                const Text(
+                  'Pick color',
+                  style: TextStyle(
+                    color: _kFg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
@@ -91,12 +97,18 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: _kFgMuted),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => Navigator.pop(context, _color),
-                      child: const Text('Apply', style: TextStyle(color: _kAccent)),
+                      child: const Text(
+                        'Apply',
+                        style: TextStyle(color: _kAccent),
+                      ),
                     ),
                   ],
                 ),
@@ -124,6 +136,7 @@ class _CommandDialogState extends State<CommandDialog> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _descCtrl;
   late final TextEditingController _cmdCtrl;
+  String? _validationMessage;
 
   @override
   void initState() {
@@ -145,27 +158,28 @@ class _CommandDialogState extends State<CommandDialog> {
   void _submit() {
     final name = _nameCtrl.text.trim();
     final cmd = _cmdCtrl.text.trim();
-    if (name.isEmpty || cmd.isEmpty) return;
+    if (name.isEmpty || cmd.isEmpty) {
+      setState(() => _validationMessage = 'Name and command are required.');
+      return;
+    }
     Navigator.pop(
       context,
-      Command(
-        name: name,
-        description: _descCtrl.text.trim(),
-        command: cmd,
-      ),
+      Command(name: name, description: _descCtrl.text.trim(), command: cmd),
     );
   }
 
   InputDecoration _fieldDecoration(String label) => InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: _kDivider)),
-        focusedBorder:
-            const UnderlineInputBorder(borderSide: BorderSide(color: _kAccent)),
-      );
+    labelText: label,
+    labelStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+    enabledBorder: const UnderlineInputBorder(
+      borderSide: BorderSide(color: _kDivider),
+    ),
+    focusedBorder: const UnderlineInputBorder(
+      borderSide: BorderSide(color: _kAccent),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -183,11 +197,20 @@ class _CommandDialogState extends State<CommandDialog> {
               children: [
                 Text(
                   isEdit ? 'Edit Command' : 'New Command',
-                  style: const TextStyle(color: _kFg, fontSize: 15, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: _kFg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _nameCtrl,
+                  onChanged: (_) {
+                    if (_validationMessage != null) {
+                      setState(() => _validationMessage = null);
+                    }
+                  },
                   style: const TextStyle(color: _kFg, fontSize: 13),
                   decoration: _fieldDecoration('Name *'),
                   textInputAction: TextInputAction.next,
@@ -202,6 +225,11 @@ class _CommandDialogState extends State<CommandDialog> {
                 const SizedBox(height: 4),
                 TextField(
                   controller: _cmdCtrl,
+                  onChanged: (_) {
+                    if (_validationMessage != null) {
+                      setState(() => _validationMessage = null);
+                    }
+                  },
                   style: const TextStyle(
                     color: _kFg,
                     fontSize: 12,
@@ -213,13 +241,26 @@ class _CommandDialogState extends State<CommandDialog> {
                   maxLines: 5,
                   minLines: 1,
                 ),
+                if (_validationMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _validationMessage!,
+                    style: const TextStyle(
+                      color: Color(0xFFFF6E67),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: _kFgMuted),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     TextButton(
