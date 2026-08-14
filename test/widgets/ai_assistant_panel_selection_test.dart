@@ -1,8 +1,36 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 void main() {
+  test(
+    'agent loop bounds model and shell work with a visible terminal event',
+    () {
+      final source = File(
+        'lib/widgets/ai_assistant_panel_loop.dart',
+      ).readAsStringSync();
+
+      expect(source, contains('final budget = AgentExecutionBudget();'));
+      expect(source, contains('budget.consumeModelRequest(DateTime.now())'));
+      expect(source, contains('budget.consumeShellCall(DateTime.now())'));
+      expect(source, contains('[Agent run stopped]'));
+    },
+  );
+
+  test('new input records an interruption before cancelling a busy agent', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('[Agent run interrupted]'));
+    expect(
+      source.indexOf('_recordAgentRunInterrupted();'),
+      lessThan(source.indexOf('if (_agentBusy) _cancelAgent();')),
+    );
+  });
+
   testWidgets('populated agent transcript is inside a selection area', (
     tester,
   ) async {

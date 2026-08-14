@@ -198,9 +198,16 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     void stopIter(int iter, String reason) =>
         _logAgentStop(iter, reason, turnId: turnId);
 
+    final budget = AgentExecutionBudget();
     var loopIterations = 0;
     agentLoop:
     while (gen == _generation) {
+      final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
+      if (modelBudgetStop != null) {
+        _recordAgentRunStopped(modelBudgetStop);
+        stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
+        break;
+      }
       loopIterations++;
 
       final historyLenBefore = _conversationHistory.length;
@@ -831,6 +838,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           return;
         }
 
+        final shellBudgetStop = budget.consumeShellCall(DateTime.now());
+        if (shellBudgetStop != null) {
+          _recordAgentRunStopped(shellBudgetStop);
+          stopIter(loopIterations, 'budget_${shellBudgetStop.limit.name}');
+          break agentLoop;
+        }
+
         setState(() => _agentLoopStatus = 'Executing: $command');
         final commandMessage = _ChatMessage.system(
           text: '',
@@ -969,5 +983,21 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       );
       _logAgent('context_compaction result=fallback_trim');
     }
+  }
+
+  void _recordAgentRunStopped(AgentBudgetStop stop) {
+    final reason = switch (stop.limit) {
+      AgentBudgetLimit.modelRequests => 'model request limit reached',
+      AgentBudgetLimit.shellCalls => 'shell command limit reached',
+      AgentBudgetLimit.elapsed => 'time limit reached',
+    };
+    final text = '[Agent run stopped] $reason.';
+    _conversationHistory.add({'role': 'assistant', 'content': text});
+    if (!mounted) return;
+    setState(() {
+      _messages.add(_ChatMessage.notice(text));
+      _agentLoopStatus = null;
+    });
+    _scrollToBottom();
   }
 }

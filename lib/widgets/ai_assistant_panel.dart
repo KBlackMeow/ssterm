@@ -14,6 +14,7 @@ import '../services/command_feedback_formatter.dart';
 import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
+import '../services/agent_execution_budget.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
 import '../services/command_risk.dart';
@@ -310,8 +311,13 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // Returning true means "fully handled — do not fall through to send".
     if (_handleSlashCommand(text)) return;
 
-    // If busy, cancel in-flight and start fresh.
-    if (_agentBusy) _cancelAgent();
+    // A replacement instruction is distinct from an ordinary Stop: retain a
+    // compact terminal event so the next model turn knows the previous work
+    // did not complete, instead of inferring state from a partial UI reply.
+    if (_agentBusy) {
+      _recordAgentRunInterrupted();
+      _cancelAgent();
+    }
 
     setState(() {
       _messages.add(_ChatMessage.user(text));
@@ -368,6 +374,13 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // [LlmService._buildSkillsBlock]) so a wipe of conversation
       // history doesn't lose any skill visibility.
     });
+  }
+
+  void _recordAgentRunInterrupted() {
+    const text =
+        '[Agent run interrupted] A new user instruction replaced the in-flight run.';
+    _conversationHistory.add({'role': 'assistant', 'content': text});
+    _messages.add(_ChatMessage.notice(text));
   }
 
   /// Append a `/help` info banner to the visible chat WITHOUT pushing
