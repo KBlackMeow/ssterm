@@ -15,6 +15,7 @@ import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
+import '../services/agent_session_store.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
 import '../services/command_risk.dart';
@@ -193,6 +194,14 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.initState();
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
+    _sessionStore = AgentSessionStore(
+      sessionId: AgentSessionStore.idForScope(
+        '${widget.fileSystemAdapter?.label ?? 'unknown'}\n'
+        '${widget.fileSystemAdapter?.currentDirectory ?? ''}\n'
+        '${widget.executionEnvironment ?? ''}',
+      ),
+    );
+    _restoreSession();
   }
 
   final _agentController = TextEditingController();
@@ -233,6 +242,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
   int? _lastAgentPromptTokenCount;
+  late final AgentSessionStore _sessionStore;
+  Future<void> _pendingSessionWrite = Future.value();
 
   TextEditingController get _textController => _agentController;
 
@@ -270,6 +281,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // card IS clicked after the fact, just done eagerly on cancel.
       _pendingQuestionProposal = null;
     });
+    _queueSessionSave();
   }
 
   void _cancelPendingAgentDecisions() {
@@ -376,6 +388,43 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // [LlmService._buildSkillsBlock]) so a wipe of conversation
       // history doesn't lose any skill visibility.
     });
+    _pendingSessionWrite = _pendingSessionWrite
+        .then((_) => _sessionStore.clear())
+        .catchError((_) {});
+  }
+
+  Future<void> _restoreSession() async {
+    final result = await _sessionStore.load();
+    if (!mounted || _conversationHistory.isNotEmpty) return;
+    final snapshot = result.snapshot;
+    if (snapshot == null || snapshot.items.isEmpty) return;
+    setState(() {
+      _conversationHistory.addAll(
+        snapshot.items.map((item) => item.toConversationItem()),
+      );
+      for (final item in snapshot.items) {
+        _messages.add(
+          item.role == 'user'
+              ? _ChatMessage.user(item.content)
+              : _ChatMessage.ai(text: item.content),
+        );
+      }
+      _messages.add(
+        _ChatMessage.notice(
+          'Restored the previous idle Agent transcript. No command or approval was resumed.',
+        ),
+      );
+    });
+  }
+
+  void _queueSessionSave() {
+    final snapshot = AgentSessionSnapshot.fromHistory(
+      sessionId: _sessionStore.sessionId,
+      history: _conversationHistory,
+    );
+    _pendingSessionWrite = _pendingSessionWrite
+        .then((_) => _sessionStore.save(snapshot))
+        .catchError((_) {});
   }
 
   void _recordAgentRunInterrupted() {

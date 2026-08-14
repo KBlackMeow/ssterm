@@ -179,6 +179,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _agentBusy = false;
           _agentLoopStatus = null;
         });
+        _queueSessionSave();
       }
     }
   }

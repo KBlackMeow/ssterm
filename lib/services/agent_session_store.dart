@@ -34,7 +34,10 @@ class AgentSessionSnapshot {
       final content = item.content;
       if (role == null || content == null || !_isSafeRole(role)) continue;
       items.add(
-        AgentSessionTranscriptItem(role: role, content: _truncate(content)),
+        AgentSessionTranscriptItem(
+          role: role,
+          content: _truncate(_removeRuntimeContext(content)),
+        ),
       );
     }
     final start = items.length > maxItems ? items.length - maxItems : 0;
@@ -84,6 +87,13 @@ class AgentSessionSnapshot {
     if (value.length <= maxItemCharacters) return value;
     return '${value.substring(0, maxItemCharacters)}\n[Persisted transcript truncated]';
   }
+
+  static String _removeRuntimeContext(String value) => value
+      .replaceAll(RegExp(r'<session_context>[\s\S]*?</session_context>\s*'), '')
+      .replaceAll(
+        RegExp(r'<command_environment>[\s\S]*?</command_environment>\s*'),
+        '',
+      );
 }
 
 class AgentSessionTranscriptItem {
@@ -134,6 +144,16 @@ class AgentSessionStore {
 
   final File? file;
   final String sessionId;
+
+  /// Produces a filesystem-safe, stable identifier without exposing the tab
+  /// label, working directory, or environment in a filename.
+  static String idForScope(String scope) {
+    var hash = 0x811c9dc5;
+    for (final unit in utf8.encode(scope)) {
+      hash = (hash ^ unit) * 0x01000193 & 0xffffffff;
+    }
+    return 'v1-${hash.toRadixString(16).padLeft(8, '0')}';
+  }
 
   Future<AgentSessionLoadResult> load() async {
     final target = await _file();

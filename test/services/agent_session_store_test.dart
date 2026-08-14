@@ -27,6 +27,22 @@ void main() {
       expect(snapshot.items.map((item) => item.content), ['inspect', 'Done']);
     });
 
+    test('removes runtime environment blocks before persistence', () {
+      final snapshot = AgentSessionSnapshot.fromHistory(
+        sessionId: 'local-default',
+        history: const [
+          AgentConversationItem.text(
+            role: 'user',
+            content:
+                '<session_context>cwd: /private/project\nhome: /private/home</session_context>\n\ninspect',
+          ),
+        ],
+        savedAt: DateTime.utc(2026),
+      );
+
+      expect(snapshot.items.single.content, 'inspect');
+    });
+
     test('rejects an unknown snapshot schema', () {
       expect(
         () => AgentSessionSnapshot.fromJson({
