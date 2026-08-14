@@ -27,7 +27,7 @@
 - Produces `AgentExecutionBudget`, `AgentBudgetLimit`, and `AgentBudgetStop`.
 - `consumeModelRequest(now)` and `consumeShellCall(now)` return `AgentBudgetStop?` and increment only on success.
 
-- [ ] **Step 1: Write failing budget tests**
+- [x] **Step 1: Write failing budget tests**
 
 ````dart
 test('stops before a model request once its iteration limit is exhausted', () {
@@ -38,13 +38,13 @@ test('stops before a model request once its iteration limit is exhausted', () {
 });
 ````
 
-- [ ] **Step 2: Verify the test fails because the service is missing**
+- [x] **Step 2: Verify the test fails because the service is missing**
 
 Run: `flutter test test/services/agent_execution_budget_test.dart`
 
 Expected: compilation failure mentioning `AgentExecutionBudget`.
 
-- [ ] **Step 3: Implement the minimal state machine**
+- [x] **Step 3: Implement the minimal state machine**
 
 ````dart
 enum AgentBudgetLimit { modelRequests, shellCalls, elapsed }
@@ -55,13 +55,13 @@ class AgentExecutionBudget {
 }
 ````
 
-- [ ] **Step 4: Run the focused test and format the new files**
+- [x] **Step 4: Run the focused test and format the new files**
 
 Run: `dart format lib/services/agent_execution_budget.dart test/services/agent_execution_budget_test.dart && flutter test test/services/agent_execution_budget_test.dart`
 
 Expected: all budget tests pass.
 
-- [ ] **Step 5: Commit the standalone budget primitive**
+- [x] **Step 5: Commit the standalone budget primitive**
 
 ````bash
 git add lib/services/agent_execution_budget.dart test/services/agent_execution_budget_test.dart
@@ -79,7 +79,7 @@ git commit -m "feat: add agent execution budget"
 - Consumes `AgentExecutionBudget` from Task 1.
 - Produces a history message beginning `[Agent run stopped]` with a stable reason.
 
-- [ ] **Step 1: Add a failing assertion for a budget terminal event**
+- [x] **Step 1: Add a failing assertion for a budget terminal event**
 
 ````dart
 test('agent loop records a terminal budget event before another model call', () {
@@ -88,13 +88,13 @@ test('agent loop records a terminal budget event before another model call', () 
 });
 ````
 
-- [ ] **Step 2: Verify it fails**
+- [x] **Step 2: Verify it fails**
 
 Run: `flutter test test/widgets/ai_assistant_panel_selection_test.dart`
 
 Expected: failure because the loop does not use `consumeModelRequest`.
 
-- [ ] **Step 3: Add model and shell budget checks**
+- [x] **Step 3: Add model and shell budget checks**
 
 ````dart
 final stop = budget.consumeModelRequest(DateTime.now());
@@ -106,13 +106,13 @@ if (stop != null) {
 
 The recorder adds the same safe text to visible messages and history. Before `onExecuteAsync`, call `consumeShellCall`; do not render or run a command when it returns a stop.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `flutter test test/services/agent_execution_budget_test.dart test/widgets/ai_assistant_panel_selection_test.dart`
 
 Expected: passing tests.
 
-- [ ] **Step 5: Commit loop integration**
+- [x] **Step 5: Commit loop integration**
 
 ````bash
 git add lib/widgets/ai_assistant_panel.dart lib/widgets/ai_assistant_panel_loop.dart test/widgets/ai_assistant_panel_selection_test.dart
@@ -128,7 +128,7 @@ git commit -m "feat: bound agent loop execution"
 **Interfaces:**
 - Produces `[Agent run interrupted]` before a busy run is replaced by a new instruction.
 
-- [ ] **Step 1: Add a failing regression assertion**
+- [x] **Step 1: Add a failing regression assertion**
 
 ````dart
 test('new input records an interruption before cancelling a busy agent', () {
@@ -136,13 +136,13 @@ test('new input records an interruption before cancelling a busy agent', () {
 });
 ````
 
-- [ ] **Step 2: Verify it fails**
+- [x] **Step 2: Verify it fails**
 
 Run: `flutter test test/widgets/ai_assistant_panel_selection_test.dart`
 
 Expected: failure because interruption is only implicit in `_generation`.
 
-- [ ] **Step 3: Add the idempotent interruption recorder**
+- [x] **Step 3: Add the idempotent interruption recorder**
 
 ````dart
 void _recordAgentRunInterrupted() {
@@ -154,13 +154,13 @@ void _recordAgentRunInterrupted() {
 
 Call it from `_send` only when `_agentBusy` is true and before `_cancelAgent`.
 
-- [ ] **Step 4: Run focused tests and format**
+- [x] **Step 4: Run focused tests and format**
 
 Run: `dart format lib/widgets/ai_assistant_panel.dart test/widgets/ai_assistant_panel_selection_test.dart && flutter test test/widgets/ai_assistant_panel_selection_test.dart`
 
 Expected: passing tests.
 
-- [ ] **Step 5: Commit interruption continuity**
+- [x] **Step 5: Commit interruption continuity**
 
 ````bash
 git add lib/widgets/ai_assistant_panel.dart test/widgets/ai_assistant_panel_selection_test.dart
@@ -172,17 +172,23 @@ git commit -m "feat: retain interrupted agent context"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-08-15-agent-durable-execution-design.md`
 
-- [ ] **Step 1: Mark delivered design items**
+- [x] **Step 1: Mark delivered design items**
 
 Mark execution-budget and interruption-continuity delivered; leave session persistence, output artifacts, and provider usage for subsequent slices.
 
-- [ ] **Step 2: Run static analysis and all regressions**
+- [x] **Step 2: Run static analysis and all regressions**
+
+`flutter analyze lib test` was run in place of the repository-wide command:
+vendored xterm examples make the full analyzer baseline fail outside this
+slice. The scoped analysis has three pre-existing warnings in
+`skill_archive_importer_test.dart` and no new errors. Full `flutter test`
+passes.
 
 Run: `flutter analyze && flutter test`
 
 Expected: analysis exits 0 and all tests pass.
 
-- [ ] **Step 3: Inspect final scope**
+- [x] **Step 3: Inspect final scope**
 
 Run: `git diff main...HEAD --check && git status --short`
 

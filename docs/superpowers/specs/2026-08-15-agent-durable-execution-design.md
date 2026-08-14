@@ -81,12 +81,14 @@ may consume it. This keeps the first delivery safe across local and SSH tabs.
 
 ## Delivery slices
 
-1. Introduce pure budget primitives and enforce them in the loop, including a
-   structured cancellation/limit terminal event.
+1. **Delivered:** Introduce pure budget primitives and enforce them in the
+   loop, including a structured cancellation/limit terminal event.
 2. Add safe, atomic session serialization and restore idle transcripts.
 3. Add bounded output artifacts and preview references.
-4. Thread actual provider usage into the ledger, enforce hard context limits,
-   and add one reactive compaction retry.
+4. **Partially delivered:** thread provider-reported prompt, completion, and
+   reasoning usage through OpenAI-compatible, Anthropic, and Gemini adapters
+   into context compaction. A durable cross-turn usage ledger, hard preflight,
+   and reactive compaction retry remain future work.
 5. Add UI affordances for current budget, interrupted state, persisted-session
    restore, and artifact references.
 
