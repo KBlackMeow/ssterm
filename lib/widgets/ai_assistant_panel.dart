@@ -16,6 +16,7 @@ import '../services/background_command_executor.dart'
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
 import '../services/agent_session_store.dart';
+import '../services/agent_output_store.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
 import '../services/command_risk.dart';
@@ -201,6 +202,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         '${widget.executionEnvironment ?? ''}',
       ),
     );
+    _outputStore = AgentOutputStore(sessionId: _sessionStore.sessionId);
     _restoreSession();
   }
 
@@ -243,6 +245,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   final _conversationHistory = AgentConversationHistory();
   int? _lastAgentPromptTokenCount;
   late final AgentSessionStore _sessionStore;
+  late final AgentOutputStore _outputStore;
   Future<void> _pendingSessionWrite = Future.value();
 
   TextEditingController get _textController => _agentController;

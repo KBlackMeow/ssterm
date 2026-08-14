@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../io/output_pipe.dart';
 import 'command_risk.dart';
+import 'agent_output_store.dart';
 
 class CommandFeedbackFormatter {
   const CommandFeedbackFormatter({
@@ -20,6 +21,7 @@ class CommandFeedbackFormatter {
     String? toolCallId,
     String toolName = 'bash',
     CommandRiskAssessment? risk,
+    AgentOutputReference? artifact,
   }) {
     final exit = result?.exitCode;
     final rawBytes = utf8.encode(result?.output ?? '');
@@ -55,6 +57,12 @@ class CommandFeedbackFormatter {
     if (result?.truncated == true) {
       header.writeln(
         '[capture_truncated=true reason="output exceeded ssterm capture cap; head and/or tail may be missing"]',
+      );
+    }
+    if (artifact != null) {
+      header.writeln(
+        '[output_artifact id=${artifact.id} stored_bytes=${artifact.storedBytes} '
+        'original_bytes=${artifact.originalBytes} truncated=${artifact.truncated}]',
       );
     }
     if (rawBytes.length > maxFeedbackBytes) {

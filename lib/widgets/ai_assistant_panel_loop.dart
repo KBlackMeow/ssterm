@@ -35,6 +35,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     String? toolCallId,
     String toolName = 'bash',
     CommandRiskAssessment? risk,
+    AgentOutputReference? artifact,
   }) {
     return _commandFeedbackFormatter.format(
       cmd,
@@ -42,6 +43,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       toolCallId: toolCallId,
       toolName: toolName,
       risk: risk,
+      artifact: artifact,
     );
   }
 
@@ -898,12 +900,22 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
         _scrollToBottom();
 
+        AgentOutputReference? outputArtifact;
+        if (result != null && result.output.isNotEmpty) {
+          try {
+            outputArtifact = await _outputStore.save(result.output);
+          } catch (error) {
+            _logAgent('output_artifact_save_failed type=${error.runtimeType}');
+          }
+        }
+
         final feedback = _formatCommandFeedback(
           command,
           result,
           toolCallId: toolCall.id,
           toolName: toolCall.name,
           risk: assessment,
+          artifact: outputArtifact,
         );
         feedbacks.add(feedback);
         nativeResults.add(

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../utils/app_dir.dart';
+
 /// Opaque reference to bounded command output stored locally for one session.
 class AgentOutputReference {
   const AgentOutputReference({
@@ -23,7 +25,7 @@ class AgentOutputReference {
 /// paths, which keeps the model and UI from reading arbitrary local files.
 class AgentOutputStore {
   AgentOutputStore({
-    required this.directory,
+    this.directory,
     required this.sessionId,
     this.maxArtifactBytes = 64 * 1024,
     this.maxSessionBytes = 512 * 1024,
@@ -32,7 +34,7 @@ class AgentOutputStore {
        assert(maxSessionBytes >= maxArtifactBytes),
        assert(maxReadBytes > 0);
 
-  final Directory directory;
+  final Directory? directory;
   final String sessionId;
   final int maxArtifactBytes;
   final int maxSessionBytes;
@@ -48,9 +50,10 @@ class AgentOutputStore {
     if (used + stored.length > maxSessionBytes) {
       throw StateError('Agent output artifact session limit reached');
     }
-    await directory.create(recursive: true);
+    final root = await _directory();
+    await root.create(recursive: true);
     final id = _newId();
-    final target = File('${directory.path}/$id.bin');
+    final target = File('${root.path}/$id.bin');
     await target.writeAsBytes(stored, flush: true);
     _storedBytes = used + stored.length;
     return AgentOutputReference(
@@ -73,7 +76,7 @@ class AgentOutputStore {
     if (offset < 0 || maxBytes <= 0 || maxBytes > maxReadBytes) {
       throw ArgumentError('Invalid artifact read range');
     }
-    final target = File('${directory.path}/$id.bin');
+    final target = File('${(await _directory()).path}/$id.bin');
     if (!await target.exists())
       throw StateError('Agent output artifact missing');
     final bytes = await target.readAsBytes();
@@ -85,15 +88,23 @@ class AgentOutputStore {
   Future<int> _currentStoredBytes() async {
     final known = _storedBytes;
     if (known != null) return known;
-    if (!await directory.exists()) return _storedBytes = 0;
+    final root = await _directory();
+    if (!await root.exists()) return _storedBytes = 0;
     var total = 0;
-    await for (final entry in directory.list(followLinks: false)) {
+    await for (final entry in root.list(followLinks: false)) {
       if (entry is File &&
           RegExp(r'/out-[a-f0-9]+\.bin$').hasMatch(entry.path)) {
         total += await entry.length();
       }
     }
     return _storedBytes = total;
+  }
+
+  Future<Directory> _directory() async {
+    final override = directory;
+    if (override != null) return override;
+    final data = await appDataDir();
+    return Directory('${data.path}/agent-output/$sessionId');
   }
 
   String _newId() {

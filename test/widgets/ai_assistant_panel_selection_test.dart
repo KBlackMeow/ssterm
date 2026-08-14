@@ -31,6 +31,18 @@ void main() {
     );
   });
 
+  test(
+    'command feedback references bounded output artifacts when available',
+    () {
+      final source = File(
+        'lib/widgets/ai_assistant_panel_loop.dart',
+      ).readAsStringSync();
+
+      expect(source, contains('_outputStore.save(result.output)'));
+      expect(source, contains('artifact: outputArtifact'));
+    },
+  );
+
   testWidgets('populated agent transcript is inside a selection area', (
     tester,
   ) async {
