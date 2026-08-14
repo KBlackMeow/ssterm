@@ -43,5 +43,18 @@ void main() {
 
       expect(budget.shouldCompact(estimatedTokens: 1, itemCount: 80), isTrue);
     });
+
+    test('does not ignore a larger local estimate when usage is stale', () {
+      final budget = AgentContextBudget.forContextWindow(128000);
+
+      expect(
+        budget.shouldCompact(
+          estimatedTokens: 100000,
+          exactUsageTokens: 10,
+          itemCount: 1,
+        ),
+        isTrue,
+      );
+    });
   });
 }

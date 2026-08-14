@@ -47,11 +47,10 @@ class AgentContextBudget {
     int? exactUsageTokens,
     required int itemCount,
   }) {
-    if (exactUsageTokens != null) {
-      return exactUsageTokens >= autoCompactAtTokens;
-    }
-    return estimatedTokens >= autoCompactAtTokens ||
-        itemCount >= itemFallbackThreshold;
+    return (exactUsageTokens != null &&
+            exactUsageTokens >= autoCompactAtTokens) ||
+        estimatedTokens >= autoCompactAtTokens ||
+        (exactUsageTokens == null && itemCount >= itemFallbackThreshold);
   }
 
   /// Conservative cross-provider estimate used until an adapter reports exact
