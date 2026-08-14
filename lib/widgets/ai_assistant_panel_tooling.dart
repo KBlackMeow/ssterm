@@ -8,6 +8,8 @@ typedef _AgentStreamResult = ({
   List<AgentToolCall> toolCalls,
   String? finishReason,
   int malformedEventCount,
+  int? promptTokenCount,
+  int? completionTokenCount,
 });
 
 /// Streaming and tool-approval implementation used by the agent loop.
@@ -27,7 +29,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       ..._conversationHistory,
       AgentConversationItem.text(
         role: 'user',
-        content: 'A command has produced no output for 60 seconds. '
+        content:
+            'A command has produced no output for 60 seconds. '
             'Assess whether this is normal progress. Command: $command\n'
             'Last output (up to 3 lines):\n${lastThreeLines.join('\n')}\n'
             'Reply with exactly CONTINUE to wait another 60 seconds, or STOP to terminate.',
@@ -80,6 +83,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     String? finishReason;
     var malformedEventCount = 0;
     int? exactReasoningTokenCount;
+    int? promptTokenCount;
+    int? completionTokenCount;
 
     // Retry only when an attempt yielded zero content or tool calls and
     // failed with a transient network error. Anything more aggressive
@@ -121,6 +126,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       finishReason = null;
       malformedEventCount = 0;
       exactReasoningTokenCount = null;
+      promptTokenCount = null;
+      completionTokenCount = null;
       var scheduled = false;
       // Once the stream completes (success OR error), block all pending
       // post-frame callbacks from clobbering `aiMsg.text` with the
@@ -141,6 +148,12 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
             malformedEventCount += event.malformedEventCount;
             if (event.reasoningTokenCount != null) {
               exactReasoningTokenCount = event.reasoningTokenCount;
+            }
+            if (event.promptTokenCount != null) {
+              promptTokenCount = event.promptTokenCount;
+            }
+            if (event.completionTokenCount != null) {
+              completionTokenCount = event.completionTokenCount;
             }
           } else {
             fullText += event.content;
@@ -251,6 +264,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       toolCalls: List<AgentToolCall>.unmodifiable(nativeToolCalls),
       finishReason: finishReason,
       malformedEventCount: malformedEventCount,
+      promptTokenCount: promptTokenCount,
+      completionTokenCount: completionTokenCount,
     );
   }
 

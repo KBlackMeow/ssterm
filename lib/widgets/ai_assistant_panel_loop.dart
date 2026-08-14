@@ -244,6 +244,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
 
       final resolvedStreamResult = streamResult;
+      _lastAgentPromptTokenCount = resolvedStreamResult.promptTokenCount;
       final fullText = resolvedStreamResult.text;
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
       final nativeToolCalls = resolvedStreamResult.toolCalls
@@ -943,6 +944,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     );
     if (!budget.shouldCompact(
       estimatedTokens: estimatedTokens,
+      exactUsageTokens: _lastAgentPromptTokenCount,
       itemCount: _conversationHistory.length,
     )) {
       return;

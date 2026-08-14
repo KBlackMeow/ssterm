@@ -232,6 +232,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
+  int? _lastAgentPromptTokenCount;
 
   TextEditingController get _textController => _agentController;
 
@@ -368,6 +369,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // transcript without wiping this would leave the AI "remembering"
       // the previous task on the next prompt, which is surprising.
       _conversationHistory.clear();
+      _lastAgentPromptTokenCount = null;
       _agentLoopStatus = null;
       // No per-conversation skill bookkeeping to reset anymore — the
       // catalogue lives inside the system prompt (see
