@@ -63,6 +63,73 @@ class LlmStreamEvent {
   );
 }
 
+/// Provider-neutral token usage reported at the end of a model response.
+///
+/// Providers use different field names, and Anthropic reports cache reads and
+/// writes separately.  For context safety those cached tokens still occupy
+/// the prompt, so [fromAnthropic] includes them in [promptTokenCount].
+class ProviderTokenUsage {
+  const ProviderTokenUsage({
+    this.promptTokenCount,
+    this.completionTokenCount,
+    this.reasoningTokenCount,
+  });
+
+  final int? promptTokenCount;
+  final int? completionTokenCount;
+  final int? reasoningTokenCount;
+
+  bool get isEmpty =>
+      promptTokenCount == null &&
+      completionTokenCount == null &&
+      reasoningTokenCount == null;
+
+  factory ProviderTokenUsage.fromOpenAi(Object? value) {
+    final usage = _usageMap(value);
+    return ProviderTokenUsage(
+      promptTokenCount: _nonNegativeInt(usage?['prompt_tokens']),
+      completionTokenCount: _nonNegativeInt(usage?['completion_tokens']),
+      reasoningTokenCount: _nonNegativeInt(
+        _usageMap(usage?['completion_tokens_details'])?['reasoning_tokens'],
+      ),
+    );
+  }
+
+  factory ProviderTokenUsage.fromAnthropic(Object? value) {
+    final usage = _usageMap(value);
+    final inputTokens = _nonNegativeInt(usage?['input_tokens']);
+    final cacheCreationTokens = _nonNegativeInt(
+      usage?['cache_creation_input_tokens'],
+    );
+    final cacheReadTokens = _nonNegativeInt(usage?['cache_read_input_tokens']);
+    final promptTokens = [
+      inputTokens,
+      cacheCreationTokens,
+      cacheReadTokens,
+    ].whereType<int>().fold<int>(0, (total, tokens) => total + tokens);
+    return ProviderTokenUsage(
+      promptTokenCount: promptTokens == 0 && inputTokens == null
+          ? null
+          : promptTokens,
+      completionTokenCount: _nonNegativeInt(usage?['output_tokens']),
+    );
+  }
+
+  factory ProviderTokenUsage.fromGemini(Object? value) {
+    final usage = _usageMap(value);
+    return ProviderTokenUsage(
+      promptTokenCount: _nonNegativeInt(usage?['promptTokenCount']),
+      completionTokenCount: _nonNegativeInt(usage?['candidatesTokenCount']),
+      reasoningTokenCount: _nonNegativeInt(usage?['thoughtsTokenCount']),
+    );
+  }
+
+  static Map? _usageMap(Object? value) => value is Map ? value : null;
+
+  static int? _nonNegativeInt(Object? value) =>
+      value is int && value >= 0 ? value : null;
+}
+
 /// Structured tool invocation emitted by the model.
 ///
 /// The canonical shell shape is:

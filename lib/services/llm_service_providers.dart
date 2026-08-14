@@ -10,6 +10,16 @@ part of 'llm_service.dart';
 // shape (OpenAI-compatible vs Anthropic vs Google Gemini).
 // ───────────────────────────────────────────────────────────────────────────
 
+LlmStreamEvent? _usageDiagnostics(ProviderTokenUsage usage) {
+  if (usage.isEmpty) return null;
+  return LlmStreamEvent.diagnostics(
+    malformedEventCount: 0,
+    reasoningTokenCount: usage.reasoningTokenCount,
+    promptTokenCount: usage.promptTokenCount,
+    completionTokenCount: usage.completionTokenCount,
+  );
+}
+
 // ── OpenAI-compatible (OpenAI, DeepSeek, etc.) ──────────────────────────
 
 Future<LlmResponse> _callOpenAiCompatible(
@@ -288,19 +298,10 @@ class OpenAiStreamAccumulator {
       }
       final usage = decoded['usage'];
       if (usage is Map) {
-        final promptTokens = usage['prompt_tokens'];
-        if (promptTokens is int && promptTokens >= 0) {
-          promptTokenCount = promptTokens;
-        }
-        final completionTokens = usage['completion_tokens'];
-        if (completionTokens is int && completionTokens >= 0) {
-          completionTokenCount = completionTokens;
-        }
-        final details = usage['completion_tokens_details'];
-        if (details is Map) {
-          final tokens = details['reasoning_tokens'];
-          if (tokens is int && tokens >= 0) reasoningTokenCount = tokens;
-        }
+        final tokenUsage = ProviderTokenUsage.fromOpenAi(usage);
+        promptTokenCount ??= tokenUsage.promptTokenCount;
+        completionTokenCount ??= tokenUsage.completionTokenCount;
+        reasoningTokenCount ??= tokenUsage.reasoningTokenCount;
       }
       final choices = decoded['choices'];
       if (choices is! List || choices.isEmpty) return const [];
@@ -452,12 +453,17 @@ Stream<LlmStreamEvent> _streamOpenAi(
   for (final event in accumulator.finish()) {
     yield event;
   }
-  yield LlmStreamEvent.diagnostics(
-    finishReason: accumulator.finishReason,
-    malformedEventCount: accumulator.malformedEventCount,
+  final usage = ProviderTokenUsage(
     reasoningTokenCount: accumulator.reasoningTokenCount,
     promptTokenCount: accumulator.promptTokenCount,
     completionTokenCount: accumulator.completionTokenCount,
+  );
+  yield LlmStreamEvent.diagnostics(
+    finishReason: accumulator.finishReason,
+    malformedEventCount: accumulator.malformedEventCount,
+    reasoningTokenCount: usage.reasoningTokenCount,
+    promptTokenCount: usage.promptTokenCount,
+    completionTokenCount: usage.completionTokenCount,
   );
 }
 
@@ -518,6 +524,17 @@ Stream<LlmStreamEvent> _streamAnthropic(
     if (data.isEmpty) continue;
     try {
       final json = jsonDecode(data) as Map<String, dynamic>;
+      if (json['type'] == 'message_start') {
+        final diagnostics = _usageDiagnostics(
+          ProviderTokenUsage.fromAnthropic(json['message']?['usage']),
+        );
+        if (diagnostics != null) yield diagnostics;
+      } else if (json['type'] == 'message_delta') {
+        final diagnostics = _usageDiagnostics(
+          ProviderTokenUsage.fromAnthropic(json['usage']),
+        );
+        if (diagnostics != null) yield diagnostics;
+      }
       if (json['type'] == 'content_block_start') {
         final block = json['content_block'] as Map<String, dynamic>?;
         if (block?['type'] == 'tool_use') {
@@ -612,16 +629,10 @@ Stream<LlmStreamEvent> _streamGemini(
     if (data.isEmpty) continue;
     try {
       final json = jsonDecode(data) as Map<String, dynamic>;
-      final usage = json['usageMetadata'];
-      if (usage is Map) {
-        final thoughtsTokenCount = usage['thoughtsTokenCount'];
-        if (thoughtsTokenCount is int && thoughtsTokenCount >= 0) {
-          yield LlmStreamEvent.diagnostics(
-            malformedEventCount: 0,
-            reasoningTokenCount: thoughtsTokenCount,
-          );
-        }
-      }
+      final diagnostics = _usageDiagnostics(
+        ProviderTokenUsage.fromGemini(json['usageMetadata']),
+      );
+      if (diagnostics != null) yield diagnostics;
       final candidates = json['candidates'] as List?;
       // Gemini interleaves `usageMetadata`/`promptFeedback` chunks that
       // have no `candidates` at all.  `break` would terminate the WHOLE

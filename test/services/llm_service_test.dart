@@ -11,6 +11,40 @@ import 'package:ssterm/services/skill_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('ProviderTokenUsage', () {
+    test('adds Anthropic cache usage to the effective prompt size', () {
+      final usage = ProviderTokenUsage.fromAnthropic({
+        'input_tokens': 120,
+        'cache_creation_input_tokens': 80,
+        'cache_read_input_tokens': 900,
+      });
+
+      expect(usage.promptTokenCount, 1100);
+      expect(usage.completionTokenCount, isNull);
+    });
+
+    test('reads Gemini prompt, output, and thinking token counts', () {
+      final usage = ProviderTokenUsage.fromGemini({
+        'promptTokenCount': 900,
+        'candidatesTokenCount': 120,
+        'thoughtsTokenCount': 40,
+      });
+
+      expect(usage.promptTokenCount, 900);
+      expect(usage.completionTokenCount, 120);
+      expect(usage.reasoningTokenCount, 40);
+    });
+
+    test('drops invalid provider token counts', () {
+      final usage = ProviderTokenUsage.fromOpenAi({
+        'prompt_tokens': -1,
+        'completion_tokens': '12',
+      });
+
+      expect(usage.isEmpty, isTrue);
+    });
+  });
+
   test('chatStream uses the supplied task-scoped client session', () {
     final source = File('lib/services/llm_service.dart').readAsStringSync();
 
