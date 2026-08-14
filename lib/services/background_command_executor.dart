@@ -133,6 +133,7 @@ class BackgroundCommandTarget {
 class BackgroundCommandExecutor {
   const BackgroundCommandExecutor({
     this.timeout = const Duration(seconds: 120),
+    this.silenceTimeout = const Duration(seconds: 60),
     this.outputLimitBytes = 256 * 1024,
     this.loginEnvironmentResolver,
     this.processStarter,
@@ -141,6 +142,8 @@ class BackgroundCommandExecutor {
   });
 
   final Duration timeout;
+  /// Stops a command which has made no observable progress for this interval.
+  final Duration silenceTimeout;
   final int outputLimitBytes;
   final LoginShellEnvironmentResolver? loginEnvironmentResolver;
   final BackgroundProcessStarter? processStarter;
@@ -257,15 +260,19 @@ class BackgroundCommandExecutor {
         );
       }
       var cancelled = isCancelled?.call() == true;
+      var stalled = false;
+      var lastOutputAt = DateTime.now();
       final stdout = _BoundedOutput(outputLimitBytes);
       final stderr = _BoundedOutput(outputLimitBytes);
       final liveOutput = _LiveOutputTail(onUpdate);
       final stdoutDone = process.stdout.listen((chunk) {
         stdout.add(chunk);
+        lastOutputAt = DateTime.now();
         liveOutput.add(chunk);
       }).asFuture<void>();
       final stderrDone = process.stderr.listen((chunk) {
         stderr.add(chunk);
+        lastOutputAt = DateTime.now();
         liveOutput.add(chunk);
       }).asFuture<void>();
       final completed = Future.wait<void>([
@@ -297,6 +304,16 @@ class BackgroundCommandExecutor {
           timer.cancel();
         },
       );
+      final silencePoll = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (cancelled || DateTime.now().difference(lastOutputAt) < silenceTimeout) {
+          return;
+        }
+        stalled = true;
+        cancelled = true;
+        termination = terminate(ProcessSignal.sigterm);
+        cancellationRequested.complete();
+        timer.cancel();
+      });
 
       final timedOut = await Future.any<bool>([
         completed.then((_) => false),
@@ -317,11 +334,14 @@ class BackgroundCommandExecutor {
       }
       await completed;
       cancellationPoll.cancel();
+      silencePoll.cancel();
       if (wslMarker != null) {
         unawaited(_removeWslMarker(target.shell, wslMarker));
       }
       if (posixMarker != null) unawaited(_removePosixMarker(posixMarker));
-      final status = cancelled
+      final status = stalled
+          ? 'stopped after ${silenceTimeout.inSeconds}s without output; last output was reviewed as no progress'
+          : cancelled
           ? 'cancelled'
           : timedOut
           ? 'timed out after ${timeout.inSeconds}s'
