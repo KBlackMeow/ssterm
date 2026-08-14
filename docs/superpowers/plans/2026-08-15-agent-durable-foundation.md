@@ -194,4 +194,3 @@ Expected: no whitespace errors and only planned files changed.
 git add docs/superpowers/specs/2026-08-15-agent-durable-execution-design.md
 git commit -m "docs: record durable agent foundation"
 ```
-
