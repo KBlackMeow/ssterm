@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="SSTerm"
 VERSION="$(grep '^version:' "$REPO_ROOT/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
 BUILD_DIR="$REPO_ROOT/build/macos/Build/Products/Release"
