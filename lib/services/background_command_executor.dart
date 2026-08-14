@@ -396,6 +396,7 @@ class BackgroundCommandExecutor {
     final stdout = _BoundedOutput(outputLimitBytes);
     final stderr = _BoundedOutput(outputLimitBytes);
     final liveOutput = _LiveOutputTail(onUpdate);
+    var lastOutputAt = DateTime.now();
     late final SSHSession session;
     try {
       session = await (sshSessionStarter ?? _startSshSession)(
@@ -410,21 +411,34 @@ class BackgroundCommandExecutor {
     }
 
     var cancelled = isCancelled?.call() == true;
+    var stalled = false;
     if (cancelled) {
       session.kill(SSHSignal.TERM);
       session.close();
     }
     final stdoutDone = session.stdout.listen((chunk) {
       stdout.add(chunk);
+      lastOutputAt = DateTime.now();
       liveOutput.add(chunk);
     }).asFuture<void>();
     final stderrDone = session.stderr.listen((chunk) {
       stderr.add(chunk);
+      lastOutputAt = DateTime.now();
       liveOutput.add(chunk);
     }).asFuture<void>();
     final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
     final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       if (isCancelled?.call() != true || cancelled) return;
+      cancelled = true;
+      session.kill(SSHSignal.TERM);
+      session.close();
+      timer.cancel();
+    });
+    final silencePoll = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (cancelled || DateTime.now().difference(lastOutputAt) < silenceTimeout) {
+        return;
+      }
+      stalled = true;
       cancelled = true;
       session.kill(SSHSignal.TERM);
       session.close();
@@ -440,7 +454,10 @@ class BackgroundCommandExecutor {
     }
     await completed;
     poll.cancel();
-    final status = cancelled
+    silencePoll.cancel();
+    final status = stalled
+        ? 'stopped after ${silenceTimeout.inSeconds}s without output; last output was reviewed as no progress'
+        : cancelled
         ? 'cancelled'
         : timedOut
         ? 'timed out after ${timeout.inSeconds}s'
