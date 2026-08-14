@@ -53,6 +53,16 @@ class AgentContextBudget {
         (exactUsageTokens == null && itemCount >= itemFallbackThreshold);
   }
 
+  /// Reject a model request only after compaction has had a chance to reduce
+  /// history. Both usage sources are considered because provider usage can be
+  /// one turn stale while the local estimate sees newly-added tool feedback.
+  bool isHardLimitExceeded({
+    required int estimatedTokens,
+    int? exactUsageTokens,
+  }) =>
+      estimatedTokens >= hardLimitTokens ||
+      (exactUsageTokens != null && exactUsageTokens >= hardLimitTokens);
+
   /// Conservative cross-provider estimate used until an adapter reports exact
   /// usage. UTF-8 bytes / 3 is deliberately safer for CJK and JSON-heavy tool
   /// payloads than the common English-only characters / 4 shortcut.

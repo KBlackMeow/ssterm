@@ -56,5 +56,15 @@ void main() {
         isTrue,
       );
     });
+
+    test('blocks a request when either usage source reaches hard limit', () {
+      final budget = AgentContextBudget.forContextWindow(32000);
+
+      expect(
+        budget.isHardLimitExceeded(estimatedTokens: 1, exactUsageTokens: 28800),
+        isTrue,
+      );
+      expect(budget.isHardLimitExceeded(estimatedTokens: 28800), isTrue);
+    });
   });
 }

@@ -205,17 +205,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     var loopIterations = 0;
     agentLoop:
     while (gen == _generation) {
-      final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
-      if (modelBudgetStop != null) {
-        _recordAgentRunStopped(modelBudgetStop);
-        stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
-        break;
-      }
       loopIterations++;
 
       final historyLenBefore = _conversationHistory.length;
-      final aiMsg = _ChatMessage.ai(text: '');
-      setState(() => _messages.add(aiMsg));
 
       // Truncate history — but pin the first [_kPinnedHeadMessages] (the
       // user's goal + the first AI reply) so the agent never forgets WHAT
@@ -223,6 +215,30 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // transcript group, so trimming must not split them.
       await _compactHistoryIfNeeded(gen, config);
       if (gen != _generation) break;
+
+      final contextBudget = AgentContextBudget.forContextWindow(
+        config.resolvedModel == null
+            ? null
+            : config.current?.modelContextWindows[config.resolvedModel],
+      );
+      if (contextBudget.isHardLimitExceeded(
+        estimatedTokens: AgentContextBudget.estimateHistoryTokens(
+          _conversationHistory,
+        ),
+        exactUsageTokens: _lastAgentPromptTokenCount,
+      )) {
+        _recordAgentContextLimit();
+        stopIter(loopIterations, 'context_hard_limit');
+        break;
+      }
+      final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
+      if (modelBudgetStop != null) {
+        _recordAgentRunStopped(modelBudgetStop);
+        stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
+        break;
+      }
+      final aiMsg = _ChatMessage.ai(text: '');
+      setState(() => _messages.add(aiMsg));
 
       // --- AI call ---
       // Structured one-line logs, greppable; see `_logAgent` /
@@ -1007,6 +1023,18 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       AgentBudgetLimit.elapsed => 'time limit reached',
     };
     final text = '[Agent run stopped] $reason.';
+    _conversationHistory.add({'role': 'assistant', 'content': text});
+    if (!mounted) return;
+    setState(() {
+      _messages.add(_ChatMessage.notice(text));
+      _agentLoopStatus = null;
+    });
+    _scrollToBottom();
+  }
+
+  void _recordAgentContextLimit() {
+    const text =
+        '[Agent run stopped] Context remains above the safe model limit after compaction.';
     _conversationHistory.add({'role': 'assistant', 'content': text});
     if (!mounted) return;
     setState(() {
