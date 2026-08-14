@@ -402,6 +402,16 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   }
 
   void _scrollToBottom() {
+    // Capture this before the next frame expands the transcript. Checking in
+    // the post-frame callback would see the new max extent and mistake newly
+    // appended content for a user scroll-away from the bottom.
+    final shouldFollowLatest =
+        !_scrollController.hasClients ||
+        _scrollController.position.maxScrollExtent -
+                _scrollController.position.pixels <=
+            24;
+    if (!shouldFollowLatest) return;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // `hasClients` alone is NOT sufficient — the controller can still
       // be alive on a disposed State (e.g. the user closed the panel
@@ -409,8 +419,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // animateTo on a disposed ScrollController.
       if (!mounted) return;
       if (_scrollController.hasClients) {
-        final position = _scrollController.position;
-        if (position.maxScrollExtent - position.pixels > 24) return;
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
           duration: const Duration(milliseconds: 200),
