@@ -392,7 +392,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // history doesn't lose any skill visibility.
     });
     _pendingSessionWrite = _pendingSessionWrite
-        .then((_) => _sessionStore.clear())
+        .then((_) async {
+          await _sessionStore.clear();
+          await _outputStore.clear();
+        })
         .catchError((_) {});
   }
 

@@ -53,5 +53,19 @@ void main() {
 
       expect(stat.mode & 0x1ff, 0x180); // 0600
     });
+
+    test('clears only its opaque artifact files', () async {
+      final reference = await store.save('temporary output');
+      final unrelated = File('${directory.path}/keep.txt');
+      await unrelated.writeAsString('keep');
+
+      await store.clear();
+
+      expect(
+        await File('${directory.path}/${reference.id}.bin').exists(),
+        isFalse,
+      );
+      expect(await unrelated.exists(), isTrue);
+    });
   });
 }

@@ -88,6 +88,20 @@ class AgentOutputStore {
     return utf8.decode(bytes.sublist(offset, end), allowMalformed: true);
   }
 
+  /// Removes artifacts belonging to this session without touching unrelated
+  /// files in an overridden test or host directory.
+  Future<void> clear() async {
+    final root = await _directory();
+    if (!await root.exists()) return;
+    final pattern = RegExp(r'^out-[a-f0-9]+\.bin$');
+    await for (final entry in root.list(followLinks: false)) {
+      if (entry is File && pattern.hasMatch(entry.uri.pathSegments.last)) {
+        await entry.delete();
+      }
+    }
+    _storedBytes = 0;
+  }
+
   Future<int> _currentStoredBytes() async {
     final known = _storedBytes;
     if (known != null) return known;
