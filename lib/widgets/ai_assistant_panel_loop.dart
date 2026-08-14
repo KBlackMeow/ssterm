@@ -854,6 +854,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             });
             _scrollToBottom();
           },
+          onSilence: (lastThreeLines) => _decideSilentCommand(
+            gen: gen,
+            config: config,
+            command: command,
+            lastThreeLines: lastThreeLines,
+          ),
         );
         if (!mounted || gen != _generation) {
           logIter('iter=$loopIterations exit stale_generation');

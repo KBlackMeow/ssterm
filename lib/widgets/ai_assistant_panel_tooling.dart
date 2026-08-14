@@ -12,6 +12,49 @@ typedef _AgentStreamResult = ({
 
 /// Streaming and tool-approval implementation used by the agent loop.
 extension _AiAgentToolingExt on _AiAssistantOverlayState {
+  /// Makes an isolated, constrained decision while a command has produced no
+  /// output. It deliberately uses a fresh HTTP session: the main agent loop is
+  /// awaiting the command and must not have its reusable stream interrupted.
+  Future<bool> _decideSilentCommand({
+    required int gen,
+    required AgentConfig config,
+    required String command,
+    required List<String> lastThreeLines,
+  }) async {
+    if (!mounted || gen != _generation) return false;
+    setState(() => _agentLoopStatus = 'Checking silent command…');
+    final messages = <AgentConversationItem>[
+      ..._conversationHistory,
+      AgentConversationItem.text(
+        role: 'user',
+        content: 'A command has produced no output for 60 seconds. '
+            'Assess whether this is normal progress. Command: $command\n'
+            'Last output (up to 3 lines):\n${lastThreeLines.join('\n')}\n'
+            'Reply with exactly CONTINUE to wait another 60 seconds, or STOP to terminate.',
+      ),
+    ];
+    final session = AgentStreamClientSession();
+    try {
+      final result = LlmService.chatStream(
+        config: config,
+        messages: messages,
+        session: session,
+      );
+      var text = '';
+      await for (final event in result.stream) {
+        if (event.kind == 'text') text += event.content;
+      }
+      return text.trim().toUpperCase() == 'CONTINUE';
+    } catch (_) {
+      return false;
+    } finally {
+      session.close(force: true);
+      if (mounted && gen == _generation) {
+        setState(() => _agentLoopStatus = 'Executing: $command');
+      }
+    }
+  }
+
   bool _isTransientStreamError(Object e) {
     if (e is HttpException) return true;
     if (e is SocketException) return true;

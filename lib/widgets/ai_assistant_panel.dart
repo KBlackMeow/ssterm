@@ -12,7 +12,7 @@ import '../models/mcp_server_config.dart';
 import '../models/skill.dart';
 import '../services/command_feedback_formatter.dart';
 import '../services/background_command_executor.dart'
-    show CommandExecutionUpdateListener;
+    show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
@@ -121,6 +121,7 @@ class AiAssistantOverlay extends StatefulWidget {
     String cmd, {
     bool Function()? isCancelled,
     CommandExecutionUpdateListener? onUpdate,
+    CommandSilenceDecider? onSilence,
   })?
   onExecuteAsync;
 

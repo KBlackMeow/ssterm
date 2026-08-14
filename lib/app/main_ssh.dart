@@ -723,6 +723,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     String command, {
     bool Function()? isCancelled,
     CommandExecutionUpdateListener? onUpdate,
+    CommandSilenceDecider? onSilence,
   }) {
     bool cancellationRequested() =>
         tab.isAgentExecutionCancelled || isCancelled?.call() == true;
@@ -749,6 +750,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           command,
           isCancelled: cancellationRequested,
           onUpdate: onUpdate,
+          onSilence: onSilence,
         ),
       );
     }
@@ -770,6 +772,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         command,
         isCancelled: cancellationRequested,
         onUpdate: onUpdate,
+        onSilence: onSilence,
       ),
     );
   }
