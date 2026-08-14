@@ -92,8 +92,9 @@ may consume it. This keeps the first delivery safe across local and SSH tabs.
 4. **Partially delivered:** thread provider-reported prompt, completion, and
    reasoning usage through OpenAI-compatible, Anthropic, and Gemini adapters
    into context compaction. A durable cross-turn usage ledger, hard preflight,
-   and reactive compaction retry remain future work. A hard preflight now
-   stops an unsafe request after compaction when context remains too large.
+   remain future work. A hard preflight stops an unsafe request after
+   compaction when context remains too large; a single recovery retry runs
+   only for an empty context-length failure.
 5. Add UI affordances for current budget, interrupted state, persisted-session
    restore, and artifact references.
 

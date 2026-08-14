@@ -962,7 +962,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     // it and the outer wrapper's finally would still need to fire anyway.
   }
 
-  Future<void> _compactHistoryIfNeeded(int gen, AgentConfig config) async {
+  Future<void> _compactHistoryIfNeeded(
+    int gen,
+    AgentConfig config, {
+    bool force = false,
+  }) async {
     final provider = config.current;
     final model = config.resolvedModel;
     final budget = AgentContextBudget.forContextWindow(
@@ -971,11 +975,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final estimatedTokens = AgentContextBudget.estimateHistoryTokens(
       _conversationHistory,
     );
-    if (!budget.shouldCompact(
-      estimatedTokens: estimatedTokens,
-      exactUsageTokens: _lastAgentPromptTokenCount,
-      itemCount: _conversationHistory.length,
-    )) {
+    if (!force &&
+        !budget.shouldCompact(
+          estimatedTokens: estimatedTokens,
+          exactUsageTokens: _lastAgentPromptTokenCount,
+          itemCount: _conversationHistory.length,
+        )) {
       return;
     }
     final candidate = _conversationHistory.compactionCandidate(

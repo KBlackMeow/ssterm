@@ -85,6 +85,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     int? exactReasoningTokenCount;
     int? promptTokenCount;
     int? completionTokenCount;
+    var didContextRecovery = false;
 
     // Retry only when an attempt yielded zero content or tool calls and
     // failed with a transient network error. Anything more aggressive
@@ -201,6 +202,22 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         break;
       } catch (e) {
         streamDone = true;
+        final canRecoverContext =
+            !didContextRecovery &&
+            fullText.isEmpty &&
+            reasoningText.isEmpty &&
+            nativeToolCalls.isEmpty &&
+            _isContextLengthError(e) &&
+            mounted &&
+            gen == _generation;
+        if (canRecoverContext) {
+          didContextRecovery = true;
+          _logAgent('context_length_recovery attempt=1');
+          await _compactHistoryIfNeeded(gen, config, force: true);
+          if (!mounted || gen != _generation) return null;
+          streamSession.reset();
+          continue;
+        }
         // Catch EVERYTHING — stream errors, SSE parse failures, etc.
         final retryDelay = AgentStreamRetryPolicy.delayAfterAttempt(attempt);
         final canRetry = AgentStreamRetryPolicy.canRetry(
@@ -276,6 +293,14 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     }
     final port = uri.hasPort ? ':${uri.port}' : '';
     return '${uri.scheme}://${uri.host}$port';
+  }
+
+  bool _isContextLengthError(Object error) {
+    final message = AgentStreamLogSanitizer.message(error).toLowerCase();
+    return message.contains('context length') ||
+        message.contains('context_length') ||
+        message.contains('maximum context') ||
+        message.contains('too many tokens');
   }
 
   Future<String?> _runWebSearch({

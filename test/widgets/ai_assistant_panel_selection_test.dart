@@ -43,6 +43,18 @@ void main() {
     },
   );
 
+  test('context-length failures compact and retry at most once', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel_tooling.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('didContextRecovery'));
+    expect(
+      source,
+      contains('_compactHistoryIfNeeded(gen, config, force: true)'),
+    );
+  });
+
   testWidgets('populated agent transcript is inside a selection area', (
     tester,
   ) async {
