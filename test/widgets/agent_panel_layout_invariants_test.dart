@@ -17,6 +17,28 @@ void main() {
     expect(toolCallCard, contains('child: ExpansionTile('));
   });
 
+  test('execution output cards default to a four-line collapsed preview', () {
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final widgets = File(
+      'lib/widgets/ai_assistant_panel_widgets.dart',
+    ).readAsStringSync();
+    final mcpResultCard = content.substring(
+      content.indexOf('class _McpResultCard'),
+      content.length,
+    );
+
+    expect(widgets, contains('static const _kCollapsedLines = 4;'));
+    expect(
+      mcpResultCard,
+      contains('class _McpResultCard extends StatefulWidget'),
+    );
+    expect(mcpResultCard, contains('static const _kCollapsedLines = 4;'));
+    expect(mcpResultCard, contains("'Collapse'"));
+    expect(mcpResultCard, contains('more lines'));
+  });
+
   test('top-level collapsible cards have no assistant-body indentation', () {
     final source = File(
       'lib/widgets/ai_assistant_panel_content.dart',

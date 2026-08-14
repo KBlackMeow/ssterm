@@ -853,9 +853,18 @@ class _ToolCallCard extends StatelessWidget {
 }
 
 /// Simple card rendering an MCP tool call result.
-class _McpResultCard extends StatelessWidget {
+class _McpResultCard extends StatefulWidget {
   final _McpResultData data;
   const _McpResultCard({required this.data});
+
+  @override
+  State<_McpResultCard> createState() => _McpResultCardState();
+}
+
+class _McpResultCardState extends State<_McpResultCard> {
+  static const _kCollapsedLines = 4;
+
+  var _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -867,8 +876,13 @@ class _McpResultCard extends StatelessWidget {
     final surface =
         AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
 
-    final result = data.result;
+    final result = widget.data.result;
     final isError = result.isError;
+    final lines = _contentLines(result.content);
+    final overflow = !_expanded && lines.length > _kCollapsedLines;
+    final preview = overflow
+        ? lines.sublist(0, _kCollapsedLines).join('\n')
+        : lines.join('\n');
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -894,7 +908,7 @@ class _McpResultCard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                'MCP: ${data.serverId}/${data.toolName}',
+                'MCP: ${widget.data.serverId}/${widget.data.toolName}',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -903,15 +917,82 @@ class _McpResultCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          for (final block in result.content)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: _buildContentBlock(block, dim, fg),
-            ),
+          if (lines.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            if (_expanded)
+              for (final block in result.content)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: _buildContentBlock(block, dim, fg),
+                )
+            else
+              SelectableText(
+                preview,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: fg,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            if (overflow) ...[
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => setState(() => _expanded = true),
+                child: Text(
+                  '+ ${lines.length - _kCollapsedLines} more lines',
+                  style: TextStyle(
+                    color: dim,
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    decoration: TextDecoration.underline,
+                    decorationColor: dim.withValues(alpha: 0.4),
+                  ),
+                ),
+              ),
+            ],
+            if (_expanded && lines.length > _kCollapsedLines) ...[
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => setState(() => _expanded = false),
+                child: Text(
+                  'Collapse',
+                  style: TextStyle(
+                    color: dim,
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                    decoration: TextDecoration.underline,
+                    decorationColor: dim.withValues(alpha: 0.4),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );
+  }
+
+  List<String> _contentLines(Iterable<McpContentBlock> blocks) {
+    final lines = <String>[];
+    for (final block in blocks) {
+      if (block.type == 'text') {
+        lines.addAll((block.text ?? '').split('\n'));
+      } else {
+        lines.add(_contentLabel(block));
+      }
+    }
+    return lines;
+  }
+
+  String _contentLabel(McpContentBlock block) {
+    switch (block.type) {
+      case 'image':
+        return '[image: ${block.mimeType ?? "unknown"}]';
+      case 'resource':
+        return '[resource: ${block.uri ?? "unknown"}]';
+      default:
+        return '[${block.type} content]';
+    }
   }
 
   Widget _buildContentBlock(McpContentBlock block, Color dim, Color fg) {
@@ -923,7 +1004,7 @@ class _McpResultCard extends StatelessWidget {
         );
       case 'image':
         return Text(
-          '[image: ${block.mimeType ?? "unknown"}]',
+          _contentLabel(block),
           style: TextStyle(
             fontSize: 11,
             color: dim,
@@ -932,7 +1013,7 @@ class _McpResultCard extends StatelessWidget {
         );
       case 'resource':
         return Text(
-          '[resource: ${block.uri ?? "unknown"}]',
+          _contentLabel(block),
           style: TextStyle(
             fontSize: 11,
             color: dim,
@@ -941,7 +1022,7 @@ class _McpResultCard extends StatelessWidget {
         );
       default:
         return Text(
-          '[${block.type} content]',
+          _contentLabel(block),
           style: TextStyle(
             fontSize: 11,
             color: dim,

@@ -227,7 +227,7 @@ class _CommandResultCard extends StatefulWidget {
 }
 
 class _CommandResultCardState extends State<_CommandResultCard> {
-  static const _kCollapsedLines = 8;
+  static const _kCollapsedLines = 4;
 
   bool _expanded = false;
 
