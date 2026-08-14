@@ -32,6 +32,8 @@ class LlmStreamEvent {
   final String? finishReason;
   final int malformedEventCount;
   final int? reasoningTokenCount;
+  final int? promptTokenCount;
+  final int? completionTokenCount;
 
   LlmStreamEvent(
     this.kind,
@@ -40,18 +42,24 @@ class LlmStreamEvent {
     this.finishReason,
     this.malformedEventCount = 0,
     this.reasoningTokenCount,
+    this.promptTokenCount,
+    this.completionTokenCount,
   });
 
   factory LlmStreamEvent.diagnostics({
     String? finishReason,
     required int malformedEventCount,
     int? reasoningTokenCount,
+    int? promptTokenCount,
+    int? completionTokenCount,
   }) => LlmStreamEvent(
     'diagnostics',
     '',
     finishReason: finishReason,
     malformedEventCount: malformedEventCount,
     reasoningTokenCount: reasoningTokenCount,
+    promptTokenCount: promptTokenCount,
+    completionTokenCount: completionTokenCount,
   );
 }
 

@@ -108,6 +108,22 @@ void main() {
       expect(accumulator.reasoningTokenCount, 37);
     });
 
+    test('retains exact prompt and completion usage from a terminal chunk', () {
+      final accumulator = OpenAiStreamAccumulator();
+
+      accumulator.addData(
+        jsonEncode({
+          'choices': [
+            {'delta': {}, 'finish_reason': 'stop'},
+          ],
+          'usage': {'prompt_tokens': 1234, 'completion_tokens': 56},
+        }),
+      );
+
+      expect(accumulator.promptTokenCount, 1234);
+      expect(accumulator.completionTokenCount, 56);
+    });
+
     test('ignores missing or invalid reasoning usage', () {
       final accumulator = OpenAiStreamAccumulator();
 
