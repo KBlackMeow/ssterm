@@ -52,9 +52,12 @@ class AgentOutputStore {
     }
     final root = await _directory();
     await root.create(recursive: true);
+    await _restrictPermissions(root.path, '700');
     final id = _newId();
     final target = File('${root.path}/$id.bin');
+    await _restrictPermissions(target.path, '600', create: target);
     await target.writeAsBytes(stored, flush: true);
+    await _restrictPermissions(target.path, '600');
     _storedBytes = used + stored.length;
     return AgentOutputReference(
       id: id,
@@ -105,6 +108,20 @@ class AgentOutputStore {
     if (override != null) return override;
     final data = await appDataDir();
     return Directory('${data.path}/agent-output/$sessionId');
+  }
+
+  Future<void> _restrictPermissions(
+    String path,
+    String mode, {
+    File? create,
+  }) async {
+    if (Platform.isWindows) return;
+    try {
+      if (create != null && !await create.exists()) await create.create();
+      await Process.run('chmod', [mode, path]);
+    } catch (_) {
+      // The app must remain usable on filesystems without POSIX permissions.
+    }
   }
 
   String _newId() {

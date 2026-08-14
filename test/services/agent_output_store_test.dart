@@ -45,5 +45,13 @@ void main() {
 
       await expectLater(limited.save('abcdefgh'), throwsA(isA<StateError>()));
     });
+
+    test('uses owner-only permissions on POSIX artifact files', () async {
+      if (Platform.isWindows) return;
+      final reference = await store.save('private output');
+      final stat = await File('${directory.path}/${reference.id}.bin').stat();
+
+      expect(stat.mode & 0x1ff, 0x180); // 0600
+    });
   });
 }
