@@ -12,6 +12,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<SshHost> _savedHosts = [];
   List<SshHost> _configHosts = [];
   List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
+  final _localShellLoginEnvironmentResolver = LoginShellEnvironmentResolver();
   AppConfig _config = AppConfig();
   int _mobileTabIndex = 0; // 0=terminal 1=files 2=commands 3=settings
 
@@ -64,7 +65,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     });
   }
 
-  Map<String, String> _environmentForLocalShell(LocalShellOption shell) {
+  Future<Map<String, String>> _environmentForLocalShell(
+    LocalShellOption shell,
+  ) async {
     if (shell.isWsl) {
       return buildWslEnvironment(
         systemRoot: Platform.environment['SystemRoot'] ?? r'C:\Windows',
@@ -77,7 +80,13 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         extras: shell.environment,
       );
     }
-    final env = buildLocalShellEnvironment(extras: shell.environment);
+    final env = Platform.isMacOS || Platform.isLinux
+        ? await buildLocalShellEnvironmentWithLoginPath(
+            shell: shell,
+            extras: shell.environment,
+            loginEnvironmentResolver: _localShellLoginEnvironmentResolver,
+          )
+        : buildLocalShellEnvironment(extras: shell.environment);
     if (shell.id == 'cmd') {
       env['PROMPT'] = buildCmdOsc7Prompt(Platform.environment['PROMPT']);
     }
@@ -249,7 +258,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
     final isSplit = pane == 1;
     final home = userHomeDir();
-    final env = _environmentForLocalShell(shell);
+    final env = await _environmentForLocalShell(shell);
     late Pty pty;
     try {
       pty = await Pty.start(

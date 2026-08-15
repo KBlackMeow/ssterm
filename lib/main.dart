@@ -26,6 +26,7 @@ import 'services/bundled_skills.dart';
 import 'services/file_write_service.dart';
 import 'services/local_pty_service.dart';
 import 'services/local_shell_discovery.dart';
+import 'services/login_shell_environment.dart';
 import 'services/local_shell_wrapper.dart';
 import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';

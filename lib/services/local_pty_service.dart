@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'local_shell_discovery.dart';
+import 'login_shell_environment.dart';
+
 String buildCmdOsc7Prompt(String? originalPrompt) =>
     r'$E]7;file:///$P$E\' + (originalPrompt ?? r'$P$G');
 
@@ -126,5 +129,25 @@ Map<String, String> buildLocalShellEnvironment({
     ..['TERM_PROGRAM'] = 'ssterm';
 
   if (extras != null) env.addAll(extras);
+  return env;
+}
+
+/// Builds a POSIX terminal environment using the selected shell's login PATH.
+///
+/// macOS GUI apps commonly start with a system-only PATH, which cannot locate
+/// user-installed tools such as Homebrew. Resolving it from the actual selected
+/// shell also keeps a direct Fish session consistent with Fish launched from
+/// another shell.
+Future<Map<String, String>> buildLocalShellEnvironmentWithLoginPath({
+  required LocalShellOption shell,
+  Map<String, String>? base,
+  Map<String, String>? extras,
+  LoginShellEnvironmentResolver? loginEnvironmentResolver,
+}) async {
+  final env = buildLocalShellEnvironment(base: base, extras: extras);
+  final loginPath = await (loginEnvironmentResolver ??
+          LoginShellEnvironmentResolver())
+      .resolvePath(shell);
+  env.addAll(loginPath);
   return env;
 }

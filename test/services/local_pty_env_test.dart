@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/services/local_shell_discovery.dart';
+import 'package:ssterm/services/login_shell_environment.dart';
 import 'package:ssterm/services/local_pty_service.dart';
 
 void main() {
@@ -95,6 +97,26 @@ void main() {
     test('merges extra env vars', () {
       final env = buildLocalShellEnvironment(extras: {'FOO': 'bar'});
       expect(env['FOO'], equals('bar'));
+    });
+
+    test('uses the selected shell login PATH over a GUI process PATH', () async {
+      const fish = LocalShellOption(
+        id: 'fish',
+        displayName: 'Fish',
+        executable: '/opt/homebrew/bin/fish',
+      );
+      final resolver = LoginShellEnvironmentResolver(
+        readPath: (_) async => '/opt/homebrew/bin:/usr/bin:/bin',
+      );
+
+      final env = await buildLocalShellEnvironmentWithLoginPath(
+        shell: fish,
+        base: {'PATH': '/usr/bin:/bin'},
+        loginEnvironmentResolver: resolver,
+      );
+
+      expect(env['PATH'], '/opt/homebrew/bin:/usr/bin:/bin');
+      expect(env['TERM'], 'xterm-256color');
     });
   });
 }
