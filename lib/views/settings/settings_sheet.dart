@@ -21,6 +21,7 @@ import '../../models/ssh_host.dart';
 import '../../models/terminal_settings.dart';
 import '../../models/terminal_theme_presets.dart';
 import '../../services/mcp_service.dart';
+import '../../services/shell_integration_manager.dart';
 import '../../services/skill_service.dart';
 import '../../services/skill_archive_importer.dart';
 import '../../services/wallpaper_storage.dart';
@@ -32,6 +33,7 @@ import 'settings_console_shell.dart';
 part 'settings_sheet_agent.dart';
 part 'settings_sheet_commands.dart';
 part 'settings_sheet_safety.dart';
+part 'settings_sheet_shell_integration.dart';
 
 const _kSheetBg = Color(0xFF0B0F16);
 const _kDivider = Color(0xFF283545);
@@ -73,6 +75,9 @@ class _SettingsPageState extends State<SettingsPage>
   List<Command> _commands = const [];
   bool _skillImporting = false;
   bool _skillDragOver = false;
+  List<ShellIntegrationTarget> _shellIntegrationTargets = const [];
+  bool _shellIntegrationLoading = false;
+  StreamSubscription<ShellIntegrationTarget>? _shellIntegrationSubscription;
   StreamSubscription<McpServiceEvent>? _mcpStatusSubscription;
 
   final _apiKeyControllers = <String, TextEditingController>{};
@@ -105,7 +110,8 @@ class _SettingsPageState extends State<SettingsPage>
     super.initState();
     _s = widget.settings.copyWith();
     _agentConfig = widget.agent ?? AgentConfig();
-    _tabController = TabController(length: 10, vsync: this);
+    _tabController = TabController(length: 11, vsync: this);
+    _tabController.addListener(_handleSettingsTabChanged);
     _loadPackageInfo();
     _loadCommands();
     _initAgentControllers();
@@ -122,6 +128,14 @@ class _SettingsPageState extends State<SettingsPage>
       _loadApiKey(p.id);
     }
     _loadBraveSearchKey();
+  }
+
+  void _handleSettingsTabChanged() {
+    if (_tabController.index == 9 &&
+        _shellIntegrationTargets.isEmpty &&
+        !_shellIntegrationLoading) {
+      unawaited(_loadShellIntegrations());
+    }
   }
 
   Future<void> _loadApiKey(String id) async {
@@ -170,6 +184,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
+    _shellIntegrationSubscription?.cancel();
     _mcpStatusSubscription?.cancel();
     _tabController.dispose();
     for (final c in _apiKeyControllers.values) {
@@ -218,6 +233,10 @@ class _SettingsPageState extends State<SettingsPage>
       ),
       SettingsConsoleDestination(label: 'MCP', icon: Icons.hub_outlined),
       SettingsConsoleDestination(label: 'Safety', icon: Icons.shield_outlined),
+      SettingsConsoleDestination(
+        label: 'Shell Integration',
+        icon: Icons.sync_alt_outlined,
+      ),
       SettingsConsoleDestination(label: 'About', icon: Icons.info_outline),
     ];
 
@@ -243,6 +262,7 @@ class _SettingsPageState extends State<SettingsPage>
         Tab(text: 'Skills'),
         Tab(text: 'MCP'),
         Tab(text: 'Safety'),
+        Tab(text: 'Shell Integration'),
         Tab(text: 'About'),
       ],
     );
@@ -257,6 +277,7 @@ class _SettingsPageState extends State<SettingsPage>
       _buildSkillsTab(),
       _buildMcpTab(),
       _buildSafetyTab(),
+      _buildShellIntegrationTab(),
       _buildAboutTab(),
     ];
 

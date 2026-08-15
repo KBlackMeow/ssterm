@@ -2,6 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/local_pty_service.dart';
 
 void main() {
+  test('CMD prompt reports cwd without a startup command', () {
+    expect(buildCmdOsc7Prompt(null), r'$E]7;file:///$P$E\$P$G');
+    expect(buildCmdOsc7Prompt(r'$N$G'), r'$E]7;file:///$P$E\$N$G');
+  });
+
   group('buildWslEnvironment', () {
     test('always sets TERM to xterm-256color', () {
       final env = buildWslEnvironment(systemRoot: r'C:\Windows');

@@ -74,6 +74,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       );
     }
     final env = buildLocalShellEnvironment(extras: shell.environment);
+    if (shell.id == 'cmd') {
+      env['PROMPT'] = buildCmdOsc7Prompt(Platform.environment['PROMPT']);
+    }
     if (shell.useUnixWrapper) env['SHELL'] = shell.executable;
     return env;
   }
@@ -243,66 +246,19 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final isSplit = pane == 1;
     final home = userHomeDir();
     final env = _environmentForLocalShell(shell);
-    final useUnixWrapper = shell.useUnixWrapper && !Platform.isWindows;
-    final usePowerShellCwdWrapper =
-        shell.usePowerShellCwdWrapper && Platform.isWindows;
-    var powerShellPolicyFallback = false;
-
     late Pty pty;
     try {
-      if (useUnixWrapper) {
-        // On iOS login-shell flag (-l) causes /bin/sh to source system profile
-        // files that don't exist in the iOS sandbox, hanging the shell startup.
-        final shArgs = Platform.isIOS
-            ? ['-c', _interactiveLocalShellWrapperCommand()]
-            : ['-lc', _interactiveLocalShellWrapperCommand()];
-        pty = await Pty.start(
-          '/bin/sh',
-          arguments: shArgs,
-          columns: columns,
-          rows: rows,
-          environment: env,
-          workingDirectory: workingDirectory ?? home,
-          ackRead: true,
-        );
-      } else if (usePowerShellCwdWrapper) {
-        final encoded = encodePowerShellCommand(buildPowerShellOsc7Prelude());
-        try {
-          pty = await Pty.start(
-            shell.executable,
-            arguments: ['-NoLogo', '-NoExit', '-EncodedCommand', encoded],
-            columns: columns,
-            rows: rows,
-            environment: env,
-            workingDirectory: workingDirectory ?? home,
-            ackRead: true,
-          );
-        } on PtyStartException catch (error) {
-          if (!isPowerShellEncodedCommandPolicyError(error.toString())) {
-            rethrow;
-          }
-          pty = await Pty.start(
-            shell.executable,
-            arguments: shell.arguments,
-            columns: columns,
-            rows: rows,
-            environment: env,
-            workingDirectory: workingDirectory ?? home,
-            ackRead: true,
-          );
-          powerShellPolicyFallback = true;
-        }
-      } else {
-        pty = await Pty.start(
-          shell.executable,
-          arguments: shell.arguments,
-          columns: columns,
-          rows: rows,
-          environment: env,
-          workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
-          ackRead: true,
-        );
-      }
+      pty = await Pty.start(
+        shell.executable,
+        // WSL keeps only its distribution selector. No selected shell receives
+        // startup arguments; cwd integration is installed over PTY input.
+        arguments: shell.isWsl ? shell.arguments : const [],
+        columns: columns,
+        rows: rows,
+        environment: env,
+        workingDirectory: shell.isWsl ? null : (workingDirectory ?? home),
+        ackRead: true,
+      );
     } catch (e) {
       if (!mounted) return;
       terminal.write('\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt');
@@ -319,13 +275,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.pty?.kill();
       tab.pty?.dispose();
       tab.pty = pty;
-    }
-
-    if (powerShellPolicyFallback) {
-      terminal.write(
-        '\r\n[PowerShell started in compatibility mode: your Windows policy '
-        'blocked the startup hook, so automatic working-directory sync is off.]\r\n',
-      );
     }
 
     final cwdParser = RemoteCwdParser();
@@ -655,9 +604,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       (_) => _handleSshSessionDone(tab, terminal, profile: profile),
     );
   }
-
-  String _interactiveLocalShellWrapperCommand() =>
-      buildInteractiveShellWrapper();
 
   void _newLocalTab(LocalShellOption shell) {
     final home = userHomeDir();

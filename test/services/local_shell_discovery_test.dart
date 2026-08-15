@@ -69,38 +69,55 @@ void main() {
     },
   );
 
-  test('passes a no-launcher WSL login shell as a positional argument', () {
-    const adversarialShell = "/bin/zsh'; printf injected; #";
-    final arguments = buildWslInteractiveShellArguments(
-      distro: 'Ubuntu',
-      loginShell: adversarialShell,
-    );
+  test('selects a no-launcher WSL distro without shell arguments', () {
+    final arguments = buildWslInteractiveShellArguments(distro: 'Ubuntu');
 
-    expect(arguments.take(7), [
-      '-d',
-      'Ubuntu',
-      '--cd',
-      '~',
-      '--',
-      '/bin/sh',
-      '-lc',
-    ]);
-    expect(arguments[7], contains(r'export SHELL="$1"'));
-    expect(arguments[7], isNot(contains(adversarialShell)));
-    expect(arguments[7], contains(']7;file://'));
-    expect(arguments[8], 'ssterm-wsl');
-    expect(arguments[9], adversarialShell);
+    expect(arguments, ['-d', 'Ubuntu']);
   });
 
-  test('passes a launcher-backed WSL login shell positionally too', () {
-    const adversarialShell = '/bin/bash\nprintf injected';
-    final arguments = buildWslLauncherArguments(loginShell: adversarialShell);
+  test('starts a launcher-backed WSL distro without injected commands', () {
+    expect(buildWslLauncherArguments(), isEmpty);
+  });
 
-    expect(arguments.take(4), ['run', '/bin/sh', '-lc', isA<String>()]);
-    expect(arguments[3], contains(r'export SHELL="$1"'));
-    expect(arguments[3], isNot(contains(adversarialShell)));
-    expect(arguments[4], 'ssterm-wsl');
-    expect(arguments[5], adversarialShell);
+  test('migrates a cached launcher-backed WSL bootstrap to 1.6 behavior', () {
+    final shell = LocalShellOption.fromJson({
+      'id': 'wsl:Ubuntu',
+      'displayName': 'Ubuntu',
+      'executable':
+          r'C:\Users\Alice\AppData\Local\Microsoft\WindowsApps\ubuntu.exe',
+      'arguments': [
+        'run',
+        '/bin/sh',
+        '-lc',
+        'script',
+        'ssterm-wsl',
+        '/bin/bash',
+      ],
+      'isWsl': true,
+    })!;
+
+    expect(shell.arguments, isEmpty);
+  });
+
+  test('migrates a cached wsl.exe bootstrap to a direct login shell', () {
+    final shell = LocalShellOption.fromJson({
+      'id': 'wsl:Ubuntu',
+      'displayName': 'WSL Ubuntu',
+      'executable': r'C:\Windows\System32\wsl.exe',
+      'arguments': [
+        '-d',
+        'Ubuntu',
+        '--',
+        '/bin/sh',
+        '-lc',
+        'script',
+        'ssterm-wsl',
+        '/bin/bash',
+      ],
+      'isWsl': true,
+    })!;
+
+    expect(shell.arguments, ['-d', 'Ubuntu']);
   });
 
   test('only bash and zsh qualify for OSC 7 POSIX shell discovery', () {
@@ -135,36 +152,6 @@ void main() {
       nativePathForLocalShell(shell, '//server/share/project'),
       r'\\server\share\project',
     );
-  });
-
-  test('builds an env.exe-compatible Git Bash OSC 7 wrapper launch', () {
-    final arguments = buildGitBashInteractiveShellArguments(const [
-      'MSYSTEM=MINGW64',
-      'MSYS=enable_pcon winsymlink:nativestrict',
-      'CHERE_INVOKING=1',
-      'SHELL=/usr/bin/bash',
-      '/usr/bin/bash',
-      '--login',
-      '-i',
-    ]);
-
-    expect(arguments.take(4), [
-      'MSYSTEM=MINGW64',
-      'MSYS=enable_pcon winsymlink:nativestrict',
-      'CHERE_INVOKING=1',
-      'SHELL=/usr/bin/bash',
-    ]);
-    expect(arguments.sublist(4, 9), [
-      '/usr/bin/bash',
-      '--noprofile',
-      '--norc',
-      '-c',
-      isA<String>(),
-    ]);
-    final script = arguments.last;
-    expect(script, contains(r"printf '\033]7;file://%s\033\\'"));
-    expect(script, contains('PROMPT_COMMAND'));
-    expect(script, contains(r'$HOME/.bash_profile'));
   });
 
   group(
@@ -205,6 +192,15 @@ void main() {
           expect(shell.usePowerShellCwdWrapper, isFalse);
         }
       });
+
+      test(
+        'native shell processes are discovered without startup arguments',
+        () {
+          for (final shell in shells) {
+            expect(shell.arguments, isEmpty, reason: shell.id);
+          }
+        },
+      );
     },
     skip: Platform.isWindows ? false : 'Windows-only discovery path',
   );

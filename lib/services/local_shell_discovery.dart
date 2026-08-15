@@ -1,12 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'local_shell_wrapper.dart';
-
-String _wslShellBootstrap({bool changeToHome = false}) =>
-    '${changeToHome ? 'cd ~ 2>/dev/null\n' : ''}'
-    'export SHELL="\$1"\n${buildInteractiveShellWrapper()}';
-
 /// Whether [path] names one of the POSIX shells for which SSTerm installs a
 /// correct OSC 7 prompt hook.
 bool isOsc7CompatiblePosixShellPath(String path) {
@@ -52,54 +46,17 @@ String nativePathForLocalShell(LocalShellOption shell, String cwd) {
   return '$gitRoot\\${cwd.substring(1).replaceAll('/', r'\')}';
 }
 
-/// Replaces Git Bash's ordinary `--login -i` tail with SSTerm's bash
-/// bootstrap while retaining the environment assignments consumed by
-/// Git-for-Windows `env.exe`.
-List<String> buildGitBashInteractiveShellArguments(
-  List<String> discoveredArguments,
-) {
-  final bashIndex = discoveredArguments.indexOf('/usr/bin/bash');
-  final environment = bashIndex < 0
-      ? const <String>[]
-      : discoveredArguments.take(bashIndex).toList(growable: false);
-  return [
-    ...environment,
-    '/usr/bin/bash',
-    '--noprofile',
-    '--norc',
-    '-c',
-    buildInteractiveShellWrapper(),
-  ];
-}
-
 /// Builds the `wsl.exe` invocation used when a distribution has no dedicated
-/// launcher. The discovered login shell is passed as `$1`, never interpolated
-/// into shell source.
-List<String> buildWslInteractiveShellArguments({
-  required String distro,
-  required String loginShell,
-}) => [
+/// launcher. Keep this deliberately close to WSL's native interactive launch
+/// behavior; injecting a `/bin/sh -lc` bootstrap here broke working distros.
+List<String> buildWslInteractiveShellArguments({required String distro}) => [
   '-d',
   distro,
-  '--cd',
-  '~',
-  '--',
-  '/bin/sh',
-  '-lc',
-  _wslShellBootstrap(),
-  'ssterm-wsl',
-  loginShell,
 ];
 
-/// Builds the equivalent invocation for Store/launcher-backed WSL distros.
-List<String> buildWslLauncherArguments({required String loginShell}) => [
-  'run',
-  '/bin/sh',
-  '-lc',
-  _wslShellBootstrap(changeToHome: true),
-  'ssterm-wsl',
-  loginShell,
-];
+/// Store-backed distro launchers already know the user, home directory, and
+/// login shell. Starting them without arguments is the reliable 1.6 behavior.
+List<String> buildWslLauncherArguments() => const [];
 
 /// A local shell that can be launched in a PTY tab.
 class LocalShellOption {
@@ -168,11 +125,11 @@ class LocalShellOption {
   static LocalShellOption? fromJson(Map<String, dynamic> json) {
     final id = json['id'];
     final displayName = json['displayName'];
-    final executable = json['executable'];
+    var executable = json['executable'];
     if (id is! String || displayName is! String || executable is! String) {
       return null;
     }
-    final args =
+    var args =
         (json['arguments'] as List?)?.whereType<String>().toList() ??
         const <String>[];
     Map<String, String>? env;
@@ -183,6 +140,37 @@ class LocalShellOption {
         if (k is String && v is String) env![k] = v;
       });
       if (env.isEmpty) env = null;
+    }
+    final isWsl = json['isWsl'] as bool? ?? false;
+    // Versions after 1.6 persisted an injected `sh -lc` bootstrap which can
+    // immediately exit with code 64 on otherwise healthy WSL installations.
+    // Normalize that cached shape so users do not have to wait for background
+    // discovery (or manually delete their settings) before WSL works again.
+    if (isWsl && args.contains('ssterm-wsl')) {
+      final executableName = executable
+          .replaceAll('/', r'\')
+          .split(r'\')
+          .last
+          .toLowerCase();
+      if (executableName == 'wsl.exe') {
+        final distro = id.startsWith('wsl:')
+            ? id.substring('wsl:'.length)
+            : displayName;
+        args = buildWslInteractiveShellArguments(distro: distro);
+      } else {
+        args = const <String>[];
+      }
+    }
+    if (id.startsWith('git-bash') &&
+        executable
+            .toLowerCase()
+            .replaceAll('/', r'\')
+            .endsWith(r'\usr\bin\env.exe')) {
+      executable = executable.replaceFirst(
+        RegExp(r'\\usr\\bin\\env\.exe$', caseSensitive: false),
+        r'\bin\bash.exe',
+      );
+      args = const <String>[];
     }
     return LocalShellOption(
       id: id,
@@ -195,7 +183,7 @@ class LocalShellOption {
           json['usePowerShellCwdWrapper'] as bool? ??
           json['usePowerShellWrapper'] as bool? ??
           false,
-      isWsl: json['isWsl'] as bool? ?? false,
+      isWsl: isWsl,
     );
   }
 }
@@ -331,15 +319,6 @@ class LocalShellDiscovery {
     Set<String> seen,
   ) {
     final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
-    final gitBashArguments = buildGitBashInteractiveShellArguments(const [
-      'MSYSTEM=MINGW64',
-      'MSYS=enable_pcon winsymlink:nativestrict',
-      'CHERE_INVOKING=1',
-      'SHELL=/usr/bin/bash',
-      '/usr/bin/bash',
-      '--login',
-      '-i',
-    ]);
     final candidates =
         <
           ({
@@ -388,8 +367,8 @@ class LocalShellDiscovery {
           (
             id: 'git-bash',
             name: 'Git Bash',
-            path: r'C:\Program Files\Git\usr\bin\env.exe',
-            args: gitBashArguments,
+            path: r'C:\Program Files\Git\bin\bash.exe',
+            args: const [],
             env: {
               'MSYSTEM': 'MINGW64',
               // ConPTY pseudo-console support; winsymlink alone is not enough.
@@ -404,8 +383,8 @@ class LocalShellDiscovery {
           (
             id: 'git-bash-x86',
             name: 'Git Bash',
-            path: r'C:\Program Files (x86)\Git\usr\bin\env.exe',
-            args: gitBashArguments,
+            path: r'C:\Program Files (x86)\Git\bin\bash.exe',
+            args: const [],
             env: {
               'MSYSTEM': 'MINGW64',
               'MSYS': 'enable_pcon winsymlink:nativestrict',
@@ -449,22 +428,15 @@ class LocalShellDiscovery {
 
       final distros = _decodeWslDistroNames(result.stdout);
       for (final distro in distros) {
-        final loginShell = await _wslLoginShell(wsl, distro);
-        if (!isOsc7CompatiblePosixShellPath(loginShell)) continue;
         final launcher = _findDistroLauncher(distro);
         if (launcher != null) {
-          // `<launcher> run <cmd>` executes non-interactively in the
-          // launcher's own (Windows-side) CWD rather than the Linux
-          // $HOME the no-args interactive form uses, so `cd ~` first to
-          // match today's behavior before handing off to the OSC 7 cwd
-          // bootstrap shared with macOS/Linux native shells.
           _addShell(
             shells,
             seen,
             id: 'wsl:$distro',
             displayName: distro,
             executable: launcher,
-            arguments: buildWslLauncherArguments(loginShell: loginShell),
+            arguments: buildWslLauncherArguments(),
             isWsl: true,
           );
           continue;
@@ -476,10 +448,7 @@ class LocalShellDiscovery {
           id: 'wsl:$distro',
           displayName: 'WSL $distro',
           executable: wsl,
-          arguments: buildWslInteractiveShellArguments(
-            distro: distro,
-            loginShell: loginShell,
-          ),
+          arguments: buildWslInteractiveShellArguments(distro: distro),
           isWsl: true,
         );
       }
@@ -531,24 +500,6 @@ class LocalShellDiscovery {
     }
 
     return names.toList();
-  }
-
-  static Future<String> _wslLoginShell(String wsl, String distro) async {
-    try {
-      final result = await Process.run(wsl, [
-        '-d',
-        distro,
-        '-e',
-        'sh',
-        '-lc',
-        r'getent passwd "$(id -un)" | cut -d: -f7',
-      ]);
-      if (result.exitCode == 0) {
-        final shell = result.stdout.toString().trim();
-        if (shell.startsWith('/')) return shell;
-      }
-    } catch (_) {}
-    return '/bin/sh';
   }
 
   /// `wsl --list --quiet` returns UTF-16LE names on Windows.

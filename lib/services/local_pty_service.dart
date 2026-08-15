@@ -1,5 +1,8 @@
 import 'dart:io';
 
+String buildCmdOsc7Prompt(String? originalPrompt) =>
+    r'$E]7;file:///$P$E\' + (originalPrompt ?? r'$P$G');
+
 /// Builds the environment map for a WSL session.
 ///
 /// [systemRoot] is the Windows SystemRoot (e.g. `C:\Windows`).
@@ -62,10 +65,7 @@ Map<String, String> buildGitBashEnvironment({
   Map<String, String>? extras,
 }) {
   final gitRoot = executable
-      .replaceFirst(
-        RegExp(r'\\usr\\bin\\env\.exe$', caseSensitive: false),
-        '',
-      )
+      .replaceFirst(RegExp(r'\\usr\\bin\\env\.exe$', caseSensitive: false), '')
       .replaceFirst(RegExp(r'\\bin\\bash\.exe$', caseSensitive: false), '');
 
   final path = [
@@ -76,8 +76,7 @@ Map<String, String> buildGitBashEnvironment({
     ],
     '$systemRoot\\System32',
     systemRoot,
-    if (Platform.environment.containsKey('PATH'))
-      Platform.environment['PATH']!,
+    if (Platform.environment.containsKey('PATH')) Platform.environment['PATH']!,
   ].join(';');
 
   final env = <String, String>{
