@@ -113,12 +113,13 @@ extension _SafetySettingsExt on _SettingsPageState {
   }
 
   Widget _agentSafetySection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
+    return Material(
+      color: _kSurface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
+        side: const BorderSide(color: _kDivider),
       ),
+      clipBehavior: Clip.antiAlias,
       child: SwitchListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         dense: true,
@@ -140,12 +141,13 @@ extension _SafetySettingsExt on _SettingsPageState {
 
   Widget _builtinRulesSection() {
     final rules = CommandSafety.builtinDangerRules;
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
+    return Material(
+      color: _kSurface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _kDivider),
+        side: const BorderSide(color: _kDivider),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           for (var i = 0; i < rules.length; i++) ...[

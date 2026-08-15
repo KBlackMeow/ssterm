@@ -576,46 +576,53 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildHostTile(SshHost host) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
+      child: Material(
         color: _kSurface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _kDivider),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-        leading: const Icon(Icons.lock_outline, color: _kFgMuted, size: 18),
-        title: Text(
-          host.alias,
-          style: const TextStyle(color: _kFg, fontSize: 13),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: const BorderSide(color: _kDivider),
         ),
-        subtitle: Text(
-          host.displayInfo,
-          style: const TextStyle(color: _kFgMuted, fontSize: 11),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
-              onPressed: () => _editHost(host),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: const EdgeInsets.all(6),
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
-                size: 15,
-                color: _kFgMuted,
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          leading: const Icon(Icons.lock_outline, color: _kFgMuted, size: 18),
+          title: Text(
+            host.alias,
+            style: const TextStyle(color: _kFg, fontSize: 13),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            host.displayInfo,
+            style: const TextStyle(color: _kFgMuted, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  size: 15,
+                  color: _kFgMuted,
+                ),
+                onPressed: () => _editHost(host),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: const EdgeInsets.all(6),
               ),
-              onPressed: () => _confirmDeleteHost(host),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: const EdgeInsets.all(6),
-            ),
-          ],
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 15,
+                  color: _kFgMuted,
+                ),
+                onPressed: () => _confirmDeleteHost(host),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: const EdgeInsets.all(6),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -718,12 +725,13 @@ class _SettingsPageState extends State<SettingsPage>
     ),
   );
 
-  Widget _consoleSurface({required Widget child}) => Container(
-    decoration: BoxDecoration(
-      color: _kSurface,
+  Widget _consoleSurface({required Widget child}) => Material(
+    color: _kSurface,
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: _kDivider),
+      side: const BorderSide(color: _kDivider),
     ),
+    clipBehavior: Clip.antiAlias,
     child: child,
   );
 

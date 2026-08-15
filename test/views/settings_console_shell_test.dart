@@ -195,6 +195,40 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('every settings destination renders without framework errors', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(),
+          onChanged: (_) {},
+          agent: AgentConfig(),
+        ),
+      ),
+    );
+
+    for (final label in const [
+      'Appearance',
+      'Font',
+      'Cursor',
+      'SSH',
+      'Commands',
+      'Agent',
+      'Skills',
+      'MCP',
+      'Safety',
+      'Shell Integration',
+      'About',
+    ]) {
+      await tester.tap(find.text(label).first);
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: label);
+    }
+  });
 }
 
 class _Harness extends StatefulWidget {

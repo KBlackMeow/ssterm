@@ -109,67 +109,70 @@ extension _ShellIntegrationSettingsExt on _SettingsPageState {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
+      child: Material(
         color: _kSurface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _kDivider),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
-        leading: Icon(Icons.terminal, size: 18, color: color),
-        title: Text(
-          target.label,
-          style: const TextStyle(color: _kFg, fontSize: 13),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: const BorderSide(color: _kDivider),
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(status, style: TextStyle(color: color, fontSize: 11)),
-            if (target.profilePath != null)
-              Text(
-                target.profilePath!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _kFgMuted,
-                  fontSize: 10,
-                  fontFamily: 'JetBrainsMono',
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+          leading: Icon(Icons.terminal, size: 18, color: color),
+          title: Text(
+            target.label,
+            style: const TextStyle(color: _kFg, fontSize: 13),
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(status, style: TextStyle(color: color, fontSize: 11)),
+              if (target.profilePath != null)
+                Text(
+                  target.profilePath!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kFgMuted,
+                    fontSize: 10,
+                    fontFamily: 'JetBrainsMono',
+                  ),
                 ),
-              ),
-            if (target.message != null)
-              Text(
-                target.message!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _kFgMuted, fontSize: 10),
-              ),
-          ],
-        ),
-        trailing: target.kind == ShellIntegrationKind.cmd
-            ? const SizedBox.shrink()
-            : checking
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: _kAccent,
+              if (target.message != null)
+                Text(
+                  target.message!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _kFgMuted, fontSize: 10),
                 ),
-              )
-            : TextButton(
-                onPressed: () => unavailable
-                    ? _retryShellIntegration(target)
-                    : installed
-                    ? _uninstallShellIntegration(target)
-                    : _installShellIntegration(target),
-                child: Text(
-                  unavailable
-                      ? 'Retry'
+            ],
+          ),
+          trailing: target.kind == ShellIntegrationKind.cmd
+              ? const SizedBox.shrink()
+              : checking
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _kAccent,
+                  ),
+                )
+              : TextButton(
+                  onPressed: () => unavailable
+                      ? _retryShellIntegration(target)
                       : installed
-                      ? 'Uninstall'
-                      : (damaged ? 'Repair' : 'Install'),
+                      ? _uninstallShellIntegration(target)
+                      : _installShellIntegration(target),
+                  child: Text(
+                    unavailable
+                        ? 'Retry'
+                        : installed
+                        ? 'Uninstall'
+                        : (damaged ? 'Repair' : 'Install'),
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

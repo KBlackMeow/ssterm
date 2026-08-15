@@ -168,12 +168,16 @@ class _ConsoleRailItem extends StatelessWidget {
           children: [
             Icon(destination.icon, size: 17, color: color),
             const SizedBox(width: 10),
-            Text(
-              destination.label,
-              style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            Expanded(
+              child: Text(
+                destination.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
               ),
             ),
           ],

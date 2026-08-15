@@ -51,56 +51,63 @@ extension _CommandsSettingsExt on _SettingsPageState {
     final cmd = _commands[index];
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
+      child: Material(
         color: _kSurface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _kDivider),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-        leading: const Icon(Icons.terminal, color: _kFgMuted, size: 18),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(
-                cmd.name,
-                style: const TextStyle(color: _kFg, fontSize: 13),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: const BorderSide(color: _kDivider),
         ),
-        subtitle: Text(
-          cmd.command,
-          style: const TextStyle(
-            color: _kFgMuted,
-            fontSize: 11,
-            fontFamily: 'JetBrainsMono',
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          leading: const Icon(Icons.terminal, color: _kFgMuted, size: 18),
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  cmd.name,
+                  style: const TextStyle(color: _kFg, fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 15, color: _kFgMuted),
-              onPressed: () => _editCommand(index),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: const EdgeInsets.all(6),
+          subtitle: Text(
+            cmd.command,
+            style: const TextStyle(
+              color: _kFgMuted,
+              fontSize: 11,
+              fontFamily: 'JetBrainsMono',
             ),
-            IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
-                size: 15,
-                color: _kFgMuted,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  size: 15,
+                  color: _kFgMuted,
+                ),
+                onPressed: () => _editCommand(index),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: const EdgeInsets.all(6),
               ),
-              onPressed: () => _confirmDeleteCommand(index),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: const EdgeInsets.all(6),
-            ),
-          ],
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 15,
+                  color: _kFgMuted,
+                ),
+                onPressed: () => _confirmDeleteCommand(index),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: const EdgeInsets.all(6),
+              ),
+            ],
+          ),
         ),
       ),
     );
