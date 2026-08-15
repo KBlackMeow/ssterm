@@ -38,12 +38,10 @@ void main() {
       expect(script, contains('functions -c fish_prompt'));
     });
 
-    test('starts fish without unsupported terminal capability queries', () {
-      expect(
-        localShellStartupArguments('/opt/homebrew/bin/fish'),
-        const ['--features', 'no-query-term'],
-      );
+    test('starts fish with its standard terminal capability queries', () {
+      expect(localShellStartupArguments('/opt/homebrew/bin/fish'), isEmpty);
       expect(localShellStartupArguments('/bin/zsh'), isEmpty);
+      expect(script, isNot(contains('no-query-term')));
     });
 
     test(

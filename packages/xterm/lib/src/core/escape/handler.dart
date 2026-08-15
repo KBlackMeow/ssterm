@@ -42,6 +42,11 @@ abstract class EscapeHandler {
 
   void unkownEscape(int char);
 
+  /* DCS */
+
+  /// Responds to an XTGETTCAP capability query.
+  void requestTermcap(List<String> names);
+
   /* CSI */
 
   void repeatPreviousCharacter(int n);
@@ -65,6 +70,12 @@ abstract class EscapeHandler {
   void sendSecondaryDeviceAttributes();
 
   void sendTertiaryDeviceAttributes();
+
+  /// Reports the current kitty keyboard protocol flags.
+  void sendKittyKeyboardState();
+
+  /// Responds to an XTVERSION request.
+  void sendXtvVersion();
 
   void sendOperatingStatus();
 

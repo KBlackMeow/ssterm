@@ -100,7 +100,7 @@ class EscapeParser {
     'E'.charCode: _escHandleNextLine,
     'H'.charCode: _escHandleTabSet,
     'M'.charCode: _escHandleReverseIndex,
-    // 'P'.charCode: _unsupportedHandler, // Sixel
+    'P'.charCode: _escHandleDCS,
     // 'c'.charCode: _unsupportedHandler,
     // '#'.charCode: _unsupportedHandler,
     '('.charCode: _escHandleDesignateCharset0, //  SCS - G0
@@ -187,6 +187,64 @@ class EscapeParser {
   bool _escHandleResetAppKeypadMode() {
     handler.setAppKeypadMode(false);
     return true;
+  }
+
+  /// Handles Device Control Strings terminated by `ST` (`ESC \\`).
+  ///
+  /// SSTerm currently supports the XTGETTCAP subset used by Fish. DCS is
+  /// parsed here, rather than forwarded to the screen, so terminal queries do
+  /// not leak into scrollback. Keep a strict cap to avoid unbounded allocation
+  /// from a hostile or malformed application stream.
+  bool _escHandleDCS() {
+    final value = StringBuffer();
+    var oversized = false;
+
+    while (true) {
+      if (_queue.isEmpty) return false;
+
+      final char = _queue.consume();
+      if (char == Ascii.ESC) {
+        if (_queue.isEmpty) return false;
+
+        if (_queue.consume() == Ascii.backslash) {
+          break;
+        }
+
+        // ESC not followed by ST is malformed DCS content. Continue
+        // consuming it, but do not ever expose it to the screen.
+        oversized = true;
+        continue;
+      }
+
+      if (value.length >= _maxDcsLength) {
+        oversized = true;
+      } else {
+        value.writeCharCode(char);
+      }
+    }
+
+    if (oversized) return true;
+
+    final query = value.toString();
+    if (!query.startsWith('+q')) return true;
+
+    final names = query.substring(2).split(';');
+    if (names.isEmpty || names.any((name) => !_isHex(name))) return true;
+
+    handler.requestTermcap(names);
+    return true;
+  }
+
+  static const _maxDcsLength = 4096;
+
+  static bool _isHex(String value) {
+    if (value.isEmpty) return false;
+    return value.codeUnits.every(
+      (char) =>
+          (char >= '0'.charCode && char <= '9'.charCode) ||
+          (char >= 'A'.charCode && char <= 'F'.charCode) ||
+          (char >= 'a'.charCode && char <= 'f'.charCode),
+    );
   }
 
   bool _escHandleCSI() {
@@ -319,6 +377,7 @@ class EscapeParser {
     'q'.codeUnitAt(0): _csiHandleDecscusr,
     'r'.codeUnitAt(0): _csiHandleSetMargins,
     't'.codeUnitAt(0): _csiWindowManipulation,
+    'u'.codeUnitAt(0): _csiHandleKittyKeyboardState,
     'A'.codeUnitAt(0): _csiHandleCursorUp,
     'B'.codeUnitAt(0): _csiHandleCursorDown,
     'C'.codeUnitAt(0): _csiHandleCursorForward,
@@ -482,11 +541,31 @@ class EscapeParser {
   ///
   /// https://terminalguide.namepad.de/seq/csi_sp_sq/
   void _csiHandleDecscusr() {
+    // CSI > 0 q is XTVERSION. This must be checked before interpreting q as
+    // DECSCUSR because both sequences have the same final byte.
+    if (_csi.prefix == Ascii.greaterThan &&
+        _csi.intermediate == null &&
+        _csi.params.length == 1 &&
+        _csi.params[0] == 0) {
+      return handler.sendXtvVersion();
+    }
+
     // Intermediate byte must be SP (0x20); bare `q` without SP is ignored.
     if (_csi.intermediate != Ascii.space) return;
 
     final ps = _csi.params.isEmpty ? 0 : _csi.params[0];
     handler.setCursorShape(ps);
+  }
+
+  /// `CSI ? u` — kitty keyboard protocol state query.
+  void _csiHandleKittyKeyboardState() {
+    if (_csi.prefix != Ascii.questionMark ||
+        _csi.intermediate != null ||
+        _csi.params.isNotEmpty) {
+      return;
+    }
+
+    handler.sendKittyKeyboardState();
   }
 
   /// `ESC [ Ps ; Ps r` Set Top and Bottom Margins (DECSTBM)

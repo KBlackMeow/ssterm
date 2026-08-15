@@ -639,6 +639,40 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     onOutput?.call(_emitter.tertiaryDeviceAttributes());
   }
 
+  @override
+  void sendKittyKeyboardState() {
+    // Kitty keyboard flags are not enabled by SSTerm.
+    onOutput?.call('\x1b[?0u');
+  }
+
+  @override
+  void sendXtvVersion() {
+    // XTVERSION uses DCS and identifies this terminal without claiming to be
+    // iTerm2 or xterm itself.
+    onOutput?.call('\x1bP>|SSTerm\x1b\\');
+  }
+
+  @override
+  void requestTermcap(List<String> names) {
+    // XTGETTCAP values are hexadecimal. `indn` is the terminal capability
+    // Fish probes at startup: ESC[%p1%dS (scroll down N lines).
+    const capabilities = <String, String>{
+      '696e646e': '1b5b257031256453',
+    };
+
+    final response = <String>[];
+    for (final name in names) {
+      final value = capabilities[name.toLowerCase()];
+      if (value == null) {
+        onOutput?.call('\x1bP0+r\x1b\\');
+        return;
+      }
+      response.add('${name.toLowerCase()}=$value');
+    }
+
+    onOutput?.call('\x1bP1+r${response.join(';')}\x1b\\');
+  }
+
   bool _daAllowed() {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastDaSentMs < _daThrottleMs) return false;

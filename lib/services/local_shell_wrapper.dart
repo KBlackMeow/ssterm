@@ -5,10 +5,9 @@
 /// shells are rejected explicitly because launching them without a correct
 /// prompt hook would silently break OSC 7 cwd tracking.
 List<String> localShellStartupArguments(String executable) {
-  final name = executable.split(RegExp(r'[/\\]')).last.toLowerCase();
-  // Fish 4.7+ waits for a terminal Device Attributes reply before accepting
-  // input. SSTerm does not yet implement that request/response exchange.
-  return name == 'fish' ? const ['--features', 'no-query-term'] : const [];
+  // Keep this API so callers can supply shell-specific startup options later.
+  // Fish 4.7+ terminal queries are answered by xterm's protocol parser.
+  return const [];
 }
 
 String buildInteractiveShellWrapper() => r'''
@@ -73,7 +72,7 @@ __ssterm_cwd
 RCEOF
     ;;
   fish)
-    exec "$shell" --features no-query-term -C '
+    exec "$shell" -C '
 function __ssterm_cwd
   printf "\\e]7;file://%s\\e\\\\" (pwd)
 end
