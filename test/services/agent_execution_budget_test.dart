@@ -3,6 +3,17 @@ import 'package:ssterm/services/agent_execution_budget.dart';
 
 void main() {
   group('AgentExecutionBudget', () {
+    test('has no model, shell, or elapsed limit by default', () {
+      final startedAt = DateTime(2026);
+      final budget = AgentExecutionBudget(startedAt: startedAt);
+      final muchLater = startedAt.add(const Duration(days: 1));
+
+      for (var i = 0; i < 100; i++) {
+        expect(budget.consumeModelRequest(muchLater), isNull);
+        expect(budget.consumeShellCall(muchLater), isNull);
+      }
+    });
+
     test(
       'stops before a model request once its iteration limit is exhausted',
       () {

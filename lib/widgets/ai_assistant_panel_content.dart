@@ -20,6 +20,7 @@ class _AiPanelContent extends StatelessWidget {
     required this.textController,
     this.agentInputFocusNode,
     required this.scrollController,
+    this.onTranscriptUserScroll,
     required this.onSend,
     required this.onCancel,
     this.onAutoExecuteChanged,
@@ -48,6 +49,7 @@ class _AiPanelContent extends StatelessWidget {
   /// see `_AiAssistantOverlayState._beginCustomQuestionAnswer`.
   final FocusNode? agentInputFocusNode;
   final ScrollController scrollController;
+  final VoidCallback? onTranscriptUserScroll;
   final VoidCallback onSend;
   final VoidCallback onCancel;
   final ValueChanged<bool>? onAutoExecuteChanged;
@@ -206,17 +208,26 @@ class _AiPanelContent extends StatelessWidget {
           Expanded(
             child: messages.isEmpty
                 ? _agentEmptyState(context)
-                : SelectionArea(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      itemCount: messages.length + (loopStatus != null ? 1 : 0),
-                      itemBuilder: (ctx, i) {
-                        if (loopStatus != null && i == messages.length) {
-                          return _loopStatusIndicator(context, loopStatus!);
-                        }
-                        return _buildAgentMessage(ctx, messages[i]);
-                      },
+                : NotificationListener<UserScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification.direction != ScrollDirection.idle) {
+                        onTranscriptUserScroll?.call();
+                      }
+                      return false;
+                    },
+                    child: SelectionArea(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        itemCount:
+                            messages.length + (loopStatus != null ? 1 : 0),
+                        itemBuilder: (ctx, i) {
+                          if (loopStatus != null && i == messages.length) {
+                            return _loopStatusIndicator(context, loopStatus!);
+                          }
+                          return _buildAgentMessage(ctx, messages[i]);
+                        },
+                      ),
                     ),
                   ),
           ),

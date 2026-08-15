@@ -129,6 +129,37 @@ void main() {
     },
   );
 
+  testWidgets('keeps following rapid consecutive transcript updates', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            child: SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+
+    for (var i = 0; i < 6; i++) {
+      await tester.enterText(find.byType(TextField), '/help');
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pumpAndSettle();
+
+    final position = tester
+        .widget<ListView>(find.byType(ListView))
+        .controller!
+        .position;
+    expect(position.pixels, closeTo(position.maxScrollExtent, 0.1));
+  });
+
   testWidgets(
     'does not pull the transcript down while the user reads history',
     (tester) async {

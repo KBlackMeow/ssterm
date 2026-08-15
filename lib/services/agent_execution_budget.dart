@@ -5,18 +5,19 @@
 /// a limit has been reached.
 class AgentExecutionBudget {
   AgentExecutionBudget({
-    this.maxModelRequests = 12,
-    this.maxShellCalls = 24,
+    this.maxModelRequests,
+    this.maxShellCalls,
     DateTime? startedAt,
-    this.maxElapsed = const Duration(minutes: 12),
-  }) : assert(maxModelRequests > 0),
-       assert(maxShellCalls > 0),
-       assert(!maxElapsed.isNegative),
+    this.maxElapsed,
+  }) : assert(maxModelRequests == null || maxModelRequests > 0),
+       assert(maxShellCalls == null || maxShellCalls > 0),
+       assert(maxElapsed == null || !maxElapsed.isNegative),
        _startedAt = startedAt ?? DateTime.now();
 
-  final int maxModelRequests;
-  final int maxShellCalls;
-  final Duration maxElapsed;
+  /// Null disables the corresponding budget limit.
+  final int? maxModelRequests;
+  final int? maxShellCalls;
+  final Duration? maxElapsed;
   final DateTime _startedAt;
 
   int _modelRequests = 0;
@@ -28,7 +29,7 @@ class AgentExecutionBudget {
   AgentBudgetStop? consumeModelRequest(DateTime now) {
     final elapsedStop = _elapsedStop(now);
     if (elapsedStop != null) return elapsedStop;
-    if (_modelRequests >= maxModelRequests) {
+    if (maxModelRequests != null && _modelRequests >= maxModelRequests!) {
       return const AgentBudgetStop(AgentBudgetLimit.modelRequests);
     }
     _modelRequests++;
@@ -38,7 +39,7 @@ class AgentExecutionBudget {
   AgentBudgetStop? consumeShellCall(DateTime now) {
     final elapsedStop = _elapsedStop(now);
     if (elapsedStop != null) return elapsedStop;
-    if (_shellCalls >= maxShellCalls) {
+    if (maxShellCalls != null && _shellCalls >= maxShellCalls!) {
       return const AgentBudgetStop(AgentBudgetLimit.shellCalls);
     }
     _shellCalls++;
@@ -46,7 +47,7 @@ class AgentExecutionBudget {
   }
 
   AgentBudgetStop? _elapsedStop(DateTime now) =>
-      now.isAfter(_startedAt.add(maxElapsed))
+      maxElapsed != null && now.isAfter(_startedAt.add(maxElapsed!))
       ? const AgentBudgetStop(AgentBudgetLimit.elapsed)
       : null;
 }

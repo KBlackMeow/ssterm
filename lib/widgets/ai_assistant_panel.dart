@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io' show stdout, HttpException, Platform, SocketException;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:gpt_markdown/gpt_markdown.dart';
 
@@ -208,6 +209,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   final _agentController = TextEditingController();
   final _scrollController = ScrollController();
+  var _followLatestTranscript = true;
+  var _autoScrollAnimationActive = false;
+  var _scrollAnimationGeneration = 0;
   final _agentMessages = <_ChatMessage>[];
   var _agentBusy = false;
   var _autoExecute = false;
@@ -475,27 +479,50 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // Capture this before the next frame expands the transcript. Checking in
     // the post-frame callback would see the new max extent and mistake newly
     // appended content for a user scroll-away from the bottom.
-    final shouldFollowLatest =
+    final isAtBottom =
         !_scrollController.hasClients ||
         _scrollController.position.maxScrollExtent -
                 _scrollController.position.pixels <=
             24;
+    if (isAtBottom) _followLatestTranscript = true;
+    if (!isAtBottom && !_autoScrollAnimationActive) {
+      _followLatestTranscript = false;
+    }
+    final shouldFollowLatest = _followLatestTranscript;
     if (!shouldFollowLatest) return;
 
+    final animationGeneration = ++_scrollAnimationGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // `hasClients` alone is NOT sufficient — the controller can still
       // be alive on a disposed State (e.g. the user closed the panel
       // mid-stream).  Always re-check `mounted` first so we never call
       // animateTo on a disposed ScrollController.
-      if (!mounted) return;
+      if (!mounted || animationGeneration != _scrollAnimationGeneration) {
+        return;
+      }
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+        _autoScrollAnimationActive = true;
+        _scrollController
+            .animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            )
+            .whenComplete(() {
+              if (!mounted ||
+                  animationGeneration != _scrollAnimationGeneration) {
+                return;
+              }
+              _autoScrollAnimationActive = false;
+            });
       }
     });
+  }
+
+  void _pauseFollowingLatestTranscript() {
+    _followLatestTranscript = false;
+    _autoScrollAnimationActive = false;
+    _scrollAnimationGeneration++;
   }
 
   /// Resolve the panel's extent along its dock axis (height when docked
@@ -592,6 +619,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             textController: _textController,
             agentInputFocusNode: _agentInputFocusNode,
             scrollController: _scrollController,
+            onTranscriptUserScroll: _pauseFollowingLatestTranscript,
             onSend: _send,
             onCancel: _cancelAgent,
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
