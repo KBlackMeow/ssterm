@@ -18,6 +18,7 @@ import 'package:xterm/src/core/mouse/mode.dart';
 import 'package:xterm/src/core/platform.dart';
 import 'package:xterm/src/core/state.dart';
 import 'package:xterm/src/core/terminal_compat.dart';
+import 'package:xterm/src/core/terminal_capabilities.dart';
 import 'package:xterm/src/core/tabs.dart';
 import 'package:xterm/src/utils/ascii.dart';
 import 'package:xterm/src/utils/circular_buffer.dart';
@@ -84,6 +85,9 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   @override
   final TerminalCompat compat;
 
+  /// Facts used when responding to terminal queries.
+  TerminalCapabilities capabilities;
+
   /// Characters that break selection when double clicking. If not set, the
   /// [Buffer.defaultWordSeparators] will be used.
   final Set<int>? wordSeparators;
@@ -97,6 +101,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     this.onResize,
     this.platform = TerminalTargetPlatform.unknown,
     this.compat = TerminalCompat.vim,
+    this.capabilities = const TerminalCapabilities(),
     this.inputHandler = defaultInputHandler,
     this.mouseHandler = defaultMouseHandler,
     this.onPrivateOSC,
@@ -649,7 +654,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   void sendXtvVersion() {
     // XTVERSION uses DCS and identifies this terminal without claiming to be
     // iTerm2 or xterm itself.
-    onOutput?.call('\x1bP>|SSTerm\x1b\\');
+    onOutput?.call('\x1bP>|${capabilities.termName}\x1b\\');
   }
 
   @override
@@ -671,6 +676,25 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     }
 
     onOutput?.call('\x1bP1+r${response.join(';')}\x1b\\');
+  }
+
+  @override
+  void requestBackgroundColor({required bool useBellTerminator}) {
+    onOutput?.call(
+      '\x1b]11;${capabilities.backgroundColorReport}${_oscTerminator(useBellTerminator)}',
+    );
+  }
+
+  @override
+  void requestItermCapabilities({required bool useBellTerminator}) {
+    onOutput?.call(
+      '\x1b]1337;Capabilities=${TerminalCapabilities.featureReport}'
+      '${_oscTerminator(useBellTerminator)}',
+    );
+  }
+
+  static String _oscTerminator(bool useBellTerminator) {
+    return useBellTerminator ? '\x07' : '\x1b\\';
   }
 
   bool _daAllowed() {

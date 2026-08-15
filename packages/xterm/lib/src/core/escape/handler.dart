@@ -259,5 +259,11 @@ abstract class EscapeHandler {
   /// OSC 52 read: terminal should respond with current clipboard contents.
   void requestClipboard();
 
+  /// Responds to the xterm OSC 11 background-color query.
+  void requestBackgroundColor({required bool useBellTerminator});
+
+  /// Responds to iTerm2's public terminal feature-reporting query.
+  void requestItermCapabilities({required bool useBellTerminator});
+
   void unknownOSC(String code, List<String> args);
 }

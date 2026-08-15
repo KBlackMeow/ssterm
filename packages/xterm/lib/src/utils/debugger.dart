@@ -178,6 +178,13 @@ class _TerminalDebuggerHandler implements EscapeHandler {
     onCommand('unkownEscape(${String.fromCharCode(char)})', error: true);
   }
 
+  /* DCS */
+
+  @override
+  void requestTermcap(List<String> names) {
+    onCommand('requestTermcap($names)');
+  }
+
   /* CSI */
 
   @override
@@ -188,6 +195,16 @@ class _TerminalDebuggerHandler implements EscapeHandler {
   @override
   void unknownCSI(int finalByte) {
     onCommand('unkownCSI(${String.fromCharCode(finalByte)})', error: true);
+  }
+
+  @override
+  void sendKittyKeyboardState() {
+    onCommand('sendKittyKeyboardState');
+  }
+
+  @override
+  void sendXtvVersion() {
+    onCommand('sendXtvVersion');
   }
 
   @override
@@ -646,5 +663,15 @@ class _TerminalDebuggerHandler implements EscapeHandler {
   @override
   void requestClipboard() {
     onCommand('requestClipboard');
+  }
+
+  @override
+  void requestBackgroundColor({required bool useBellTerminator}) {
+    onCommand('requestBackgroundColor($useBellTerminator)');
+  }
+
+  @override
+  void requestItermCapabilities({required bool useBellTerminator}) {
+    onCommand('requestItermCapabilities($useBellTerminator)');
   }
 }

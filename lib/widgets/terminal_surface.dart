@@ -38,6 +38,7 @@ class TerminalSurface extends StatelessWidget {
     // IME (e.g. Chinese) needs [CustomTextEdit] / TextInput, not hardware keys only.
     this.hardwareKeyboardOnly = false,
     this.contextMenu,
+
     /// When false, wallpaper is expected from a parent (e.g. app chrome / tab bar).
     this.includeWallpaper = true,
   });
@@ -53,7 +54,8 @@ class TerminalSurface extends StatelessWidget {
 
   void _showContextMenu(BuildContext context, Offset position) {
     final config = contextMenu!;
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final relativeRect = RelativeRect.fromRect(
       position & Size.zero,
       Offset.zero & overlay.size,
@@ -122,11 +124,18 @@ class TerminalSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = settings;
+    final theme = t.resolveTheme();
+    // The terminal core owns OSC 11 formatting; the Flutter surface supplies
+    // the actual active theme color. This updates existing tabs when users
+    // change themes without coupling xterm to Flutter's Color type.
+    terminal.capabilities = terminal.capabilities.copyWith(
+      backgroundRgb: theme.background.toARGB32() & 0xffffff,
+    );
     final terminalView = TerminalView(
       key: viewKey,
       terminal,
       controller: contextMenu?.controller,
-      theme: t.resolveTheme(),
+      theme: theme,
       textStyle: t.toTerminalStyle(),
       cursorType: t.cursorType,
       cursorBlink: t.cursorBlink,

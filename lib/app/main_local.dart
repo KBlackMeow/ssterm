@@ -41,6 +41,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     maxLines: 5000,
     platform: detectTerminalHostPlatform(),
     reflowEnabled: reflowEnabled,
+    capabilities: TerminalCapabilities(
+      backgroundRgb:
+          _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
+    ),
   );
 
   void _syncPaneAfterShown(_Tab tab, {required int pane}) {

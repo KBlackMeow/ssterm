@@ -1038,6 +1038,11 @@ class EscapeParser {
           // OSC 7: current working directory URI (file:///path)
           handler.setWorkingDirectory(pt);
           return true;
+        case '11':
+          if (pt == '?') {
+            handler.requestBackgroundColor(useBellTerminator: _oscUsesBell);
+          }
+          return true;
         case '52':
           // OSC 52: clipboard access
           // _osc[1] = selection target (usually "c"), _osc[2] = base64 data or "?"
@@ -1046,6 +1051,11 @@ class EscapeParser {
             handler.requestClipboard();
           } else {
             handler.setClipboard(data);
+          }
+          return true;
+        case '1337':
+          if (pt == 'Capabilities' && _osc.length == 2) {
+            handler.requestItermCapabilities(useBellTerminator: _oscUsesBell);
           }
           return true;
       }
@@ -1058,9 +1068,11 @@ class EscapeParser {
   }
 
   final _osc = <String>[];
+  var _oscUsesBell = false;
 
   bool _consumeOsc() {
     _osc.clear();
+    _oscUsesBell = false;
     final param = StringBuffer();
 
     while (true) {
@@ -1072,6 +1084,7 @@ class EscapeParser {
 
       // OSC terminates with BEL
       if (char == Ascii.BEL) {
+        _oscUsesBell = true;
         _osc.add(param.toString());
         return true;
       }

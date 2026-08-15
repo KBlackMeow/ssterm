@@ -1,5 +1,23 @@
 # xterm 兼容性优化清单
 
+## 已实现：确定性的终端能力查询回包
+
+SSTerm 在 macOS、Linux 和 Windows 上通过同一份 `packages/xterm` 解析器
+回答查询，回包均走既有 `Terminal.onOutput` 通道，因此会转发到本地 PTY 和
+SSH 会话，不进入滚屏内容。
+
+| 查询 | SSTerm 回包/行为 |
+| --- | --- |
+| DA1 / DA2 | xterm 兼容的设备属性回包 |
+| `CSI ? u` | 明确回报未启用 kitty 键盘协议 |
+| `CSI > 0 q` | `SSTerm` 身份的 XTVERSION 回包，不伪装为 iTerm2 |
+| `OSC 11 ; ?` | 当前主题的 sRGB 背景色；保持请求使用的 BEL/ST 终止符 |
+| `DCS +q` | 仅回报已实现的 `indn` termcap；其它项目得到标准否定回包 |
+| `OSC 1337 ; Capabilities` | iTerm2 公开 feature-reporting；仅公布 `T3MSc6Ts2B`（真彩色、鼠标、DECSCUSR、标题设置、bracketed paste） |
+
+不会公布或执行 iTerm2 私有的 File/图片传输、profile 切换、专有剪贴板、
+超链接等功能。Fish 4.7+ 不再使用 `no-query-term` 启动参数。
+
 基于与 iTerm2 的对比分析，记录当前 `packages/xterm` 的缺陷与缺失功能。  
 分为 **Bug**（代码写错，改动小）和 **未实现**（功能缺失，需新增）两类。
 
