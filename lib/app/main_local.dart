@@ -252,7 +252,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         shell.executable,
         // WSL keeps only its distribution selector. No selected shell receives
         // startup arguments; cwd integration is installed over PTY input.
-        arguments: shell.isWsl ? shell.arguments : const [],
+        arguments: shell.isWsl
+            ? shell.arguments
+            : localShellStartupArguments(shell.executable),
         columns: columns,
         rows: rows,
         environment: env,

@@ -1,9 +1,16 @@
 /// Returns a POSIX shell script that launches the user's login shell inside
 /// a clean environment with OSC 7 working-directory reporting wired up.
 ///
-/// Handles zsh (ZDOTDIR isolation) and bash (ENV fd trick). Other shells are
-/// rejected explicitly because launching them without a correct prompt hook
-/// would silently break OSC 7 cwd tracking.
+/// Handles zsh (ZDOTDIR isolation), bash (ENV fd trick), and fish. Other
+/// shells are rejected explicitly because launching them without a correct
+/// prompt hook would silently break OSC 7 cwd tracking.
+List<String> localShellStartupArguments(String executable) {
+  final name = executable.split(RegExp(r'[/\\]')).last.toLowerCase();
+  // Fish 4.7+ waits for a terminal Device Attributes reply before accepting
+  // input. SSTerm does not yet implement that request/response exchange.
+  return name == 'fish' ? const ['--features', 'no-query-term'] : const [];
+}
+
 String buildInteractiveShellWrapper() => r'''
 shell="${SHELL:-/bin/sh}"
 shell_name="${shell##*/}"
@@ -66,7 +73,7 @@ __ssterm_cwd
 RCEOF
     ;;
   fish)
-    exec "$shell" -C '
+    exec "$shell" --features no-query-term -C '
 function __ssterm_cwd
   printf "\\e]7;file://%s\\e\\\\" (pwd)
 end

@@ -38,6 +38,14 @@ void main() {
       expect(script, contains('functions -c fish_prompt'));
     });
 
+    test('starts fish without unsupported terminal capability queries', () {
+      expect(
+        localShellStartupArguments('/opt/homebrew/bin/fish'),
+        const ['--features', 'no-query-term'],
+      );
+      expect(localShellStartupArguments('/bin/zsh'), isEmpty);
+    });
+
     test(
       'rejects unknown shells instead of launching without cwd metadata',
       () {
