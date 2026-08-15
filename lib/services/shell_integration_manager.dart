@@ -16,7 +16,16 @@ enum ShellIntegrationState {
   unavailable,
 }
 
-enum ShellIntegrationKind { powershell, bash, zsh, wslBash, wslZsh, cmd }
+enum ShellIntegrationKind {
+  powershell,
+  bash,
+  zsh,
+  fish,
+  wslBash,
+  wslZsh,
+  wslFish,
+  cmd,
+}
 
 class ShellIntegrationTarget {
   const ShellIntegrationTarget({
@@ -203,6 +212,16 @@ class ShellIntegrationManager {
               profilePath: '$home/.zshrc',
             ),
           );
+        } else if (name == 'fish' &&
+            !targets.any((target) => target.id == 'fish')) {
+          targets.add(
+            ShellIntegrationTarget(
+              id: 'fish',
+              label: 'Fish',
+              kind: ShellIntegrationKind.fish,
+              profilePath: '$home/.config/fish/config.fish',
+            ),
+          );
         }
       }
     }
@@ -295,8 +314,14 @@ class ShellIntegrationManager {
     if (target.kind == ShellIntegrationKind.cmd) return target;
     final current = await _readProfile(target);
     final updated = target.state == ShellIntegrationState.damaged
-        ? repairShellIntegrationBlock(current, _blockFor(target.kind))
-        : upsertShellIntegrationBlock(current, _blockFor(target.kind));
+        ? repairShellIntegrationBlock(
+            current,
+            shellIntegrationBlockFor(target.kind),
+          )
+        : upsertShellIntegrationBlock(
+            current,
+            shellIntegrationBlockFor(target.kind),
+          );
     await _writeProfile(target, updated);
     return check(target);
   }
@@ -327,18 +352,28 @@ class ShellIntegrationManager {
         throw StateError('WSL returned an invalid HOME directory: $home');
       }
       final shellName = shell.split('/').last.toLowerCase();
-      if (shellName != 'bash' && shellName != 'zsh') {
+      if (shellName != 'bash' && shellName != 'zsh' && shellName != 'fish') {
         throw UnsupportedError(
           'The default WSL login shell is ${shell.isEmpty ? 'unknown' : shell}. '
-          'Automatic profile installation currently supports bash and zsh.',
+          'Automatic profile installation currently supports bash, zsh, and fish.',
         );
       }
       final zsh = shellName == 'zsh';
+      final fish = shellName == 'fish';
       return ShellIntegrationTarget(
         id: 'wsl:$distro',
         label: 'WSL $distro',
-        kind: zsh ? ShellIntegrationKind.wslZsh : ShellIntegrationKind.wslBash,
-        profilePath: '$home/${zsh ? '.zshrc' : '.bashrc'}',
+        kind: fish
+            ? ShellIntegrationKind.wslFish
+            : zsh
+            ? ShellIntegrationKind.wslZsh
+            : ShellIntegrationKind.wslBash,
+        profilePath:
+            '$home/${fish
+                ? '.config/fish/config.fish'
+                : zsh
+                ? '.zshrc'
+                : '.bashrc'}',
         distribution: distro,
       );
     } catch (error) {
@@ -629,7 +664,7 @@ String repairShellIntegrationBlock(String content, String block) {
   return upsertShellIntegrationBlock(content, block);
 }
 
-String _blockFor(ShellIntegrationKind kind) => switch (kind) {
+String shellIntegrationBlockFor(ShellIntegrationKind kind) => switch (kind) {
   ShellIntegrationKind.powershell =>
     r'''if ($env:TERM_PROGRAM -eq 'ssterm' -and -not $global:SSTermShellIntegrationLoaded) {
   $global:SSTermShellIntegrationLoaded = $true
@@ -665,5 +700,13 @@ fi''',
   autoload -Uz add-zsh-hook
   add-zsh-hook precmd __ssterm_cwd
 fi''',
+  ShellIntegrationKind.fish || ShellIntegrationKind.wslFish =>
+    r'''if test "$TERM_PROGRAM" = "ssterm"; and not set -q SSTERM_SHELL_INTEGRATION
+  set -gx SSTERM_SHELL_INTEGRATION 1
+  function __ssterm_cwd --on-event fish_prompt
+    printf '\e]7;file://%s\e\\' (pwd)
+  end
+  __ssterm_cwd
+end''',
   ShellIntegrationKind.cmd => '',
 };

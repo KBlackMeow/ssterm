@@ -128,6 +128,13 @@ void main() {
     expect(target.state, ShellIntegrationState.unavailable);
   });
 
+  test('fish profile integration emits cwd at every prompt', () {
+    final block = shellIntegrationBlockFor(ShellIntegrationKind.fish);
+
+    expect(block, contains('fish_prompt'));
+    expect(block, contains(']7;file://'));
+  });
+
   test('WSL profile probe ignores unrelated output before its marker', () {
     final profile = parseWslProfileProbe(
       'welcome message\nwarning\n__SSTERM_PROFILE__\t/home/alice\t/bin/bash\n',

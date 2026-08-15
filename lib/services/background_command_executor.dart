@@ -111,9 +111,9 @@ class BackgroundCommandTarget {
         .split('/')
         .last
         .toLowerCase();
-    if (executable != 'bash' && executable != 'zsh') {
+    if (executable != 'bash' && executable != 'zsh' && executable != 'fish') {
       return BackgroundCommandSupport.unsupported(
-        'Agent background execution supports bash and zsh, not '
+        'Agent background execution supports bash, zsh, and fish, not '
         '${shell.displayName}.',
       );
     }
@@ -721,10 +721,26 @@ String _wrapPosixCommandForCwdResult(String command, String resultPath) {
       'exit "\$__ssterm_exit"';
 }
 
+String _wrapFishCommandForCwdResult(String command, String resultPath) {
+  final result = BackgroundCommandExecutor.shellQuotePosix(resultPath);
+  return '$command\n'
+      'set __ssterm_exit \$status\n'
+      'umask 077\n'
+      'printf %s "\$PWD" > $result\n'
+      'exit \$__ssterm_exit';
+}
+
+bool _isFishShell(LocalShellOption shell) =>
+    shell.executable.replaceAll('\\', '/').split('/').last.toLowerCase() ==
+    'fish';
+
 String _posixProcessTreeSupervisor() {
-  return '__ssterm_child=\n'
+  return '__ssterm_wait_shell=\$1\n'
+      '__ssterm_marker=\$2\n'
+      '__ssterm_gate=\$__ssterm_marker.go\n'
+      'shift 2\n'
+      '__ssterm_child=\n'
       '__ssterm_stopping=0\n'
-      '__ssterm_gate=\$3.go\n'
       'rm -f -- "\$__ssterm_gate"\n'
       '__ssterm_signal_group() {\n'
       '  test -n "\$__ssterm_child" || return 0\n'
@@ -739,9 +755,9 @@ String _posixProcessTreeSupervisor() {
       'trap __ssterm_stop TERM INT HUP\n'
       'test "\$__ssterm_stopping" = 0 || exit 143\n'
       'set -m\n'
-      '"\$1" -c \'while [ ! -e "\$1" ]; do sleep 0.01; done; '
-      'exec "\$2" -c "\$3"\' ssterm-command '
-      '"\$__ssterm_gate" "\$1" "\$2" &\n'
+      '"\$__ssterm_wait_shell" -c \'while [ ! -e "\$1" ]; do sleep 0.01; done; '
+      'shift; exec "\$@"\' ssterm-command '
+      '"\$__ssterm_gate" "\$@" &\n'
       '__ssterm_child=\$!\n'
       'set +m\n'
       'if [ "\$__ssterm_stopping" != 0 ]; then\n'
@@ -750,7 +766,7 @@ String _posixProcessTreeSupervisor() {
       '  wait "\$__ssterm_child" 2>/dev/null\n'
       '  exit 143\n'
       'fi\n'
-      'if ! printf %s "\$__ssterm_child" > "\$3"; then\n'
+      'if ! printf %s "\$__ssterm_child" > "\$__ssterm_marker"; then\n'
       '  __ssterm_signal_group KILL\n'
       '  __ssterm_signal_group CONT\n'
       '  wait "\$__ssterm_child" 2>/dev/null\n'
@@ -771,7 +787,7 @@ String _posixProcessTreeSupervisor() {
       '  sleep 0.01\n'
       'done\n'
       'trap - TERM INT HUP\n'
-      'rm -f -- "\$3" "\$__ssterm_gate"\n'
+      'rm -f -- "\$__ssterm_marker" "\$__ssterm_gate"\n'
       'test "\$__ssterm_stopping" = 0 || exit 143\n'
       'exit "\$__ssterm_status"';
 }
@@ -799,6 +815,9 @@ String _wrapCommandForCwdResult(
   String command,
   String resultPath,
 ) {
+  if (_isFishShell(target.shell)) {
+    return _wrapFishCommandForCwdResult(command, resultPath);
+  }
   if (target.platform != BackgroundCommandPlatform.windows ||
       target.shell.isWsl ||
       target.shell.id.startsWith('git-bash') ||
@@ -885,9 +904,11 @@ String? validateBackgroundCommandSyntax(
             : _posixProcessTreeSupervisor(),
         if (posixProcessMarker != null) ...[
           'ssterm-process-supervisor',
-          shell.executable,
-          executionCommand,
+          '/bin/sh',
           posixProcessMarker,
+          shell.executable,
+          '-c',
+          executionCommand,
         ],
       ],
     );

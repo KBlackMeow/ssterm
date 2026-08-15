@@ -107,6 +107,11 @@ void main() {
       displayName: 'Zsh',
       executable: '/bin/zsh',
     );
+    const fish = LocalShellOption(
+      id: 'fish',
+      displayName: 'Fish',
+      executable: '/opt/homebrew/bin/fish',
+    );
 
     test('accepts zsh on macOS and Linux', () {
       expect(
@@ -125,6 +130,47 @@ void main() {
         ).support.isSupported,
         isTrue,
       );
+    });
+
+    test('accepts fish on macOS and Linux', () {
+      expect(
+        BackgroundCommandTarget.local(
+          shell: fish,
+          cwd: '/tmp',
+          platform: BackgroundCommandPlatform.macos,
+        ).support.isSupported,
+        isTrue,
+      );
+      expect(
+        BackgroundCommandTarget.local(
+          shell: fish,
+          cwd: '/tmp',
+          platform: BackgroundCommandPlatform.linux,
+        ).support.isSupported,
+        isTrue,
+      );
+    });
+
+    test('executes a local fish command', () async {
+      const fishPath = '/opt/homebrew/bin/fish';
+      if (!File(fishPath).existsSync()) return;
+
+      final result = await const BackgroundCommandExecutor().executeLocal(
+        const BackgroundCommandTarget.local(
+          shell: LocalShellOption(
+            id: 'fish',
+            displayName: 'Fish',
+            executable: fishPath,
+          ),
+          cwd: '/tmp',
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        'printf "fish-background-ok:%s" (pwd)',
+      );
+
+      expect(result.exitCode, 0, reason: result.output);
+      expect(result.output, contains('fish-background-ok:'));
+      expect(result.output, endsWith('/tmp'));
     });
 
     test('supports known Windows shells and rejects unknown ones', () {
@@ -319,74 +365,77 @@ void main() {
       );
     });
 
-    test('writes cwd to a private result file for every Windows shell route', () {
-      const resultPath = r'C:\temp\ssterm-cwd-result';
-      BackgroundCommandTarget windows(LocalShellOption shell) =>
-          BackgroundCommandTarget.local(
-            shell: shell,
-            cwd: r'C:\work',
-            platform: BackgroundCommandPlatform.windows,
-          );
+    test(
+      'writes cwd to a private result file for every Windows shell route',
+      () {
+        const resultPath = r'C:\temp\ssterm-cwd-result';
+        BackgroundCommandTarget windows(LocalShellOption shell) =>
+            BackgroundCommandTarget.local(
+              shell: shell,
+              cwd: r'C:\work',
+              platform: BackgroundCommandPlatform.windows,
+            );
 
-      final cmd = buildBackgroundCommandInvocation(
-        windows(
-          const LocalShellOption(
-            id: 'cmd',
-            displayName: 'CMD',
-            executable: 'cmd.exe',
+        final cmd = buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'cmd',
+              displayName: 'CMD',
+              executable: 'cmd.exe',
+            ),
           ),
-        ),
-        'cd child',
-        cwdResultPath: resultPath,
-      ).arguments.last;
-      expect(cmd, contains(resultPath));
-      expect(cmd, contains('%CD%'));
+          'cd child',
+          cwdResultPath: resultPath,
+        ).arguments.last;
+        expect(cmd, contains(resultPath));
+        expect(cmd, contains('%CD%'));
 
-      final powershell = buildBackgroundCommandInvocation(
-        windows(
-          const LocalShellOption(
-            id: 'pwsh',
-            displayName: 'PowerShell',
-            executable: 'pwsh.exe',
-            usePowerShellCwdWrapper: true,
+        final powershell = buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'pwsh',
+              displayName: 'PowerShell',
+              executable: 'pwsh.exe',
+              usePowerShellCwdWrapper: true,
+            ),
           ),
-        ),
-        'Set-Location child',
-        cwdResultPath: resultPath,
-      ).arguments.last;
-      expect(powershell, contains(resultPath));
-      expect(powershell, contains(r'(Get-Location).ProviderPath'));
+          'Set-Location child',
+          cwdResultPath: resultPath,
+        ).arguments.last;
+        expect(powershell, contains(resultPath));
+        expect(powershell, contains(r'(Get-Location).ProviderPath'));
 
-      final gitBash = buildBackgroundCommandInvocation(
-        windows(
-          const LocalShellOption(
-            id: 'git-bash',
-            displayName: 'Git Bash',
-            executable: 'env.exe',
-            arguments: ['/usr/bin/bash', '--login', '-i'],
+        final gitBash = buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'git-bash',
+              displayName: 'Git Bash',
+              executable: 'env.exe',
+              arguments: ['/usr/bin/bash', '--login', '-i'],
+            ),
           ),
-        ),
-        'cd child',
-        cwdResultPath: resultPath,
-      ).arguments.last;
-      expect(gitBash, contains(resultPath));
-      expect(gitBash, contains(r'"$PWD"'));
+          'cd child',
+          cwdResultPath: resultPath,
+        ).arguments.last;
+        expect(gitBash, contains(resultPath));
+        expect(gitBash, contains(r'"$PWD"'));
 
-      final wsl = buildBackgroundCommandInvocation(
-        windows(
-          const LocalShellOption(
-            id: 'wsl:ubuntu',
-            displayName: 'Ubuntu',
-            executable: 'wsl.exe',
-            isWsl: true,
+        final wsl = buildBackgroundCommandInvocation(
+          windows(
+            const LocalShellOption(
+              id: 'wsl:ubuntu',
+              displayName: 'Ubuntu',
+              executable: 'wsl.exe',
+              isWsl: true,
+            ),
           ),
-        ),
-        'cd child',
-        cwdResultPath: resultPath,
-      ).arguments.last;
-      expect(wsl, contains(resultPath));
-      expect(wsl, contains(r'"$PWD"'));
-    });
+          'cd child',
+          cwdResultPath: resultPath,
+        ).arguments.last;
+        expect(wsl, contains(resultPath));
+        expect(wsl, contains(r'"$PWD"'));
+      },
+    );
 
     test('rejects known cmd probes in PowerShell before execution', () {
       const shell = LocalShellOption(
@@ -544,34 +593,38 @@ void main() {
       },
       skip: Platform.isWindows
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
-      : false,
+          : false,
     );
 
-    test('reports a rolling three-line output tail while a command runs', () async {
-      final updates = <CommandExecutionUpdate>[];
-      final shell = Platform.isWindows ? LocalShellDiscovery.fallback() : zsh;
-      final platform = Platform.isWindows
-          ? BackgroundCommandPlatform.windows
-          : BackgroundCommandPlatform.macos;
-      final command = Platform.isWindows
-          ? 'echo one & echo two & echo three & echo four'
-          : 'printf "one\\ntwo\\nthree\\nfour\\n"';
+    test(
+      'reports a rolling three-line output tail while a command runs',
+      () async {
+        final updates = <CommandExecutionUpdate>[];
+        final shell = Platform.isWindows ? LocalShellDiscovery.fallback() : zsh;
+        final platform = Platform.isWindows
+            ? BackgroundCommandPlatform.windows
+            : BackgroundCommandPlatform.macos;
+        final command = Platform.isWindows
+            ? 'echo one & echo two & echo three & echo four'
+            : 'printf "one\\ntwo\\nthree\\nfour\\n"';
 
-      await const BackgroundCommandExecutor().executeLocal(
-        BackgroundCommandTarget.local(
-          shell: shell,
-          cwd: Directory.current.path,
-          platform: platform,
-        ),
-        command,
-        onUpdate: updates.add,
-      );
+        await const BackgroundCommandExecutor().executeLocal(
+          BackgroundCommandTarget.local(
+            shell: shell,
+            cwd: Directory.current.path,
+            platform: platform,
+          ),
+          command,
+          onUpdate: updates.add,
+        );
 
-      expect(updates, isNotEmpty);
-      expect(updates.last.lastThreeLines, const ['two', 'three', 'four']);
-    }, skip: Platform.isWindows
-        ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
-        : false);
+        expect(updates, isNotEmpty);
+        expect(updates.last.lastThreeLines, const ['two', 'three', 'four']);
+      },
+      skip: Platform.isWindows
+          ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
+          : false,
+    );
 
     test(
       'cancels and awaits an in-flight POSIX command process tree',
@@ -704,7 +757,8 @@ exit 0
                 includeParentEnvironment = true,
                 environment,
               }) async {
-                const markerWrite = r'''printf %s "$__ssterm_child" > "$3"''';
+                const markerWrite =
+                    r'''printf %s "$__ssterm_child" > "$__ssterm_marker"''';
                 final delayedArguments = List<String>.from(arguments);
                 delayedArguments[1] = delayedArguments[1].replaceFirst(
                   markerWrite,
@@ -1070,29 +1124,26 @@ exit 0
       );
     });
 
-    test(
-      'returns the remote cwd from the private result reader',
-      () async {
-        final session = _FakeSshSession();
-        final executor = BackgroundCommandExecutor(
-          sshSessionStarter: (client, command) async {
-            session.complete(stderr: '/ordinary-stderr');
-            return session;
-          },
-          sshCwdResultReader: (client, path) async => utf8.encode('/srv/project'),
-        );
+    test('returns the remote cwd from the private result reader', () async {
+      final session = _FakeSshSession();
+      final executor = BackgroundCommandExecutor(
+        sshSessionStarter: (client, command) async {
+          session.complete(stderr: '/ordinary-stderr');
+          return session;
+        },
+        sshCwdResultReader: (client, path) async => utf8.encode('/srv/project'),
+      );
 
-        final result = await executor.executeSsh(
-          _UnusedSshClient(),
-          '/srv',
-          'cd project',
-        );
+      final result = await executor.executeSsh(
+        _UnusedSshClient(),
+        '/srv',
+        'cd project',
+      );
 
-        expect(result.exitCode, 0);
-        expect(result.effectiveCwd, '/srv/project');
-        expect(result.output, contains('/ordinary-stderr'));
-      },
-    );
+      expect(result.exitCode, 0);
+      expect(result.effectiveCwd, '/srv/project');
+      expect(result.output, contains('/ordinary-stderr'));
+    });
 
     test('reads SSH cwd outside the command stderr stream', () async {
       final session = _FakeSshSession();
@@ -1123,38 +1174,14 @@ exit 0
       expect(launchedCommand, contains(resultPath!));
     });
 
-    test(
-      'does not parse stderr as a remote cwd result',
-      () async {
-        final session = _FakeSshSession();
-        final executor = BackgroundCommandExecutor(
-          sshSessionStarter: (client, command) async {
-            session.complete(stderr: 'before/stderr/after');
-            return session;
-          },
-          sshCwdResultReader: (client, path) async => utf8.encode('/last'),
-        );
-
-        final result = await executor.executeSsh(
-          _UnusedSshClient(),
-          '/srv',
-          'cd project',
-        );
-
-        expect(result.effectiveCwd, '/last');
-        expect(result.output, contains('before/stderr/after'));
-      },
-    );
-
-    test('applies the output cap while reading remote cwd separately', () async {
+    test('does not parse stderr as a remote cwd result', () async {
       final session = _FakeSshSession();
       final executor = BackgroundCommandExecutor(
-        outputLimitBytes: 4,
         sshSessionStarter: (client, command) async {
-          session.complete(stderr: '0123456789');
+          session.complete(stderr: 'before/stderr/after');
           return session;
         },
-        sshCwdResultReader: (client, path) async => utf8.encode('/srv/project'),
+        sshCwdResultReader: (client, path) async => utf8.encode('/last'),
       );
 
       final result = await executor.executeSsh(
@@ -1163,10 +1190,35 @@ exit 0
         'cd project',
       );
 
-      expect(result.effectiveCwd, '/srv/project');
-      expect(result.output, contains('0123'));
-      expect(result.output, isNot(contains('456789')));
-      expect(result.truncated, isTrue);
+      expect(result.effectiveCwd, '/last');
+      expect(result.output, contains('before/stderr/after'));
     });
+
+    test(
+      'applies the output cap while reading remote cwd separately',
+      () async {
+        final session = _FakeSshSession();
+        final executor = BackgroundCommandExecutor(
+          outputLimitBytes: 4,
+          sshSessionStarter: (client, command) async {
+            session.complete(stderr: '0123456789');
+            return session;
+          },
+          sshCwdResultReader: (client, path) async =>
+              utf8.encode('/srv/project'),
+        );
+
+        final result = await executor.executeSsh(
+          _UnusedSshClient(),
+          '/srv',
+          'cd project',
+        );
+
+        expect(result.effectiveCwd, '/srv/project');
+        expect(result.output, contains('0123'));
+        expect(result.output, isNot(contains('456789')));
+        expect(result.truncated, isTrue);
+      },
+    );
   });
 }

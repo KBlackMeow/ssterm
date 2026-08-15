@@ -65,8 +65,25 @@ esac
 __ssterm_cwd
 RCEOF
     ;;
+  fish)
+    exec "$shell" -C '
+function __ssterm_cwd
+  printf "\\e]7;file://%s\\e\\\\" (pwd)
+end
+if functions -q fish_prompt
+  functions -c fish_prompt __ssterm_user_fish_prompt
+end
+function fish_prompt
+  __ssterm_cwd
+  if functions -q __ssterm_user_fish_prompt
+    __ssterm_user_fish_prompt
+  end
+end
+__ssterm_cwd
+' -i
+    ;;
   *)
-    printf '%s\n' "ssterm: OSC 7 integration supports only bash and zsh (got $shell_name)." >&2
+    printf '%s\n' "ssterm: OSC 7 integration supports only bash, zsh, and fish (got $shell_name)." >&2
     exit 64
     ;;
 esac

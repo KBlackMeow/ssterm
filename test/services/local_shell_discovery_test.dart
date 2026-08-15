@@ -120,15 +120,11 @@ void main() {
     expect(shell.arguments, ['-d', 'Ubuntu']);
   });
 
-  test('only bash and zsh qualify for OSC 7 POSIX shell discovery', () {
+  test('bash, zsh, and fish qualify for OSC 7 POSIX shell discovery', () {
     expect(isOsc7CompatiblePosixShellPath('/bin/bash'), isTrue);
     expect(isOsc7CompatiblePosixShellPath('/usr/local/bin/zsh'), isTrue);
-    for (final path in const [
-      '/bin/sh',
-      '/usr/bin/fish',
-      '/bin/tcsh',
-      '/bin/ksh',
-    ]) {
+    expect(isOsc7CompatiblePosixShellPath('/opt/homebrew/bin/fish'), isTrue);
+    for (final path in const ['/bin/sh', '/bin/tcsh', '/bin/ksh']) {
       expect(isOsc7CompatiblePosixShellPath(path), isFalse, reason: path);
     }
   });

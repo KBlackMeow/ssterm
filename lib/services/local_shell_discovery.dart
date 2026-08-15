@@ -5,7 +5,7 @@ import 'dart:io';
 /// correct OSC 7 prompt hook.
 bool isOsc7CompatiblePosixShellPath(String path) {
   final name = path.split(RegExp(r'[/\\]')).last.toLowerCase();
-  return name == 'bash' || name == 'zsh';
+  return name == 'bash' || name == 'zsh' || name == 'fish';
 }
 
 bool isGitBashShell(LocalShellOption shell) {
@@ -555,6 +555,10 @@ class LocalShellDiscovery {
       '/usr/local/bin/bash',
       '/opt/homebrew/bin/zsh',
       '/opt/homebrew/bin/bash',
+      '/bin/fish',
+      '/usr/bin/fish',
+      '/usr/local/bin/fish',
+      '/opt/homebrew/bin/fish',
     ];
     paths.addAll(common);
 
