@@ -135,16 +135,10 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   /// sequences that repeat the last character.
   var _precedingCodepoint = 0;
 
-  // DA (Device Attributes) response guard. PTYs are byte streams and may
-  // deliver a capability query either one byte at a time or as one chunk.
-  // Never use chunk size to distinguish a real query from command output:
-  // macOS commonly batches ESC[>c, and suppressing that response makes apps
-  // such as Claude Code downgrade from their alternate-screen renderer.
-  // Rate limiting still prevents accidental query-like binary data from
-  // flooding shell stdin.
-  int _lastDaSentMs = 0;
-  static const _daThrottleMs = 500;
-
+  // Every complete DA (Device Attributes) query receives a reply. PTYs are
+  // byte streams, and Fish issues multiple consecutive DA queries while it
+  // initializes its prompt; suppressing one leaves the shell unable to read
+  // input.
   /* TerminalState */
 
   int _viewWidth = 80;
@@ -628,19 +622,16 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
 
   @override
   void sendPrimaryDeviceAttributes() {
-    if (!_daAllowed()) return;
     onOutput?.call(_emitter.primaryDeviceAttributes());
   }
 
   @override
   void sendSecondaryDeviceAttributes() {
-    if (!_daAllowed()) return;
     onOutput?.call(_emitter.secondaryDeviceAttributes());
   }
 
   @override
   void sendTertiaryDeviceAttributes() {
-    if (!_daAllowed()) return;
     onOutput?.call(_emitter.tertiaryDeviceAttributes());
   }
 
@@ -695,13 +686,6 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
 
   static String _oscTerminator(bool useBellTerminator) {
     return useBellTerminator ? '\x07' : '\x1b\\';
-  }
-
-  bool _daAllowed() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastDaSentMs < _daThrottleMs) return false;
-    _lastDaSentMs = now;
-    return true;
   }
 
   @override

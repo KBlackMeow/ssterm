@@ -49,6 +49,15 @@ void main() {
     expect(output, ['\x1bP>|SSTerm\x1b\\']);
   });
 
+  test('answers consecutive DA1 queries during Fish startup', () {
+    final output = <String>[];
+    final terminal = Terminal(onOutput: output.add);
+
+    terminal.write('\x1b[0c\x1b[0c');
+
+    expect(output, ['\x1b[?1;2c', '\x1b[?1;2c']);
+  });
+
   test('reports the active background color for OSC 11 queries', () {
     final output = <String>[];
     final terminal = Terminal(
