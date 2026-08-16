@@ -231,6 +231,26 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   _QuestionProposal? _pendingQuestionProposal;
   _DangerProposal? _pendingDangerProposal;
 
+  /// Pending write/edit proposals, kept so `_agentEngaged` can treat the
+  /// "paused for Apply/Reject" state as still busy.  These two are NOT
+  /// awaited in place (unlike danger/question proposals) — the loop returns
+  /// `waitingForUser`, so `_agentBusy` drops to false while the card is up.
+  _WriteProposal? _pendingWriteProposal;
+  _EditProposal? _pendingEditProposal;
+
+  /// User messages typed while the agent is engaged.  FIFO — each drains
+  /// into its own agent turn once the current turn fully completes (see
+  /// `_drainQueuedUserInput`), instead of interrupting the in-flight turn.
+  final List<String> _pendingUserInput = [];
+
+  /// Whether the agent is actively running OR paused on a user decision
+  /// (write/edit proposal).  While true, new input is queued rather than
+  /// interrupting the current turn.
+  bool get _agentEngaged =>
+      _agentBusy ||
+      _pendingWriteProposal != null ||
+      _pendingEditProposal != null;
+
   /// Focus target for the agent-mode chat `TextField`, used ONLY to
   /// hand focus back to the input when the user taps "Other" on a
   /// pending question card — see `_beginCustomQuestionAnswer`.
@@ -274,10 +294,19 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _cancelStream?.call();
     _cancelStream = null;
     _cancelPendingAgentDecisions();
+    // If the turn was interrupted between the model emitting a native tool
+    // call and the loop recording its result, the conversation history ends
+    // on a dangling `assistantToolCalls` item.  Backfill a synthetic tool
+    // result so the next provider request doesn't 400 on "tool_use requires
+    // a tool_result" (Anthropic) / "assistant tool_calls requires a tool
+    // message" (OpenAI).
+    _completeInterruptedToolCalls();
     _streamSession?.close(force: true);
     _streamSession = null;
     _streamSessionGeneration = null;
     _streamSessionPausedGeneration = null;
+    _pendingWriteProposal = null;
+    _pendingEditProposal = null;
     setState(() {
       _agentBusy = false;
       _agentLoopStatus = null;
@@ -287,8 +316,27 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // lazy staleness check `_decideQuestionProposal` runs when a
       // card IS clicked after the fact, just done eagerly on cancel.
       _pendingQuestionProposal = null;
+      // Flip any still-running command card to a terminal "stopped" state.
+      // The loop's post-execute `commandRunning = false` assignment is
+      // skipped on the cancel path (gen != _generation returns before it),
+      // which would otherwise leave the card frozen at "运行中" forever.
+      for (final message in _messages) {
+        if (message.isSystem && message.commandRunning == true) {
+          message.commandRunning = false;
+          message.commandExitCode = null;
+        }
+        // Same for an approved-but-still-executing danger card: its
+        // "RUNNING…" badge would otherwise stick forever.
+        final danger = message.dangerProposal;
+        if (danger != null && danger.state == _DangerProposalState.running) {
+          danger.state = _DangerProposalState.stopped;
+        }
+      }
     });
     _queueSessionSave();
+    // The user may have queued input while the cancelled turn was running —
+    // hand it back off now that the turn is fully torn down.
+    _drainQueuedUserInput();
   }
 
   void _cancelPendingAgentDecisions() {
@@ -331,12 +379,18 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // Returning true means "fully handled — do not fall through to send".
     if (_handleSlashCommand(text)) return;
 
-    // A replacement instruction is distinct from an ordinary Stop: retain a
-    // compact terminal event so the next model turn knows the previous work
-    // did not complete, instead of inferring state from a partial UI reply.
-    if (_agentBusy) {
-      _recordAgentRunInterrupted();
-      _cancelAgent();
+    // While the agent is engaged (streaming, executing a tool, or paused on a
+    // write/edit proposal), queue the input for the next round instead of
+    // interrupting the in-flight turn.  The queued text becomes a fresh turn
+    // once the current turn fully completes — see `_drainQueuedUserInput`.
+    if (_agentEngaged) {
+      _pendingUserInput.add(text);
+      _textController.clear();
+      setState(() {
+        _messages.add(_ChatMessage.user(text));
+      });
+      _scrollToBottom();
+      return;
     }
 
     setState(() {
@@ -380,6 +434,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// loop status.  Cancels any in-flight agent stream so cleared state
   /// stays cleared instead of being clobbered by late stream chunks.
   void _clearChat() {
+    // Drop queued input and pending write/edit proposals BEFORE cancelling
+    // the in-flight turn — otherwise `_cancelAgent`'s tail drain would
+    // resurrect a queued message on the freshly cleared chat.
+    _pendingUserInput.clear();
+    _pendingWriteProposal = null;
+    _pendingEditProposal = null;
     if (_agentBusy) _cancelAgent();
     setState(() {
       _messages.clear();
@@ -437,11 +497,39 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         .catchError((_) {});
   }
 
-  void _recordAgentRunInterrupted() {
-    const text =
-        '[Agent run interrupted] A new user instruction replaced the in-flight run.';
-    _conversationHistory.add({'role': 'assistant', 'content': text});
-    _messages.add(_ChatMessage.notice(text));
+  /// Backfill a synthetic `tool_result` for the conversation history's
+  /// trailing `assistantToolCalls` item (if any), so an interrupted turn
+  /// leaves the transcript valid for the next provider request.
+  ///
+  /// Called from `_cancelAgent` right before the in-flight stream/session is
+  /// torn down.  When the interruption lands between "model emitted native
+  /// tool calls" and "loop recorded their results", history ends on a
+  /// dangling assistant-tool-calls item with no following tool result — which
+  /// Anthropic rejects ("tool_use requires a tool_result") and OpenAI rejects
+  /// ("assistant tool_calls must be followed by a tool message").  Injecting
+  /// an `isError` result keeps the transcript alternating and each tool call
+  /// answered.
+  void _completeInterruptedToolCalls() {
+    if (_conversationHistory.isEmpty) return;
+    final last = _conversationHistory.last;
+    if (last.toolCalls.isEmpty) return;
+    _conversationHistory.add(
+      AgentConversationItem.toolResults([
+        for (final call in last.toolCalls)
+          AgentToolResult(
+            toolCallId: call.id,
+            content: '[Tool interrupted by user]',
+            isError: true,
+          ),
+      ]),
+    );
+  }
+
+  /// Dequeue the next queued user message and start a fresh agent turn for
+  /// it.  No-op while the agent is still engaged or nothing is queued.
+  void _drainQueuedUserInput() {
+    if (!mounted || _agentEngaged || _pendingUserInput.isEmpty) return;
+    _agentRespond(_pendingUserInput.removeAt(0));
   }
 
   /// Append a `/help` info banner to the visible chat WITHOUT pushing
@@ -621,7 +709,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             scrollController: _scrollController,
             onTranscriptUserScroll: _pauseFollowingLatestTranscript,
             onSend: _send,
-            onCancel: _cancelAgent,
+            onStop: _cancelAgent,
+            queuedCount: _pendingUserInput.length,
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
             // Mirror `AgentConfig.markdownEnabled`'s true default so the
             // very first frame (before agentConfig has been wired in)

@@ -58,6 +58,7 @@ class _DangerProposalCard extends StatelessWidget {
       _DangerProposalState.running => const Color(0xFF61AFEF), // blue
       _DangerProposalState.ran => const Color(0xFF98C379), // green
       _DangerProposalState.rejected => dim,
+      _DangerProposalState.stopped => dim,
     };
 
     return Container(
@@ -181,6 +182,7 @@ class _DangerProposalCard extends StatelessWidget {
       _DangerProposalState.running => 'RUNNING…',
       _DangerProposalState.ran => 'APPROVED',
       _DangerProposalState.rejected => 'REJECTED',
+      _DangerProposalState.stopped => 'STOPPED',
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

@@ -160,6 +160,115 @@ void main() {
     });
   });
 
+  test('backfilled interrupted tool result serializes a valid transcript', () {
+    // Mirrors `_completeInterruptedToolCalls`: an interrupted turn leaves a
+    // dangling assistant tool call; backfilling an isError tool result keeps
+    // the next provider request valid (tool_use → tool_result for Anthropic,
+    // assistant tool_calls → role:tool for OpenAI).
+    final call = AgentToolCall.fromRaw(
+      id: 'call_stop',
+      name: 'bash',
+      arguments: const {'command': 'sleep 60'},
+    )!;
+    final transcript = [
+      const AgentConversationItem.text(role: 'user', content: 'run it'),
+      AgentConversationItem.assistantToolCalls([call]),
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(
+          toolCallId: 'call_stop',
+          content: '[Tool interrupted by user]',
+          isError: true,
+        ),
+      ]),
+    ];
+
+    final openAi = AgentProviderTools.openAiMessages(transcript);
+    expect(openAi[1]['role'], 'assistant');
+    expect(openAi[2], {
+      'role': 'tool',
+      'tool_call_id': 'call_stop',
+      'content': '[Tool interrupted by user]',
+    });
+
+    final anthropic = AgentProviderTools.anthropicMessages(transcript);
+    expect((anthropic[2]['content'] as List).single, {
+      'type': 'tool_result',
+      'tool_use_id': 'call_stop',
+      'content': '[Tool interrupted by user]',
+      'is_error': true,
+    });
+
+    // Gemini resolves the functionResponse `name` from the preceding tool
+    // call's id map, so a backfilled result (which carries only a call id)
+    // still serializes a valid transcript.
+    final gemini = AgentProviderTools.geminiContents(transcript);
+    expect((gemini[2]['parts'] as List).single, {
+      'functionResponse': {
+        'name': 'bash',
+        'response': {
+          'tool_call_id': 'call_stop',
+          'content': '[Tool interrupted by user]',
+          'is_error': true,
+        },
+      },
+    });
+  });
+
+  test('backfills an isError result for every dangling multi-call turn', () {
+    // Mirrors `_completeInterruptedToolCalls` when the model emitted several
+    // shell calls (e.g. `sleep 60 && sleep 60`) and the user stops mid-run:
+    // EVERY dangling call gets an isError result, keeping the next provider
+    // request valid regardless of how many calls were in flight.
+    final call1 = AgentToolCall.fromRaw(
+      id: 'call_1',
+      name: 'bash',
+      arguments: const {'command': 'sleep 60'},
+    )!;
+    final call2 = AgentToolCall.fromRaw(
+      id: 'call_2',
+      name: 'bash',
+      arguments: const {'command': 'sleep 60'},
+    )!;
+    final transcript = [
+      const AgentConversationItem.text(role: 'user', content: 'run both'),
+      AgentConversationItem.assistantToolCalls([call1, call2]),
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(
+          toolCallId: 'call_1',
+          content: '[Tool interrupted by user]',
+          isError: true,
+        ),
+        AgentToolResult(
+          toolCallId: 'call_2',
+          content: '[Tool interrupted by user]',
+          isError: true,
+        ),
+      ]),
+    ];
+
+    final openAi = AgentProviderTools.openAiMessages(transcript);
+    final toolMessages = openAi
+        .where((message) => message['role'] == 'tool')
+        .toList();
+    expect(toolMessages, hasLength(2));
+    expect(toolMessages[0]['tool_call_id'], 'call_1');
+    expect(toolMessages[1]['tool_call_id'], 'call_2');
+
+    final anthropic = AgentProviderTools.anthropicMessages(transcript);
+    final anthropicBlocks = anthropic[2]['content'] as List;
+    expect(anthropicBlocks, hasLength(2));
+    expect((anthropicBlocks[0] as Map)['tool_use_id'], 'call_1');
+    expect((anthropicBlocks[1] as Map)['tool_use_id'], 'call_2');
+    expect((anthropicBlocks[0] as Map)['is_error'], true);
+    expect((anthropicBlocks[1] as Map)['is_error'], true);
+
+    final gemini = AgentProviderTools.geminiContents(transcript);
+    final geminiParts = gemini[2]['parts'] as List;
+    expect(geminiParts, hasLength(2));
+    expect(((geminiParts[0] as Map)['functionResponse'] as Map)['name'], 'bash');
+    expect(((geminiParts[1] as Map)['functionResponse'] as Map)['name'], 'bash');
+  });
+
   test('preserves every tool call from one assistant turn', () {
     final calls = [
       AgentToolCall.fromRaw(

@@ -182,6 +182,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _agentLoopStatus = null;
         });
         _queueSessionSave();
+        // Hand off any user input queued while this turn was running.  The
+        // drain no-ops when a write/edit proposal is still pending
+        // (`_agentEngaged` is true), so queued text waits for the user to
+        // resolve the card before it runs.
+        _drainQueuedUserInput();
       }
     }
   }

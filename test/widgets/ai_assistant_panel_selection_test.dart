@@ -19,16 +19,85 @@ void main() {
     },
   );
 
-  test('new input records an interruption before cancelling a busy agent', () {
+  test('new input during a busy agent is queued instead of interrupting', () {
     final source = File(
       'lib/widgets/ai_assistant_panel.dart',
     ).readAsStringSync();
 
-    expect(source, contains('[Agent run interrupted]'));
-    expect(
-      source.indexOf('_recordAgentRunInterrupted();'),
-      lessThan(source.indexOf('if (_agentBusy) _cancelAgent();')),
+    expect(source, contains('_pendingUserInput.add(text)'));
+    expect(source, contains('void _drainQueuedUserInput()'));
+    // The old interrupt-on-send path is gone — input is queued instead of
+    // being fed straight through as a replacement instruction.
+    expect(source, isNot(contains('_recordAgentRunInterrupted')));
+  });
+
+  test('cancelling backfills any dangling native tool call', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('void _completeInterruptedToolCalls()'));
+    expect(source, contains("content: '[Tool interrupted by user]'"));
+    expect(source, contains('isError: true'));
+    expect(source, contains('_completeInterruptedToolCalls();'));
+  });
+
+  test('clearing the chat drops queued input before cancelling', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    // `_clearChat` must empty the queue (and null the proposal pause
+    // signals) BEFORE `_cancelAgent` runs, otherwise the cancel's tail
+    // drain would resurrect a queued message on the freshly cleared chat.
+    final clearQueue = source.indexOf(
+      '_pendingUserInput.clear();\n    _pendingWriteProposal = null;',
     );
+    final cancel = source.indexOf('if (_agentBusy) _cancelAgent();');
+    expect(clearQueue, isNot(-1));
+    expect(cancel, isNot(-1));
+    expect(clearQueue, lessThan(cancel));
+  });
+
+  test('cancelling marks a running command card stopped', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    // A command card whose execution was aborted must not stay frozen at
+    // "运行中" — the cancel path flips it to a terminal state because the
+    // loop's post-execute `commandRunning = false` is skipped on cancel.
+    expect(source, contains('message.isSystem && message.commandRunning == true'));
+    expect(source, contains('message.commandRunning = false'));
+    expect(source, contains('message.commandExitCode = null'));
+  });
+
+  test('cancelling flips an in-flight danger card to stopped', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    // An approved-but-still-executing danger card must not stay at
+    // "RUNNING…" after a stop — it flips to a muted "STOPPED" badge.
+    expect(source, contains('danger.state == _DangerProposalState.running'));
+    expect(source, contains('danger.state = _DangerProposalState.stopped'));
+  });
+
+  test('write/edit decisions hold the pause signal across the commit', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel_tooling.dart',
+    ).readAsStringSync();
+
+    // The proposal pause field must stay set through the `adapter.commit`
+    // await (so mid-commit input queues instead of racing the resume), and
+    // only drop once the decision fully resolves.
+    expect(source, contains("keep `_agentEngaged` true across the commit"));
+    final commit = source.indexOf('await adapter.commit(');
+    final lastWriteClear = source.lastIndexOf('_pendingWriteProposal = null;');
+    final lastEditClear = source.lastIndexOf('_pendingEditProposal = null;');
+    expect(commit, isNot(-1));
+    expect(lastWriteClear, greaterThan(commit));
+    expect(lastEditClear, greaterThan(commit));
   });
 
   test(

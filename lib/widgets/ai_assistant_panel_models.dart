@@ -446,6 +446,11 @@ enum _DangerProposalState {
   /// envelope so the LLM can decide what to do next (typically: pick
   /// a less destructive alternative).
   rejected,
+
+  /// Command was approved and executing, then the user hit the manual
+  /// stop button.  No result is recorded; the card flips to a muted
+  /// "stopped" badge (the companion command card shows "exit ?").
+  stopped,
 }
 
 /// Per-proposal record for a dangerous agent command awaiting user

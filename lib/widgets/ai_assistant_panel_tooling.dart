@@ -479,6 +479,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     );
     setState(() {
       _messages.add(_ChatMessage.writeProposal(proposal));
+      // Pause signal for `_agentEngaged` — new input is queued (not sent
+      // straight through) while this card awaits Apply/Reject.
+      _pendingWriteProposal = proposal;
       // Status text reflects the wait — the chat card itself carries
       // the action buttons.
       _agentLoopStatus = 'Awaiting Apply for ${preview.resolvedPath}';
@@ -507,6 +510,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // it visually rejected but do NOT touch the new conversation's
     // history (the new loop is busy and didn't ask for this).
     if (proposal.agentGeneration != _generation) {
+      if (identical(_pendingWriteProposal, proposal)) {
+        _pendingWriteProposal = null;
+      }
       setState(() {
         proposal.state = _WriteProposalState.rejected;
         proposal.outcomeMessage =
@@ -517,6 +523,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
 
     final config = widget.agentConfig;
     if (config == null) {
+      if (identical(_pendingWriteProposal, proposal)) {
+        _pendingWriteProposal = null;
+      }
       setState(() {
         proposal.state = _WriteProposalState.failed;
         proposal.outcomeMessage = 'Agent is not configured.';
@@ -600,6 +609,19 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       }
     }
 
+    // If the chat was cleared while `adapter.commit` was in flight,
+    // `_clearChat` already nulled the pause field — abort instead of
+    // injecting a stale envelope into a freshly-cleared transcript.
+    if (!mounted || !identical(_pendingWriteProposal, proposal)) {
+      return;
+    }
+    // Clear the pause signal now that the decision has fully resolved and
+    // the loop is about to resume.  Clearing here — rather than at the top —
+    // keeps `_agentEngaged` true across the `adapter.commit` await above, so
+    // input typed mid-commit is queued instead of flowing into a concurrent
+    // `_agentRespond` that would bump `_generation` and collide with the
+    // resume below.
+    _pendingWriteProposal = null;
     // Inject the envelope and resume the loop where it left off.
     // The loop's generation hasn't changed (we checked above), so
     // _continueAgentLoop will pick up from this synthetic user turn.
@@ -724,6 +746,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     );
     setState(() {
       _messages.add(_ChatMessage.editProposal(proposal));
+      // Pause signal for `_agentEngaged` — new input is queued while this
+      // diff card awaits Apply/Reject.
+      _pendingEditProposal = proposal;
       _agentLoopStatus = 'Awaiting Apply for edit to ${preview.resolvedPath}';
     });
     _scrollToBottom();
@@ -742,6 +767,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     if (proposal.state != _EditProposalState.pending) return;
 
     if (proposal.agentGeneration != _generation) {
+      if (identical(_pendingEditProposal, proposal)) {
+        _pendingEditProposal = null;
+      }
       setState(() {
         proposal.state = _EditProposalState.rejected;
         proposal.outcomeMessage =
@@ -752,6 +780,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
 
     final config = widget.agentConfig;
     if (config == null) {
+      if (identical(_pendingEditProposal, proposal)) {
+        _pendingEditProposal = null;
+      }
       setState(() {
         proposal.state = _EditProposalState.failed;
         proposal.outcomeMessage = 'Agent is not configured.';
@@ -838,6 +869,16 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       }
     }
 
+    // Mirror `_decideWriteProposal`: if the chat was cleared while the commit
+    // was in flight, `_clearChat` already nulled the pause field — abort
+    // instead of injecting a stale envelope into the cleared transcript.
+    if (!mounted || !identical(_pendingEditProposal, proposal)) {
+      return;
+    }
+    // Clear the pause signal once the decision is fully resolved (mirrors
+    // `_decideWriteProposal`): keep `_agentEngaged` true across the commit
+    // await so mid-commit input queues rather than racing the resume.
+    _pendingEditProposal = null;
     _conversationHistory.add({'role': 'user', 'content': envelope});
     _markAgentBusy();
     await _continueAgentLoop(_generation, config);

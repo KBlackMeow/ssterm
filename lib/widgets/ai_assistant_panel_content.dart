@@ -22,7 +22,8 @@ class _AiPanelContent extends StatelessWidget {
     required this.scrollController,
     this.onTranscriptUserScroll,
     required this.onSend,
-    required this.onCancel,
+    required this.onStop,
+    this.queuedCount = 0,
     this.onAutoExecuteChanged,
     required this.markdownEnabled,
     this.terminalBackground,
@@ -51,7 +52,16 @@ class _AiPanelContent extends StatelessWidget {
   final ScrollController scrollController;
   final VoidCallback? onTranscriptUserScroll;
   final VoidCallback onSend;
-  final VoidCallback onCancel;
+
+  /// Fires when the user taps the dedicated stop button (shown only while
+  /// [busy] and not awaiting a question answer).  Distinct from [onSend],
+  /// which always sends — queueing when the agent is engaged.
+  final VoidCallback onStop;
+
+  /// Number of user messages waiting in the queue.  `> 0` shows a compact
+  /// "queued" chip in the input bar so the user knows their earlier input
+  /// hasn't been dropped while the agent is busy.
+  final int queuedCount;
   final ValueChanged<bool>? onAutoExecuteChanged;
 
   /// When `true`, AI replies are rendered with `gpt_markdown` (bold, lists,
@@ -117,9 +127,8 @@ class _AiPanelContent extends StatelessWidget {
   /// The pause-in-place design deliberately keeps [busy] `true` for the
   /// entire time a question card is on screen (including while the user
   /// types a custom "Other" answer), so the loop stays suspended in place.
-  /// But the single shared send/cancel
-  /// button below must NOT show as a red "Stop" affordance in that state:
-  /// tapping Stop there would call [onCancel], marking the question stale
+  /// But the dedicated stop button below must NOT render in that state:
+  /// tapping Stop there would call [onStop], marking the question stale
   /// and discarding whatever the user just typed, directly contradicting
   /// the question card's own "send it" instruction. This flag lets the
   /// button distinguish "busy because waiting on the user" from "busy
@@ -139,10 +148,11 @@ class _AiPanelContent extends StatelessWidget {
   /// layout).
   final VoidCallback? onPositionToggle;
 
-  /// `true` when the input bar's send/cancel button should render as the
-  /// red "Stop" affordance — i.e. genuinely busy AND not just paused on a
-  /// pending question.  See [hasPendingQuestion] doc for why the two
-  /// must be distinguished.
+  /// `true` when the input bar should show the red "Stop" button — i.e.
+  /// genuinely busy AND not just paused on a pending question.  See
+  /// [hasPendingQuestion] doc for why the two must be distinguished.  The
+  /// send button itself always stays visible; the stop button is a separate
+  /// control that appears only in this state.
   bool get showStopButton => busy && !hasPendingQuestion;
 
   @override
@@ -352,23 +362,76 @@ class _AiPanelContent extends StatelessWidget {
                             ),
                           ),
                         ),
+                        // Queued-input chip — how many typed messages are
+                        // waiting for the current turn to finish.
+                        if (queuedCount > 0)
+                          Container(
+                            height: 20,
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF2472C8,
+                              ).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.schedule,
+                                  size: 10,
+                                  color: Color(0xFF2472C8),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  '$queuedCount',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF2472C8),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        // Dedicated stop button — only while genuinely busy.
+                        // Cancels the current turn (and completes any dangling
+                        // tool call) without discarding queued input.
+                        if (showStopButton)
+                          GestureDetector(
+                            onTap: onStop,
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              margin: const EdgeInsets.only(right: 4),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF6E67),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Icon(
+                                Icons.stop_rounded,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        // Send button — always available.  Sends now, or queues
+                        // the message when the agent is engaged.
                         GestureDetector(
-                          onTap: showStopButton ? onCancel : onSend,
+                          onTap: onSend,
                           child: Container(
                             width: 26,
                             height: 26,
                             margin: const EdgeInsets.only(right: 4),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
-                              color: showStopButton
-                                  ? const Color(0xFFFF6E67)
-                                  : const Color(0xFF2472C8),
+                              color: const Color(0xFF2472C8),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Icon(
-                              showStopButton
-                                  ? Icons.stop_rounded
-                                  : Icons.send_rounded,
+                            child: const Icon(
+                              Icons.send_rounded,
                               size: 13,
                               color: Colors.white,
                             ),
