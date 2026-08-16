@@ -24,7 +24,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 
 | Capability | Description |
 |---|---|
-| **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local) |
+| **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local), plus a compatible-provider catalog (OpenRouter, Kimi, Qwen, GLM, Mistral, MiniMax, SiliconFlow) and custom OpenAI/Anthropic-compatible endpoints |
 | **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
 | **Session context** | Active tab, working directory, and date/time sent on first turn |
 | **Auto-execute mode** | Ordinary and warning commands run automatically; dangerous commands pause for approval |
@@ -61,6 +61,7 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 | Feature | Description |
 |---|---|
 | **File operations** | Browse, upload, download, rename, mkdir, delete |
+| **In-app file editor** | Double-click a remote file to open a syntax-highlighted editor tab (language detection, line folding) and save changes back over SFTP |
 | **Transfer queue** | Concurrent transfers with live progress, pause/resume/cancel per task |
 | **Drag & drop** | Drop files onto the terminal to upload |
 | **Panel docking** | Bottom or right side, persisted in config |
@@ -126,6 +127,9 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 | Terminal emulator | [xterm](packages/xterm) (vendored) |
 | Local PTY | [flutter_pty](packages/flutter_pty) (vendored) |
 | SSH / SFTP | [dartssh2](https://pub.dev/packages/dartssh2) |
+| AI Agent | [mcp_dart](https://pub.dev/packages/mcp_dart) (MCP) + provider-native tool calling |
+| File editor | [flutter_code_editor](https://pub.dev/packages/flutter_code_editor) + [highlight](https://pub.dev/packages/highlight) |
+| Credential storage | [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage) (macOS Keychain) |
 
 ---
 
@@ -146,7 +150,7 @@ flutter build macos
 
 Output: `build/macos/Build/Products/`
 
-**Requirements:** [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart `^3.11`), macOS with Xcode command-line tools.
+**Requirements:** [Flutter SDK](https://docs.flutter.dev/get-started/install) (Dart `^3.11.1`), macOS with Xcode command-line tools.
 
 ---
 
@@ -154,12 +158,15 @@ Output: `build/macos/Build/Products/`
 
 ```
 lib/
-  main.dart          # App shell, tabs, local/SSH terminal state
+  app/               # Desktop & mobile app shells (tabs, panes, mobile nav)
+  main.dart          # Bootstrap, service init, tab/connection state
   dialogs/           # Connect dialog (auth, port forwarding, jump host)
-  models/            # SshHost, AppConfig, Command, PortForwardRule …
-  services/          # SSH connection, port forwarding, session logger, LLM …
+  io/                # PTY output pipe + metrics
+  models/            # SshHost, AppConfig, Command, PortForwardRule, AgentConfig, McpServerConfig, Skill …
+  services/          # SSH, SFTP, port forwarding, session logger, LLM, MCP, skills, agent execution …
   utils/             # Helpers (FD limit, SSH fingerprint …)
-  views/             # SFTP browser, SSH session view, settings panel
+  views/             # SFTP browser, SSH session view, in-app file editor
+  views/settings/    # Settings console (themes, providers, MCP, agent, commands, safety)
   widgets/           # Terminal surface, split view, transfer panel, AI panel …
 packages/
   flutter_pty/       # Native PTY plugin (vendored)
