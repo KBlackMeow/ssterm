@@ -210,7 +210,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   final _agentController = TextEditingController();
   final _scrollController = ScrollController();
   var _followLatestTranscript = true;
-  var _autoScrollAnimationActive = false;
   var _scrollAnimationGeneration = 0;
   final _agentMessages = <_ChatMessage>[];
   var _agentBusy = false;
@@ -572,12 +571,14 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         _scrollController.position.maxScrollExtent -
                 _scrollController.position.pixels <=
             24;
+    // Scrolling back down to the bottom resumes following.  We deliberately
+    // do NOT pause following here when the view is away from the bottom:
+    // programmatic growth (an empty assistant card, a status line) creates
+    // transient gaps that would otherwise be misread as a user scroll-away
+    // and permanently disable following.  Only genuine user scrolls (the
+    // UserScrollNotification → _pauseFollowingLatestTranscript path) pause it.
     if (isAtBottom) _followLatestTranscript = true;
-    if (!isAtBottom && !_autoScrollAnimationActive) {
-      _followLatestTranscript = false;
-    }
-    final shouldFollowLatest = _followLatestTranscript;
-    if (!shouldFollowLatest) return;
+    if (!_followLatestTranscript) return;
 
     final animationGeneration = ++_scrollAnimationGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -589,27 +590,17 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         return;
       }
       if (_scrollController.hasClients) {
-        _autoScrollAnimationActive = true;
-        _scrollController
-            .animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            )
-            .whenComplete(() {
-              if (!mounted ||
-                  animationGeneration != _scrollAnimationGeneration) {
-                return;
-              }
-              _autoScrollAnimationActive = false;
-            });
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
 
   void _pauseFollowingLatestTranscript() {
     _followLatestTranscript = false;
-    _autoScrollAnimationActive = false;
     _scrollAnimationGeneration++;
   }
 

@@ -260,12 +260,18 @@ void main() {
           .widget<ListView>(find.byType(ListView))
           .controller!
           .position;
-      position.jumpTo(position.minScrollExtent);
-      await tester.pump();
+      // Real user scroll up to read history — a drag (not a programmatic
+      // jumpTo) so the UserScrollNotification fires and pauses following.
+      // jumpTo would be indistinguishable from our own auto-scroll, so it no
+      // longer counts as a "user scrolled away" signal.
+      await tester.drag(find.byType(ListView), const Offset(0, 400));
+      await tester.pumpAndSettle();
+      final readPosition = position.pixels;
+      expect(readPosition, lessThan(position.maxScrollExtent));
 
       await sendHelp();
 
-      expect(position.pixels, position.minScrollExtent);
+      expect(position.pixels, readPosition);
     },
   );
 }
