@@ -1,5 +1,6 @@
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
@@ -67,9 +68,38 @@ class FileEditorView extends StatefulWidget {
 
 enum _ConflictChoice { overwrite, reload }
 
+/// Editor scroll behavior: clamp at the edges instead of macOS's default
+/// rubber-band overscroll, so scrolling stops dead at the top/bottom and
+/// left/right of the code area.
+///
+/// This must override [ScrollBehavior.getScrollPhysics] rather than setting
+/// `physics:` on a copy — macOS's platform branch would otherwise wrap the
+/// clamped physics as the *parent* of a `BouncingScrollPhysics`, and the
+/// rubber band would still show.
+class _ClampingScrollBehavior extends MaterialScrollBehavior {
+  const _ClampingScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const ClampingScrollPhysics();
+}
+
 class FileEditorViewState extends State<FileEditorView> {
+  /// Used to reach the inner [EditableText] (its own vertical scroll
+  /// controller and [RenderEditable]) so the editor can scroll the caret
+  /// into view after programmatic text changes — see
+  /// [_revealCaretIfNeeded].
+  final GlobalKey _codeFieldKey = GlobalKey();
+
   late final CodeController _controller;
   late String _originalContent;
+
+  /// The last full text the controller held at listener time. Enter, Tab,
+  /// autocomplete, undo/redo — flutter_code_editor's editing keys — all
+  /// change the text; selection-only movements (arrow keys, drag) do not,
+  /// and must not trigger the caret reveal.
+  late String _lastRevealText;
+
   DateTime? _mtime;
   String? _error;
   bool _saving = false;
@@ -82,20 +112,158 @@ class FileEditorViewState extends State<FileEditorView> {
       language: codeEditorLanguageForPath(widget.path),
     );
     _originalContent = widget.initialContent;
+    _lastRevealText = widget.initialContent;
     _mtime = widget.initialMtime;
-    _controller.addListener(_onTextChanged);
+    _controller.addListener(_onControllerChanged);
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_onTextChanged);
+    _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
 
-  void _onTextChanged() {
-    final isDirty = _controller.fullText != _originalContent;
+  void _onControllerChanged() {
+    final text = _controller.fullText;
+    final textChanged = text != _lastRevealText;
+    _lastRevealText = text;
+
+    final isDirty = text != _originalContent;
     if (widget.dirty.value != isDirty) widget.dirty.value = isDirty;
+
+    // flutter_code_editor routes Enter/Tab/etc. through programmatic
+    // CodeController writes, and EditableText deliberately does NOT scroll
+    // the caret into view for programmatic text changes (it only reveals
+    // for platform-driven updateEditingValue). So Enter at the end of a
+    // line flush against the bottom edge left the caret off-screen with the
+    // viewport pinned. Scroll it into view ourselves.
+    if (textChanged) _revealCaretAfterChange();
+  }
+
+  /// Scrolls the caret back into view after the new text has been laid out.
+  /// Only runs when the caret has actually left the viewport — for a caret
+  /// still in view it is a no-op, so it never fights a correct native reveal
+  /// or a drag selection.
+  ///
+  /// The actual jump is deferred to the NEXT frame's post-frame phase
+  /// (post-frame callbacks appended while the list is being drained run next
+  /// frame, which we then schedule explicitly). That lands it after any
+  /// native reveal EditableText may also have scheduled for this change,
+  /// which misbehaves in the editor's internally-scrollable `expands: true`
+  /// configuration and can fling the viewport to its end.
+  void _revealCaretAfterChange() {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _revealCaretTargets() == null) return;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        final targets = _revealCaretTargets();
+        if (targets == null) return;
+        if (targets.$1 != null) {
+          _editableState?.widget.scrollController?.jumpTo(targets.$1!);
+        }
+        if (targets.$2 != null) {
+          _horizontalScrollPosition?.jumpTo(targets.$2!);
+        }
+      });
+      SchedulerBinding.instance.scheduleFrame();
+    });
+  }
+
+  /// The vertical and horizontal offsets that bring the caret fully into
+  /// view, as a `(v, h)` record, or `null` when the caret is already in view
+  /// on both axes. Call only after layout.
+  ///
+  /// [RenderEditable.getLocalRectForCaret] returns the caret rect relative
+  /// to the field: its vertical range already has the field's vertical scroll
+  /// baked in (so a caret below the fold has `bottom > viewportDimension`),
+  /// but its horizontal range is in field coordinates, which the outer
+  /// horizontal scroll view shows as `[hPixels, hPixels + hViewport]`.
+  (double?, double?)? _revealCaretTargets() {
+    final editable = _editableState;
+    if (editable == null) return null;
+    final scroll = editable.widget.scrollController;
+    if (scroll == null || !scroll.hasClients) return null;
+    final selection = _controller.selection;
+    if (!selection.isValid) return null;
+
+    final caret = editable.renderEditable.getLocalRectForCaret(
+      selection.extent,
+    );
+
+    double? vTarget;
+    final position = scroll.position;
+    final vPixels = position.pixels;
+    var v = vPixels;
+    if (caret.bottom > position.viewportDimension) {
+      // Caret below the fold — bring its bottom edge up to the bottom edge.
+      v = vPixels + (caret.bottom - position.viewportDimension);
+    } else if (caret.top < 0) {
+      // Caret above the fold — bring its top edge back into view.
+      v = vPixels + caret.top;
+    }
+    v = v.clamp(0.0, position.maxScrollExtent);
+    if ((v - vPixels).abs() > 0.1) vTarget = v;
+
+    double? hTarget;
+    final h = _horizontalScrollPosition;
+    if (h != null) {
+      final hPixels = h.pixels;
+      var ht = hPixels;
+      if (caret.right > hPixels + h.viewportDimension) {
+        // Caret past the right edge — bring its right edge to the right edge.
+        ht = caret.right - h.viewportDimension;
+      } else if (caret.left < hPixels) {
+        // Caret off the left edge (e.g. Enter moved it to column 0 of a line
+        // while the view was scrolled to a long line's end) — bring its left
+        // edge back to the left edge.
+        ht = caret.left;
+      }
+      ht = ht.clamp(0.0, h.maxScrollExtent);
+      if ((ht - hPixels).abs() > 0.1) hTarget = ht;
+    }
+
+    if (vTarget == null && hTarget == null) return null;
+    return (vTarget, hTarget);
+  }
+
+  /// The [EditableText] inside the [CodeField] — the render object and
+  /// scroll controller that own the caret.
+  EditableTextState? get _editableState {
+    final context = _codeFieldKey.currentContext;
+    if (context == null) return null;
+    EditableTextState? found;
+    void visit(Element element) {
+      if (found != null) return;
+      if (element.widget is EditableText) {
+        found = (element as StatefulElement).state as EditableTextState;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    context.visitChildElements(visit);
+    return found;
+  }
+
+  /// The scroll position of flutter_code_editor's outer horizontal scroll
+  /// view, which carries the horizontal axis of the field (the field's own
+  /// scroll controller only scrolls vertically). Walks up from the field to
+  /// find it; returns `null` when there is nothing to scroll horizontally
+  /// (no horizontal scroll extent).
+  ScrollPosition? get _horizontalScrollPosition {
+    final editable = _editableState;
+    if (editable == null) return null;
+    ScrollPosition? found;
+    editable.context.visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is Scrollable && widget.axis != Axis.vertical) {
+        found =
+            ((element as StatefulElement).state as ScrollableState).position;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 
   SftpFileSystemAdapter get _adapter =>
@@ -157,16 +325,16 @@ class FileEditorViewState extends State<FileEditorView> {
     final choice = await showDialog<_ConflictChoice>(
       context: context,
       builder: (ctx) => Theme(
-        data: Theme.of(context)
-            .copyWith(extensions: colors != null ? {colors} : null),
+        data: Theme.of(
+          context,
+        ).copyWith(extensions: colors != null ? {colors} : null),
         child: const _ConflictDialog(),
       ),
     );
     if (!mounted) return false;
     if (choice == _ConflictChoice.overwrite) {
       try {
-        final result =
-            await _adapter.commit(widget.path, _controller.fullText);
+        final result = await _adapter.commit(widget.path, _controller.fullText);
         if (!mounted) return true;
         setState(() {
           _originalContent = _controller.fullText;
@@ -213,8 +381,7 @@ class FileEditorViewState extends State<FileEditorView> {
     FileWriteErrorKind.permission => 'Permission denied writing to this file.',
     FileWriteErrorKind.notSupported =>
       'The connection to this file is no longer available.',
-    FileWriteErrorKind.tooLarge =>
-      'File is too large to save from the editor.',
+    FileWriteErrorKind.tooLarge => 'File is too large to save from the editor.',
     FileWriteErrorKind.parentMissing =>
       'The containing folder no longer exists.',
     FileWriteErrorKind.invalidPath => 'Invalid path.',
@@ -248,17 +415,36 @@ class FileEditorViewState extends State<FileEditorView> {
               Expanded(
                 child: CodeTheme(
                   data: CodeThemeData(styles: atomOneDarkTheme),
-                  child: SingleChildScrollView(
+                  child: ScrollConfiguration(
+                    // macOS's ScrollBehavior defaults every scrollable to
+                    // BouncingScrollPhysics — the rubber-band overscroll
+                    // where scrolling past the end pulls the content back
+                    // with a spring. Clamp instead: the editor stops dead
+                    // at its edges, on both the outer horizontal axis and
+                    // the field's own vertical axis.
+                    behavior: const _ClampingScrollBehavior(),
                     child: CodeField(
+                      key: _codeFieldKey,
                       controller: _controller,
-                      expands: false,
-                      // Without this, CodeField paints its OWN background
-                      // from the highlight theme's root style (Atom One
-                      // Dark's #282c34) instead of our chrome's _kBg
-                      // (#1E1E1E) — invisible while at rest, but rubber-
-                      // band overscroll past the top/bottom pulls the
-                      // code area away from the viewport edge and
-                      // reveals the mismatched color underneath.
+                      // Let the editor own its own vertical scrolling
+                      // instead of wrapping it in a SingleChildScrollView.
+                      // With expands:false + an outer scroll view the inner
+                      // TextField grows to full content height, so its
+                      // scroll controller has no extent and drag-selecting
+                      // across lines can't auto-scroll the viewport to
+                      // follow the selection — the window only moves in
+                      // fixed jumps. expands:true makes the TextField
+                      // internally scrollable, restoring the auto-scroll
+                      // behavior.
+                      expands: true,
+                      // Keep the code area's background matched to our
+                      // chrome: CodeField otherwise paints its OWN
+                      // background from the highlight theme's root style
+                      // (Atom One Dark's #282c34) instead of _kBg
+                      // (#1E1E1E), showing up as a hard seam against the
+                      // toolbar. (The rubber-band overscroll that used to
+                      // reveal this under the viewport edge is gone — the
+                      // editor now clamps, see _ClampingScrollBehavior.)
                       background: _kBg,
                       textStyle: const TextStyle(
                         fontFamily: 'JetBrainsMono',
@@ -336,8 +522,10 @@ class FileEditorViewState extends State<FileEditorView> {
                     height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Save',
-                    style: TextStyle(color: _kAccent, fontSize: 12)),
+                : const Text(
+                    'Save',
+                    style: TextStyle(color: _kAccent, fontSize: 12),
+                  ),
           ),
         ],
       ),
@@ -349,7 +537,10 @@ class FileEditorViewState extends State<FileEditorView> {
       width: double.infinity,
       color: _kDanger.withValues(alpha: 0.15),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Text(_error!, style: const TextStyle(color: _kDanger, fontSize: 12)),
+      child: Text(
+        _error!,
+        style: const TextStyle(color: _kDanger, fontSize: 12),
+      ),
     );
   }
 }
