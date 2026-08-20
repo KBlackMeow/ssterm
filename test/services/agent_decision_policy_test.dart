@@ -38,6 +38,7 @@ void main() {
       expect(guide, contains('architecture, constraints, edge cases'));
       expect(guide, contains('decision or an information need'));
       expect(guide, contains('unguided environment inspection'));
+      expect(guide, contains('Recommendation'));
     });
   });
 

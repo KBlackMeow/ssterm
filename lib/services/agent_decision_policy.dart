@@ -188,7 +188,8 @@ abstract final class AgentDecisionPolicy {
           'integration points. Do not spend reasoning on the environment or '
           'tooling. End each reasoning block with a decision or an information '
           'need. Review completed work; do not perform unguided environment '
-          'inspection or exhaustive search.',
+          'inspection or exhaustive search. In the final answer include '
+          'Recommendation, Alternatives considered, Evidence, and Remaining risk.',
     AgentDecisionRoute.uncertain =>
       'Gather the minimum evidence needed to decide whether deeper planning '
           'is necessary.',
