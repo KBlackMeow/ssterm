@@ -317,30 +317,13 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     if (!mounted) return;
     final selected = await showDialog<AgentSessionDescriptor>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Continue session'),
-        content: SizedBox(
-          width: 420,
-          child: available.isEmpty
-              ? const Text('No available sessions.')
-              : ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final session in available)
-                      ListTile(
-                        title: Text(session.title),
-                        subtitle: Text(session.updatedAt.toLocal().toString()),
-                        onTap: () => Navigator.of(context).pop(session),
-                      ),
-                  ],
-                ),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: _SessionPicker(
+          sessions: available,
+          onDelete: _deleteAvailableSession,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
       ),
     );
     if (selected == null || !mounted) return;
@@ -358,6 +341,20 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
           _ChatMessage.notice('That session was opened in another Agent tab.'),
         );
       });
+    }
+  }
+
+  Future<void> _deleteAvailableSession(AgentSessionDescriptor session) async {
+    try {
+      await _sessionRegistry.delete(session.id);
+    } on AgentSessionUnavailableException {
+      if (!mounted) return;
+      setState(() {
+        _messages.add(
+          _ChatMessage.notice('That session was opened in another Agent tab.'),
+        );
+      });
+      rethrow;
     }
   }
 
@@ -906,6 +903,224 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// Returns the host-provided terminal unchanged. Agent commands run in a
   /// separate background process or SSH channel and never write to its PTY.
   Widget _buildTerminalBody() => widget.child;
+}
+
+class _SessionPicker extends StatefulWidget {
+  const _SessionPicker({required this.sessions, required this.onDelete});
+
+  final List<AgentSessionDescriptor> sessions;
+  final Future<void> Function(AgentSessionDescriptor session) onDelete;
+
+  @override
+  State<_SessionPicker> createState() => _SessionPickerState();
+}
+
+class _SessionPickerState extends State<_SessionPicker> {
+  late List<AgentSessionDescriptor> _sessions;
+  String? _deleteError;
+  String? _deletingSessionId;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessions = List.of(widget.sessions);
+  }
+
+  Future<void> _delete(AgentSessionDescriptor session) async {
+    setState(() {
+      _deletingSessionId = session.id;
+      _deleteError = null;
+    });
+    try {
+      await widget.onDelete(session);
+      if (!mounted) return;
+      setState(() => _sessions.remove(session));
+    } on AgentSessionUnavailableException {
+      if (!mounted) return;
+      setState(() {
+        _deleteError = 'That session was opened in another Agent tab.';
+      });
+    } finally {
+      if (mounted) setState(() => _deletingSessionId = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.maybeOf(context);
+    final foreground = colors?.foreground ?? _kFgActive;
+    final foregroundDim = colors?.foregroundDim ?? _kFgInactive;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+      child: FrostedGlassSurface(
+        frosted: true,
+        borderRadius: 16,
+        child: Material(
+          type: MaterialType.transparency,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Continue session',
+                        style: TextStyle(
+                          color: foreground,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      icon: Icon(Icons.close, color: foregroundDim, size: 18),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+                if (_deleteError != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    _deleteError!,
+                    style: TextStyle(color: foregroundDim, fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Flexible(
+                  child: _sessions.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Text(
+                            'No available sessions.',
+                            style: TextStyle(color: foregroundDim),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _sessions.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final session = _sessions[index];
+                            final deleting = _deletingSessionId == session.id;
+                            return _SessionPickerCard(
+                              session: session,
+                              deleting: deleting,
+                              foreground: foreground,
+                              foregroundDim: foregroundDim,
+                              onSelect: () =>
+                                  Navigator.of(context).pop(session),
+                              onDelete: () => _delete(session),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionPickerCard extends StatefulWidget {
+  const _SessionPickerCard({
+    required this.session,
+    required this.deleting,
+    required this.foreground,
+    required this.foregroundDim,
+    required this.onSelect,
+    required this.onDelete,
+  });
+
+  final AgentSessionDescriptor session;
+  final bool deleting;
+  final Color foreground;
+  final Color foregroundDim;
+  final VoidCallback onSelect;
+  final VoidCallback onDelete;
+
+  @override
+  State<_SessionPickerCard> createState() => _SessionPickerCardState();
+}
+
+class _SessionPickerCardState extends State<_SessionPickerCard> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.deleting ? null : widget.onSelect,
+        child: FrostedGlassSurface(
+          frosted: true,
+          blur: false,
+          borderRadius: 10,
+          fillColor: _hovered
+              ? const Color(0xB52A2A2A)
+              : const Color(0x9A202020),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+            child: Row(
+              children: [
+                Icon(Icons.forum_outlined, size: 16, color: widget.foreground),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.session.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: widget.foreground,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.session.updatedAt.toLocal().toString(),
+                        style: TextStyle(
+                          color: widget.foregroundDim,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Delete session',
+                  onPressed: widget.deleting ? null : widget.onDelete,
+                  icon: widget.deleting
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: widget.foregroundDim,
+                          ),
+                        )
+                      : Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                          color: widget.foregroundDim,
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ── Logging helpers ─────────────────────────────────────────────────────────

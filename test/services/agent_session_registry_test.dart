@@ -75,6 +75,19 @@ void main() {
       expect(await registry.listAvailable(), isEmpty);
     });
 
+    test('deletes a released session from the available list', () async {
+      final registry = AgentSessionRegistry(indexFile: indexFile);
+      final lease = await registry.createAndAcquire();
+
+      await lease.release();
+      await registry.delete(lease.session.id);
+
+      expect(
+        (await registry.listAvailable()).map((session) => session.id),
+        isNot(contains(lease.session.id)),
+      );
+    });
+
     test('acquires a caller-generated session id', () async {
       final registry = AgentSessionRegistry(indexFile: indexFile);
 

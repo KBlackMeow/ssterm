@@ -74,6 +74,17 @@ void main() {
     expect(header, contains("message: 'Continue session'"));
   });
 
+  test('continue-session picker uses glass cards with safe deletion', () {
+    final source = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('class _SessionPicker'));
+    expect(source, contains('FrostedGlassSurface('));
+    expect(source, contains('_sessionRegistry.delete(session.id)'));
+    expect(source, contains("tooltip: 'Delete session'"));
+  });
+
   test('cancelling marks a running command card stopped', () {
     final source = File(
       'lib/widgets/ai_assistant_panel.dart',
