@@ -28,6 +28,9 @@ extension _AgentSettingsExt on _SettingsPageState {
         _sectionTitle('Display'),
         _buildAgentDisplaySection(),
         const SizedBox(height: 16),
+        _sectionTitle('Decision Quality'),
+        _buildDecisionQualitySection(),
+        const SizedBox(height: 16),
         _sectionTitle('Web Search'),
         _buildWebSearchSection(),
         const SizedBox(height: 16),
@@ -436,6 +439,83 @@ extension _AgentSettingsExt on _SettingsPageState {
         onChanged: (v) {
           _agentApply(_agentConfig.copyWith(markdownEnabled: v));
         },
+      ),
+    );
+  }
+
+  Widget _buildDecisionQualitySection() {
+    final provider = _agentConfig.current;
+    final model = _agentConfig.resolvedModel;
+    if (provider == null || model == null) {
+      return _consoleSurface(
+        child: const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text(
+            'Select an enabled provider and model to configure adaptive decision quality.',
+            style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+          ),
+        ),
+      );
+    }
+    final settings = _agentConfig.decisionSettingsFor(provider.id, model);
+    void apply({bool? enabled, bool? focus}) {
+      final next = _agentConfig.copyWith();
+      next.setDecisionSettings(
+        provider.id,
+        model,
+        AgentDecisionSettings(
+          enabled: enabled ?? settings.enabled,
+          firstTurnToolFocus: focus ?? settings.firstTurnToolFocus,
+        ),
+      );
+      _agentApply(next);
+    }
+
+    return _consoleSurface(
+      child: Column(
+        children: [
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            dense: true,
+            title: const Text(
+              'Adaptive decision quality (experimental)',
+              style: TextStyle(color: _kFg, fontSize: 13),
+            ),
+            subtitle: const Text(
+              'For complex tasks, uses separate planning and critique calls before execution. Simple tasks remain fast.',
+              style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+            ),
+            value: settings.enabled,
+            activeThumbColor: _kAccent,
+            onChanged: (value) => apply(enabled: value),
+          ),
+          if (settings.enabled)
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              dense: true,
+              title: const Text(
+                'Focus first native tool request',
+                style: TextStyle(color: _kFg, fontSize: 13),
+              ),
+              subtitle: const Text(
+                'Initially exposes only core tools, then restores the full catalogue after the first tool result.',
+                style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
+              ),
+              value: settings.firstTurnToolFocus,
+              activeThumbColor: _kAccent,
+              onChanged: (value) => apply(focus: value),
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Budget: up to 5 decision calls and 2 recovery calls.',
+                style: TextStyle(color: _kFgMuted, fontSize: 10.5),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

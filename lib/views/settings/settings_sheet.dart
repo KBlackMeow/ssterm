@@ -9,6 +9,7 @@ import '../../dialogs/connect_dialog.dart' show showEditHostDialog;
 import '../../services/api_key_storage.dart';
 import '../../services/command_safety.dart';
 import '../../services/command_risk.dart';
+import '../../services/agent_decision_policy.dart';
 import '../../services/file_picker_service.dart';
 import '../../services/llm_service.dart';
 import '../../widgets/frosted_glass.dart';
