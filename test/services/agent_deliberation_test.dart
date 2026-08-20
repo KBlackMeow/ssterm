@@ -23,4 +23,13 @@ void main() {
       isNull,
     );
   });
+
+  test('verifier parses an incomplete result with recovery evidence', () {
+    final verdict = AgentDeliberation.parseVerdict(
+      '{"complete":false,"evidence":"tests were not run","recovery":"run focused tests"}',
+    );
+
+    expect(verdict?.complete, isFalse);
+    expect(verdict?.recovery, 'run focused tests');
+  });
 }

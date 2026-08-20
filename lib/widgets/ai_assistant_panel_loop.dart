@@ -763,6 +763,49 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // an environment fact the user needs in the log to make sense of
       // why the loop halted with runnable commands sitting on the chat
       // card.
+      if (taskComplete &&
+          _activeDecisionRun != null &&
+          _activeDecisionPlan != null) {
+        setState(() => _agentLoopStatus = 'Verifying decision evidence…');
+        final evidence = _conversationHistory
+            .expand(
+              (item) => [
+                if (item.content != null) item.content!,
+                ...item.toolResults.map((result) => result.content),
+              ],
+            )
+            .join('\n\n');
+        final verdict = await AgentDeliberation.verify(
+          config: config,
+          plan: _activeDecisionPlan!,
+          finalAnswer: displayText,
+          evidence: evidence.length <= 12000
+              ? evidence
+              : evidence.substring(evidence.length - 12000),
+        );
+        if (!mounted || gen != _generation) return;
+        if (verdict != null &&
+            !verdict.complete &&
+            verdict.recovery != null &&
+            _activeDecisionRun!.requestRecovery(evidence: verdict.evidence)) {
+          _conversationHistory.add({
+            'role': 'user',
+            'content':
+                '<verification_recovery>${verdict.recovery}</verification_recovery>',
+          });
+          setState(
+            () => _agentLoopStatus = 'Verification found remaining work…',
+          );
+          continue;
+        }
+        if (verdict == null || !verdict.complete) {
+          final reason =
+              verdict?.evidence ??
+              'The verification pass was unavailable; the result is not independently confirmed.';
+          aiMsg.text = '$displayText\n\n> **Verification pending:** $reason';
+          setState(() {});
+        }
+      }
       if (taskComplete) break;
       if (askUser) break;
       if (commands.isEmpty) break;
