@@ -15,11 +15,34 @@ class AgentDecisionSettings {
   final bool firstTurnToolFocus;
   final int maxDeepModelRequests;
   final int maxRecoveryModelRequests;
+
+  Map<String, Object> toJson() => {
+    'enabled': enabled,
+    if (firstTurnToolFocus) 'firstTurnToolFocus': true,
+    if (maxDeepModelRequests != 5) 'maxDeepModelRequests': maxDeepModelRequests,
+    if (maxRecoveryModelRequests != 2)
+      'maxRecoveryModelRequests': maxRecoveryModelRequests,
+  };
+
+  static AgentDecisionSettings? tryFromJson(Object? value) {
+    if (value is! Map) return null;
+    final enabled = value['enabled'];
+    if (enabled is! bool) return null;
+    final deep = value['maxDeepModelRequests'];
+    final recovery = value['maxRecoveryModelRequests'];
+    if (deep != null && (deep is! int || deep <= 0)) return null;
+    if (recovery != null && (recovery is! int || recovery < 0)) return null;
+    return AgentDecisionSettings(
+      enabled: enabled,
+      firstTurnToolFocus: value['firstTurnToolFocus'] == true,
+      maxDeepModelRequests: deep as int? ?? 5,
+      maxRecoveryModelRequests: recovery as int? ?? 2,
+    );
+  }
 }
 
 class AgentDecisionRun {
-  AgentDecisionRun.deep(this.settings)
-    : route = AgentDecisionRoute.deep;
+  AgentDecisionRun.deep(this.settings) : route = AgentDecisionRoute.deep;
 
   final AgentDecisionSettings settings;
   final AgentDecisionRoute route;
@@ -63,7 +86,8 @@ abstract final class AgentDecisionPolicy {
     String task,
     AgentDecisionSettings settings,
   ) {
-    if (!settings.enabled || task.trim().isEmpty) return AgentDecisionRoute.fast;
+    if (!settings.enabled || task.trim().isEmpty)
+      return AgentDecisionRoute.fast;
     final normalized = task.toLowerCase();
     if (_deepSignals.any(normalized.contains)) return AgentDecisionRoute.deep;
     return AgentDecisionRoute.fast;
@@ -74,12 +98,12 @@ abstract final class AgentDecisionPolicy {
       'Use direct, verifiable steps. Finish when the evidence is sufficient.',
     AgentDecisionRoute.deep =>
       'Think deeply about architecture, constraints, edge cases, and '
-      'integration points. Do not spend reasoning on the environment or '
-      'tooling. End each reasoning block with a decision or an information '
-      'need. Review completed work; do not perform unguided environment '
-      'inspection or exhaustive search.',
+          'integration points. Do not spend reasoning on the environment or '
+          'tooling. End each reasoning block with a decision or an information '
+          'need. Review completed work; do not perform unguided environment '
+          'inspection or exhaustive search.',
     AgentDecisionRoute.uncertain =>
       'Gather the minimum evidence needed to decide whether deeper planning '
-      'is necessary.',
+          'is necessary.',
   };
 }

@@ -1,4 +1,5 @@
 import 'mcp_server_config.dart';
+import '../services/agent_decision_policy.dart';
 
 // ── Provider ids ──────────────────────────────────────────────────────────
 
@@ -724,6 +725,9 @@ class AgentConfig {
   /// is true are connected at startup.  Defaults to empty.
   List<McpServerConfig> mcpServers;
 
+  /// Per-provider/model opt-in settings for the adaptive decision pipeline.
+  Map<String, AgentDecisionSettings> decisionSettingsByModel;
+
   AgentConfig({
     this.defaultProvider,
     this.defaultModel,
@@ -735,9 +739,31 @@ class AgentConfig {
     DangerousCommandsPolicy? dangerousPolicy,
     this.mcpEnabled = false,
     List<McpServerConfig>? mcpServers,
+    Map<String, AgentDecisionSettings>? decisionSettingsByModel,
   }) : dangerousPolicy = dangerousPolicy ?? DangerousCommandsPolicy(),
        mcpServers = mcpServers ?? [],
+       decisionSettingsByModel = decisionSettingsByModel ?? {},
        providers = providers ?? ProviderConfig.builtIns;
+
+  String _decisionSettingsKey(String providerId, String model) =>
+      '$providerId/$model';
+
+  AgentDecisionSettings decisionSettingsFor(String providerId, String model) =>
+      decisionSettingsByModel[_decisionSettingsKey(providerId, model)] ??
+      const AgentDecisionSettings(enabled: false);
+
+  void setDecisionSettings(
+    String providerId,
+    String model,
+    AgentDecisionSettings settings,
+  ) {
+    final key = _decisionSettingsKey(providerId, model);
+    if (!settings.enabled && !settings.firstTurnToolFocus) {
+      decisionSettingsByModel.remove(key);
+    } else {
+      decisionSettingsByModel[key] = settings;
+    }
+  }
 
   /// The currently enabled provider matching [defaultProvider], or the first
   /// enabled provider if none is explicitly selected.
@@ -777,6 +803,11 @@ class AgentConfig {
     'mcpEnabled': mcpEnabled,
     if (mcpServers.isNotEmpty)
       'mcpServers': mcpServers.map((s) => s.toJson()).toList(),
+    if (decisionSettingsByModel.isNotEmpty)
+      'decisionSettingsByModel': {
+        for (final entry in decisionSettingsByModel.entries)
+          entry.key: entry.value.toJson(),
+      },
   };
 
   factory AgentConfig.fromJson(Map<String, dynamic>? json) {
@@ -861,6 +892,15 @@ class AgentConfig {
         if (s != null) mcpServers.add(s);
       }
     }
+    final decisionSettings = <String, AgentDecisionSettings>{};
+    final rawDecisionSettings = json['decisionSettingsByModel'];
+    if (rawDecisionSettings is Map) {
+      rawDecisionSettings.forEach((key, value) {
+        if (key is! String) return;
+        final settings = AgentDecisionSettings.tryFromJson(value);
+        if (settings != null) decisionSettings[key] = settings;
+      });
+    }
 
     return AgentConfig(
       defaultProvider: json['defaultProvider'] as String?,
@@ -885,6 +925,7 @@ class AgentConfig {
       ),
       mcpEnabled: json['mcpEnabled'] as bool? ?? false,
       mcpServers: mcpServers,
+      decisionSettingsByModel: decisionSettings,
     );
   }
 
@@ -904,6 +945,7 @@ class AgentConfig {
     DangerousCommandsPolicy? dangerousPolicy,
     bool? mcpEnabled,
     List<McpServerConfig>? mcpServers,
+    Map<String, AgentDecisionSettings>? decisionSettingsByModel,
   }) => AgentConfig(
     defaultProvider: defaultProvider ?? this.defaultProvider,
     defaultModel: defaultModel ?? this.defaultModel,
@@ -917,5 +959,7 @@ class AgentConfig {
     dangerousPolicy: dangerousPolicy ?? this.dangerousPolicy,
     mcpEnabled: mcpEnabled ?? this.mcpEnabled,
     mcpServers: mcpServers ?? List.of(this.mcpServers),
+    decisionSettingsByModel:
+        decisionSettingsByModel ?? Map.of(this.decisionSettingsByModel),
   );
 }
