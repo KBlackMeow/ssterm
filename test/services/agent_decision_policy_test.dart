@@ -62,14 +62,30 @@ void main() {
         isFalse,
       );
     });
+
+    test(
+      'caps deep-model requests and clears focused tools after evidence',
+      () {
+        final run = AgentDecisionRun.deep(
+          const AgentDecisionSettings(enabled: true, maxDeepModelRequests: 2),
+        );
+
+        expect(run.firstToolFocusPending, isTrue);
+        run.markFirstToolResult();
+        expect(run.firstToolFocusPending, isFalse);
+        expect(run.consumeModelRequest(), isTrue);
+        expect(run.consumeModelRequest(), isTrue);
+        expect(run.consumeModelRequest(), isFalse);
+      },
+    );
   });
 
   group('AgentDecisionPlan', () {
     test('accepts two complete candidates with a recommendation', () {
       final plan = AgentDecisionPlan.tryParseJson('''
 {"recommendedId":"safe","candidates":[
- {"id":"safe","summary":"Incremental change","risk":"low","validation":"run tests"},
- {"id":"fast","summary":"Direct change","risk":"medium","validation":"smoke test"}]}
+ {"id":"safe","summary":"Incremental change","fit":"good","evidence":"existing tests","cost":"low","maintenance":"low","risk":"low","validation":"run tests"},
+ {"id":"fast","summary":"Direct change","fit":"partial","evidence":"limited","cost":"low","maintenance":"medium","risk":"medium","validation":"smoke test"}]}
 ''');
 
       expect(plan?.recommendedId, 'safe');

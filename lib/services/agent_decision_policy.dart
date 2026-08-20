@@ -49,7 +49,23 @@ class AgentDecisionRun {
   final AgentDecisionSettings settings;
   final AgentDecisionRoute route;
   final Set<String> _recoveryEvidence = <String>{};
+  int modelRequests = 0;
   int recoveryRequests = 0;
+  bool firstToolFocusPending = true;
+
+  void markFirstToolResult() => firstToolFocusPending = false;
+
+  int get _modelRequestLimit =>
+      settings.maxDeepModelRequests +
+      (recoveryRequests * settings.maxRecoveryModelRequests);
+
+  int get remainingModelRequests => _modelRequestLimit - modelRequests;
+
+  bool consumeModelRequest() {
+    if (modelRequests >= _modelRequestLimit) return false;
+    modelRequests++;
+    return true;
+  }
 
   bool requestRecovery({required String evidence}) {
     final normalized = evidence.trim();
@@ -67,12 +83,20 @@ class AgentDecisionCandidate {
   const AgentDecisionCandidate({
     required this.id,
     required this.summary,
+    required this.fit,
+    required this.evidence,
+    required this.cost,
+    required this.maintenance,
     required this.risk,
     required this.validation,
   });
 
   final String id;
   final String summary;
+  final String fit;
+  final String evidence;
+  final String cost;
+  final String maintenance;
   final String risk;
   final String validation;
 
@@ -80,12 +104,24 @@ class AgentDecisionCandidate {
     if (value is! Map) throw const FormatException();
     final id = value['id'];
     final summary = value['summary'];
+    final fit = value['fit'];
+    final evidence = value['evidence'];
+    final cost = value['cost'];
+    final maintenance = value['maintenance'];
     final risk = value['risk'];
     final validation = value['validation'];
     if (id is! String ||
         id.trim().isEmpty ||
         summary is! String ||
         summary.trim().isEmpty ||
+        fit is! String ||
+        fit.trim().isEmpty ||
+        evidence is! String ||
+        evidence.trim().isEmpty ||
+        cost is! String ||
+        cost.trim().isEmpty ||
+        maintenance is! String ||
+        maintenance.trim().isEmpty ||
         risk is! String ||
         risk.trim().isEmpty ||
         validation is! String ||
@@ -95,6 +131,10 @@ class AgentDecisionCandidate {
     return AgentDecisionCandidate(
       id: id.trim(),
       summary: summary.trim(),
+      fit: fit.trim(),
+      evidence: evidence.trim(),
+      cost: cost.trim(),
+      maintenance: maintenance.trim(),
       risk: risk.trim(),
       validation: validation.trim(),
     );
@@ -141,6 +181,10 @@ class AgentDecisionPlan {
         {
           'id': candidate.id,
           'summary': candidate.summary,
+          'fit': candidate.fit,
+          'evidence': candidate.evidence,
+          'cost': candidate.cost,
+          'maintenance': candidate.maintenance,
           'risk': candidate.risk,
           'validation': candidate.validation,
         },
@@ -173,8 +217,9 @@ abstract final class AgentDecisionPolicy {
     String task,
     AgentDecisionSettings settings,
   ) {
-    if (!settings.enabled || task.trim().isEmpty)
+    if (!settings.enabled || task.trim().isEmpty) {
       return AgentDecisionRoute.fast;
+    }
     final normalized = task.toLowerCase();
     if (_deepSignals.any(normalized.contains)) return AgentDecisionRoute.deep;
     return AgentDecisionRoute.fast;

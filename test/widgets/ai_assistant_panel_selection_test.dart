@@ -12,7 +12,7 @@ void main() {
         'lib/widgets/ai_assistant_panel_loop.dart',
       ).readAsStringSync();
 
-      expect(source, contains('final budget = AgentExecutionBudget();'));
+      expect(source, contains('maxModelRequests: remainingDeepRequests'));
       expect(source, contains('budget.consumeModelRequest(DateTime.now())'));
       expect(source, contains('budget.consumeShellCall(DateTime.now())'));
       expect(source, contains('[Agent run stopped]'));

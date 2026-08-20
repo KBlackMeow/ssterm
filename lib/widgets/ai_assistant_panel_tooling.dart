@@ -76,6 +76,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     _ChatMessage aiMsg,
     AgentConfig config, {
     required AgentStreamClientSession streamSession,
+    AgentRequestProfile? profile,
   }) async {
     String fullText = '';
     String reasoningText = '';
@@ -99,6 +100,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           config: config,
           messages: _conversationHistory,
           session: streamSession,
+          profile: profile,
         );
       } catch (e) {
         // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.

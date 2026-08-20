@@ -118,12 +118,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     if (route == AgentDecisionRoute.deep) {
       _activeDecisionRun = AgentDecisionRun.deep(decisionSettings);
       setState(() => _agentLoopStatus = 'Planning and reviewing options…');
-      final planned = await AgentDeliberation.plan(
-        config: config,
-        taskContext: routedBody,
-      );
+      final planned = _activeDecisionRun!.consumeModelRequest()
+          ? await AgentDeliberation.plan(
+              config: config,
+              taskContext: routedBody,
+            )
+          : null;
       if (!mounted || gen != _generation) return;
-      final reviewed = planned == null
+      final reviewed =
+          planned == null || !_activeDecisionRun!.consumeModelRequest()
           ? null
           : await AgentDeliberation.critique(
               config: config,
@@ -246,7 +249,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     void stopIter(int iter, String reason) =>
         _logAgentStop(iter, reason, turnId: turnId);
 
-    final budget = AgentExecutionBudget();
+    // Reserve one deep-model request for independent final verification.
+    final remainingDeepRequests = _activeDecisionRun == null
+        ? null
+        : (_activeDecisionRun!.remainingModelRequests - 1).clamp(1, 100);
+    final budget = AgentExecutionBudget(
+      maxModelRequests: remainingDeepRequests,
+    );
     var loopIterations = 0;
     agentLoop:
     while (gen == _generation) {
@@ -276,12 +285,17 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         stopIter(loopIterations, 'context_hard_limit');
         break;
       }
+      if (_activeDecisionRun?.remainingModelRequests == 0) {
+        stopIter(loopIterations, 'budget_deep_model_requests');
+        break;
+      }
       final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
       if (modelBudgetStop != null) {
         _recordAgentRunStopped(modelBudgetStop);
         stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
         break;
       }
+      _activeDecisionRun?.consumeModelRequest();
       final aiMsg = _ChatMessage.ai(text: '');
       setState(() => _messages.add(aiMsg));
 
@@ -295,12 +309,22 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // one line of pure heartbeat noise from every iteration on the
       // happy path.
       final historyLenAtCall = _conversationHistory.length;
+      final activeRun = _activeDecisionRun;
+      final shouldFocusFirstTools =
+          activeRun?.settings.firstTurnToolFocus == true &&
+          activeRun!.firstToolFocusPending &&
+          config.current?.protocol != ProviderProtocol.ollamaNative;
       final streamResult = await _streamAiResponse(
         gen,
         historyLenBefore,
         aiMsg,
         config,
         streamSession: streamSession,
+        profile: shouldFocusFirstTools
+            ? const AgentRequestProfile(
+                allowedNativeToolNames: {'bash', 'ask_user_question'},
+              )
+            : null,
       );
       if (streamResult == null) {
         stopIter(loopIterations, 'stream_error_or_cancelled');
@@ -775,14 +799,16 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               ],
             )
             .join('\n\n');
-        final verdict = await AgentDeliberation.verify(
-          config: config,
-          plan: _activeDecisionPlan!,
-          finalAnswer: displayText,
-          evidence: evidence.length <= 12000
-              ? evidence
-              : evidence.substring(evidence.length - 12000),
-        );
+        final verdict = _activeDecisionRun!.consumeModelRequest()
+            ? await AgentDeliberation.verify(
+                config: config,
+                plan: _activeDecisionPlan!,
+                finalAnswer: displayText,
+                evidence: evidence.length <= 12000
+                    ? evidence
+                    : evidence.substring(evidence.length - 12000),
+              )
+            : null;
         if (!mounted || gen != _generation) return;
         if (verdict != null &&
             !verdict.complete &&
@@ -1039,6 +1065,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               )
             : AgentConversationItem.toolResults(nativeResults),
       );
+      if (toolCalls.isNotEmpty || feedbacks.isNotEmpty) {
+        _activeDecisionRun?.markFirstToolResult();
+      }
       logIter(
         'iter=$loopIterations feedback +${feedbacks.length} '
         'history=${_conversationHistory.length}',

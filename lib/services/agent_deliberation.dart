@@ -33,8 +33,9 @@ abstract final class AgentDeliberation {
   static const _plannerPrompt = '''You are a planning reviewer. You cannot use
 tools or authorize changes. Return one JSON object only with `recommendedId`
 and `candidates`. Provide 2 or 3 candidates; every candidate needs `id`,
-`summary`, `risk`, and `validation`. Recommend the candidate that best balances
-outcome, evidence, reversibility, cost, and maintenance.''';
+`summary`, `fit`, `evidence`, `cost`, `maintenance`, `risk`, and `validation`.
+Recommend the candidate that best balances outcome, evidence, reversibility,
+cost, and maintenance.''';
 
   static AgentDeliberationRequest planRequest(String taskContext) =>
       AgentDeliberationRequest(
@@ -75,7 +76,8 @@ outcome, evidence, reversibility, cost, and maintenance.''';
         systemPromptOverride:
             'You are an independent critic. You cannot use tools or authorize '
             'changes. Return one corrected decision-plan JSON object only. '
-            'Keep 2 or 3 candidates and challenge unsupported assumptions.',
+            'Keep 2 or 3 candidates, preserve every comparison field, and '
+            'challenge unsupported assumptions.',
         allowedNativeToolNames: {},
       ),
       messages: [
