@@ -11,6 +11,19 @@ import 'package:ssterm/services/skill_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'request profile can disable native tools without changing defaults',
+    () {
+      const profile = AgentRequestProfile(
+        systemPromptOverride: 'Return JSON only. Do not use tools.',
+        allowedNativeToolNames: {},
+      );
+
+      expect(profile.allowsNativeTools, isFalse);
+      expect(profile.systemPromptOverride, contains('Do not use tools'));
+    },
+  );
+
   group('ProviderTokenUsage', () {
     test('adds Anthropic cache usage to the effective prompt size', () {
       final usage = ProviderTokenUsage.fromAnthropic({
