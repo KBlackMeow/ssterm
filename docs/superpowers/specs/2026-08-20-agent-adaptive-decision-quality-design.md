@@ -24,6 +24,37 @@ the model generate, challenge, and verify alternatives.
 
 ## Behavior
 
+### First-turn route and anchors
+
+Before the first model request, the host selects the task's reasoning mode.
+This is external routing: do not depend on a 27B model to reliably decide for
+itself when to switch from quick execution to deep planning.  The route is
+locked for the task, not continuously rewritten mid-trajectory:
+
+- **Fast** uses the existing concise think-act loop.
+- **Deep** requires the decision path below.
+- **Uncertain** uses a neutral route that asks for evidence or escalates after
+  its first observed result; it must not select an unstable halfway persona.
+
+The static system prompt continues to carry durable safety and tool protocol.
+Immediately after each user task, the host appends a short, fixed routing guide
+to the user-side task context.  The deep guide calls out architecture,
+constraints, edge cases, and integration points; it ends each reasoning block
+in a decision or information need.  The fast guide calls for direct,
+verifiable completion.  Both include three anti-runaway anchors: review what
+is already complete, finish when the evidence is sufficient, and avoid
+unguided environment inspection or exhaustive search.  The guide contains no
+dynamic secrets or host facts, preserving stable system-prompt caching.
+
+### First-turn tool focus
+
+When a session exposes a large tool catalogue, the first request may advertise
+only the one or two tools necessary to take a safe initial step.  After the
+first durable tool outcome, the complete authorised catalogue becomes
+available.  This is an optional, measured optimisation: it must never hide a
+tool required to answer the task safely, or reduce a user's existing access.
+The full catalogue is restored on every later request and after session resume.
+
 ### Fast path
 
 Tasks that are low risk, have one obvious action, and require no material
@@ -64,7 +95,9 @@ The deep path has these phases:
 
 Classifies a user request as fast or deep.  Its decision is deterministic from
 observable task signals where possible; the model may request escalation when
-new evidence reveals uncertainty.  Classification is recorded for diagnostics.
+new evidence reveals uncertainty.  It also selects fast, deep, or uncertain
+first-turn guidance and records the route for diagnostics.  Classification is
+recorded for diagnostics.
 
 ### DecisionPlan
 
@@ -121,6 +154,27 @@ ranked it highest.
 - Facts, user preferences, and model assumptions are tagged separately.  A
   recommendation based on an unverified assumption identifies it as such.
 
+## Measurement and model calibration
+
+The routing and anchoring behaviours are hypotheses to validate in SSTerm;
+they are not assumed to transfer from another runtime or model family.  For
+each supported local 27B model, run a fixed task set with an unchanged host
+environment and compare the candidate presets against the current loop.
+
+Record at least:
+
+- task completion and verification-pass rate;
+- user-visible recommendation quality on tasks with alternatives;
+- mean model calls, tool calls, elapsed time, and token use;
+- safety-gate compliance;
+- failure category, including incorrect routing, tool misuse, unsupported
+  assertion, insufficient exploration, and runaway exploration.
+
+Promote a route, near-message guide, or first-turn tool focus only when it
+improves verification-adjusted completion without an unacceptable cost or
+safety regression.  Keep per-model settings versioned and observable so an
+operator can revert to the baseline path.
+
 ## Tests and acceptance criteria
 
 Add focused tests for:
@@ -131,6 +185,10 @@ Add focused tests for:
 - execution respecting the current approval/safety gates;
 - verifier-led recovery with a bounded call count and no blind retry;
 - budget exhaustion and safe fallback;
+- first-turn route selection and stable near-message guidance;
+- correct expansion from a focused first-turn tool set to the full authorised
+  catalogue;
+- anti-runaway anchors terminating unproductive exploration;
 - a final summary containing recommendation, comparison, evidence, and
   residual risk without chain-of-thought;
 - preservation of one-call behavior for simple tasks.
@@ -147,3 +205,5 @@ within its configured budget.  The fast path must not gain extra model calls.
 - Introducing additional model providers or a separate large-model fallback.
 - Replacing existing host command safety, user-approval, provider protocols,
   or transcript-compaction behavior.
+- Treating results from an external routing project or a different model family
+  as proof that the same prompts or routes work for SSTerm.
