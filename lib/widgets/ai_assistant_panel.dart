@@ -953,74 +953,70 @@ class _SessionPickerState extends State<_SessionPicker> {
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
-      child: FrostedGlassSurface(
-        frosted: true,
-        borderRadius: 16,
-        child: Material(
-          type: MaterialType.transparency,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Continue session',
-                        style: TextStyle(
-                          color: foreground,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+      child: PopupSurface(
+        color: FrostedGlassStyle.menuFillSolid,
+        radius: 16,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Continue session',
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close',
-                      icon: Icon(Icons.close, color: foregroundDim, size: 18),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-                if (_deleteError != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _deleteError!,
-                    style: TextStyle(color: foregroundDim, fontSize: 12),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    icon: Icon(Icons.close, color: foregroundDim, size: 18),
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
-                const SizedBox(height: 8),
-                Flexible(
-                  child: _sessions.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                          child: Text(
-                            'No available sessions.',
-                            style: TextStyle(color: foregroundDim),
-                          ),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: _sessions.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final session = _sessions[index];
-                            final deleting = _deletingSessionId == session.id;
-                            return _SessionPickerCard(
-                              session: session,
-                              deleting: deleting,
-                              foreground: foreground,
-                              foregroundDim: foregroundDim,
-                              onSelect: () =>
-                                  Navigator.of(context).pop(session),
-                              onDelete: () => _delete(session),
-                            );
-                          },
-                        ),
+              ),
+              if (_deleteError != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _deleteError!,
+                  style: TextStyle(color: foregroundDim, fontSize: 12),
                 ),
               ],
-            ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: _sessions.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Text(
+                          'No available sessions.',
+                          style: TextStyle(color: foregroundDim),
+                        ),
+                      )
+                    : ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _sessions.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final session = _sessions[index];
+                          final deleting = _deletingSessionId == session.id;
+                          return _SessionPickerCard(
+                            session: session,
+                            deleting: deleting,
+                            foreground: foreground,
+                            foregroundDim: foregroundDim,
+                            onSelect: () => Navigator.of(context).pop(session),
+                            onDelete: () => _delete(session),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1059,13 +1055,11 @@ class _SessionPickerCardState extends State<_SessionPickerCard> {
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         onTap: widget.deleting ? null : widget.onSelect,
-        child: FrostedGlassSurface(
-          frosted: true,
-          blur: false,
-          borderRadius: 10,
-          fillColor: _hovered
-              ? const Color(0xB52A2A2A)
-              : const Color(0x9A202020),
+        child: PopupSurface(
+          color: _hovered
+              ? const Color(0xFF303030)
+              : FrostedGlassStyle.panelFillSolid,
+          radius: 10,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
             child: Row(
