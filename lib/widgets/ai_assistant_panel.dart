@@ -16,6 +16,8 @@ import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
+import '../services/agent_decision_policy.dart';
+import '../services/agent_deliberation.dart';
 import '../services/agent_session_store.dart';
 import '../services/agent_session_registry.dart';
 import '../services/agent_output_store.dart';
@@ -263,6 +265,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
   int? _lastAgentPromptTokenCount;
+  AgentDecisionRun? _activeDecisionRun;
+  AgentDecisionPlan? _activeDecisionPlan;
   final _sessionRegistry = AgentSessionRegistry();
   AgentSessionLease? _sessionLease;
   var _sessionNeedsTitle = true;

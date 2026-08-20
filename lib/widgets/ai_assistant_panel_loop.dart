@@ -72,6 +72,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     }
 
     _markAgentBusy();
+    _activeDecisionRun = null;
+    _activeDecisionPlan = null;
 
     // The agent loop receives direct stdout/stderr from the independent
     // background executor. Visible-terminal scrollback is never included.
@@ -102,7 +104,45 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           ? userText
           : '<command_environment>$environment</command_environment>\n\n$userText';
     }
-    _conversationHistory.add({'role': 'user', 'content': body});
+    final providerId = config.current?.id;
+    final model = config.resolvedModel;
+    final decisionSettings = providerId == null || model == null
+        ? const AgentDecisionSettings(enabled: false)
+        : config.decisionSettingsFor(providerId, model);
+    final route = AgentDecisionPolicy.classify(userText, decisionSettings);
+    final routedBody = route == AgentDecisionRoute.fast
+        ? body
+        : '$body\n\n<agent_route>${AgentDecisionPolicy.guideFor(route)}</agent_route>';
+    var executionBody = routedBody;
+
+    if (route == AgentDecisionRoute.deep) {
+      _activeDecisionRun = AgentDecisionRun.deep(decisionSettings);
+      setState(() => _agentLoopStatus = 'Planning and reviewing options…');
+      final planned = await AgentDeliberation.plan(
+        config: config,
+        taskContext: routedBody,
+      );
+      if (!mounted || gen != _generation) return;
+      final reviewed = planned == null
+          ? null
+          : await AgentDeliberation.critique(
+              config: config,
+              taskContext: routedBody,
+              plan: planned,
+            );
+      if (!mounted || gen != _generation) return;
+      final plan = reviewed ?? planned;
+      if (plan == null) {
+        _activeDecisionRun = null;
+        executionBody =
+            '$routedBody\n\n<decision_fallback>Planning was unavailable. Continue with the standard Agent loop; do not claim an optimal recommendation without evidence.</decision_fallback>';
+      } else {
+        _activeDecisionPlan = plan;
+        executionBody =
+            '$routedBody\n\n<decision_plan>Recommended candidate: ${plan.recommendedId}. Candidates: ${plan.toJson()}. Execute only with real evidence and report remaining risks.</decision_plan>';
+      }
+    }
+    _conversationHistory.add({'role': 'user', 'content': executionBody});
 
     await _continueAgentLoop(gen, config);
   }

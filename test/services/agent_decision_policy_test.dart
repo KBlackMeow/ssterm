@@ -44,16 +44,44 @@ void main() {
   group('AgentDecisionRun', () {
     test('allows recovery only with unseen evidence within its budget', () {
       final run = AgentDecisionRun.deep(
-        const AgentDecisionSettings(
-          enabled: true,
-          maxRecoveryModelRequests: 1,
-        ),
+        const AgentDecisionSettings(enabled: true, maxRecoveryModelRequests: 1),
       );
 
       expect(run.requestRecovery(evidence: ''), isFalse);
-      expect(run.requestRecovery(evidence: '[exit_code=1] build failed'), isTrue);
-      expect(run.requestRecovery(evidence: '[exit_code=1] build failed'), isFalse);
-      expect(run.requestRecovery(evidence: '[exit_code=2] test failed'), isFalse);
+      expect(
+        run.requestRecovery(evidence: '[exit_code=1] build failed'),
+        isTrue,
+      );
+      expect(
+        run.requestRecovery(evidence: '[exit_code=1] build failed'),
+        isFalse,
+      );
+      expect(
+        run.requestRecovery(evidence: '[exit_code=2] test failed'),
+        isFalse,
+      );
+    });
+  });
+
+  group('AgentDecisionPlan', () {
+    test('accepts two complete candidates with a recommendation', () {
+      final plan = AgentDecisionPlan.tryParseJson('''
+{"recommendedId":"safe","candidates":[
+ {"id":"safe","summary":"Incremental change","risk":"low","validation":"run tests"},
+ {"id":"fast","summary":"Direct change","risk":"medium","validation":"smoke test"}]}
+''');
+
+      expect(plan?.recommendedId, 'safe');
+      expect(plan?.candidates, hasLength(2));
+    });
+
+    test('rejects incomplete or uncomparable plans', () {
+      expect(
+        AgentDecisionPlan.tryParseJson(
+          '{"recommendedId":"only","candidates":[{"id":"only"}]}',
+        ),
+        isNull,
+      );
     });
   });
 }

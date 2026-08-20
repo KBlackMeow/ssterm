@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Deterministic, model-independent policy for deciding when an Agent task
 /// merits additional planning and verification calls.
 enum AgentDecisionRoute { fast, deep, uncertain }
@@ -59,6 +61,91 @@ class AgentDecisionRun {
     recoveryRequests++;
     return true;
   }
+}
+
+class AgentDecisionCandidate {
+  const AgentDecisionCandidate({
+    required this.id,
+    required this.summary,
+    required this.risk,
+    required this.validation,
+  });
+
+  final String id;
+  final String summary;
+  final String risk;
+  final String validation;
+
+  factory AgentDecisionCandidate.tryFromJson(Object? value) {
+    if (value is! Map) throw const FormatException();
+    final id = value['id'];
+    final summary = value['summary'];
+    final risk = value['risk'];
+    final validation = value['validation'];
+    if (id is! String ||
+        id.trim().isEmpty ||
+        summary is! String ||
+        summary.trim().isEmpty ||
+        risk is! String ||
+        risk.trim().isEmpty ||
+        validation is! String ||
+        validation.trim().isEmpty) {
+      throw const FormatException();
+    }
+    return AgentDecisionCandidate(
+      id: id.trim(),
+      summary: summary.trim(),
+      risk: risk.trim(),
+      validation: validation.trim(),
+    );
+  }
+}
+
+class AgentDecisionPlan {
+  const AgentDecisionPlan({
+    required this.recommendedId,
+    required this.candidates,
+  });
+
+  final String recommendedId;
+  final List<AgentDecisionCandidate> candidates;
+
+  static AgentDecisionPlan? tryParseJson(String text) {
+    try {
+      final value = jsonDecode(text);
+      if (value is! Map) return null;
+      final recommendedId = value['recommendedId'];
+      final rawCandidates = value['candidates'];
+      if (recommendedId is! String || rawCandidates is! List) return null;
+      if (rawCandidates.length < 2 || rawCandidates.length > 3) return null;
+      final candidates = rawCandidates
+          .map(AgentDecisionCandidate.tryFromJson)
+          .toList(growable: false);
+      final ids = candidates.map((candidate) => candidate.id).toSet();
+      if (ids.length != candidates.length || !ids.contains(recommendedId)) {
+        return null;
+      }
+      return AgentDecisionPlan(
+        recommendedId: recommendedId,
+        candidates: candidates,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  Map<String, Object> toJson() => {
+    'recommendedId': recommendedId,
+    'candidates': [
+      for (final candidate in candidates)
+        {
+          'id': candidate.id,
+          'summary': candidate.summary,
+          'risk': candidate.risk,
+          'validation': candidate.validation,
+        },
+    ],
+  };
 }
 
 abstract final class AgentDecisionPolicy {
