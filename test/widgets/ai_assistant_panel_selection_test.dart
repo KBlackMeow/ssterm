@@ -59,6 +59,21 @@ void main() {
     expect(clearQueue, lessThan(cancel));
   });
 
+  test('agent header exposes explicit New and Continue session actions', () {
+    final panel = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+    final header = File(
+      'lib/widgets/ai_assistant_panel_widgets.dart',
+    ).readAsStringSync();
+
+    expect(panel, contains('AgentSessionRegistry'));
+    expect(panel, contains('Future<void> _createNewSession()'));
+    expect(panel, contains('Future<void> _continueSession()'));
+    expect(header, contains("message: 'New session'"));
+    expect(header, contains("message: 'Continue session'"));
+  });
+
   test('cancelling marks a running command card stopped', () {
     final source = File(
       'lib/widgets/ai_assistant_panel.dart',
@@ -67,7 +82,10 @@ void main() {
     // A command card whose execution was aborted must not stay frozen at
     // "运行中" — the cancel path flips it to a terminal state because the
     // loop's post-execute `commandRunning = false` is skipped on cancel.
-    expect(source, contains('message.isSystem && message.commandRunning == true'));
+    expect(
+      source,
+      contains('message.isSystem && message.commandRunning == true'),
+    );
     expect(source, contains('message.commandRunning = false'));
     expect(source, contains('message.commandExitCode = null'));
   });
@@ -153,6 +171,27 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('agent header has New and Continue session controls', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            child: SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byTooltip('New session'), findsOneWidget);
+    expect(find.byTooltip('Continue session'), findsOneWidget);
   });
 
   testWidgets(

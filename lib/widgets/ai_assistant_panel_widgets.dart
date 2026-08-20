@@ -17,11 +17,15 @@ class _AgentHeader extends StatelessWidget {
   const _AgentHeader({
     required this.position,
     required this.onClear,
+    required this.onNewSession,
+    required this.onContinueSession,
     this.onPositionToggle,
   });
 
   final AiPanelPosition position;
   final VoidCallback onClear;
+  final VoidCallback onNewSession;
+  final VoidCallback onContinueSession;
   final VoidCallback? onPositionToggle;
 
   @override
@@ -44,6 +48,28 @@ class _AgentHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          Tooltip(
+            message: 'New session',
+            child: InkWell(
+              onTap: onNewSession,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.add_comment_outlined, size: 14, color: dim),
+              ),
+            ),
+          ),
+          Tooltip(
+            message: 'Continue session',
+            child: InkWell(
+              onTap: onContinueSession,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.history_outlined, size: 14, color: dim),
+              ),
+            ),
+          ),
           Tooltip(
             message: 'Clear conversation',
             child: InkWell(

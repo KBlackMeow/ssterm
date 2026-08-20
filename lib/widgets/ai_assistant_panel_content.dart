@@ -36,6 +36,8 @@ class _AiPanelContent extends StatelessWidget {
     this.hasPendingQuestion = false,
     required this.position,
     required this.onClear,
+    required this.onNewSession,
+    required this.onContinueSession,
     this.onPositionToggle,
   });
 
@@ -143,6 +145,12 @@ class _AiPanelContent extends StatelessWidget {
   /// Clears the current Agent conversation and all of its LLM context.
   final VoidCallback onClear;
 
+  /// Creates an empty session and releases the previous session lease.
+  final VoidCallback onNewSession;
+
+  /// Opens the picker for an unlocked saved session.
+  final VoidCallback onContinueSession;
+
   /// Tap handler for the position toggle in the mode-switch row.  Null
   /// hides the button (used in tests / hosts that don't persist
   /// layout).
@@ -212,6 +220,8 @@ class _AiPanelContent extends StatelessWidget {
           _AgentHeader(
             position: position,
             onClear: onClear,
+            onNewSession: onNewSession,
+            onContinueSession: onContinueSession,
             onPositionToggle: onPositionToggle,
           ),
           // Conversation area
@@ -297,8 +307,12 @@ class _AiPanelContent extends StatelessWidget {
                                 fontWeight: FontWeight.w400,
                               ),
                               border: InputBorder.none,
-                              contentPadding:
-                                  const EdgeInsets.fromLTRB(12, 0, 8, 0),
+                              contentPadding: const EdgeInsets.fromLTRB(
+                                12,
+                                0,
+                                8,
+                                0,
+                              ),
                               isDense: true,
                             ),
                             onSubmitted: (_) => onSend(),

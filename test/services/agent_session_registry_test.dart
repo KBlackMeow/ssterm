@@ -74,5 +74,16 @@ void main() {
       await registry.delete(lease.session.id);
       expect(await registry.listAvailable(), isEmpty);
     });
+
+    test('acquires a caller-generated session id', () async {
+      final registry = AgentSessionRegistry(indexFile: indexFile);
+
+      final lease = await registry.createAndAcquire(
+        sessionId: 'session-test-id',
+      );
+
+      expect(lease.session.id, 'session-test-id');
+      await lease.release();
+    });
   });
 }

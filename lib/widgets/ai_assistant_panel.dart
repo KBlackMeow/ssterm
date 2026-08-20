@@ -17,6 +17,7 @@ import '../services/background_command_executor.dart'
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
 import '../services/agent_session_store.dart';
+import '../services/agent_session_registry.dart';
 import '../services/agent_output_store.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
@@ -196,15 +197,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.initState();
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
-    _sessionStore = AgentSessionStore(
-      sessionId: AgentSessionStore.idForScope(
-        '${widget.fileSystemAdapter?.label ?? 'unknown'}\n'
-        '${widget.fileSystemAdapter?.currentDirectory ?? ''}\n'
-        '${widget.executionEnvironment ?? ''}',
-      ),
-    );
+    final sessionId = _sessionRegistry.newSessionId();
+    _sessionStore = AgentSessionStore(sessionId: sessionId);
     _outputStore = AgentOutputStore(sessionId: _sessionStore.sessionId);
-    _restoreSession();
+    _createInitialSession(sessionId);
   }
 
   final _agentController = TextEditingController();
@@ -267,8 +263,11 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
   int? _lastAgentPromptTokenCount;
-  late final AgentSessionStore _sessionStore;
-  late final AgentOutputStore _outputStore;
+  final _sessionRegistry = AgentSessionRegistry();
+  AgentSessionLease? _sessionLease;
+  var _sessionNeedsTitle = true;
+  late AgentSessionStore _sessionStore;
+  late AgentOutputStore _outputStore;
   Future<void> _pendingSessionWrite = Future.value();
 
   TextEditingController get _textController => _agentController;
@@ -285,7 +284,105 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _agentController.dispose();
     _scrollController.dispose();
     _agentInputFocusNode.dispose();
+    _sessionLease?.release();
     super.dispose();
+  }
+
+  Future<void> _createInitialSession(String sessionId) async {
+    final lease = await _sessionRegistry.createAndAcquire(sessionId: sessionId);
+    if (!mounted || _sessionStore.sessionId != sessionId) {
+      await lease.release();
+      return;
+    }
+    _sessionLease = lease;
+    for (final message in _messages) {
+      if (message.isUser) {
+        _nameSessionFrom(message.text);
+        break;
+      }
+    }
+  }
+
+  Future<void> _createNewSession() async {
+    final lease = await _sessionRegistry.createAndAcquire();
+    if (!mounted) {
+      await lease.release();
+      return;
+    }
+    await _activateSession(lease, restore: false);
+  }
+
+  Future<void> _continueSession() async {
+    final available = await _sessionRegistry.listAvailable();
+    if (!mounted) return;
+    final selected = await showDialog<AgentSessionDescriptor>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Continue session'),
+        content: SizedBox(
+          width: 420,
+          child: available.isEmpty
+              ? const Text('No available sessions.')
+              : ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final session in available)
+                      ListTile(
+                        title: Text(session.title),
+                        subtitle: Text(session.updatedAt.toLocal().toString()),
+                        onTap: () => Navigator.of(context).pop(session),
+                      ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    try {
+      final lease = await _sessionRegistry.acquire(selected.id);
+      if (!mounted) {
+        await lease.release();
+        return;
+      }
+      await _activateSession(lease, restore: true);
+    } on AgentSessionUnavailableException {
+      if (!mounted) return;
+      setState(() {
+        _messages.add(
+          _ChatMessage.notice('That session was opened in another Agent tab.'),
+        );
+      });
+    }
+  }
+
+  Future<void> _activateSession(
+    AgentSessionLease lease, {
+    required bool restore,
+  }) async {
+    final previous = _sessionLease;
+    _pendingUserInput.clear();
+    _pendingWriteProposal = null;
+    _pendingEditProposal = null;
+    if (_agentBusy) _cancelAgent();
+    _sessionLease = lease;
+    _sessionStore = AgentSessionStore(sessionId: lease.session.id);
+    _outputStore = AgentOutputStore(sessionId: lease.session.id);
+    _sessionNeedsTitle = lease.session.title == 'New session';
+    setState(() {
+      _messages.clear();
+      _textController.clear();
+      _conversationHistory.clear();
+      _lastAgentPromptTokenCount = null;
+      _agentLoopStatus = null;
+    });
+    if (restore) await _restoreSession();
+    await previous?.release();
   }
 
   void _cancelAgent() {
@@ -396,8 +493,20 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       _messages.add(_ChatMessage.user(text));
     });
     _textController.clear();
+    _nameSessionFrom(text);
     _agentRespond(text);
     _scrollToBottom();
+  }
+
+  void _nameSessionFrom(String text) {
+    final lease = _sessionLease;
+    if (!_sessionNeedsTitle || lease == null) return;
+    _sessionNeedsTitle = false;
+    final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final title = normalized.length <= 56
+        ? normalized
+        : '${normalized.substring(0, 56)}…';
+    unawaited(_sessionRegistry.touch(lease.session.id, title: title));
   }
 
   /// Slash-command dispatcher.  Returns `true` when the input was a
@@ -405,7 +514,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// caller MUST NOT forward the text to the LLM or the terminal.
   ///
   /// Currently supports:
-  ///   /clear, /reset, /new   — wipe the chat (see `_clearChat`).
+  ///   /clear, /reset — wipe the current chat (see `_clearChat`).
+  ///   /new           — create a new Agent session.
   ///   /help, /?              — show the command list (see `_showHelp`).
   ///
   /// Slash-commands are matched case-insensitively on the WHOLE trimmed
@@ -417,8 +527,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     switch (cmd) {
       case '/clear':
       case '/reset':
-      case '/new':
         _clearChat();
+        return true;
+      case '/new':
+        _createNewSession();
         return true;
       case '/help':
       case '/?':
@@ -454,10 +566,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       // [LlmService._buildSkillsBlock]) so a wipe of conversation
       // history doesn't lose any skill visibility.
     });
+    final sessionStore = _sessionStore;
+    final outputStore = _outputStore;
     _pendingSessionWrite = _pendingSessionWrite
         .then((_) async {
-          await _sessionStore.clear();
-          await _outputStore.clear();
+          await sessionStore.clear();
+          await outputStore.clear();
         })
         .catchError((_) {});
   }
@@ -487,12 +601,13 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   }
 
   void _queueSessionSave() {
+    final sessionStore = _sessionStore;
     final snapshot = AgentSessionSnapshot.fromHistory(
-      sessionId: _sessionStore.sessionId,
+      sessionId: sessionStore.sessionId,
       history: _conversationHistory,
     );
     _pendingSessionWrite = _pendingSessionWrite
-        .then((_) => _sessionStore.save(snapshot))
+        .then((_) => sessionStore.save(snapshot))
         .catchError((_) {});
   }
 
@@ -718,6 +833,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             hasPendingQuestion: _pendingQuestionProposal != null,
             position: _position,
             onClear: _clearChat,
+            onNewSession: () => _createNewSession(),
+            onContinueSession: () => _continueSession(),
             onPositionToggle: _togglePosition,
           ),
         );

@@ -88,11 +88,15 @@ class AgentSessionRegistry {
   static final Map<String, Map<String, String>> _leasesByIndex = {};
   final File? indexFile;
 
-  Future<AgentSessionLease> createAndAcquire() async {
+  /// Generates an opaque session id synchronously so callers can start
+  /// buffering a first user turn before registry I/O completes.
+  String newSessionId() => _newId();
+
+  Future<AgentSessionLease> createAndAcquire({String? sessionId}) async {
     final sessions = await _read();
     final now = DateTime.now().toUtc();
     final session = AgentSessionDescriptor(
-      id: _newId(),
+      id: sessionId ?? _newId(),
       title: 'New session',
       createdAt: now,
       updatedAt: now,
