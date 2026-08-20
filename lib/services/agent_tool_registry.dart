@@ -20,6 +20,20 @@ class AgentToolRegistry {
     return null;
   }
 
+  /// Restricts a first native-tool request to a focused subset. Shell and a
+  /// structured question remain available so the Agent can always take a safe
+  /// next step or ask for missing authority.
+  AgentToolRegistry limitedTo(Set<String> allowedNames) {
+    const required = {'bash', 'ask_user_question'};
+    final allowed = {...required, ...allowedNames};
+    return AgentToolRegistry._(
+      List.unmodifiable(
+        definitions.where((definition) => allowed.contains(definition.name)),
+      ),
+      _mcpToolsByNativeName,
+    );
+  }
+
   /// Converts a provider-visible MCP function call back to the canonical
   /// bridge shape already understood by the agent executor.
   AgentToolCall normalizeToolCall(AgentToolCall call) {

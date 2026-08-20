@@ -5,6 +5,18 @@ import 'package:ssterm/models/mcp_server_config.dart';
 
 void main() {
   group('AgentToolRegistry', () {
+    test('focused registry retains core tools and filters optional tools', () {
+      final registry = AgentToolRegistry.build(
+        webSearchEnabled: true,
+        fileWriteEnabled: true,
+      ).limitedTo({'bash'});
+
+      expect(registry.names, containsAll(['bash', 'ask_user_question']));
+      expect(registry.names, isNot(contains('web_search')));
+      expect(registry.names, isNot(contains('write_file')));
+      expect(registry.names, isNot(contains('edit_file')));
+    });
+
     test('always exposes shell and structured user-question tools', () {
       final registry = AgentToolRegistry.build();
 
