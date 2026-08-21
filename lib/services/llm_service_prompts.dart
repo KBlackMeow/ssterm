@@ -25,6 +25,7 @@ String _buildSystemPrompt({
     parts.add(_buildSkillsBlock(nativeToolCalling: nativeToolCalling));
   }
   if (!nativeToolCalling) parts.add(_buildAskUserQuestionBlock());
+  if (!nativeToolCalling) parts.add(_buildReadImageBlock());
   if (webSearchEnabled && !nativeToolCalling) parts.add(_buildWebSearchBlock());
   if (mcpEnabled && !nativeToolCalling) {
     final block = _buildMcpToolsBlock();
@@ -94,6 +95,17 @@ Example INVESTIGATE-then-ASK turn:
   ```
 </ask_user_question_tool>''';
 }
+
+String _buildReadImageBlock() => '''
+<read_image_tool>
+Use this tool when the task requires seeing a local image. It accepts an absolute path or a path relative to the current workspace; paths outside that workspace are rejected.
+
+```tool_call
+{"id":"call_<short_unique_id>","name":"read_image","arguments":{"path":"<image path>"}}
+```
+
+After the call, ssterm attaches the image to your next turn. Inspect the attachment directly and continue. Issue only this tool call on its turn.
+</read_image_tool>''';
 
 /// Returns the `<web_search_tool>` block for the system prompt, or an
 /// empty string when the master switch is off.

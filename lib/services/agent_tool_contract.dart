@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'conversation_compactor.dart';
+import 'agent_image_attachment.dart';
 
 /// Provider-neutral description of one parameter accepted by an agent tool.
 class AgentToolParameter {
@@ -106,6 +107,10 @@ class AgentToolCall {
   /// function name needed in the following provider-native tool result turn.
   final String? providerName;
 
+  /// Opaque Gemini reasoning state attached to a returned function call.
+  /// It must be replayed unchanged with that call in later requests.
+  final String? thoughtSignature;
+
   /// Original provider-visible arguments.  MCP execution uses a canonical
   /// bridge argument shape, while provider continuations must replay the
   /// arguments accepted by the concrete function schema.
@@ -116,6 +121,7 @@ class AgentToolCall {
     required this.id,
     required this.name,
     this.providerName,
+    this.thoughtSignature,
     this.providerArguments,
     required this.arguments,
   });
@@ -125,6 +131,7 @@ class AgentToolCall {
     required String id,
     required String name,
     String? providerName,
+    String? thoughtSignature,
     Map<String, Object?>? providerArguments,
     required Object? arguments,
   }) {
@@ -135,6 +142,7 @@ class AgentToolCall {
       id: id,
       name: name,
       providerName: providerName,
+      thoughtSignature: thoughtSignature,
       providerArguments: providerArguments == null
           ? null
           : Map.unmodifiable(providerArguments),
@@ -169,12 +177,29 @@ class AgentToolResult {
   final String toolCallId;
   final String content;
   final bool isError;
+  final List<AgentImageAttachment> images;
 
   const AgentToolResult({
     required this.toolCallId,
     required this.content,
     this.isError = false,
+    this.images = const [],
   });
+}
+
+/// Opaque reasoning state that Anthropic-compatible providers require when
+/// continuing an assistant turn which issued tools.
+class AgentThinkingBlock {
+  final String thinking;
+  final String signature;
+
+  const AgentThinkingBlock({required this.thinking, required this.signature});
+
+  Map<String, String> toAnthropicJson() => {
+    'type': 'thinking',
+    'thinking': thinking,
+    'signature': signature,
+  };
 }
 
 /// Provider-neutral item retained in the agent conversation transcript.
@@ -184,12 +209,22 @@ class AgentToolResult {
 class AgentConversationItem {
   final String? role;
   final String? content;
+
+  /// Opaque model reasoning required by a provider when replaying an
+  /// assistant tool-call turn. DeepSeek thinking-mode tool calls reject the
+  /// continuation unless their original `reasoning_content` is included.
+  final String? reasoningContent;
+  final List<AgentThinkingBlock> thinkingBlocks;
+  final List<AgentImageAttachment> images;
   final List<AgentToolCall> toolCalls;
   final List<AgentToolResult> toolResults;
 
   const AgentConversationItem._({
     this.role,
     this.content,
+    this.reasoningContent,
+    this.thinkingBlocks = const [],
+    this.images = const [],
     this.toolCalls = const [],
     this.toolResults = const [],
   });
@@ -197,12 +232,20 @@ class AgentConversationItem {
   const AgentConversationItem.text({
     required String role,
     required String content,
-  }) : this._(role: role, content: content);
+    List<AgentImageAttachment> images = const [],
+  }) : this._(role: role, content: content, images: images);
 
   AgentConversationItem.assistantToolCalls(
     Iterable<AgentToolCall> calls, {
     String? content,
-  }) : this._(content: content, toolCalls: List.unmodifiable(calls));
+    String? reasoningContent,
+    List<AgentThinkingBlock> thinkingBlocks = const [],
+  }) : this._(
+         content: content,
+         reasoningContent: reasoningContent,
+         thinkingBlocks: List.unmodifiable(thinkingBlocks),
+         toolCalls: List.unmodifiable(calls),
+       );
 
   AgentConversationItem.toolResults(Iterable<AgentToolResult> results)
     : this._(toolResults: List.unmodifiable(results));
@@ -375,5 +418,4 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
     }
     return start;
   }
-
 }

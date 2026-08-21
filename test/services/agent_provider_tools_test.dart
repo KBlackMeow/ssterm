@@ -3,6 +3,7 @@ import 'package:ssterm/services/agent_provider_tools.dart';
 import 'package:ssterm/services/agent_tool_contract.dart';
 import 'package:ssterm/services/agent_tool_registry.dart';
 import 'package:ssterm/models/mcp_server_config.dart';
+import 'package:ssterm/services/agent_image_attachment.dart';
 
 void main() {
   final registry = AgentToolRegistry.build(
@@ -33,6 +34,126 @@ void main() {
 
     final declarations = tools.single['functionDeclarations'] as List;
     expect((declarations.first as Map)['name'], 'bash');
+  });
+
+  test('removes unsupported additionalProperties recursively for Gemini', () {
+    final tools = AgentProviderTools.geminiTools(registry.definitions);
+    final declarations = tools.single['functionDeclarations'] as List;
+
+    bool containsAdditionalProperties(Object? value) {
+      if (value is Map) {
+        return value.containsKey('additionalProperties') ||
+            value.values.any(containsAdditionalProperties);
+      }
+      if (value is Iterable) return value.any(containsAdditionalProperties);
+      return false;
+    }
+
+    expect(containsAdditionalProperties(declarations), isFalse);
+  });
+
+  test('serializes user image attachments for every multimodal provider', () {
+    const image = AgentImageAttachment(
+      mimeType: 'image/png',
+      base64Data: 'aGVsbG8=',
+      displayName: 'diagram.png',
+    );
+    final transcript = [
+      const AgentConversationItem.text(
+        role: 'user',
+        content: 'What is shown?',
+        images: [image],
+      ),
+    ];
+
+    expect(AgentProviderTools.openAiMessages(transcript).single, {
+      'role': 'user',
+      'content': [
+        {'type': 'text', 'text': 'What is shown?'},
+        {
+          'type': 'image_url',
+          'image_url': {'url': 'data:image/png;base64,aGVsbG8='},
+        },
+      ],
+    });
+    expect(AgentProviderTools.anthropicMessages(transcript).single, {
+      'role': 'user',
+      'content': [
+        {'type': 'text', 'text': 'What is shown?'},
+        {
+          'type': 'image',
+          'source': {
+            'type': 'base64',
+            'media_type': 'image/png',
+            'data': 'aGVsbG8=',
+          },
+        },
+      ],
+    });
+    expect(AgentProviderTools.geminiContents(transcript).single, {
+      'role': 'user',
+      'parts': [
+        {'text': 'What is shown?'},
+        {
+          'inlineData': {'mimeType': 'image/png', 'data': 'aGVsbG8='},
+        },
+      ],
+    });
+  });
+
+  test('serializes image-returning tool results as vision input', () {
+    const image = AgentImageAttachment(
+      mimeType: 'image/png',
+      base64Data: 'aGVsbG8=',
+      displayName: 'diagram.png',
+    );
+    final transcript = [
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(
+          toolCallId: 'call_image',
+          content: 'Loaded image: diagram.png',
+          images: [image],
+        ),
+      ]),
+    ];
+
+    final openAi = AgentProviderTools.openAiMessages(transcript);
+    expect(openAi, hasLength(2));
+    expect((openAi[1]['content'] as List).last, {
+      'type': 'image_url',
+      'image_url': {'url': 'data:image/png;base64,aGVsbG8='},
+    });
+    final anthropic = AgentProviderTools.anthropicMessages(transcript);
+    expect(
+      ((anthropic.single['content'] as List).single['content'] as List).last,
+      containsPair('type', 'image'),
+    );
+    final gemini = AgentProviderTools.geminiContents(transcript);
+    expect((gemini.single['parts'] as List).last, {
+      'inlineData': {'mimeType': 'image/png', 'data': 'aGVsbG8='},
+    });
+  });
+
+  test('serializes image attachments for Ollama native chat', () {
+    const image = AgentImageAttachment(
+      mimeType: 'image/png',
+      base64Data: 'aGVsbG8=',
+      displayName: 'diagram.png',
+    );
+
+    final messages = AgentProviderTools.ollamaMessages([
+      const AgentConversationItem.text(
+        role: 'user',
+        content: 'What is shown?',
+        images: [image],
+      ),
+    ]);
+
+    expect(messages.single, {
+      'role': 'user',
+      'content': 'What is shown?',
+      'images': ['aGVsbG8='],
+    });
   });
 
   test('encodes each MCP tool for OpenAI, Claude, and Gemini', () {
@@ -160,6 +281,93 @@ void main() {
     });
   });
 
+  test(
+    'preserves Gemini function-call thought signatures across tool results',
+    () {
+      final call = AgentToolCall.fromRaw(
+        id: 'call_gemini_1',
+        name: 'bash',
+        arguments: const {'command': 'pwd'},
+        thoughtSignature: 'encrypted-signature',
+      )!;
+      final contents = AgentProviderTools.geminiContents([
+        AgentConversationItem.assistantToolCalls([call]),
+        AgentConversationItem.toolResults(const [
+          AgentToolResult(toolCallId: 'call_gemini_1', content: '/workspace'),
+        ]),
+      ]);
+
+      expect((contents[0]['parts'] as List).single, {
+        'functionCall': {
+          'name': 'bash',
+          'args': {'command': 'pwd'},
+        },
+        'thoughtSignature': 'encrypted-signature',
+      });
+      expect((contents[1]['parts'] as List).single, {
+        'functionResponse': {
+          'name': 'bash',
+          'response': {
+            'tool_call_id': 'call_gemini_1',
+            'content': '/workspace',
+          },
+        },
+      });
+    },
+  );
+
+  test('replays DeepSeek reasoning content with an assistant tool call', () {
+    final call = AgentToolCall.fromRaw(
+      id: 'call_deepseek_1',
+      name: 'bash',
+      arguments: const {'command': 'pwd'},
+    )!;
+
+    final messages = AgentProviderTools.openAiMessages([
+      AgentConversationItem.assistantToolCalls([
+        call,
+      ], reasoningContent: 'Need inspect the current working directory first.'),
+    ], includeReasoningContent: true);
+
+    expect(
+      messages.single['reasoning_content'],
+      'Need inspect the current working directory first.',
+    );
+  });
+
+  test('replays Anthropic thinking blocks with assistant tool calls', () {
+    final call = AgentToolCall.fromRaw(
+      id: 'call_minimax_1',
+      name: 'bash',
+      arguments: const {'command': 'pwd'},
+    )!;
+    final messages = AgentProviderTools.anthropicMessages([
+      AgentConversationItem.assistantToolCalls(
+        [call],
+        thinkingBlocks: const [
+          AgentThinkingBlock(
+            thinking: 'I need the working directory before continuing.',
+            signature: 'provider-signature',
+          ),
+        ],
+      ),
+    ]);
+
+    expect(messages.single['content'], [
+      {
+        'type': 'thinking',
+        'thinking': 'I need the working directory before continuing.',
+        'signature': 'provider-signature',
+      },
+      {
+        'type': 'tool_use',
+        'id': 'call_minimax_1',
+        'name': 'bash',
+        'input': {'command': 'pwd'},
+      },
+    ]);
+  });
+
   test('backfilled interrupted tool result serializes a valid transcript', () {
     // Mirrors `_completeInterruptedToolCalls`: an interrupted turn leaves a
     // dangling assistant tool call; backfilling an isError tool result keeps
@@ -265,8 +473,14 @@ void main() {
     final gemini = AgentProviderTools.geminiContents(transcript);
     final geminiParts = gemini[2]['parts'] as List;
     expect(geminiParts, hasLength(2));
-    expect(((geminiParts[0] as Map)['functionResponse'] as Map)['name'], 'bash');
-    expect(((geminiParts[1] as Map)['functionResponse'] as Map)['name'], 'bash');
+    expect(
+      ((geminiParts[0] as Map)['functionResponse'] as Map)['name'],
+      'bash',
+    );
+    expect(
+      ((geminiParts[1] as Map)['functionResponse'] as Map)['name'],
+      'bash',
+    );
   });
 
   test('preserves every tool call from one assistant turn', () {
@@ -355,5 +569,27 @@ void main() {
 
     expect(calls.single.name, 'bash');
     expect(calls.single.arguments['command'], 'pwd');
+  });
+
+  test('parses a Gemini function-call thought signature', () {
+    final calls = AgentProviderTools.parseGeminiToolCalls({
+      'candidates': [
+        {
+          'content': {
+            'parts': [
+              {
+                'functionCall': {
+                  'name': 'bash',
+                  'args': {'command': 'pwd'},
+                },
+                'thoughtSignature': 'encrypted-signature',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(calls.single.thoughtSignature, 'encrypted-signature');
   });
 }

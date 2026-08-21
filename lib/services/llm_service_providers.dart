@@ -39,7 +39,10 @@ Future<LlmResponse> _callOpenAiCompatible(
     'model': model,
     'messages': [
       {'role': 'system', 'content': systemPrompt},
-      ...AgentProviderTools.openAiMessages(messages),
+      ...AgentProviderTools.openAiMessages(
+        messages,
+        includeReasoningContent: provider.id == 'deepseek',
+      ),
     ],
     'max_tokens': provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
@@ -408,7 +411,10 @@ Stream<LlmStreamEvent> _streamOpenAi(
     'model': model,
     'messages': [
       {'role': 'system', 'content': systemPrompt},
-      ...AgentProviderTools.openAiMessages(messages),
+      ...AgentProviderTools.openAiMessages(
+        messages,
+        includeReasoningContent: isDeepSeek || provider.id == 'glm',
+      ),
     ],
     'max_tokens': provider.maxOutputTokensFor(model),
     'stream': true,
@@ -420,11 +426,17 @@ Stream<LlmStreamEvent> _streamOpenAi(
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
     if (tools.isNotEmpty) 'tool_choice': 'auto',
     if (tools.isNotEmpty) 'parallel_tool_calls': false,
-    // DeepSeek-only: only `reasoning_effort` is recognised by their
-    // OpenAI-compatible chat-completions endpoint.  The previous build
-    // also sent `'thinking': {'type': 'enabled'}` — that's Anthropic's
-    // shape and gets silently ignored (best case) or 400-rejected
-    // (worst case) by DeepSeek.  Remove to keep the payload clean.
+    // GLM's OpenAI-compatible stream omits function-call deltas unless this
+    // vendor extension is enabled (GLM-4.6 and newer).
+    if (provider.id == 'glm' && tools.isNotEmpty) 'tool_stream': true,
+    // GLM clears prior reasoning by default. Preserve it between tool turns
+    // so the model can continue its interleaved-thinking chain.
+    if (provider.id == 'glm')
+      'thinking': {'type': 'enabled', 'clear_thinking': false},
+    // DeepSeek thinking-mode tool calls require the model's original
+    // `reasoning_content` in the following assistant turn. The transcript
+    // adapter above preserves that opaque state, and this toggles the mode.
+    if (isDeepSeek) 'thinking': {'type': 'enabled'},
     if (isDeepSeek) 'reasoning_effort': 'high',
   };
 
@@ -516,6 +528,8 @@ Stream<LlmStreamEvent> _streamAnthropic(
 
   final toolNames = <String, String>{};
   final toolArguments = <String, StringBuffer>{};
+  final thinkingBuffers = <int, StringBuffer>{};
+  final thinkingSignatures = <int, String>{};
   String? currentToolId;
   await for (final line
       in response.transform(utf8.decoder).transform(const LineSplitter())) {
@@ -537,6 +551,14 @@ Stream<LlmStreamEvent> _streamAnthropic(
       }
       if (json['type'] == 'content_block_start') {
         final block = json['content_block'] as Map<String, dynamic>?;
+        final index = json['index'] as int?;
+        if (block?['type'] == 'thinking' && index != null) {
+          thinkingBuffers.putIfAbsent(index, StringBuffer.new);
+          final signature = block?['signature'] as String?;
+          if (signature != null && signature.isNotEmpty) {
+            thinkingSignatures[index] = signature;
+          }
+        }
         if (block?['type'] == 'tool_use') {
           final id = block?['id'] as String?;
           final name = block?['name'] as String?;
@@ -548,6 +570,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
         }
       } else if (json['type'] == 'content_block_delta') {
         final delta = json['delta'] as Map<String, dynamic>?;
+        final index = json['index'] as int?;
         if (delta == null) continue;
         if (delta['type'] == 'input_json_delta') {
           final partial = delta['partial_json'] as String?;
@@ -557,7 +580,15 @@ Stream<LlmStreamEvent> _streamAnthropic(
         } else if (delta['type'] == 'thinking_delta') {
           final text = delta['thinking'] as String?;
           if (text != null && text.isNotEmpty) {
+            if (index != null) {
+              thinkingBuffers.putIfAbsent(index, StringBuffer.new).write(text);
+            }
             yield LlmStreamEvent('reasoning', text);
+          }
+        } else if (delta['type'] == 'signature_delta') {
+          final signature = delta['signature'] as String?;
+          if (index != null && signature != null && signature.isNotEmpty) {
+            thinkingSignatures[index] = signature;
           }
         } else {
           final text = delta['text'] as String?;
@@ -567,6 +598,20 @@ Stream<LlmStreamEvent> _streamAnthropic(
         }
       }
     } catch (_) {}
+  }
+  for (final entry in thinkingBuffers.entries) {
+    final thinking = entry.value.toString();
+    final signature = thinkingSignatures[entry.key];
+    if (thinking.isNotEmpty && signature != null && signature.isNotEmpty) {
+      yield LlmStreamEvent(
+        'thinking_state',
+        '',
+        thinkingBlock: AgentThinkingBlock(
+          thinking: thinking,
+          signature: signature,
+        ),
+      );
+    }
   }
   for (final entry in toolArguments.entries) {
     final call = AgentToolCall.fromRaw(
@@ -648,6 +693,7 @@ Stream<LlmStreamEvent> _streamGemini(
             id: 'call_gemini_stream',
             name: function['name'] as String? ?? '',
             arguments: function['args'],
+            thoughtSignature: part['thoughtSignature'] as String?,
           );
           if (call != null) {
             yield LlmStreamEvent('tool_call', '', toolCall: call);
@@ -712,9 +758,9 @@ Future<LlmResponse> _callOllama(
 
   // System prompt rides at the head of the messages list — same
   // convention as OpenAI's chat format and what the Modelfile expects.
-  final apiMessages = <Map<String, dynamic>>[
+  final apiMessages = <Map<String, Object?>>[
     {'role': 'system', 'content': systemPrompt},
-    ...AgentProviderTools.legacyMessages(messages),
+    ...AgentProviderTools.ollamaMessages(messages),
   ];
 
   final body = {
@@ -758,9 +804,9 @@ Stream<LlmStreamEvent> _streamOllama(
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
 
-  final apiMessages = <Map<String, dynamic>>[
+  final apiMessages = <Map<String, Object?>>[
     {'role': 'system', 'content': systemPrompt},
-    ...AgentProviderTools.legacyMessages(messages),
+    ...AgentProviderTools.ollamaMessages(messages),
   ];
 
   final body = {

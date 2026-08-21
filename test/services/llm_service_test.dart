@@ -66,6 +66,21 @@ void main() {
     expect(source, isNot(contains('final client = HttpClient();')));
   });
 
+  test('GLM streaming enables its required tool-call stream extension', () {
+    final source = File(
+      'lib/services/llm_service_providers.dart',
+    ).readAsStringSync();
+
+    expect(
+      source,
+      contains(
+        "if (provider.id == 'glm' && tools.isNotEmpty) 'tool_stream': true",
+      ),
+    );
+    expect(source, contains("if (provider.id == 'glm')"));
+    expect(source, contains("'clear_thinking': false"));
+  });
+
   group('OpenAiStreamAccumulator', () {
     test('assembles tool arguments by index when later chunks omit id', () {
       final accumulator = OpenAiStreamAccumulator();
@@ -223,6 +238,40 @@ void main() {
           malformedEventCount: 0,
         ),
         isNull,
+      );
+    });
+  });
+
+  group('LlmService image input capability', () {
+    test('rejects known text-only provider models before dispatch', () {
+      expect(
+        LlmService.supportsImageInput(
+          ProviderConfig.deepseek(),
+          'deepseek-v4-pro',
+        ),
+        isFalse,
+      );
+      expect(
+        LlmService.supportsImageInput(ProviderConfig.minimax(), 'MiniMax-M2.7'),
+        isFalse,
+      );
+      expect(
+        LlmService.supportsImageInput(ProviderConfig.glm(), 'glm-5.2'),
+        isFalse,
+      );
+    });
+
+    test('allows image-capable built-in provider models', () {
+      expect(
+        LlmService.supportsImageInput(
+          ProviderConfig.gemini(),
+          'gemini-3.6-flash',
+        ),
+        isTrue,
+      );
+      expect(
+        LlmService.supportsImageInput(ProviderConfig.kimi(), 'kimi-k2.6'),
+        isTrue,
       );
     });
   });
@@ -1189,6 +1238,12 @@ Done.
   });
 
   group('LlmService.systemPromptFor', () {
+    test('legacy prompt documents the read_image vision tool', () {
+      final prompt = LlmService.systemPromptFor(enabledSkillIds: <String>{});
+
+      expect(prompt, contains('<read_image_tool>'));
+      expect(prompt, contains('"name":"read_image"'));
+    });
     // The system prompt is the heaviest reusable thing on every turn.
     // These tests pin the cache-key shape so we can't accidentally
     // regress prompt-cache hit rate by introducing a per-call timestamp,

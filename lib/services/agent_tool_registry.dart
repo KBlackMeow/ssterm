@@ -24,7 +24,7 @@ class AgentToolRegistry {
   /// structured question remain available so the Agent can always take a safe
   /// next step or ask for missing authority.
   AgentToolRegistry limitedTo(Set<String> allowedNames) {
-    const required = {'bash', 'ask_user_question'};
+    const required = {'bash', 'ask_user_question', 'read_image'};
     final allowed = {...required, ...allowedNames};
     return AgentToolRegistry._(
       List.unmodifiable(
@@ -43,6 +43,7 @@ class AgentToolRegistry {
       id: call.id,
       name: 'mcp',
       providerName: call.providerName ?? call.name,
+      thoughtSignature: call.thoughtSignature,
       providerArguments: call.providerArguments ?? call.arguments,
       arguments: {
         'server': mcpTool.serverId,
@@ -106,6 +107,17 @@ class AgentToolRegistry {
               'required': ['label', 'description'],
               'additionalProperties': false,
             },
+          ),
+        },
+      ),
+      const AgentToolDefinition(
+        name: 'read_image',
+        description:
+            'Read one image from the current workspace and inspect it visually.',
+        parameters: {
+          'path': AgentToolParameter.string(
+            required: true,
+            description: 'Absolute or workspace-relative path to the image.',
           ),
         },
       ),

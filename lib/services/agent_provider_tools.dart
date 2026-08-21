@@ -42,23 +42,56 @@ class AgentProviderTools {
           {
             'name': definition.name,
             'description': definition.description,
-            'parameters': definition.toJsonSchema(),
+            'parameters': _geminiSchema(definition.toJsonSchema()),
           },
       ],
     },
   ];
 
+  /// Gemini's function-declaration schema is JSON-Schema-like, but it does
+  /// not recognise OpenAI strict-mode's `additionalProperties` keyword.
+  /// Strip it at every depth because tool parameter arrays can nest objects.
+  static Object? _geminiSchema(Object? value) {
+    if (value is Map) {
+      return {
+        for (final entry in value.entries)
+          if (entry.key != 'additionalProperties')
+            entry.key.toString(): _geminiSchema(entry.value),
+      };
+    }
+    if (value is Iterable) return value.map(_geminiSchema).toList();
+    return value;
+  }
+
   /// Serializes the shared transcript to OpenAI Chat Completions messages.
   static List<Map<String, Object?>> openAiMessages(
-    Iterable<AgentConversationItem> transcript,
-  ) => [
+    Iterable<AgentConversationItem> transcript, {
+    bool includeReasoningContent = false,
+  }) => [
     for (final item in transcript)
       if (item.role != null)
-        {'role': item.role!, 'content': item.content ?? ''}
+        {
+          'role': item.role!,
+          'content': item.images.isEmpty
+              ? item.content ?? ''
+              : [
+                  {'type': 'text', 'text': item.content ?? ''},
+                  for (final image in item.images)
+                    {
+                      'type': 'image_url',
+                      'image_url': {
+                        'url':
+                            'data:${image.mimeType};base64,${image.base64Data}',
+                      },
+                    },
+                ],
+        }
       else if (item.toolCalls.isNotEmpty)
         {
           'role': 'assistant',
           'content': item.content,
+          if (includeReasoningContent && item.reasoningContent != null)
+            'reasoning_content': item.reasoningContent,
           'tool_calls': [
             for (final call in item.toolCalls)
               {
@@ -74,12 +107,28 @@ class AgentProviderTools {
           ],
         }
       else if (item.toolResults.isNotEmpty)
-        for (final result in item.toolResults)
+        for (final result in item.toolResults) ...[
           {
             'role': 'tool',
             'tool_call_id': result.toolCallId,
             'content': result.content,
           },
+          if (result.images.isNotEmpty)
+            {
+              'role': 'user',
+              'content': [
+                {'type': 'text', 'text': 'Inspect the attached image.'},
+                for (final image in result.images)
+                  {
+                    'type': 'image_url',
+                    'image_url': {
+                      'url':
+                          'data:${image.mimeType};base64,${image.base64Data}',
+                    },
+                  },
+              ],
+            },
+        ],
   ];
 
   /// Serializes the shared transcript to Anthropic Messages content blocks.
@@ -88,11 +137,29 @@ class AgentProviderTools {
   ) => [
     for (final item in transcript)
       if (item.role != null)
-        {'role': item.role!, 'content': item.content ?? ''}
+        {
+          'role': item.role!,
+          'content': item.images.isEmpty
+              ? item.content ?? ''
+              : [
+                  {'type': 'text', 'text': item.content ?? ''},
+                  for (final image in item.images)
+                    {
+                      'type': 'image',
+                      'source': {
+                        'type': 'base64',
+                        'media_type': image.mimeType,
+                        'data': image.base64Data,
+                      },
+                    },
+                ],
+        }
       else if (item.toolCalls.isNotEmpty)
         {
           'role': 'assistant',
           'content': [
+            for (final thinking in item.thinkingBlocks)
+              thinking.toAnthropicJson(),
             if (item.content != null && item.content!.isNotEmpty)
               {'type': 'text', 'text': item.content},
             for (final call in item.toolCalls)
@@ -112,7 +179,20 @@ class AgentProviderTools {
               {
                 'type': 'tool_result',
                 'tool_use_id': result.toolCallId,
-                'content': result.content,
+                'content': result.images.isEmpty
+                    ? result.content
+                    : [
+                        {'type': 'text', 'text': result.content},
+                        for (final image in result.images)
+                          {
+                            'type': 'image',
+                            'source': {
+                              'type': 'base64',
+                              'media_type': image.mimeType,
+                              'data': image.base64Data,
+                            },
+                          },
+                      ],
                 if (result.isError) 'is_error': true,
               },
           ],
@@ -131,6 +211,13 @@ class AgentProviderTools {
           'role': item.role == 'assistant' ? 'model' : 'user',
           'parts': [
             {'text': item.content ?? ''},
+            for (final image in item.images)
+              {
+                'inlineData': {
+                  'mimeType': image.mimeType,
+                  'data': image.base64Data,
+                },
+              },
           ],
         });
       } else if (item.toolCalls.isNotEmpty) {
@@ -148,6 +235,8 @@ class AgentProviderTools {
                   'name': call.providerName ?? call.name,
                   'args': call.providerArguments ?? call.arguments,
                 },
+                if (call.thoughtSignature != null)
+                  'thoughtSignature': call.thoughtSignature,
               },
           ],
         });
@@ -164,6 +253,15 @@ class AgentProviderTools {
                     'content': result.content,
                     if (result.isError) 'is_error': true,
                   },
+                },
+              },
+            for (final image in item.toolResults.expand(
+              (result) => result.images,
+            ))
+              {
+                'inlineData': {
+                  'mimeType': image.mimeType,
+                  'data': image.base64Data,
                 },
               },
           ],
@@ -194,6 +292,43 @@ class AgentProviderTools {
           'content': item.toolResults
               .map((result) => result.content)
               .join('\n\n'),
+        },
+  ];
+
+  /// Native Ollama chat messages. Ollama expects base64 image payloads in an
+  /// `images` array on the message rather than OpenAI's content parts.
+  static List<Map<String, Object?>> ollamaMessages(
+    Iterable<AgentConversationItem> transcript,
+  ) => [
+    for (final item in transcript)
+      if (item.role != null)
+        {
+          'role': item.role!,
+          'content': item.content ?? '',
+          if (item.images.isNotEmpty)
+            'images': [for (final image in item.images) image.base64Data],
+        }
+      else if (item.toolCalls.isNotEmpty)
+        {
+          'role': 'assistant',
+          'content': jsonEncode(<Object?>[
+            if (item.content != null && item.content!.isNotEmpty) item.content,
+            ...item.toolCalls.map((call) => call.toLegacyJson()),
+          ]),
+        }
+      else if (item.toolResults.isNotEmpty)
+        {
+          'role': 'user',
+          'content': item.toolResults
+              .map((result) => result.content)
+              .join('\n\n'),
+          if (item.toolResults.any((result) => result.images.isNotEmpty))
+            'images': [
+              for (final image in item.toolResults.expand(
+                (result) => result.images,
+              ))
+                image.base64Data,
+            ],
         },
   ];
 
@@ -248,12 +383,14 @@ class AgentProviderTools {
       final parts = (candidate as Map?)?['content']?['parts'];
       if (parts is! List) continue;
       for (final part in parts) {
-        final function = (part as Map?)?['functionCall'];
+        final partMap = part as Map?;
+        final function = partMap?['functionCall'];
         if (function is! Map) continue;
         final call = AgentToolCall.fromRaw(
           id: 'call_gemini_${calls.length + 1}',
           name: function['name'] as String? ?? '',
           arguments: function['args'],
+          thoughtSignature: partMap?['thoughtSignature'],
         );
         if (call != null) calls.add(call);
       }

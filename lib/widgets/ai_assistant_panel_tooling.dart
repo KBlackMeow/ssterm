@@ -4,6 +4,8 @@ part of 'ai_assistant_panel.dart';
 
 typedef _AgentStreamResult = ({
   String text,
+  String reasoning,
+  List<AgentThinkingBlock> thinkingBlocks,
   bool hasReasoning,
   List<AgentToolCall> toolCalls,
   String? finishReason,
@@ -80,6 +82,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
   }) async {
     String fullText = '';
     String reasoningText = '';
+    final thinkingBlocks = <AgentThinkingBlock>[];
     final nativeToolCalls = <AgentToolCall>[];
     String? finishReason;
     var malformedEventCount = 0;
@@ -125,6 +128,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
 
       fullText = '';
       reasoningText = '';
+      thinkingBlocks.clear();
       nativeToolCalls.clear();
       finishReason = null;
       malformedEventCount = 0;
@@ -144,6 +148,9 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         await for (final event in result.stream) {
           if (event.kind == 'reasoning') {
             reasoningText += event.content;
+          } else if (event.kind == 'thinking_state' &&
+              event.thinkingBlock != null) {
+            thinkingBlocks.add(event.thinkingBlock!);
           } else if (event.kind == 'tool_call' && event.toolCall != null) {
             nativeToolCalls.add(event.toolCall!);
           } else if (event.kind == 'diagnostics') {
@@ -279,6 +286,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     if (!mounted || gen != _generation) return null;
     return (
       text: fullText,
+      reasoning: reasoningText,
+      thinkingBlocks: List<AgentThinkingBlock>.unmodifiable(thinkingBlocks),
       hasReasoning: reasoningText.isNotEmpty,
       toolCalls: List<AgentToolCall>.unmodifiable(nativeToolCalls),
       finishReason: finishReason,

@@ -54,7 +54,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
   /// model has already started speaking — partial chunks aren't safe to
   /// replay because re-streaming would duplicate the head of the reply.
 
-  Future<void> _agentRespond(String userText) async {
+  Future<void> _agentRespond(
+    String userText, {
+    List<AgentImageAttachment> images = const [],
+  }) async {
     final int gen = ++_generation;
     final config = widget.agentConfig;
     if (config == null) {
@@ -145,7 +148,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             '$routedBody\n\n<decision_plan>Recommended candidate: ${plan.recommendedId}. Candidates: ${plan.toJson()}. Execute only with real evidence and report remaining risks.</decision_plan>';
       }
     }
-    _conversationHistory.add({'role': 'user', 'content': executionBody});
+    _conversationHistory.add(
+      AgentConversationItem.text(
+        role: 'user',
+        content: executionBody,
+        images: images,
+      ),
+    );
 
     await _continueAgentLoop(gen, config);
   }
@@ -383,6 +392,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           AgentConversationItem.assistantToolCalls(
             resolvedStreamResult.toolCalls,
             content: protocolText.isEmpty ? null : protocolText,
+            reasoningContent: resolvedStreamResult.reasoning.isEmpty
+                ? null
+                : resolvedStreamResult.reasoning,
+            thinkingBlocks: resolvedStreamResult.thinkingBlocks,
           ),
         );
       }
@@ -402,6 +415,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       ToolCall? writeFileTool;
       ToolCall? editFileTool;
       ToolCall? askUserQuestionTool;
+      ToolCall? readImageTool;
       final mcpToolCalls = <ToolCall>[];
       for (final call in toolCalls) {
         if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
@@ -430,6 +444,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             call.header != null &&
             call.options.length >= 2) {
           askUserQuestionTool = call;
+        }
+        if (readImageTool == null && call.isReadImage && call.path != null) {
+          readImageTool = call;
         }
         if (call.isMcp &&
             call.mcpServerId != null &&
@@ -579,6 +596,54 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
         _conversationHistory.add({'role': 'user', 'content': injected});
         setState(() => _agentLoopStatus = null);
+        continue;
+      }
+
+      if (readImageTool != null) {
+        final root =
+            widget.fileSystemAdapter?.currentDirectory ??
+            Directory.current.path;
+        final requestedPath = readImageTool.path!;
+        final nativeCall = resolvedStreamResult.toolCalls
+            .where((call) => call.id == readImageTool!.id)
+            .firstOrNull;
+        try {
+          final image = await AgentImageAttachmentReader.read(
+            path: requestedPath,
+            workspaceRoot: root,
+          );
+          if (nativeCall != null) {
+            _conversationHistory.add(
+              AgentConversationItem.toolResults([
+                AgentToolResult(
+                  toolCallId: nativeCall.id,
+                  content: 'Loaded image: ${image.displayName}',
+                  images: [image],
+                ),
+              ]),
+            );
+          }
+          setState(
+            () => _agentLoopStatus = 'Image loaded: ${image.displayName}',
+          );
+        } on AgentImageAttachmentException catch (e) {
+          if (nativeCall != null) {
+            _conversationHistory.add(
+              AgentConversationItem.toolResults([
+                AgentToolResult(
+                  toolCallId: nativeCall.id,
+                  content: '[Image read failed] ${e.message}',
+                  isError: true,
+                ),
+              ]),
+            );
+          } else {
+            _conversationHistory.add({
+              'role': 'user',
+              'content': '[Image read failed] ${e.message}',
+            });
+          }
+        }
         continue;
       }
 

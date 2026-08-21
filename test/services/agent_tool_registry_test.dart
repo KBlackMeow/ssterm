@@ -11,7 +11,10 @@ void main() {
         fileWriteEnabled: true,
       ).limitedTo({'bash'});
 
-      expect(registry.names, containsAll(['bash', 'ask_user_question']));
+      expect(
+        registry.names,
+        containsAll(['bash', 'ask_user_question', 'read_image']),
+      );
       expect(registry.names, isNot(contains('web_search')));
       expect(registry.names, isNot(contains('write_file')));
       expect(registry.names, isNot(contains('edit_file')));
@@ -61,6 +64,13 @@ void main() {
         'new_string',
       ]);
     });
+  });
+
+  test('exposes a workspace image-reading tool with a required path', () {
+    final tool = AgentToolRegistry.build().byName('read_image')!;
+
+    expect(tool.toJsonSchema()['required'], ['path']);
+    expect(tool.description, contains('workspace'));
   });
 
   test('exposes each connected MCP tool with its discovered schema', () {

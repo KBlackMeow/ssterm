@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show stdout, HttpException, Platform, SocketException;
+import 'dart:io'
+    show stdout, Directory, HttpException, Platform, SocketException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
@@ -27,6 +28,8 @@ import '../services/command_risk.dart';
 import '../services/conversation_compactor.dart';
 import '../services/llm_service.dart';
 import '../services/agent_tool_contract.dart';
+import '../services/agent_image_attachment.dart';
+import '../services/file_picker_service.dart';
 import '../services/file_write_service.dart';
 import '../services/file_edit_service.dart';
 import '../services/mcp_service.dart';
@@ -238,7 +241,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// User messages typed while the agent is engaged.  FIFO — each drains
   /// into its own agent turn once the current turn fully completes (see
   /// `_drainQueuedUserInput`), instead of interrupting the in-flight turn.
-  final List<String> _pendingUserInput = [];
+  final List<({String text, List<AgentImageAttachment> images})>
+  _pendingUserInput = [];
+  final List<AgentImageAttachment> _pendingImages = [];
 
   /// Whether the agent is actively running OR paused on a user decision
   /// (write/edit proposal).  While true, new input is queued rather than
@@ -368,6 +373,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   }) async {
     final previous = _sessionLease;
     _pendingUserInput.clear();
+    _pendingImages.clear();
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
     if (_agentBusy) _cancelAgent();
@@ -454,7 +460,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   void _send() {
     final text = _textController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _pendingImages.isEmpty) return;
+    final images = List<AgentImageAttachment>.unmodifiable(_pendingImages);
 
     // If a question-proposal card is waiting on an answer (option tap
     // OR the "Other" custom-text path), whatever the user just typed
@@ -481,22 +488,39 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // interrupting the in-flight turn.  The queued text becomes a fresh turn
     // once the current turn fully completes — see `_drainQueuedUserInput`.
     if (_agentEngaged) {
-      _pendingUserInput.add(text);
+      _pendingUserInput.add((text: text, images: images));
       _textController.clear();
       setState(() {
-        _messages.add(_ChatMessage.user(text));
+        _messages.add(_ChatMessage.user(text, images: images));
+        _pendingImages.clear();
       });
       _scrollToBottom();
       return;
     }
 
     setState(() {
-      _messages.add(_ChatMessage.user(text));
+      _messages.add(_ChatMessage.user(text, images: images));
+      _pendingImages.clear();
     });
     _textController.clear();
     _nameSessionFrom(text);
-    _agentRespond(text);
+    _agentRespond(text, images: images);
     _scrollToBottom();
+  }
+
+  Future<void> _addImageAttachment() async {
+    final path = await FilePickerService.pickImageFile();
+    if (path == null || !mounted) return;
+    try {
+      final image = await AgentImageAttachmentReader.read(path: path);
+      if (!mounted) return;
+      setState(() => _pendingImages.add(image));
+    } on AgentImageAttachmentException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   void _nameSessionFrom(String text) {
@@ -550,6 +574,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // the in-flight turn — otherwise `_cancelAgent`'s tail drain would
     // resurrect a queued message on the freshly cleared chat.
     _pendingUserInput.clear();
+    _pendingImages.clear();
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
     if (_agentBusy) _cancelAgent();
@@ -644,7 +669,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   /// it.  No-op while the agent is still engaged or nothing is queued.
   void _drainQueuedUserInput() {
     if (!mounted || _agentEngaged || _pendingUserInput.isEmpty) return;
-    _agentRespond(_pendingUserInput.removeAt(0));
+    final next = _pendingUserInput.removeAt(0);
+    _agentRespond(next.text, images: next.images);
   }
 
   /// Append a `/help` info banner to the visible chat WITHOUT pushing
@@ -816,6 +842,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             scrollController: _scrollController,
             onTranscriptUserScroll: _pauseFollowingLatestTranscript,
             onSend: _send,
+            pendingImages: _pendingImages,
+            onAddImage: _addImageAttachment,
+            onRemoveImage: (image) =>
+                setState(() => _pendingImages.remove(image)),
             onStop: _cancelAgent,
             queuedCount: _pendingUserInput.length,
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),

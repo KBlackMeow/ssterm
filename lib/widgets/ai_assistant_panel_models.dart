@@ -38,6 +38,7 @@ class _ChatMessage {
   bool? hasExactReasoningTokenCount;
   final bool isUser;
   final bool isSystem;
+  final List<AgentImageAttachment> images;
 
   /// `true` for client-generated info banners (e.g. `/help` output).
   /// Notices are rendered with a small info-icon card distinct from
@@ -121,6 +122,7 @@ class _ChatMessage {
     this.hasExactReasoningTokenCount,
     required this.isUser,
     this.isSystem = false,
+    this.images = const [],
     this.isNotice = false,
     this.error,
     this.commandRun,
@@ -137,8 +139,10 @@ class _ChatMessage {
     this.toolCallData,
   });
 
-  factory _ChatMessage.user(String text) =>
-      _ChatMessage._(text: text, isUser: true);
+  factory _ChatMessage.user(
+    String text, {
+    List<AgentImageAttachment> images = const [],
+  }) => _ChatMessage._(text: text, isUser: true, images: images);
 
   factory _ChatMessage.ai({
     required String text,

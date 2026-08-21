@@ -24,7 +24,10 @@ void main() {
       'lib/widgets/ai_assistant_panel.dart',
     ).readAsStringSync();
 
-    expect(source, contains('_pendingUserInput.add(text)'));
+    expect(
+      source,
+      contains('_pendingUserInput.add((text: text, images: images))'),
+    );
     expect(source, contains('void _drainQueuedUserInput()'));
     // The old interrupt-on-send path is gone — input is queued instead of
     // being fed straight through as a replacement instruction.
@@ -51,7 +54,7 @@ void main() {
     // signals) BEFORE `_cancelAgent` runs, otherwise the cancel's tail
     // drain would resurrect a queued message on the freshly cleared chat.
     final clearQueue = source.indexOf(
-      '_pendingUserInput.clear();\n    _pendingWriteProposal = null;',
+      '_pendingUserInput.clear();\n    _pendingImages.clear();\n    _pendingWriteProposal = null;',
     );
     final cancel = source.indexOf('if (_agentBusy) _cancelAgent();');
     expect(clearQueue, isNot(-1));

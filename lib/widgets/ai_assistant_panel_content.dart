@@ -22,6 +22,9 @@ class _AiPanelContent extends StatelessWidget {
     required this.scrollController,
     this.onTranscriptUserScroll,
     required this.onSend,
+    required this.pendingImages,
+    required this.onAddImage,
+    required this.onRemoveImage,
     required this.onStop,
     this.queuedCount = 0,
     this.onAutoExecuteChanged,
@@ -54,6 +57,9 @@ class _AiPanelContent extends StatelessWidget {
   final ScrollController scrollController;
   final VoidCallback? onTranscriptUserScroll;
   final VoidCallback onSend;
+  final List<AgentImageAttachment> pendingImages;
+  final VoidCallback onAddImage;
+  final ValueChanged<AgentImageAttachment> onRemoveImage;
 
   /// Fires when the user taps the dedicated stop button (shown only while
   /// [busy] and not awaiting a question answer).  Distinct from [onSend],
@@ -265,195 +271,234 @@ class _AiPanelContent extends StatelessWidget {
                 ),
               ),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Container(
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: const Color(0xFF2472C8).withValues(alpha: 0.3),
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                if (pendingImages.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Wrap(
+                      spacing: 6,
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: textController,
-                            focusNode: agentInputFocusNode,
-                            textInputAction: TextInputAction.send,
-                            style: TextStyle(
-                              color:
-                                  AppColors.maybeOf(context)?.foreground ??
-                                  _kFgActive,
-                              fontSize: 13,
-                              height: 1.2,
-                              fontFamily: _agentBodyFontFamily,
-                              fontFamilyFallback: _agentBodyFontFallback,
-                              fontWeight: FontWeight.w400,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: 'Ask AI anything…',
-                              hintStyle: TextStyle(
-                                color: const Color(0xFF8E8E8E),
-                                fontSize: 13,
-                                fontFamily: _agentBodyFontFamily,
-                                fontFamilyFallback: _agentBodyFontFallback,
-                                fontWeight: FontWeight.w400,
+                        for (final image in pendingImages)
+                          InputChip(
+                            avatar: CircleAvatar(
+                              backgroundImage: MemoryImage(
+                                base64Decode(image.base64Data),
                               ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.fromLTRB(
-                                12,
-                                0,
-                                8,
-                                0,
-                              ),
-                              isDense: true,
                             ),
-                            onSubmitted: (_) => onSend(),
+                            label: Text(image.displayName),
+                            onDeleted: () => onRemoveImage(image),
                           ),
-                        ),
-                        // Compact auto-execute chip inside the input field row
-                        Tooltip(
-                          message: autoExecute
-                              ? '自动模式：仅危险命令需要确认'
-                              : '审慎模式：普通命令直接执行，警告和危险命令需要确认',
-                          child: GestureDetector(
-                            onTap: () =>
-                                onAutoExecuteChanged?.call(!autoExecute),
-                            child: Container(
-                              height: 20,
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: autoExecute
-                                    ? const Color(
-                                        0xFF2E7D32,
-                                      ).withValues(alpha: 0.3)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: autoExecute
-                                      ? const Color(
-                                          0xFF2E7D32,
-                                        ).withValues(alpha: 0.5)
-                                      : dimColor(
-                                          context,
-                                        ).withValues(alpha: 0.25),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.auto_awesome,
-                                    size: 10,
-                                    color: autoExecute
-                                        ? const Color(0xFF2EE767)
-                                        : dimColor(context),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    'Auto',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: autoExecute
-                                          ? const Color(0xFF2E7D32)
-                                          : dimColor(context),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Queued-input chip — how many typed messages are
-                        // waiting for the current turn to finish.
-                        if (queuedCount > 0)
-                          Container(
-                            height: 20,
-                            margin: const EdgeInsets.only(right: 4),
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(
-                                0xFF2472C8,
-                              ).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.schedule,
-                                  size: 10,
-                                  color: Color(0xFF2472C8),
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '$queuedCount',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF2472C8),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        // Dedicated stop button — only while genuinely busy.
-                        // Cancels the current turn (and completes any dangling
-                        // tool call) without discarding queued input.
-                        if (showStopButton)
-                          GestureDetector(
-                            onTap: onStop,
-                            child: Container(
-                              width: 26,
-                              height: 26,
-                              margin: const EdgeInsets.only(right: 4),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF6E67),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Icon(
-                                Icons.stop_rounded,
-                                size: 13,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        // Send button — always available.  Sends now, or queues
-                        // the message when the agent is engaged.
-                        GestureDetector(
-                          onTap: onSend,
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            margin: const EdgeInsets.only(right: 4),
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2472C8),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Icon(
-                              Icons.send_rounded,
-                              size: 13,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: const Color(
+                              0xFF2472C8,
+                            ).withValues(alpha: 0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            GestureDetector(
+                              onTap: onAddImage,
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 8, right: 2),
+                                child: Icon(
+                                  Icons.attach_file,
+                                  size: 18,
+                                  color: _kAccent,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: textController,
+                                focusNode: agentInputFocusNode,
+                                textInputAction: TextInputAction.send,
+                                style: TextStyle(
+                                  color:
+                                      AppColors.maybeOf(context)?.foreground ??
+                                      _kFgActive,
+                                  fontSize: 13,
+                                  height: 1.2,
+                                  fontFamily: _agentBodyFontFamily,
+                                  fontFamilyFallback: _agentBodyFontFallback,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'Ask AI anything…',
+                                  hintStyle: TextStyle(
+                                    color: const Color(0xFF8E8E8E),
+                                    fontSize: 13,
+                                    fontFamily: _agentBodyFontFamily,
+                                    fontFamilyFallback: _agentBodyFontFallback,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    0,
+                                    8,
+                                    0,
+                                  ),
+                                  isDense: true,
+                                ),
+                                onSubmitted: (_) => onSend(),
+                              ),
+                            ),
+                            // Compact auto-execute chip inside the input field row
+                            Tooltip(
+                              message: autoExecute
+                                  ? '自动模式：仅危险命令需要确认'
+                                  : '审慎模式：普通命令直接执行，警告和危险命令需要确认',
+                              child: GestureDetector(
+                                onTap: () =>
+                                    onAutoExecuteChanged?.call(!autoExecute),
+                                child: Container(
+                                  height: 20,
+                                  margin: const EdgeInsets.only(right: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: autoExecute
+                                        ? const Color(
+                                            0xFF2E7D32,
+                                          ).withValues(alpha: 0.3)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: autoExecute
+                                          ? const Color(
+                                              0xFF2E7D32,
+                                            ).withValues(alpha: 0.5)
+                                          : dimColor(
+                                              context,
+                                            ).withValues(alpha: 0.25),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.auto_awesome,
+                                        size: 10,
+                                        color: autoExecute
+                                            ? const Color(0xFF2EE767)
+                                            : dimColor(context),
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        'Auto',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: autoExecute
+                                              ? const Color(0xFF2E7D32)
+                                              : dimColor(context),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Queued-input chip — how many typed messages are
+                            // waiting for the current turn to finish.
+                            if (queuedCount > 0)
+                              Container(
+                                height: 20,
+                                margin: const EdgeInsets.only(right: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFF2472C8,
+                                  ).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.schedule,
+                                      size: 10,
+                                      color: Color(0xFF2472C8),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '$queuedCount',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF2472C8),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            // Dedicated stop button — only while genuinely busy.
+                            // Cancels the current turn (and completes any dangling
+                            // tool call) without discarding queued input.
+                            if (showStopButton)
+                              GestureDetector(
+                                onTap: onStop,
+                                child: Container(
+                                  width: 26,
+                                  height: 26,
+                                  margin: const EdgeInsets.only(right: 4),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFF6E67),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Icon(
+                                    Icons.stop_rounded,
+                                    size: 13,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            // Send button — always available.  Sends now, or queues
+                            // the message when the agent is engaged.
+                            GestureDetector(
+                              onTap: onSend,
+                              child: Container(
+                                width: 26,
+                                height: 26,
+                                margin: const EdgeInsets.only(right: 4),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF2472C8),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Icon(
+                                  Icons.send_rounded,
+                                  size: 13,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -784,16 +829,45 @@ class _AiPanelContent extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                msg.text,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 13,
-                  height: 1.5,
-                  fontFamily: _agentBodyFontFamily,
-                  fontFamilyFallback: _agentBodyFontFallback,
-                  fontWeight: FontWeight.w400,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (msg.text.isNotEmpty)
+                    Text(
+                      msg.text,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 13,
+                        height: 1.5,
+                        fontFamily: _agentBodyFontFamily,
+                        fontFamilyFallback: _agentBodyFontFallback,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  for (final image in msg.images)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Image.memory(
+                              base64Decode(image.base64Data),
+                              width: 180,
+                              height: 120,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            image.displayName,
+                            style: TextStyle(color: fg, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
