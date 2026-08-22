@@ -1,10 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/models/agent_config.dart';
 import 'package:ssterm/models/terminal_settings.dart';
 import 'package:ssterm/widgets/frosted_glass.dart';
 import 'package:ssterm/views/settings/settings_console_shell.dart';
 import 'package:ssterm/views/settings/settings_sheet.dart';
+
+/// Stubs `package_info_plus` so the About tab's "loading" spinner resolves.
+/// The settings shell mounts every tab in an `IndexedStack`, so an unresolved
+/// `PackageInfo.fromPlatform()` leaves an indeterminate `CircularProgressIndicator`
+/// animating forever and any `pumpAndSettle` would time out.
+Future<void> _mockPackageInfo(WidgetTester tester) async {
+  const channel = MethodChannel('dev.fluttercommunity.plus/package_info');
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    channel,
+    (call) async => <String, dynamic>{
+      'appName': 'ssterm',
+      'packageName': 'ssterm',
+      'version': '1.0.0',
+      'buildNumber': '1',
+      'buildSignature': '',
+      'installerStore': null,
+    },
+  );
+  addTearDown(() {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      null,
+    );
+  });
+}
 
 void main() {
   testWidgets('desktop shell exposes console destinations', (tester) async {
@@ -69,10 +95,11 @@ void main() {
   testWidgets('settings page uses the desktop rail', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -90,10 +117,11 @@ void main() {
     );
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: agent,
           onAgentChanged: (next) => agent = next,
@@ -114,10 +142,11 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -131,10 +160,11 @@ void main() {
   testWidgets('skills destination offers ZIP import', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -153,10 +183,11 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -173,10 +204,11 @@ void main() {
   testWidgets('agent MCP section uses the console surface', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -201,10 +233,11 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsPage(
-          settings: TerminalSettings(),
+          settings: TerminalSettings(cursorBlink: false),
           onChanged: (_) {},
           agent: AgentConfig(),
         ),
@@ -228,6 +261,265 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull, reason: label);
     }
+  });
+
+  testWidgets('model chip shows the configured context window', (tester) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-deepseek-v4-pro'));
+
+    expect(chip, findsOneWidget);
+    // 1000000 is a decimal "1M"; in binary units it renders as 976.6K.
+    expect(
+      find.descendant(of: chip, matching: find.text('976.6K')),
+      findsOneWidget,
+    );
+    expect(find.text('deepseek-v4-pro'), findsWidgets);
+  });
+
+  testWidgets('model chip shows em dash when context window is unset', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'test-local',
+      defaultModel: 'm1',
+      providers: [
+        ProviderConfig.custom(
+          id: 'test-local',
+          displayName: 'Test Local',
+          protocol: ProviderProtocol.openAiCompatible,
+          baseUrl: 'http://localhost:8080/v1',
+          models: ['m1'],
+        ).copyWith(enabled: true),
+      ],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-m1'));
+
+    expect(find.descendant(of: chip, matching: find.text('—')), findsOneWidget);
+  });
+
+  testWidgets('tapping a model chip opens the token settings dialog', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-deepseek-v4-pro'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    expect(find.text('上下文窗口 (tokens)'), findsOneWidget);
+    expect(find.text('最大输出 (tokens)'), findsOneWidget);
+    final ctxField = tester.widget<TextField>(
+      find.byKey(const Key('settings-model-ctx-field')),
+    );
+    final maxField = tester.widget<TextField>(
+      find.byKey(const Key('settings-model-max-field')),
+    );
+    expect(ctxField.controller!.text, '1000000');
+    expect(maxField.controller!.text, '32768');
+  });
+
+  testWidgets('saving model settings updates the context window maps', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-deepseek-v4-pro'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('settings-model-ctx-field')),
+      '128000',
+    );
+    await tester.enterText(
+      find.byKey(const Key('settings-model-max-field')),
+      '16384',
+    );
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('Save')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      agent.providers.first.modelContextWindows['deepseek-v4-pro'],
+      128000,
+    );
+    expect(
+      agent.providers.first.modelMaxOutputTokens['deepseek-v4-pro'],
+      16384,
+    );
+  });
+
+  testWidgets('empty model settings fields clear the stored values', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-deepseek-v4-pro'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('settings-model-ctx-field')),
+      '',
+    );
+    await tester.enterText(
+      find.byKey(const Key('settings-model-max-field')),
+      '',
+    );
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('Save')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      agent.providers.first.modelContextWindows.containsKey('deepseek-v4-pro'),
+      isFalse,
+    );
+    expect(
+      agent.providers.first.modelMaxOutputTokens.containsKey('deepseek-v4-pro'),
+      isFalse,
+    );
+  });
+
+  testWidgets('close icon still removes the model without opening settings', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'deepseek',
+      defaultModel: 'deepseek-v4-pro',
+      providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final chip = find.byKey(const Key('settings-model-chip-deepseek-v4-pro'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: chip, matching: find.byIcon(Icons.close)),
+    );
+    await tester.pump();
+
+    expect(agent.providers.first.models.contains('deepseek-v4-pro'), isFalse);
+    expect(agent.defaultModel, isNull);
+    expect(find.text('上下文窗口 (tokens)'), findsNothing);
   });
 }
 

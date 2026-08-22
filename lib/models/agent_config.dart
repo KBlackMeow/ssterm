@@ -838,24 +838,26 @@ class AgentConfig {
         provider.models
           ..clear()
           ..addAll([...defaults.models, ...custom]);
-        final customContextWindows = Map<String, int>.fromEntries(
-          provider.modelContextWindows.entries.where(
-            (entry) => !defaults.models.contains(entry.key),
-          ),
+        // Same philosophy as the models list above: a saved token value for
+        // a built-in model is an explicit user override and must survive a
+        // restart, so saved entries win over factory defaults.  Factory
+        // defaults are only back-filled for models the user hasn't
+        // configured, so code updates still refresh windows for new built-ins
+        // while never silently discarding a value the user set in the UI.
+        final savedContextWindows = Map<String, int>.of(
+          provider.modelContextWindows,
         );
         provider.modelContextWindows
           ..clear()
-          ..addAll(customContextWindows)
-          ..addAll(defaults.modelContextWindows);
-        final customMaxOutputTokens = Map<String, int>.fromEntries(
-          provider.modelMaxOutputTokens.entries.where(
-            (entry) => !defaults.models.contains(entry.key),
-          ),
+          ..addAll(defaults.modelContextWindows)
+          ..addAll(savedContextWindows);
+        final savedMaxOutputTokens = Map<String, int>.of(
+          provider.modelMaxOutputTokens,
         );
         provider.modelMaxOutputTokens
           ..clear()
-          ..addAll(customMaxOutputTokens)
-          ..addAll(defaults.modelMaxOutputTokens);
+          ..addAll(defaults.modelMaxOutputTokens)
+          ..addAll(savedMaxOutputTokens);
       } catch (_) {
         // Unknown provider id — leave its model list untouched.
       }
@@ -936,6 +938,7 @@ class AgentConfig {
   AgentConfig copyWith({
     String? defaultProvider,
     String? defaultModel,
+    bool resetDefaultModel = false,
     List<ProviderConfig>? providers,
     bool? markdownEnabled,
     bool? webSearchEnabled,
@@ -948,7 +951,12 @@ class AgentConfig {
     Map<String, AgentDecisionSettings>? decisionSettingsByModel,
   }) => AgentConfig(
     defaultProvider: defaultProvider ?? this.defaultProvider,
-    defaultModel: defaultModel ?? this.defaultModel,
+    // Like [resetEnabledSkills]: copyWith can't tell "not passed" from
+    // "passed null", so clearing the default model (when it is removed from
+    // its provider) needs an explicit reset flag.
+    defaultModel: resetDefaultModel
+        ? null
+        : (defaultModel ?? this.defaultModel),
     providers: providers ?? List.of(this.providers),
     markdownEnabled: markdownEnabled ?? this.markdownEnabled,
     webSearchEnabled: webSearchEnabled ?? this.webSearchEnabled,

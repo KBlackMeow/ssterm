@@ -872,35 +872,41 @@ extension _AgentSettingsExt on _SettingsPageState {
   }
 
   Widget _modelChip(String model, ProviderConfig provider, int idx) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161820),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: _kDivider),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(model, style: const TextStyle(color: _kFg, fontSize: 11)),
-          const SizedBox(width: 4),
-          GestureDetector(
-            onTap: () {
-              final nextModels = List<String>.of(provider.models)
-                ..remove(model);
-              final nextDefault = _agentConfig.defaultModel == model
-                  ? null
-                  : _agentConfig.defaultModel;
-              final next = _agentConfig.copyWith(
-                defaultModel: nextDefault,
-                providers: List.of(_agentConfig.providers)
-                  ..[idx] = provider.copyWith(models: nextModels),
-              );
-              _agentApply(next);
-            },
-            child: Icon(Icons.close, size: 12, color: _kFgMuted),
-          ),
-        ],
+    return GestureDetector(
+      key: Key('settings-model-chip-$model'),
+      onTap: () => _showModelSettingsDialog(provider, idx, model),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161820),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: _kDivider),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(model, style: const TextStyle(color: _kFg, fontSize: 11)),
+            const SizedBox(width: 4),
+            Text(
+              _formatTokens(provider.modelContextWindows[model]),
+              style: const TextStyle(color: _kFgMuted, fontSize: 11),
+            ),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: () {
+                final nextModels = List<String>.of(provider.models)
+                  ..remove(model);
+                final next = _agentConfig.copyWith(
+                  resetDefaultModel: _agentConfig.defaultModel == model,
+                  providers: List.of(_agentConfig.providers)
+                    ..[idx] = provider.copyWith(models: nextModels),
+                );
+                _agentApply(next);
+              },
+              child: Icon(Icons.close, size: 12, color: _kFgMuted),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -972,6 +978,46 @@ extension _AgentSettingsExt on _SettingsPageState {
         ..[idx] = provider.copyWith(models: nextModels),
     );
     _agentApply(next);
+  }
+
+  Future<void> _showModelSettingsDialog(
+    ProviderConfig provider,
+    int idx,
+    String model,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: const Color(0x66000000),
+      builder: (ctx) {
+        return _ModelSettingsDialog(
+          model: model,
+          contextWindow: provider.modelContextWindows[model],
+          maxOutputTokens: provider.modelMaxOutputTokens[model],
+          onSave: (contextWindow, maxOutput) {
+            final windows = Map<String, int>.of(provider.modelContextWindows);
+            final maxOutputs = Map<String, int>.of(provider.modelMaxOutputTokens);
+            if (contextWindow == null) {
+              windows.remove(model);
+            } else {
+              windows[model] = contextWindow;
+            }
+            if (maxOutput == null) {
+              maxOutputs.remove(model);
+            } else {
+              maxOutputs[model] = maxOutput;
+            }
+            final next = _agentConfig.copyWith(
+              providers: List.of(_agentConfig.providers)
+                ..[idx] = provider.copyWith(
+                  modelContextWindows: windows,
+                  modelMaxOutputTokens: maxOutputs,
+                ),
+            );
+            _agentApply(next);
+          },
+        );
+      },
+    );
   }
 
   // ── MCP section ─────────────────────────────────────────────────────
@@ -1206,6 +1252,132 @@ IconData _providerIcon(String id) {
       return Icons.pets;
     default:
       return Icons.smart_toy;
+  }
+}
+
+/// Renders a token count compactly for model chips, in the same binary
+/// units the token sizes themselves use: 131072 → "128K", 1048576 → "1M",
+/// 32768 → "32K", 128000 → "125K".  Unset / non-positive values render
+/// "—", which means the runtime 32K fallback window applies.
+String _formatTokens(int? v) {
+  if (v == null || v <= 0) return '—';
+  if (v >= 1048576) {
+    return v % 1048576 == 0
+        ? '${v ~/ 1048576}M'
+        : '${(v / 1048576).toStringAsFixed(1)}M';
+  }
+  if (v >= 1024) {
+    return v % 1024 == 0
+        ? '${v ~/ 1024}K'
+        : '${(v / 1024).toStringAsFixed(1)}K';
+  }
+  return '$v';
+}
+
+/// Per-model token settings dialog: context window + max output.
+/// Empty / non-positive fields remove the entry so the runtime fallback
+/// (32K context, 32768 output) applies.
+class _ModelSettingsDialog extends StatefulWidget {
+  const _ModelSettingsDialog({
+    required this.model,
+    required this.contextWindow,
+    required this.maxOutputTokens,
+    required this.onSave,
+  });
+
+  final String model;
+  final int? contextWindow;
+  final int? maxOutputTokens;
+  final void Function(int? contextWindow, int? maxOutput) onSave;
+
+  @override
+  State<_ModelSettingsDialog> createState() => _ModelSettingsDialogState();
+}
+
+class _ModelSettingsDialogState extends State<_ModelSettingsDialog> {
+  late final _ctxCtrl = TextEditingController(
+    text: widget.contextWindow?.toString() ?? '',
+  );
+  late final _maxCtrl = TextEditingController(
+    text: widget.maxOutputTokens?.toString() ?? '',
+  );
+
+  @override
+  void dispose() {
+    _ctxCtrl.dispose();
+    _maxCtrl.dispose();
+    super.dispose();
+  }
+
+  int? _parseTokens(String s) {
+    final v = int.tryParse(s.trim());
+    if (v == null || v <= 0) return null;
+    return v;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _kSurface,
+      title: Text(
+        widget.model,
+        style: const TextStyle(color: _kFg, fontSize: 14),
+      ),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const Key('settings-model-ctx-field'),
+              controller: _ctxCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: _kFg, fontSize: 13),
+              decoration: const InputDecoration(
+                labelText: '上下文窗口 (tokens)',
+                labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                hintText: '留空使用 32K 回退',
+                hintStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('settings-model-max-field'),
+              controller: _maxCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(color: _kFg, fontSize: 13),
+              decoration: const InputDecoration(
+                labelText: '最大输出 (tokens)',
+                labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                hintText: '留空使用 32K 回退',
+                hintStyle: TextStyle(color: _kFgMuted, fontSize: 13),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: _kFgMuted)),
+        ),
+        FilledButton(
+          onPressed: () {
+            widget.onSave(
+              _parseTokens(_ctxCtrl.text),
+              _parseTokens(_maxCtrl.text),
+            );
+            Navigator.pop(context);
+          },
+          child: const Text('Save', style: TextStyle(color: _kAccent)),
+        ),
+      ],
+    );
   }
 }
 

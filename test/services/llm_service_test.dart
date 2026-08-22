@@ -1744,7 +1744,7 @@ Done.
       expect(ProviderConfig.ollama().maxOutputTokensFor('local'), 32768);
     });
 
-    test('reload refreshes built-in limits and preserves custom limits', () {
+    test('reload keeps user-configured token limits and backfills defaults', () {
       final config = AgentConfig.fromJson({
         'providers': [
           {
@@ -1764,10 +1764,12 @@ Done.
       final deepseek = config.providers.firstWhere(
         (provider) => provider.id == 'deepseek',
       );
-      expect(deepseek.modelContextWindows['deepseek-v4-pro'], 1000000);
+      // An explicit override of a built-in model must survive a restart —
+      // silently reverting it would lose a value the user set in the UI.
+      expect(deepseek.modelContextWindows['deepseek-v4-pro'], 128000);
       expect(deepseek.modelContextWindows['deepseek-v4-flash'], 1000000);
       expect(deepseek.modelContextWindows['my-deepseek-model'], 64000);
-      expect(deepseek.modelMaxOutputTokens['deepseek-v4-pro'], 32768);
+      expect(deepseek.modelMaxOutputTokens['deepseek-v4-pro'], 4096);
       expect(deepseek.modelMaxOutputTokens['deepseek-v4-flash'], 32768);
       expect(deepseek.modelMaxOutputTokens['my-deepseek-model'], 8192);
     });
