@@ -329,8 +329,11 @@ void main() {
       ], reasoningContent: 'Need inspect the current working directory first.'),
     ], includeReasoningContent: true);
 
+    // The transcript is a dangling call (no result recorded), so the
+    // sanitizer appends a synthetic one — the reasoning replay still lands
+    // on the assistant message itself.
     expect(
-      messages.single['reasoning_content'],
+      messages.first['reasoning_content'],
       'Need inspect the current working directory first.',
     );
   });
@@ -353,7 +356,10 @@ void main() {
       ),
     ]);
 
-    expect(messages.single['content'], [
+    // The transcript is a dangling call (no result recorded), so the
+    // sanitizer appends a synthetic one — the thinking replay still lands
+    // on the assistant message itself.
+    expect(messages.first['content'], [
       {
         'type': 'thinking',
         'thinking': 'I need the working directory before continuing.',
@@ -480,6 +486,102 @@ void main() {
     expect(
       ((geminiParts[1] as Map)['functionResponse'] as Map)['name'],
       'bash',
+    );
+  });
+
+  test('answers a dangling call when the turn died mid-flight', () {
+    // Mirrors the loop-exit paths that abandon a turn after the model
+    // emitted native tool calls but before any result was recorded (user
+    // rejection, budget cap, task-complete marker, executor exception).
+    // Without an answer the next provider request 400s and the session is
+    // permanently broken; the sanitizer must append an isError result for
+    // every protocol.
+    final call = AgentToolCall.fromRaw(
+      id: 'call_dangling',
+      name: 'bash',
+      arguments: const {'command': 'sleep 60'},
+    )!;
+    final transcript = [
+      const AgentConversationItem.text(role: 'user', content: 'run it'),
+      AgentConversationItem.assistantToolCalls([call]),
+      const AgentConversationItem.text(role: 'user', content: 'and now?'),
+    ];
+
+    final openAi = AgentProviderTools.openAiMessages(transcript);
+    final toolMessage = openAi
+        .where((message) => message['role'] == 'tool')
+        .toList()
+        .single;
+    expect(toolMessage['tool_call_id'], 'call_dangling');
+    expect(toolMessage['content'], contains('not executed'));
+
+    final anthropic = AgentProviderTools.anthropicMessages(transcript);
+    final anthropicResult = anthropic
+        .expand((message) {
+          final content = message['content'];
+          return content is List ? content : const <Object>[];
+        })
+        .where((block) => block is Map && block['type'] == 'tool_result')
+        .toList()
+        .single as Map;
+    expect(anthropicResult['tool_use_id'], 'call_dangling');
+    expect(anthropicResult['is_error'], true);
+
+    final gemini = AgentProviderTools.geminiContents(transcript);
+    final geminiResponse = gemini
+        .expand((content) => (content['parts'] as List? ?? const []))
+        .where((part) => part is Map && part.containsKey('functionResponse'))
+        .toList()
+        .single as Map;
+    expect((geminiResponse['functionResponse'] as Map)['name'], 'bash');
+    expect(
+      ((geminiResponse['functionResponse'] as Map)['response'] as Map)['is_error'],
+      true,
+    );
+  });
+
+  test('leaves a fully answered transcript untouched', () {
+    // The sanitizer must be a no-op when every call already has a result —
+    // in particular it must not duplicate the backfill that
+    // `AgentConversationHistory.add` or `_completeInterruptedToolCalls`
+    // already produced, which would inject bogus repeated tool results.
+    final call = AgentToolCall.fromRaw(
+      id: 'call_done',
+      name: 'bash',
+      arguments: const {'command': 'pwd'},
+    )!;
+    final transcript = [
+      AgentConversationItem.assistantToolCalls([call]),
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(toolCallId: 'call_done', content: '/workspace'),
+      ]),
+    ];
+
+    final sanitized = AgentProviderTools.answeredTranscript(transcript);
+    expect(sanitized, hasLength(2));
+    expect(sanitized[1], transcript[1]);
+
+    final openAi = AgentProviderTools.openAiMessages(transcript);
+    expect(
+      openAi.where((message) => message['role'] == 'tool'),
+      hasLength(1),
+    );
+    final anthropic = AgentProviderTools.anthropicMessages(transcript);
+    expect(
+      anthropic
+          .expand((message) {
+            final content = message['content'];
+            return content is List ? content : const <Object>[];
+          })
+          .where((block) => block is Map && block['type'] == 'tool_result'),
+      hasLength(1),
+    );
+    final gemini = AgentProviderTools.geminiContents(transcript);
+    expect(
+      gemini
+          .expand((content) => (content['parts'] as List? ?? const []))
+          .where((part) => part is Map && part.containsKey('functionResponse')),
+      hasLength(1),
     );
   });
 

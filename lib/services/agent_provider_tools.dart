@@ -63,12 +63,63 @@ class AgentProviderTools {
     return value;
   }
 
+  /// Returns [transcript] with a synthetic error result answering every
+  /// assistant tool call that never received one.
+  ///
+  /// Providers reject requests that contain a dangling native tool call
+  /// (OpenAI: "assistant tool_calls must be followed by a tool message",
+  /// Anthropic: "tool_use requires a tool_result"), and the answer must
+  /// arrive in the item directly after the call — a `tool` message after a
+  /// `user` message is rejected just the same. So the synthetic item is
+  /// inserted right after the unanswered call, not appended at the end.
+  ///
+  /// Without this, any turn abandoned before its results were recorded —
+  /// user stop, rejection, budget cap, task-complete marker, or an exception
+  /// in the executor — poisons every subsequent request in the session.
+  /// Answering at serialization time keeps the wire transcript valid no
+  /// matter how the turn ended, including sessions restored from disk
+  /// mid-dangling.
+  static List<AgentConversationItem> answeredTranscript(
+    Iterable<AgentConversationItem> transcript,
+  ) {
+    final items = transcript.toList(growable: false);
+    final out = <AgentConversationItem>[];
+    var changed = false;
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      out.add(item);
+      if (item.toolCalls.isEmpty) continue;
+      final next = i + 1 < items.length ? items[i + 1] : null;
+      final answered = next?.toolResults ?? const <AgentToolResult>[];
+      final answeredIds = answered.map((result) => result.toolCallId).toSet();
+      final missing = item.toolCalls
+          .where((call) => !answeredIds.contains(call.id))
+          .toList(growable: false);
+      if (missing.isEmpty) continue;
+      changed = true;
+      out.add(
+        AgentConversationItem.toolResults([
+          ...answered,
+          for (final call in missing)
+            AgentToolResult(
+              toolCallId: call.id,
+              content:
+                  '[Tool call was not executed: the conversation stopped '
+                  'before its result was recorded.]',
+              isError: true,
+            ),
+        ]),
+      );
+    }
+    return changed ? List.unmodifiable(out) : items;
+  }
+
   /// Serializes the shared transcript to OpenAI Chat Completions messages.
   static List<Map<String, Object?>> openAiMessages(
     Iterable<AgentConversationItem> transcript, {
     bool includeReasoningContent = false,
   }) => [
-    for (final item in transcript)
+    for (final item in answeredTranscript(transcript))
       if (item.role != null)
         {
           'role': item.role!,
@@ -135,7 +186,7 @@ class AgentProviderTools {
   static List<Map<String, Object?>> anthropicMessages(
     Iterable<AgentConversationItem> transcript,
   ) => [
-    for (final item in transcript)
+    for (final item in answeredTranscript(transcript))
       if (item.role != null)
         {
           'role': item.role!,
@@ -205,7 +256,7 @@ class AgentProviderTools {
   ) {
     final namesByCallId = <String, String>{};
     final contents = <Map<String, Object?>>[];
-    for (final item in transcript) {
+    for (final item in answeredTranscript(transcript)) {
       if (item.role != null) {
         contents.add({
           'role': item.role == 'assistant' ? 'model' : 'user',
