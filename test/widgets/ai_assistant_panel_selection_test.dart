@@ -102,6 +102,8 @@ void main() {
     expect(models, contains(r'已 ${silentFor}s 未收到数据'));
     expect(content, contains('subagent.statusAt(DateTime.now())'));
     expect(content, contains('SelectableText'));
+    expect(content, contains('class _DecisionSubagentOutput'));
+    expect(content, contains('_scrollController.jumpTo'));
     expect(content, contains('subagent.reasoning'));
     expect(content, contains('subagent.text'));
     expect(loop, contains("startSubagent('规划子 Agent')"));

@@ -1025,23 +1025,10 @@ class _DecisionCard extends StatelessWidget {
                           color: dim.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: SingleChildScrollView(
-                          child: SelectableText(
-                            [
-                              if (subagent.reasoning.isNotEmpty)
-                                '推理流\n${subagent.reasoning}',
-                              if (subagent.reasoning.isNotEmpty &&
-                                  subagent.text.isNotEmpty)
-                                '',
-                              if (subagent.text.isNotEmpty)
-                                '输出\n${subagent.text}',
-                            ].join('\n'),
-                            style: TextStyle(
-                              color: dim,
-                              fontSize: 10.5,
-                              height: 1.35,
-                            ),
-                          ),
+                        child: _DecisionSubagentOutput(
+                          reasoning: subagent.reasoning,
+                          text: subagent.text,
+                          color: dim,
                         ),
                       ),
                   ],
@@ -1078,6 +1065,67 @@ class _DecisionCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DecisionSubagentOutput extends StatefulWidget {
+  const _DecisionSubagentOutput({
+    required this.reasoning,
+    required this.text,
+    required this.color,
+  });
+
+  final String reasoning;
+  final String text;
+  final Color color;
+
+  @override
+  State<_DecisionSubagentOutput> createState() =>
+      _DecisionSubagentOutputState();
+}
+
+class _DecisionSubagentOutputState extends State<_DecisionSubagentOutput> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _followLatestOutput();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DecisionSubagentOutput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reasoning != widget.reasoning ||
+        oldWidget.text != widget.text) {
+      _followLatestOutput();
+    }
+  }
+
+  void _followLatestOutput() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    controller: _scrollController,
+    child: SelectableText(
+      [
+        if (widget.reasoning.isNotEmpty) '推理流\n${widget.reasoning}',
+        if (widget.reasoning.isNotEmpty && widget.text.isNotEmpty) '',
+        if (widget.text.isNotEmpty) '输出\n${widget.text}',
+      ].join('\n'),
+      style: TextStyle(color: widget.color, fontSize: 10.5, height: 1.35),
+    ),
+  );
 }
 
 /// Expandable card showing the model's requested tool calls before dispatch.
