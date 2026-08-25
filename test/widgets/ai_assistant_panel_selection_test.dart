@@ -32,6 +32,26 @@ void main() {
     },
   );
 
+  test('adaptive decision card exposes progress, usage, and cancellation', () {
+    final models = File(
+      'lib/widgets/ai_assistant_panel_models.dart',
+    ).readAsStringSync();
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+
+    expect(models, contains('promptTokenCount'));
+    expect(models, contains('completionTokenCount'));
+    expect(models, contains('elapsedSeconds'));
+    expect(content, contains('Token data unavailable'));
+    expect(content, contains('Still waiting for the model'));
+    expect(content, contains('Cancel'));
+    expect(loop, contains('Timer.periodic'));
+  });
+
   test(
     'agent loop bounds model and shell work with a visible terminal event',
     () {

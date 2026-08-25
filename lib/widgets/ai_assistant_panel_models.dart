@@ -254,6 +254,28 @@ class _DecisionCardData {
   String stage;
   String? summary;
   String? detail;
+  int elapsedSeconds = 0;
+  int modelRequests = 0;
+  int? promptTokenCount;
+  int? completionTokenCount;
+  bool isStalled = false;
+  bool isRunning = true;
+  DateTime lastProgressAt = DateTime.now();
+
+  void recordUsage(ProviderTokenUsage usage) {
+    if (usage.promptTokenCount != null) {
+      promptTokenCount = (promptTokenCount ?? 0) + usage.promptTokenCount!;
+    }
+    if (usage.completionTokenCount != null) {
+      completionTokenCount =
+          (completionTokenCount ?? 0) + usage.completionTokenCount!;
+    }
+  }
+
+  void markProgress() {
+    lastProgressAt = DateTime.now();
+    isStalled = false;
+  }
 }
 
 /// Immutable display payload for one model turn's tool invocations.

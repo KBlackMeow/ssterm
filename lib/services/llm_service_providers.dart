@@ -73,6 +73,7 @@ Future<LlmResponse> _callOpenAiCompatible(
     return LlmResponse(
       text: text,
       toolCalls: AgentProviderTools.parseOpenAiToolCalls(data),
+      usage: ProviderTokenUsage.fromOpenAi(data),
     );
   } finally {
     client.close(force: true);
@@ -163,6 +164,7 @@ Future<LlmResponse> _callAnthropic(
     return LlmResponse(
       text: text,
       toolCalls: AgentProviderTools.parseAnthropicToolCalls(data),
+      usage: ProviderTokenUsage.fromAnthropic(data),
     );
   } finally {
     client.close(force: true);
@@ -224,6 +226,7 @@ Future<LlmResponse> _callGemini(
     return LlmResponse(
       text: text,
       toolCalls: AgentProviderTools.parseGeminiToolCalls(data),
+      usage: ProviderTokenUsage.fromGemini(data),
     );
   } finally {
     client.close(force: true);
@@ -788,7 +791,13 @@ Future<LlmResponse> _callOllama(
     final data = jsonDecode(responseBody) as Map<String, dynamic>;
     final message = data['message'] as Map<String, dynamic>?;
     final text = message?['content'] as String? ?? '';
-    return LlmResponse(text: text);
+    return LlmResponse(
+      text: text,
+      usage: ProviderTokenUsage(
+        promptTokenCount: data['prompt_eval_count'] as int?,
+        completionTokenCount: data['eval_count'] as int?,
+      ),
+    );
   } finally {
     client.close(force: true);
   }

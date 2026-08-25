@@ -27,6 +27,13 @@ class AgentVerificationVerdict {
   final String? recovery;
 }
 
+class AgentDeliberationResult<T> {
+  const AgentDeliberationResult({required this.value, required this.usage});
+
+  final T? value;
+  final ProviderTokenUsage usage;
+}
+
 /// Isolated model calls used to plan and critique a complex task. These calls
 /// deliberately advertise no tools, so their output cannot directly act.
 abstract final class AgentDeliberation {
@@ -51,7 +58,7 @@ cost, and maintenance.''';
   static AgentDecisionPlan? parsePlan(String response) =>
       AgentDecisionPlan.tryParseJson(response.trim());
 
-  static Future<AgentDecisionPlan?> plan({
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> plan({
     required AgentConfig config,
     required String taskContext,
   }) async {
@@ -61,11 +68,15 @@ cost, and maintenance.''';
       messages: request.messages,
       profile: request.profile,
     );
-    if (response.error != null || response.toolCalls.isNotEmpty) return null;
-    return parsePlan(response.text);
+    return AgentDeliberationResult(
+      value: response.error != null || response.toolCalls.isNotEmpty
+          ? null
+          : parsePlan(response.text),
+      usage: response.usage,
+    );
   }
 
-  static Future<AgentDecisionPlan?> critique({
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> critique({
     required AgentConfig config,
     required String taskContext,
     required AgentDecisionPlan plan,
@@ -87,8 +98,12 @@ cost, and maintenance.''';
         ),
       ],
     );
-    if (response.error != null || response.toolCalls.isNotEmpty) return null;
-    return parsePlan(response.text);
+    return AgentDeliberationResult(
+      value: response.error != null || response.toolCalls.isNotEmpty
+          ? null
+          : parsePlan(response.text),
+      usage: response.usage,
+    );
   }
 
   static AgentVerificationVerdict? parseVerdict(String response) {
@@ -112,7 +127,7 @@ cost, and maintenance.''';
     }
   }
 
-  static Future<AgentVerificationVerdict?> verify({
+  static Future<AgentDeliberationResult<AgentVerificationVerdict>> verify({
     required AgentConfig config,
     required AgentDecisionPlan plan,
     required String finalAnswer,
@@ -136,7 +151,11 @@ cost, and maintenance.''';
         ),
       ],
     );
-    if (response.error != null || response.toolCalls.isNotEmpty) return null;
-    return parseVerdict(response.text);
+    return AgentDeliberationResult(
+      value: response.error != null || response.toolCalls.isNotEmpty
+          ? null
+          : parseVerdict(response.text),
+      usage: response.usage,
+    );
   }
 }

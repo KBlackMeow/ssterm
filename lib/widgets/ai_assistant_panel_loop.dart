@@ -131,29 +131,61 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         _messages.add(_ChatMessage.decisionCard(decisionCard));
         _agentLoopStatus = 'Planning and reviewing options…';
       });
+      final startedAt = DateTime.now();
+      _decisionCardTimer?.cancel();
+      _decisionCardTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted || gen != _generation || !decisionCard.isRunning) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          decisionCard.elapsedSeconds = DateTime.now()
+              .difference(startedAt)
+              .inSeconds;
+          decisionCard.isStalled =
+              DateTime.now()
+                  .difference(decisionCard.lastProgressAt)
+                  .inSeconds >=
+              15;
+        });
+      });
       _scrollToBottom();
-      final planned = _activeDecisionRun!.consumeModelRequest()
+      decisionCard.modelRequests++;
+      final plannedResult = _activeDecisionRun!.consumeModelRequest()
           ? await AgentDeliberation.plan(
               config: config,
               taskContext: routedBody,
             )
           : null;
+      final planned = plannedResult?.value;
       if (!mounted || gen != _generation) return;
       setState(() {
+        if (plannedResult != null) {
+          decisionCard.recordUsage(plannedResult.usage);
+        }
+        decisionCard.markProgress();
         decisionCard.stage = 'Reviewing plan';
         decisionCard.detail = planned == null
             ? 'Planning response was unavailable; checking whether execution can continue.'
             : 'An independent review is checking the proposed alternatives.';
       });
-      final reviewed =
-          planned == null || !_activeDecisionRun!.consumeModelRequest()
-          ? null
-          : await AgentDeliberation.critique(
-              config: config,
-              taskContext: routedBody,
-              plan: planned,
-            );
+      AgentDeliberationResult<AgentDecisionPlan>? reviewedResult;
+      if (planned != null && _activeDecisionRun!.consumeModelRequest()) {
+        decisionCard.modelRequests++;
+        reviewedResult = await AgentDeliberation.critique(
+          config: config,
+          taskContext: routedBody,
+          plan: planned,
+        );
+      }
+      final reviewed = reviewedResult?.value;
       if (!mounted || gen != _generation) return;
+      if (reviewedResult != null) {
+        setState(() {
+          decisionCard.recordUsage(reviewedResult!.usage);
+          decisionCard.markProgress();
+        });
+      }
       final plan = reviewed ?? planned;
       if (plan == null) {
         _activeDecisionRun = null;
@@ -262,6 +294,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
       if (mounted && gen == _generation) {
         setState(() {
+          _decisionCardTimer?.cancel();
+          _activeDecisionCard?.isRunning = false;
           _agentBusy = false;
           _agentLoopStatus = null;
         });
@@ -901,7 +935,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               ],
             )
             .join('\n\n');
-        final verdict = _activeDecisionRun!.consumeModelRequest()
+        _activeDecisionCard?.modelRequests++;
+        final verdictResult = _activeDecisionRun!.consumeModelRequest()
             ? await AgentDeliberation.verify(
                 config: config,
                 plan: _activeDecisionPlan!,
@@ -911,7 +946,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                     : evidence.substring(evidence.length - 12000),
               )
             : null;
+        final verdict = verdictResult?.value;
         if (!mounted || gen != _generation) return;
+        if (verdictResult != null) {
+          _activeDecisionCard?.recordUsage(verdictResult.usage);
+          _activeDecisionCard?.markProgress();
+        }
         if (verdict != null &&
             !verdict.complete &&
             verdict.recovery != null &&

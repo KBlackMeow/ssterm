@@ -273,6 +273,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   AgentDecisionRun? _activeDecisionRun;
   AgentDecisionPlan? _activeDecisionPlan;
   _DecisionCardData? _activeDecisionCard;
+  Timer? _decisionCardTimer;
   final _sessionRegistry = AgentSessionRegistry();
   AgentSessionLease? _sessionLease;
   var _sessionNeedsTitle = true;
@@ -286,6 +287,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   @override
   void dispose() {
+    _decisionCardTimer?.cancel();
     _generation++;
     _cancelStream?.call();
     _cancelPendingAgentDecisions();
@@ -862,6 +864,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onDangerProposalDecision: _decideDangerProposal,
             onQuestionProposalDecision: _decideQuestionProposal,
             onQuestionProposalOther: _beginCustomQuestionAnswer,
+            onCancelDecision: _cancelAgent,
             hasPendingQuestion: _pendingQuestionProposal != null,
             position: _position,
             onClear: _clearChat,

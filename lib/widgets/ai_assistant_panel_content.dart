@@ -36,6 +36,7 @@ class _AiPanelContent extends StatelessWidget {
     this.onDangerProposalDecision,
     this.onQuestionProposalDecision,
     this.onQuestionProposalOther,
+    this.onCancelDecision,
     this.hasPendingQuestion = false,
     required this.position,
     required this.onClear,
@@ -128,6 +129,7 @@ class _AiPanelContent extends StatelessWidget {
   /// "Other" — does NOT resolve the proposal, just hands focus to the
   /// main input.  See [_AiAssistantOverlayState._beginCustomQuestionAnswer].
   final void Function(_QuestionProposal proposal)? onQuestionProposalOther;
+  final VoidCallback? onCancelDecision;
 
   /// `true` while a [_QuestionProposal] is pending/awaiting a custom
   /// answer — i.e. `_pendingQuestionProposal != null` in the state above.
@@ -677,7 +679,7 @@ class _AiPanelContent extends StatelessWidget {
     if (decisionCard != null) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: _DecisionCard(data: decisionCard),
+        child: _DecisionCard(data: decisionCard, onCancel: onCancelDecision),
       );
     }
 
@@ -943,9 +945,10 @@ class _AiPanelContent extends StatelessWidget {
 }
 
 class _DecisionCard extends StatelessWidget {
-  const _DecisionCard({required this.data});
+  const _DecisionCard({required this.data, this.onCancel});
 
   final _DecisionCardData data;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -999,6 +1002,32 @@ class _DecisionCard extends StatelessWidget {
               style: TextStyle(color: dim, fontSize: 11, height: 1.35),
             ),
           ],
+          const SizedBox(height: 7),
+          Row(
+            children: [
+              Text(
+                '${data.elapsedSeconds}s · ${data.modelRequests} model calls',
+                style: TextStyle(color: dim, fontSize: 10.5),
+              ),
+              const Spacer(),
+              if (data.isRunning)
+                TextButton(onPressed: onCancel, child: const Text('Cancel')),
+            ],
+          ),
+          Text(
+            data.promptTokenCount == null && data.completionTokenCount == null
+                ? 'Token data unavailable'
+                : 'Tokens: in ${data.promptTokenCount ?? 0} · out ${data.completionTokenCount ?? 0}',
+            style: TextStyle(color: dim, fontSize: 10.5),
+          ),
+          if (data.isStalled)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Still waiting for the model',
+                style: TextStyle(color: Colors.orange.shade300, fontSize: 10.5),
+              ),
+            ),
         ],
       ),
     );
