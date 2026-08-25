@@ -174,6 +174,11 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
               scheduled = false;
               if (!mounted || streamDone || gen != _generation) return;
               setState(() {
+                // A text, reasoning, tool, or diagnostics event proves the
+                // streamed model request is still making progress. Without
+                // this, the deep-decision card can show a false waiting
+                // warning while its reply is visibly streaming.
+                _activeDecisionCard?.markProgress();
                 // Hide markers during streaming — without this the user
                 // briefly sees `[`, `[TASK`, `[TASK_COMPLETE]` flicker
                 // before the post-stream strip runs.  See

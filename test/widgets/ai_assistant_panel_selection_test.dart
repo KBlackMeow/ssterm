@@ -42,6 +42,9 @@ void main() {
     final loop = File(
       'lib/widgets/ai_assistant_panel_loop.dart',
     ).readAsStringSync();
+    final tooling = File(
+      'lib/widgets/ai_assistant_panel_tooling.dart',
+    ).readAsStringSync();
 
     expect(models, contains('promptTokenCount'));
     expect(models, contains('completionTokenCount'));
@@ -53,6 +56,12 @@ void main() {
     expect(loop, contains('resolvedStreamResult.promptTokenCount'));
     expect(loop, contains('resolvedStreamResult.completionTokenCount'));
     expect(loop, contains('_activeDecisionCard?.recordUsage'));
+    expect(
+      tooling,
+      contains('_activeDecisionCard?.markProgress();'),
+      reason:
+          'streamed model events must keep the decision card out of waiting state',
+    );
   });
 
   test(
