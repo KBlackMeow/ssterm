@@ -50,6 +50,9 @@ void main() {
     expect(content, contains('Still waiting for the model'));
     expect(content, contains('Cancel'));
     expect(loop, contains('Timer.periodic'));
+    expect(loop, contains('resolvedStreamResult.promptTokenCount'));
+    expect(loop, contains('resolvedStreamResult.completionTokenCount'));
+    expect(loop, contains('_activeDecisionCard?.recordUsage'));
   });
 
   test(

@@ -372,7 +372,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
       _activeDecisionRun?.consumeModelRequest();
       final aiMsg = _ChatMessage.ai(text: '');
-      setState(() => _messages.add(aiMsg));
+      setState(() {
+        _messages.add(aiMsg);
+        // Deep routing also executes the normal streamed Agent turn. Count
+        // it with the planning/review calls shown on the decision card.
+        _activeDecisionCard?.modelRequests++;
+        _activeDecisionCard?.markProgress();
+      });
 
       // --- AI call ---
       // Structured one-line logs, greppable; see `_logAgent` /
@@ -408,6 +414,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       final resolvedStreamResult = streamResult;
       _lastAgentPromptTokenCount = resolvedStreamResult.promptTokenCount;
+      setState(() {
+        _activeDecisionCard?.recordUsage(
+          ProviderTokenUsage(
+            promptTokenCount: resolvedStreamResult.promptTokenCount,
+            completionTokenCount: resolvedStreamResult.completionTokenCount,
+          ),
+        );
+        _activeDecisionCard?.markProgress();
+      });
       final fullText = resolvedStreamResult.text;
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
       final nativeToolCalls = resolvedStreamResult.toolCalls
