@@ -1014,17 +1014,6 @@ class _DecisionCard extends StatelessWidget {
                       '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
                       style: TextStyle(color: dim, fontSize: 10.5),
                     ),
-                    if (subagent.lastPreview != null)
-                      Text(
-                        subagent.lastPreview!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: dim.withValues(alpha: 0.78),
-                          fontSize: 10,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
                     if (subagent.reasoning.isNotEmpty ||
                         subagent.text.isNotEmpty)
                       Container(

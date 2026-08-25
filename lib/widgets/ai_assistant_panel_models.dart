@@ -307,7 +307,6 @@ class _DecisionSubagentData {
   DateTime? lastChunkAt;
   int receivedReasoningCharacters = 0;
   int receivedTextCharacters = 0;
-  String? lastPreview;
   String reasoning = '';
   String text = '';
   _DecisionSubagentState state = _DecisionSubagentState.waitingForFirstChunk;
@@ -330,7 +329,6 @@ class _DecisionSubagentData {
       this.text += text;
     }
     lastChunkAt = DateTime.now();
-    lastPreview = text.length <= 96 ? text : '${text.substring(0, 96)}…';
     state = _DecisionSubagentState.receiving;
   }
 
