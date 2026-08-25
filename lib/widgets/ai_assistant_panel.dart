@@ -272,6 +272,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   int? _lastAgentPromptTokenCount;
   AgentDecisionRun? _activeDecisionRun;
   AgentDecisionPlan? _activeDecisionPlan;
+  _DecisionCardData? _activeDecisionCard;
   final _sessionRegistry = AgentSessionRegistry();
   AgentSessionLease? _sessionLease;
   var _sessionNeedsTitle = true;

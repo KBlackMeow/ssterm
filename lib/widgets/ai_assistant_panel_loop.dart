@@ -77,6 +77,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     _markAgentBusy();
     _activeDecisionRun = null;
     _activeDecisionPlan = null;
+    _activeDecisionCard = null;
 
     // The agent loop receives direct stdout/stderr from the independent
     // background executor. Visible-terminal scrollback is never included.
@@ -120,7 +121,17 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
     if (route == AgentDecisionRoute.deep) {
       _activeDecisionRun = AgentDecisionRun.deep(decisionSettings);
-      setState(() => _agentLoopStatus = 'Planning and reviewing options…');
+      final decisionCard = _DecisionCardData(
+        stage: 'Planning options',
+        detail:
+            'Deep route selected; evaluating alternatives before execution.',
+      );
+      _activeDecisionCard = decisionCard;
+      setState(() {
+        _messages.add(_ChatMessage.decisionCard(decisionCard));
+        _agentLoopStatus = 'Planning and reviewing options…';
+      });
+      _scrollToBottom();
       final planned = _activeDecisionRun!.consumeModelRequest()
           ? await AgentDeliberation.plan(
               config: config,
@@ -128,6 +139,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             )
           : null;
       if (!mounted || gen != _generation) return;
+      setState(() {
+        decisionCard.stage = 'Reviewing plan';
+        decisionCard.detail = planned == null
+            ? 'Planning response was unavailable; checking whether execution can continue.'
+            : 'An independent review is checking the proposed alternatives.';
+      });
       final reviewed =
           planned == null || !_activeDecisionRun!.consumeModelRequest()
           ? null
@@ -140,10 +157,25 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       final plan = reviewed ?? planned;
       if (plan == null) {
         _activeDecisionRun = null;
+        setState(() {
+          decisionCard.stage = 'Standard execution';
+          decisionCard.summary = 'Planning unavailable';
+          decisionCard.detail =
+              'Continued with the standard Agent loop; no recommendation was accepted.';
+        });
         executionBody =
             '$routedBody\n\n<decision_fallback>Planning was unavailable. Continue with the standard Agent loop; do not claim an optimal recommendation without evidence.</decision_fallback>';
       } else {
         _activeDecisionPlan = plan;
+        final recommended = plan.candidates.firstWhere(
+          (candidate) => candidate.id == plan.recommendedId,
+        );
+        setState(() {
+          decisionCard.stage = 'Executing recommendation';
+          decisionCard.summary = 'Recommended: ${recommended.summary}';
+          decisionCard.detail =
+              'Selected after planning and independent review. Validation: ${recommended.validation}';
+        });
         executionBody =
             '$routedBody\n\n<decision_plan>Recommended candidate: ${plan.recommendedId}. Candidates: ${plan.toJson()}. Execute only with real evidence and report remaining risks.</decision_plan>';
       }
@@ -855,7 +887,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (taskComplete &&
           _activeDecisionRun != null &&
           _activeDecisionPlan != null) {
-        setState(() => _agentLoopStatus = 'Verifying decision evidence…');
+        setState(() {
+          _agentLoopStatus = 'Verifying decision evidence…';
+          _activeDecisionCard?.stage = 'Verifying evidence';
+          _activeDecisionCard?.detail =
+              'Checking the completed work against the recommendation.';
+        });
         final evidence = _conversationHistory
             .expand(
               (item) => [
@@ -884,9 +921,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             'content':
                 '<verification_recovery>${verdict.recovery}</verification_recovery>',
           });
-          setState(
-            () => _agentLoopStatus = 'Verification found remaining work…',
-          );
+          setState(() {
+            _agentLoopStatus = 'Verification found remaining work…';
+            _activeDecisionCard?.stage = 'Recovery requested';
+            _activeDecisionCard?.detail = verdict.evidence;
+          });
           continue;
         }
         if (verdict == null || !verdict.complete) {
@@ -894,7 +933,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               verdict?.evidence ??
               'The verification pass was unavailable; the result is not independently confirmed.';
           aiMsg.text = '$displayText\n\n> **Verification pending:** $reason';
-          setState(() {});
+          setState(() {
+            _activeDecisionCard?.stage = 'Verification pending';
+            _activeDecisionCard?.detail = reason;
+          });
+        } else {
+          setState(() {
+            _activeDecisionCard?.stage = 'Evidence verified';
+            _activeDecisionCard?.detail = verdict.evidence;
+          });
         }
       }
       if (taskComplete) break;

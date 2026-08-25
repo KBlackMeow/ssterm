@@ -5,6 +5,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 void main() {
+  test('adaptive decision card is a dedicated transcript message', () {
+    final models = File(
+      'lib/widgets/ai_assistant_panel_models.dart',
+    ).readAsStringSync();
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+
+    expect(models, contains('class _DecisionCardData'));
+    expect(models, contains('factory _ChatMessage.decisionCard'));
+    expect(content, contains('class _DecisionCard'));
+  });
+
+  test(
+    'deep decision run records planning, recommendation, and fallback in its card',
+    () {
+      final loop = File(
+        'lib/widgets/ai_assistant_panel_loop.dart',
+      ).readAsStringSync();
+
+      expect(loop, contains('_ChatMessage.decisionCard'));
+      expect(loop, contains('Planning options'));
+      expect(loop, contains('Standard execution'));
+      expect(loop, contains('Recommended:'));
+    },
+  );
+
   test(
     'agent loop bounds model and shell work with a visible terminal event',
     () {

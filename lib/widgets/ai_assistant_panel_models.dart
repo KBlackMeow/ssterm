@@ -115,6 +115,11 @@ class _ChatMessage {
   /// host dispatches them. Nullable for hot-reload compatibility.
   _ToolCallData? toolCallData;
 
+  /// Client-only progress and outcome for a deep adaptive-decision run.
+  /// Kept out of `_conversationHistory`; the model receives the existing
+  /// decision-plan prompt injection instead.
+  _DecisionCardData? decisionCardData;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -137,6 +142,7 @@ class _ChatMessage {
     this.questionProposal,
     this.mcpResultData,
     this.toolCallData,
+    this.decisionCardData,
   });
 
   factory _ChatMessage.user(
@@ -189,6 +195,9 @@ class _ChatMessage {
   factory _ChatMessage.notice(String text) =>
       _ChatMessage._(text: text, isUser: false, isNotice: true);
 
+  factory _ChatMessage.decisionCard(_DecisionCardData data) =>
+      _ChatMessage._(text: '', isUser: false, decisionCardData: data);
+
   /// "File write proposal" card.  Rendered as a distinct Apply/Reject
   /// card by `_buildAgentMessage`; the contained [_WriteProposal] holds
   /// the mutable state machine driving the card.
@@ -235,6 +244,16 @@ class _ChatMessage {
     isUser: false,
     toolCallData: _ToolCallData(calls),
   );
+}
+
+/// Mutable payload for one deep-route decision card. The owner updates it in
+/// place and calls `setState`, like the existing proposal cards.
+class _DecisionCardData {
+  _DecisionCardData({required this.stage, this.detail});
+
+  String stage;
+  String? summary;
+  String? detail;
 }
 
 /// Immutable display payload for one model turn's tool invocations.

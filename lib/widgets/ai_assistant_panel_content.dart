@@ -673,6 +673,14 @@ class _AiPanelContent extends StatelessWidget {
       );
     }
 
+    final decisionCard = msg.decisionCardData;
+    if (decisionCard != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _DecisionCard(data: decisionCard),
+      );
+    }
+
     // File-write proposal: distinct Apply/Reject card with diff preview.
     // Owns its own surface to make it visually unmissable — a write is
     // an irreversible operation, so it must NOT look like a regular
@@ -928,6 +936,69 @@ class _AiPanelContent extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DecisionCard extends StatelessWidget {
+  const _DecisionCard({required this.data});
+
+  final _DecisionCardData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.8);
+    final accent = _kAccent.withValues(alpha: 0.9);
+    final surface =
+        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: surface.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.account_tree_outlined, size: 15, color: accent),
+              const SizedBox(width: 6),
+              Text(
+                'Adaptive decision',
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  data.stage,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(color: accent, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          if (data.summary != null) ...[
+            const SizedBox(height: 7),
+            Text(data.summary!, style: TextStyle(color: fg, fontSize: 12)),
+          ],
+          if (data.detail != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              data.detail!,
+              style: TextStyle(color: dim, fontSize: 11, height: 1.35),
+            ),
+          ],
         ],
       ),
     );
