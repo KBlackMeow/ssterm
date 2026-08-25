@@ -305,7 +305,9 @@ class _DecisionSubagentData {
   final String name;
   final DateTime startedAt = DateTime.now();
   DateTime? lastChunkAt;
-  int receivedCharacters = 0;
+  int receivedReasoningCharacters = 0;
+  int receivedTextCharacters = 0;
+  String? lastPreview;
   _DecisionSubagentState state = _DecisionSubagentState.waitingForFirstChunk;
   String? error;
 
@@ -313,10 +315,18 @@ class _DecisionSubagentData {
       state == _DecisionSubagentState.waitingForFirstChunk ||
       state == _DecisionSubagentState.receiving;
 
-  void recordChunk(String text) {
+  int get receivedCharacters =>
+      receivedReasoningCharacters + receivedTextCharacters;
+
+  void recordChunk({required String kind, required String text}) {
     if (!isActive || text.isEmpty) return;
-    receivedCharacters += text.length;
+    if (kind == 'reasoning') {
+      receivedReasoningCharacters += text.length;
+    } else {
+      receivedTextCharacters += text.length;
+    }
     lastChunkAt = DateTime.now();
+    lastPreview = text.length <= 96 ? text : '${text.substring(0, 96)}…';
     state = _DecisionSubagentState.receiving;
   }
 
@@ -341,7 +351,7 @@ class _DecisionSubagentData {
       _DecisionSubagentState.receiving =>
         silentFor >= 15
             ? '已 ${silentFor}s 未收到数据 · $receivedCharacters 字符'
-            : '接收中 · $receivedCharacters 字符',
+            : '接收中 · 推理 $receivedReasoningCharacters · 正文 $receivedTextCharacters 字符',
       _DecisionSubagentState.completed => '完成 · $receivedCharacters 字符',
       _DecisionSubagentState.failed => '失败：${error ?? '流请求异常'}',
       _DecisionSubagentState.cancelled => '已取消 · $receivedCharacters 字符',

@@ -37,8 +37,10 @@ void main() {
     'planner stream forwards text and parses its final diagnostics',
     () async {
       final chunks = <String>[];
+      final updates = <AgentDeliberationStreamUpdate>[];
       final result = await AgentDeliberation.collectPlanStream(
         Stream.fromIterable([
+          LlmStreamEvent('reasoning', 'checking alternatives'),
           LlmStreamEvent('text', '{"recommendedId":"a",'),
           LlmStreamEvent(
             'text',
@@ -56,9 +58,13 @@ void main() {
           ),
         ]),
         chunks.add,
+        onUpdate: updates.add,
       );
 
       expect(chunks, hasLength(2));
+      expect(updates, hasLength(3));
+      expect(updates.first.isReasoning, isTrue);
+      expect(updates.first.content, 'checking alternatives');
       expect(result.value?.recommendedId, 'a');
       expect(result.usage.promptTokenCount, 21);
       expect(result.usage.completionTokenCount, 34);

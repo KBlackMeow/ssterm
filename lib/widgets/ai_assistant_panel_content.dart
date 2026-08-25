@@ -1007,9 +1007,25 @@ class _DecisionCard extends StatelessWidget {
             for (final subagent in data.subagents)
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
-                child: Text(
-                  '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
-                  style: TextStyle(color: dim, fontSize: 10.5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
+                      style: TextStyle(color: dim, fontSize: 10.5),
+                    ),
+                    if (subagent.lastPreview != null)
+                      Text(
+                        subagent.lastPreview!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: dim.withValues(alpha: 0.78),
+                          fontSize: 10,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],

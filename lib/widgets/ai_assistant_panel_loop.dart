@@ -168,7 +168,26 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                   if (!mounted || gen != _generation) return;
                   setState(() {
                     planningMessage.text += text;
-                    planningSubagent.recordChunk(text);
+                    decisionCard.markProgress();
+                  });
+                  _scrollToBottom();
+                },
+                onUpdate: (update) {
+                  if (!mounted || gen != _generation) return;
+                  setState(() {
+                    planningSubagent.recordChunk(
+                      kind: update.kind,
+                      text: update.content,
+                    );
+                    if (update.isReasoning) {
+                      planningMessage.reasoning =
+                          '${planningMessage.reasoning ?? ''}${update.content}';
+                      planningMessage.reasoningTokenCount =
+                          LlmService.estimateReasoningTokenCount(
+                            planningMessage.reasoning!,
+                          );
+                      planningMessage.hasExactReasoningTokenCount = false;
+                    }
                     decisionCard.markProgress();
                   });
                   _scrollToBottom();
@@ -220,7 +239,26 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               if (!mounted || gen != _generation) return;
               setState(() {
                 streamedReviewMessage.text += text;
-                reviewSubagent.recordChunk(text);
+                decisionCard.markProgress();
+              });
+              _scrollToBottom();
+            },
+            onUpdate: (update) {
+              if (!mounted || gen != _generation) return;
+              setState(() {
+                reviewSubagent.recordChunk(
+                  kind: update.kind,
+                  text: update.content,
+                );
+                if (update.isReasoning) {
+                  streamedReviewMessage.reasoning =
+                      '${streamedReviewMessage.reasoning ?? ''}${update.content}';
+                  streamedReviewMessage.reasoningTokenCount =
+                      LlmService.estimateReasoningTokenCount(
+                        streamedReviewMessage.reasoning!,
+                      );
+                  streamedReviewMessage.hasExactReasoningTokenCount = false;
+                }
                 decisionCard.markProgress();
               });
               _scrollToBottom();
@@ -239,7 +277,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             (subagent) => subagent.name == '审查子 Agent',
           );
           reviewSubagent.finish(error: reviewedResult!.error);
-          decisionCard.recordUsage(reviewedResult!.usage);
+          decisionCard.recordUsage(reviewedResult.usage);
           decisionCard.markProgress();
           reviewMessage?.text = reviewed == null
               ? '审查未返回可用结论，将采用初步方案继续执行。'

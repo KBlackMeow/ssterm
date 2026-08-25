@@ -40,6 +40,19 @@ class AgentDeliberationResult<T> {
   final String? error;
 }
 
+class AgentDeliberationStreamUpdate {
+  const AgentDeliberationStreamUpdate({
+    required this.kind,
+    required this.content,
+  });
+
+  final String kind;
+  final String content;
+
+  bool get isReasoning => kind == 'reasoning';
+  bool get isText => kind == 'text';
+}
+
 /// Isolated model calls used to plan and critique a complex task. These calls
 /// deliberately advertise no tools, so their output cannot directly act.
 abstract final class AgentDeliberation {
@@ -126,11 +139,13 @@ cost, and maintenance.''';
     required String taskContext,
     required AgentStreamClientSession session,
     required void Function(String text) onText,
+    void Function(AgentDeliberationStreamUpdate update)? onUpdate,
   }) => _streamPlanRequest(
     config: config,
     request: planRequest(taskContext),
     session: session,
     onText: onText,
+    onUpdate: onUpdate,
   );
 
   static Future<AgentDeliberationResult<AgentDecisionPlan>> streamCritique({
@@ -139,11 +154,13 @@ cost, and maintenance.''';
     required AgentDecisionPlan plan,
     required AgentStreamClientSession session,
     required void Function(String text) onText,
+    void Function(AgentDeliberationStreamUpdate update)? onUpdate,
   }) => _streamPlanRequest(
     config: config,
     request: critiqueRequest(taskContext: taskContext, plan: plan),
     session: session,
     onText: onText,
+    onUpdate: onUpdate,
   );
 
   static Future<AgentDeliberationResult<AgentDecisionPlan>> _streamPlanRequest({
@@ -151,6 +168,7 @@ cost, and maintenance.''';
     required AgentDeliberationRequest request,
     required AgentStreamClientSession session,
     required void Function(String text) onText,
+    void Function(AgentDeliberationStreamUpdate update)? onUpdate,
   }) async {
     try {
       final response = LlmService.chatStream(
@@ -159,7 +177,11 @@ cost, and maintenance.''';
         session: session,
         profile: request.profile,
       );
-      return await collectPlanStream(response.stream, onText);
+      return await collectPlanStream(
+        response.stream,
+        onText,
+        onUpdate: onUpdate,
+      );
     } catch (error) {
       return const AgentDeliberationResult(
         value: null,
@@ -173,16 +195,26 @@ cost, and maintenance.''';
   /// textual JSON payload to the UI. Reasoning events stay internal.
   static Future<AgentDeliberationResult<AgentDecisionPlan>> collectPlanStream(
     Stream<LlmStreamEvent> stream,
-    void Function(String text) onText,
-  ) async {
+    void Function(String text) onText, {
+    void Function(AgentDeliberationStreamUpdate update)? onUpdate,
+  }) async {
     final buffer = StringBuffer();
     int? promptTokenCount;
     int? completionTokenCount;
     try {
       await for (final event in stream) {
-        if (event.kind == 'text' && event.content.isNotEmpty) {
-          buffer.write(event.content);
-          onText(event.content);
+        if ((event.kind == 'text' || event.kind == 'reasoning') &&
+            event.content.isNotEmpty) {
+          onUpdate?.call(
+            AgentDeliberationStreamUpdate(
+              kind: event.kind,
+              content: event.content,
+            ),
+          );
+          if (event.kind == 'text') {
+            buffer.write(event.content);
+            onText(event.content);
+          }
         } else if (event.kind == 'diagnostics') {
           promptTokenCount = event.promptTokenCount ?? promptTokenCount;
           completionTokenCount =

@@ -105,7 +105,7 @@ void main() {
     expect(content, contains('subagent.statusAt(DateTime.now())'));
     expect(loop, contains("startSubagent('规划子 Agent')"));
     expect(loop, contains("startSubagent('审查子 Agent')"));
-    expect(loop, contains('recordChunk(text)'));
+    expect(loop, contains('recordChunk('));
   });
 
   test(
