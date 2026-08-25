@@ -4,11 +4,13 @@ import 'dart:convert';
 /// merits additional planning and verification calls.
 enum AgentDecisionRoute { fast, deep, uncertain }
 
+const _defaultMaxDeepModelRequests = 12;
+
 class AgentDecisionSettings {
   const AgentDecisionSettings({
     required this.enabled,
     this.firstTurnToolFocus = false,
-    this.maxDeepModelRequests = 5,
+    this.maxDeepModelRequests = _defaultMaxDeepModelRequests,
     this.maxRecoveryModelRequests = 2,
   }) : assert(maxDeepModelRequests > 0),
        assert(maxRecoveryModelRequests >= 0);
@@ -21,7 +23,8 @@ class AgentDecisionSettings {
   Map<String, Object> toJson() => {
     'enabled': enabled,
     if (firstTurnToolFocus) 'firstTurnToolFocus': true,
-    if (maxDeepModelRequests != 5) 'maxDeepModelRequests': maxDeepModelRequests,
+    if (maxDeepModelRequests != _defaultMaxDeepModelRequests)
+      'maxDeepModelRequests': maxDeepModelRequests,
     if (maxRecoveryModelRequests != 2)
       'maxRecoveryModelRequests': maxRecoveryModelRequests,
   };
@@ -37,7 +40,7 @@ class AgentDecisionSettings {
     return AgentDecisionSettings(
       enabled: enabled,
       firstTurnToolFocus: value['firstTurnToolFocus'] == true,
-      maxDeepModelRequests: deep as int? ?? 5,
+      maxDeepModelRequests: deep as int? ?? _defaultMaxDeepModelRequests,
       maxRecoveryModelRequests: recovery as int? ?? 2,
     );
   }

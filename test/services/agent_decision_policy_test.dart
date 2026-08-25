@@ -43,6 +43,13 @@ void main() {
   });
 
   group('AgentDecisionRun', () {
+    test('defaults to enough calls for planning and normal execution', () {
+      const settings = AgentDecisionSettings(enabled: true);
+
+      expect(settings.maxDeepModelRequests, 12);
+      expect(settings.toJson(), {'enabled': true});
+    });
+
     test('allows recovery only with unseen evidence within its budget', () {
       final run = AgentDecisionRun.deep(
         const AgentDecisionSettings(enabled: true, maxRecoveryModelRequests: 1),
