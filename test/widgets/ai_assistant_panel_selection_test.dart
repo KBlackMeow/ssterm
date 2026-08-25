@@ -32,6 +32,19 @@ void main() {
     },
   );
 
+  test(
+    'deep decisions append readable planning and recommendation messages',
+    () {
+      final loop = File(
+        'lib/widgets/ai_assistant_panel_loop.dart',
+      ).readAsStringSync();
+
+      expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
+      expect(loop, contains('AgentDecisionTranscript.recommendation(plan)'));
+      expect(loop, contains('_messages.add(_ChatMessage.ai(text:'));
+    },
+  );
+
   test('adaptive decision card exposes progress, usage, and cancellation', () {
     final models = File(
       'lib/widgets/ai_assistant_panel_models.dart',

@@ -18,6 +18,7 @@ import '../services/background_command_executor.dart'
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
 import '../services/agent_decision_policy.dart';
+import '../services/agent_decision_transcript.dart';
 import '../services/agent_deliberation.dart';
 import '../services/agent_session_store.dart';
 import '../services/agent_session_registry.dart';

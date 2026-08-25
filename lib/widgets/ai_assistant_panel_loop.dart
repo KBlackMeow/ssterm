@@ -163,12 +163,18 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (plannedResult != null) {
           decisionCard.recordUsage(plannedResult.usage);
         }
+        if (planned != null) {
+          _messages.add(
+            _ChatMessage.ai(text: AgentDecisionTranscript.planning(planned)),
+          );
+        }
         decisionCard.markProgress();
         decisionCard.stage = 'Reviewing plan';
         decisionCard.detail = planned == null
             ? 'Planning response was unavailable; checking whether execution can continue.'
             : 'An independent review is checking the proposed alternatives.';
       });
+      if (planned != null) _scrollToBottom();
       AgentDeliberationResult<AgentDecisionPlan>? reviewedResult;
       if (planned != null && _activeDecisionRun!.consumeModelRequest()) {
         decisionCard.modelRequests++;
@@ -190,6 +196,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (plan == null) {
         _activeDecisionRun = null;
         setState(() {
+          _messages.add(_ChatMessage.ai(text: '方案梳理未得到有效结果，已切换为标准执行流程。'));
           decisionCard.stage = 'Standard execution';
           decisionCard.summary = 'Planning unavailable';
           decisionCard.detail =
@@ -203,6 +210,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           (candidate) => candidate.id == plan.recommendedId,
         );
         setState(() {
+          _messages.add(
+            _ChatMessage.ai(text: AgentDecisionTranscript.recommendation(plan)),
+          );
           decisionCard.stage = 'Executing recommendation';
           decisionCard.summary = 'Recommended: ${recommended.summary}';
           decisionCard.detail =
@@ -211,6 +221,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         executionBody =
             '$routedBody\n\n<decision_plan>Recommended candidate: ${plan.recommendedId}. Candidates: ${plan.toJson()}. Execute only with real evidence and report remaining risks.</decision_plan>';
       }
+      _scrollToBottom();
     }
     _conversationHistory.add(
       AgentConversationItem.text(
