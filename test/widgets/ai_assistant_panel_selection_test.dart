@@ -45,6 +45,17 @@ void main() {
     },
   );
 
+  test('deep planning and review stream into their transcript messages', () {
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+
+    expect(loop, contains('AgentDeliberation.streamPlan'));
+    expect(loop, contains('AgentDeliberation.streamCritique'));
+    expect(loop, contains('planningMessage.text += text'));
+    expect(loop, contains('streamedReviewMessage.text += text'));
+  });
+
   test('adaptive decision card exposes progress, usage, and cancellation', () {
     final models = File(
       'lib/widgets/ai_assistant_panel_models.dart',

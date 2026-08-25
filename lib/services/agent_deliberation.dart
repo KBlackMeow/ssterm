@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../models/agent_config.dart';
 import 'agent_decision_policy.dart';
+import 'agent_stream_client_session.dart';
 import 'agent_tool_contract.dart';
 import 'llm_service.dart';
 
@@ -55,6 +56,26 @@ cost, and maintenance.''';
         ],
       );
 
+  static AgentDeliberationRequest critiqueRequest({
+    required String taskContext,
+    required AgentDecisionPlan plan,
+  }) => AgentDeliberationRequest(
+    profile: const AgentRequestProfile(
+      systemPromptOverride:
+          'You are an independent critic. You cannot use tools or authorize '
+          'changes. Return one corrected decision-plan JSON object only. '
+          'Keep 2 or 3 candidates, preserve every comparison field, and '
+          'challenge unsupported assumptions.',
+      allowedNativeToolNames: {},
+    ),
+    messages: [
+      AgentConversationItem.text(
+        role: 'user',
+        content: '$taskContext\n\nProposed plan:\n${plan.toJson()}',
+      ),
+    ],
+  );
+
   static AgentDecisionPlan? parsePlan(String response) =>
       AgentDecisionPlan.tryParseJson(response.trim());
 
@@ -81,28 +102,102 @@ cost, and maintenance.''';
     required String taskContext,
     required AgentDecisionPlan plan,
   }) async {
+    final request = critiqueRequest(taskContext: taskContext, plan: plan);
     final response = await LlmService.chat(
       config: config,
-      profile: const AgentRequestProfile(
-        systemPromptOverride:
-            'You are an independent critic. You cannot use tools or authorize '
-            'changes. Return one corrected decision-plan JSON object only. '
-            'Keep 2 or 3 candidates, preserve every comparison field, and '
-            'challenge unsupported assumptions.',
-        allowedNativeToolNames: {},
-      ),
-      messages: [
-        AgentConversationItem.text(
-          role: 'user',
-          content: '$taskContext\n\nProposed plan:\n${plan.toJson()}',
-        ),
-      ],
+      profile: request.profile,
+      messages: request.messages,
     );
     return AgentDeliberationResult(
       value: response.error != null || response.toolCalls.isNotEmpty
           ? null
           : parsePlan(response.text),
       usage: response.usage,
+    );
+  }
+
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> streamPlan({
+    required AgentConfig config,
+    required String taskContext,
+    required AgentStreamClientSession session,
+    required void Function(String text) onText,
+  }) => _streamPlanRequest(
+    config: config,
+    request: planRequest(taskContext),
+    session: session,
+    onText: onText,
+  );
+
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> streamCritique({
+    required AgentConfig config,
+    required String taskContext,
+    required AgentDecisionPlan plan,
+    required AgentStreamClientSession session,
+    required void Function(String text) onText,
+  }) => _streamPlanRequest(
+    config: config,
+    request: critiqueRequest(taskContext: taskContext, plan: plan),
+    session: session,
+    onText: onText,
+  );
+
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> _streamPlanRequest({
+    required AgentConfig config,
+    required AgentDeliberationRequest request,
+    required AgentStreamClientSession session,
+    required void Function(String text) onText,
+  }) async {
+    try {
+      final response = LlmService.chatStream(
+        config: config,
+        messages: request.messages,
+        session: session,
+        profile: request.profile,
+      );
+      return await collectPlanStream(response.stream, onText);
+    } catch (_) {
+      return const AgentDeliberationResult(
+        value: null,
+        usage: ProviderTokenUsage(),
+      );
+    }
+  }
+
+  /// Consumes a tool-free planner/reviewer stream while exposing only its
+  /// textual JSON payload to the UI. Reasoning events stay internal.
+  static Future<AgentDeliberationResult<AgentDecisionPlan>> collectPlanStream(
+    Stream<LlmStreamEvent> stream,
+    void Function(String text) onText,
+  ) async {
+    final buffer = StringBuffer();
+    int? promptTokenCount;
+    int? completionTokenCount;
+    try {
+      await for (final event in stream) {
+        if (event.kind == 'text' && event.content.isNotEmpty) {
+          buffer.write(event.content);
+          onText(event.content);
+        } else if (event.kind == 'diagnostics') {
+          promptTokenCount = event.promptTokenCount ?? promptTokenCount;
+          completionTokenCount =
+              event.completionTokenCount ?? completionTokenCount;
+        }
+      }
+    } catch (_) {
+      return AgentDeliberationResult(
+        value: null,
+        usage: ProviderTokenUsage(
+          promptTokenCount: promptTokenCount,
+          completionTokenCount: completionTokenCount,
+        ),
+      );
+    }
+    return AgentDeliberationResult(
+      value: parsePlan(buffer.toString()),
+      usage: ProviderTokenUsage(
+        promptTokenCount: promptTokenCount,
+        completionTokenCount: completionTokenCount,
+      ),
     );
   }
 
