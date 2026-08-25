@@ -308,6 +308,8 @@ class _DecisionSubagentData {
   int receivedReasoningCharacters = 0;
   int receivedTextCharacters = 0;
   String? lastPreview;
+  String reasoning = '';
+  String text = '';
   _DecisionSubagentState state = _DecisionSubagentState.waitingForFirstChunk;
   String? error;
 
@@ -322,12 +324,18 @@ class _DecisionSubagentData {
     if (!isActive || text.isEmpty) return;
     if (kind == 'reasoning') {
       receivedReasoningCharacters += text.length;
+      reasoning += text;
     } else {
       receivedTextCharacters += text.length;
+      this.text += text;
     }
     lastChunkAt = DateTime.now();
     lastPreview = text.length <= 96 ? text : '${text.substring(0, 96)}…';
     state = _DecisionSubagentState.receiving;
+  }
+
+  void replaceText(String value) {
+    text = value;
   }
 
   void finish({String? error}) {

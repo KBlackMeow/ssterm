@@ -32,28 +32,26 @@ void main() {
     },
   );
 
-  test(
-    'deep decisions append readable planning and recommendation messages',
-    () {
-      final loop = File(
-        'lib/widgets/ai_assistant_panel_loop.dart',
-      ).readAsStringSync();
+  test('deep decisions keep planning and recommendation inside their card', () {
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
 
-      expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
-      expect(loop, contains('AgentDecisionTranscript.recommendation(plan)'));
-      expect(loop, contains('_messages.add(_ChatMessage.ai(text:'));
-    },
-  );
+    expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
+      expect(loop, contains('AgentDecisionTranscript.recommendation(reviewed)'));
+    expect(loop, contains('planningSubagent.replaceText'));
+    expect(loop, contains('reviewSubagent.replaceText'));
+  });
 
-  test('deep planning and review stream into their transcript messages', () {
+  test('deep planning and review stream into their decision subagents', () {
     final loop = File(
       'lib/widgets/ai_assistant_panel_loop.dart',
     ).readAsStringSync();
 
     expect(loop, contains('AgentDeliberation.streamPlan'));
     expect(loop, contains('AgentDeliberation.streamCritique'));
-    expect(loop, contains('planningMessage.text += text'));
-    expect(loop, contains('streamedReviewMessage.text += text'));
+    expect(loop, contains('planningSubagent.recordChunk'));
+    expect(loop, contains('reviewSubagent.recordChunk'));
   });
 
   test('adaptive decision card exposes progress, usage, and cancellation', () {
@@ -103,6 +101,9 @@ void main() {
     expect(models, contains('未收到首包'));
     expect(models, contains(r'已 ${silentFor}s 未收到数据'));
     expect(content, contains('subagent.statusAt(DateTime.now())'));
+    expect(content, contains('SelectableText'));
+    expect(content, contains('subagent.reasoning'));
+    expect(content, contains('subagent.text'));
     expect(loop, contains("startSubagent('规划子 Agent')"));
     expect(loop, contains("startSubagent('审查子 Agent')"));
     expect(loop, contains('recordChunk('));

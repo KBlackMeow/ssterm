@@ -1025,6 +1025,36 @@ class _DecisionCard extends StatelessWidget {
                           fontStyle: FontStyle.italic,
                         ),
                       ),
+                    if (subagent.reasoning.isNotEmpty ||
+                        subagent.text.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(maxHeight: 150),
+                        margin: const EdgeInsets.only(top: 3),
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: dim.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            [
+                              if (subagent.reasoning.isNotEmpty)
+                                '推理流\n${subagent.reasoning}',
+                              if (subagent.reasoning.isNotEmpty &&
+                                  subagent.text.isNotEmpty)
+                                '',
+                              if (subagent.text.isNotEmpty)
+                                '输出\n${subagent.text}',
+                            ].join('\n'),
+                            style: TextStyle(
+                              color: dim,
+                              fontSize: 10.5,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),

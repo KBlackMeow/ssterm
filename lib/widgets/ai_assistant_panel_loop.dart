@@ -127,10 +127,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             'Deep route selected; evaluating alternatives before execution.',
       );
       _activeDecisionCard = decisionCard;
-      final planningMessage = _ChatMessage.ai(text: '');
       setState(() {
         _messages.add(_ChatMessage.decisionCard(decisionCard));
-        _messages.add(planningMessage);
         _agentLoopStatus = 'Planning and reviewing options…';
       });
       final startedAt = DateTime.now();
@@ -164,14 +162,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                 config: config,
                 taskContext: routedBody,
                 session: planningSession,
-                onText: (text) {
-                  if (!mounted || gen != _generation) return;
-                  setState(() {
-                    planningMessage.text += text;
-                    decisionCard.markProgress();
-                  });
-                  _scrollToBottom();
-                },
+                onText: (_) {},
                 onUpdate: (update) {
                   if (!mounted || gen != _generation) return;
                   setState(() {
@@ -179,15 +170,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                       kind: update.kind,
                       text: update.content,
                     );
-                    if (update.isReasoning) {
-                      planningMessage.reasoning =
-                          '${planningMessage.reasoning ?? ''}${update.content}';
-                      planningMessage.reasoningTokenCount =
-                          LlmService.estimateReasoningTokenCount(
-                            planningMessage.reasoning!,
-                          );
-                      planningMessage.hasExactReasoningTokenCount = false;
-                    }
                     decisionCard.markProgress();
                   });
                   _scrollToBottom();
@@ -206,9 +188,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           decisionCard.recordUsage(plannedResult.usage);
         }
         if (planned != null) {
-          planningMessage.text = AgentDecisionTranscript.planning(planned);
+          planningSubagent.replaceText(
+            AgentDecisionTranscript.planning(planned),
+          );
         } else {
-          planningMessage.text = '规划请求未返回可用方案，已切换为标准执行流程。';
+          planningSubagent.replaceText('规划请求未返回可用方案，已切换为标准执行流程。');
         }
         decisionCard.markProgress();
         decisionCard.stage = 'Reviewing plan';
@@ -218,13 +202,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       });
       _scrollToBottom();
       AgentDeliberationResult<AgentDecisionPlan>? reviewedResult;
-      _ChatMessage? reviewMessage;
       if (planned != null && _activeDecisionRun!.consumeModelRequest()) {
         decisionCard.modelRequests++;
         final reviewSubagent = decisionCard.startSubagent('审查子 Agent');
-        final streamedReviewMessage = _ChatMessage.ai(text: '');
-        reviewMessage = streamedReviewMessage;
-        setState(() => _messages.add(streamedReviewMessage));
+        setState(decisionCard.markProgress);
         _scrollToBottom();
         final reviewSession = AgentStreamClientSession();
         final cancelReview = reviewSession.reset;
@@ -235,14 +216,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             taskContext: routedBody,
             plan: planned,
             session: reviewSession,
-            onText: (text) {
-              if (!mounted || gen != _generation) return;
-              setState(() {
-                streamedReviewMessage.text += text;
-                decisionCard.markProgress();
-              });
-              _scrollToBottom();
-            },
+            onText: (_) {},
             onUpdate: (update) {
               if (!mounted || gen != _generation) return;
               setState(() {
@@ -250,15 +224,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                   kind: update.kind,
                   text: update.content,
                 );
-                if (update.isReasoning) {
-                  streamedReviewMessage.reasoning =
-                      '${streamedReviewMessage.reasoning ?? ''}${update.content}';
-                  streamedReviewMessage.reasoningTokenCount =
-                      LlmService.estimateReasoningTokenCount(
-                        streamedReviewMessage.reasoning!,
-                      );
-                  streamedReviewMessage.hasExactReasoningTokenCount = false;
-                }
                 decisionCard.markProgress();
               });
               _scrollToBottom();
@@ -277,11 +242,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             (subagent) => subagent.name == '审查子 Agent',
           );
           reviewSubagent.finish(error: reviewedResult!.error);
+          reviewSubagent.replaceText(
+            reviewed == null
+                ? '审查未返回可用结论，将采用初步方案继续执行。'
+                : AgentDecisionTranscript.recommendation(reviewed),
+          );
           decisionCard.recordUsage(reviewedResult.usage);
           decisionCard.markProgress();
-          reviewMessage?.text = reviewed == null
-              ? '审查未返回可用结论，将采用初步方案继续执行。'
-              : AgentDecisionTranscript.recommendation(reviewed);
         });
         _scrollToBottom();
       }
@@ -302,13 +269,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           (candidate) => candidate.id == plan.recommendedId,
         );
         setState(() {
-          if (reviewMessage == null) {
-            _messages.add(
-              _ChatMessage.ai(
-                text: AgentDecisionTranscript.recommendation(plan),
-              ),
-            );
-          }
           decisionCard.stage = 'Executing recommendation';
           decisionCard.summary = 'Recommended: ${recommended.summary}';
           decisionCard.detail =
