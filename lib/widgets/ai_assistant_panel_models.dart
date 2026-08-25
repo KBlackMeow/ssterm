@@ -357,12 +357,10 @@ class _DecisionSubagentData {
       _DecisionSubagentState.waitingForFirstChunk =>
         silentFor >= 15 ? '未收到首包 ${silentFor}s' : '等待首包 ${elapsed}s',
       _DecisionSubagentState.receiving =>
-        silentFor >= 15
-            ? '已 ${silentFor}s 未收到数据 · $receivedCharacters 字符'
-            : '接收中 · 推理 $receivedReasoningCharacters · 正文 $receivedTextCharacters 字符',
-      _DecisionSubagentState.completed => '完成 · $receivedCharacters 字符',
+        silentFor >= 15 ? '已 ${silentFor}s 未收到数据' : '接收中',
+      _DecisionSubagentState.completed => '完成',
       _DecisionSubagentState.failed => '失败：${error ?? '流请求异常'}',
-      _DecisionSubagentState.cancelled => '已取消 · $receivedCharacters 字符',
+      _DecisionSubagentState.cancelled => '已取消',
     };
   }
 }
