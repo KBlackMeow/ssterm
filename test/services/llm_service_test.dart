@@ -48,6 +48,25 @@ void main() {
       expect(usage.reasoningTokenCount, 40);
     });
 
+    test('reads usage from complete provider response bodies', () {
+      final openAi = ProviderTokenUsage.fromOpenAi({
+        'usage': {'prompt_tokens': 300, 'completion_tokens': 40},
+      });
+      final anthropic = ProviderTokenUsage.fromAnthropic({
+        'usage': {'input_tokens': 200, 'output_tokens': 30},
+      });
+      final gemini = ProviderTokenUsage.fromGemini({
+        'usageMetadata': {'promptTokenCount': 100, 'candidatesTokenCount': 20},
+      });
+
+      expect(openAi.promptTokenCount, 300);
+      expect(openAi.completionTokenCount, 40);
+      expect(anthropic.promptTokenCount, 200);
+      expect(anthropic.completionTokenCount, 30);
+      expect(gemini.promptTokenCount, 100);
+      expect(gemini.completionTokenCount, 20);
+    });
+
     test('drops invalid provider token counts', () {
       final usage = ProviderTokenUsage.fromOpenAi({
         'prompt_tokens': -1,
@@ -1744,35 +1763,38 @@ Done.
       expect(ProviderConfig.ollama().maxOutputTokensFor('local'), 32768);
     });
 
-    test('reload keeps user-configured token limits and backfills defaults', () {
-      final config = AgentConfig.fromJson({
-        'providers': [
-          {
-            'id': 'deepseek',
-            'models': ['deepseek-v4-pro', 'my-deepseek-model'],
-            'modelContextWindows': {
-              'deepseek-v4-pro': 128000,
-              'my-deepseek-model': 64000,
+    test(
+      'reload keeps user-configured token limits and backfills defaults',
+      () {
+        final config = AgentConfig.fromJson({
+          'providers': [
+            {
+              'id': 'deepseek',
+              'models': ['deepseek-v4-pro', 'my-deepseek-model'],
+              'modelContextWindows': {
+                'deepseek-v4-pro': 128000,
+                'my-deepseek-model': 64000,
+              },
+              'modelMaxOutputTokens': {
+                'deepseek-v4-pro': 4096,
+                'my-deepseek-model': 8192,
+              },
             },
-            'modelMaxOutputTokens': {
-              'deepseek-v4-pro': 4096,
-              'my-deepseek-model': 8192,
-            },
-          },
-        ],
-      });
-      final deepseek = config.providers.firstWhere(
-        (provider) => provider.id == 'deepseek',
-      );
-      // An explicit override of a built-in model must survive a restart —
-      // silently reverting it would lose a value the user set in the UI.
-      expect(deepseek.modelContextWindows['deepseek-v4-pro'], 128000);
-      expect(deepseek.modelContextWindows['deepseek-v4-flash'], 1000000);
-      expect(deepseek.modelContextWindows['my-deepseek-model'], 64000);
-      expect(deepseek.modelMaxOutputTokens['deepseek-v4-pro'], 4096);
-      expect(deepseek.modelMaxOutputTokens['deepseek-v4-flash'], 32768);
-      expect(deepseek.modelMaxOutputTokens['my-deepseek-model'], 8192);
-    });
+          ],
+        });
+        final deepseek = config.providers.firstWhere(
+          (provider) => provider.id == 'deepseek',
+        );
+        // An explicit override of a built-in model must survive a restart —
+        // silently reverting it would lose a value the user set in the UI.
+        expect(deepseek.modelContextWindows['deepseek-v4-pro'], 128000);
+        expect(deepseek.modelContextWindows['deepseek-v4-flash'], 1000000);
+        expect(deepseek.modelContextWindows['my-deepseek-model'], 64000);
+        expect(deepseek.modelMaxOutputTokens['deepseek-v4-pro'], 4096);
+        expect(deepseek.modelMaxOutputTokens['deepseek-v4-flash'], 32768);
+        expect(deepseek.modelMaxOutputTokens['my-deepseek-model'], 8192);
+      },
+    );
 
     test(
       'reloading a saved configuration promotes defaults and keeps custom models',

@@ -108,7 +108,8 @@ class ProviderTokenUsage {
       reasoningTokenCount == null;
 
   factory ProviderTokenUsage.fromOpenAi(Object? value) {
-    final usage = _usageMap(value);
+    final root = _usageMap(value);
+    final usage = _usageMap(root?['usage']) ?? root;
     return ProviderTokenUsage(
       promptTokenCount: _nonNegativeInt(usage?['prompt_tokens']),
       completionTokenCount: _nonNegativeInt(usage?['completion_tokens']),
@@ -119,7 +120,8 @@ class ProviderTokenUsage {
   }
 
   factory ProviderTokenUsage.fromAnthropic(Object? value) {
-    final usage = _usageMap(value);
+    final root = _usageMap(value);
+    final usage = _usageMap(root?['usage']) ?? root;
     final inputTokens = _nonNegativeInt(usage?['input_tokens']);
     final cacheCreationTokens = _nonNegativeInt(
       usage?['cache_creation_input_tokens'],
@@ -139,7 +141,8 @@ class ProviderTokenUsage {
   }
 
   factory ProviderTokenUsage.fromGemini(Object? value) {
-    final usage = _usageMap(value);
+    final root = _usageMap(value);
+    final usage = _usageMap(root?['usageMetadata']) ?? root;
     return ProviderTokenUsage(
       promptTokenCount: _nonNegativeInt(usage?['promptTokenCount']),
       completionTokenCount: _nonNegativeInt(usage?['candidatesTokenCount']),
