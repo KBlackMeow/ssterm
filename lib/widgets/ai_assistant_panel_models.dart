@@ -261,6 +261,19 @@ class _DecisionCardData {
   bool isStalled = false;
   bool isRunning = true;
   DateTime lastProgressAt = DateTime.now();
+  final subagents = <_DecisionSubagentData>[];
+
+  _DecisionSubagentData startSubagent(String name) {
+    final subagent = _DecisionSubagentData(name: name);
+    subagents.add(subagent);
+    return subagent;
+  }
+
+  void cancelActiveSubagents() {
+    for (final subagent in subagents) {
+      if (subagent.isActive) subagent.cancel();
+    }
+  }
 
   void recordUsage(ProviderTokenUsage usage) {
     if (usage.promptTokenCount != null) {
@@ -275,6 +288,64 @@ class _DecisionCardData {
   void markProgress() {
     lastProgressAt = DateTime.now();
     isStalled = false;
+  }
+}
+
+enum _DecisionSubagentState {
+  waitingForFirstChunk,
+  receiving,
+  completed,
+  failed,
+  cancelled,
+}
+
+class _DecisionSubagentData {
+  _DecisionSubagentData({required this.name});
+
+  final String name;
+  final DateTime startedAt = DateTime.now();
+  DateTime? lastChunkAt;
+  int receivedCharacters = 0;
+  _DecisionSubagentState state = _DecisionSubagentState.waitingForFirstChunk;
+  String? error;
+
+  bool get isActive =>
+      state == _DecisionSubagentState.waitingForFirstChunk ||
+      state == _DecisionSubagentState.receiving;
+
+  void recordChunk(String text) {
+    if (!isActive || text.isEmpty) return;
+    receivedCharacters += text.length;
+    lastChunkAt = DateTime.now();
+    state = _DecisionSubagentState.receiving;
+  }
+
+  void finish({String? error}) {
+    if (!isActive) return;
+    this.error = error;
+    state = error == null
+        ? _DecisionSubagentState.completed
+        : _DecisionSubagentState.failed;
+  }
+
+  void cancel() {
+    if (isActive) state = _DecisionSubagentState.cancelled;
+  }
+
+  String statusAt(DateTime now) {
+    final elapsed = now.difference(startedAt).inSeconds;
+    final silentFor = now.difference(lastChunkAt ?? startedAt).inSeconds;
+    return switch (state) {
+      _DecisionSubagentState.waitingForFirstChunk =>
+        silentFor >= 15 ? '未收到首包 ${silentFor}s' : '等待首包 ${elapsed}s',
+      _DecisionSubagentState.receiving =>
+        silentFor >= 15
+            ? '已 ${silentFor}s 未收到数据 · $receivedCharacters 字符'
+            : '接收中 · $receivedCharacters 字符',
+      _DecisionSubagentState.completed => '完成 · $receivedCharacters 字符',
+      _DecisionSubagentState.failed => '失败：${error ?? '流请求异常'}',
+      _DecisionSubagentState.cancelled => '已取消 · $receivedCharacters 字符',
+    };
   }
 }
 

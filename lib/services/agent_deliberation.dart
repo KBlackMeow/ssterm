@@ -29,10 +29,15 @@ class AgentVerificationVerdict {
 }
 
 class AgentDeliberationResult<T> {
-  const AgentDeliberationResult({required this.value, required this.usage});
+  const AgentDeliberationResult({
+    required this.value,
+    required this.usage,
+    this.error,
+  });
 
   final T? value;
   final ProviderTokenUsage usage;
+  final String? error;
 }
 
 /// Isolated model calls used to plan and critique a complex task. These calls
@@ -155,10 +160,11 @@ cost, and maintenance.''';
         profile: request.profile,
       );
       return await collectPlanStream(response.stream, onText);
-    } catch (_) {
+    } catch (error) {
       return const AgentDeliberationResult(
         value: null,
         usage: ProviderTokenUsage(),
+        error: 'Unable to start deliberation stream.',
       );
     }
   }
@@ -183,21 +189,28 @@ cost, and maintenance.''';
               event.completionTokenCount ?? completionTokenCount;
         }
       }
-    } catch (_) {
+    } catch (error) {
       return AgentDeliberationResult(
         value: null,
         usage: ProviderTokenUsage(
           promptTokenCount: promptTokenCount,
           completionTokenCount: completionTokenCount,
         ),
+        error: error.toString(),
       );
     }
+    final plan = parsePlan(buffer.toString());
     return AgentDeliberationResult(
-      value: parsePlan(buffer.toString()),
+      value: plan,
       usage: ProviderTokenUsage(
         promptTokenCount: promptTokenCount,
         completionTokenCount: completionTokenCount,
       ),
+      error: buffer.isEmpty
+          ? 'The stream ended without text.'
+          : plan == null
+          ? 'The stream returned an invalid decision response.'
+          : null,
     );
   }
 

@@ -153,6 +153,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       });
       _scrollToBottom();
       decisionCard.modelRequests++;
+      final planningSubagent = decisionCard.startSubagent('规划子 Agent');
       AgentDeliberationResult<AgentDecisionPlan>? plannedResult;
       final planningSession = AgentStreamClientSession();
       final cancelPlanning = planningSession.reset;
@@ -167,6 +168,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                   if (!mounted || gen != _generation) return;
                   setState(() {
                     planningMessage.text += text;
+                    planningSubagent.recordChunk(text);
                     decisionCard.markProgress();
                   });
                   _scrollToBottom();
@@ -180,6 +182,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       final planned = plannedResult?.value;
       if (!mounted || gen != _generation) return;
       setState(() {
+        planningSubagent.finish(error: plannedResult?.error);
         if (plannedResult != null) {
           decisionCard.recordUsage(plannedResult.usage);
         }
@@ -199,6 +202,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       _ChatMessage? reviewMessage;
       if (planned != null && _activeDecisionRun!.consumeModelRequest()) {
         decisionCard.modelRequests++;
+        final reviewSubagent = decisionCard.startSubagent('审查子 Agent');
         final streamedReviewMessage = _ChatMessage.ai(text: '');
         reviewMessage = streamedReviewMessage;
         setState(() => _messages.add(streamedReviewMessage));
@@ -216,6 +220,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               if (!mounted || gen != _generation) return;
               setState(() {
                 streamedReviewMessage.text += text;
+                reviewSubagent.recordChunk(text);
                 decisionCard.markProgress();
               });
               _scrollToBottom();
@@ -230,6 +235,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (!mounted || gen != _generation) return;
       if (reviewedResult != null) {
         setState(() {
+          final reviewSubagent = decisionCard.subagents.lastWhere(
+            (subagent) => subagent.name == '审查子 Agent',
+          );
+          reviewSubagent.finish(error: reviewedResult!.error);
           decisionCard.recordUsage(reviewedResult!.usage);
           decisionCard.markProgress();
           reviewMessage?.text = reviewed == null

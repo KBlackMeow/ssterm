@@ -88,6 +88,26 @@ void main() {
     );
   });
 
+  test('decision card exposes subagent first-chunk and stall state', () {
+    final models = File(
+      'lib/widgets/ai_assistant_panel_models.dart',
+    ).readAsStringSync();
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+
+    expect(models, contains('waitingForFirstChunk'));
+    expect(models, contains('未收到首包'));
+    expect(models, contains(r'已 ${silentFor}s 未收到数据'));
+    expect(content, contains('subagent.statusAt(DateTime.now())'));
+    expect(loop, contains("startSubagent('规划子 Agent')"));
+    expect(loop, contains("startSubagent('审查子 Agent')"));
+    expect(loop, contains('recordChunk(text)'));
+  });
+
   test(
     'agent loop bounds model and shell work with a visible terminal event',
     () {

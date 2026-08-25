@@ -1002,6 +1002,17 @@ class _DecisionCard extends StatelessWidget {
               style: TextStyle(color: dim, fontSize: 11, height: 1.35),
             ),
           ],
+          if (data.subagents.isNotEmpty) ...[
+            const SizedBox(height: 7),
+            for (final subagent in data.subagents)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
+                  style: TextStyle(color: dim, fontSize: 10.5),
+                ),
+              ),
+          ],
           const SizedBox(height: 7),
           Row(
             children: [

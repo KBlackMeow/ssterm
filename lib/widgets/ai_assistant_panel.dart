@@ -415,6 +415,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
     setState(() {
+      _activeDecisionCard?.cancelActiveSubagents();
+      _activeDecisionCard?.isRunning = false;
       _agentBusy = false;
       _agentLoopStatus = null;
       // A pending ask_user_question card's `await` would otherwise
