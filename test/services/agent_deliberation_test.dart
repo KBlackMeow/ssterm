@@ -1,8 +1,29 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/agent_deliberation.dart';
+import 'package:ssterm/services/agent_decision_policy.dart';
 import 'package:ssterm/services/llm_service.dart';
 
 void main() {
+  test('router request classifies execution mode and accepts fenced JSON', () {
+    final request = AgentDeliberation.routeRequest('Assess the change.');
+
+    expect(request.profile.allowedNativeToolNames, isEmpty);
+    expect(request.profile.systemPromptOverride, contains('solution workflow'));
+    expect(
+      AgentDeliberation.parseRoute('''```json
+{"route":"deep","confidence":0.86,"signals":["rollback_required"]}
+```''')?.route,
+      AgentDecisionRoute.deep,
+    );
+    expect(
+      AgentDeliberation.parseRoute(
+        '{"route":"fast","confidence":0.7,"signals":[]}',
+      )?.confidence,
+      0.7,
+    );
+    expect(AgentDeliberation.parseRoute('{"route":"uncertain"}'), isNull);
+  });
+
   test('planner request is tool-free and asks for comparable candidates', () {
     final request = AgentDeliberation.planRequest('Compare deployment paths.');
 

@@ -16,6 +16,19 @@ class AgentDeliberationRequest {
   final List<AgentConversationItem> messages;
 }
 
+/// The outcome of the lightweight, tool-free routing call.
+class AgentRouteDecision {
+  const AgentRouteDecision({
+    required this.route,
+    required this.confidence,
+    required this.signals,
+  });
+
+  final AgentDecisionRoute route;
+  final double confidence;
+  final List<String> signals;
+}
+
 class AgentVerificationVerdict {
   const AgentVerificationVerdict({
     required this.complete,
@@ -56,6 +69,20 @@ class AgentDeliberationStreamUpdate {
 /// Isolated model calls used to plan and critique a complex task. These calls
 /// deliberately advertise no tools, so their output cannot directly act.
 abstract final class AgentDeliberation {
+  static const _routerPrompt = '''You are a conservative task router. You
+cannot use tools or authorize changes. Return exactly one JSON object:
+`{"route":"fast"|"deep","confidence":0.0-1.0,"signals":["..."]}`.
+
+Choose `fast` when one direct tool operation or a clear, single-path change
+will fulfill the request. Choose `deep` when the agent must first create and
+execute a solution workflow: identify unknowns, compare material options, make
+architecture or operational tradeoffs, manage high-impact risk, or coordinate
+dependent steps and validation. Do not require the user to say "deep". Be
+conservative, but do not discard a genuinely complex problem merely because it
+does not use planning keywords. Signals must be short, concrete evidence from
+the request (for example `multiple_options`, `rollback_required`, or
+`cross_service_dependencies`).''';
+
   static const _plannerPrompt = '''You are a planning reviewer. You cannot use
 tools or authorize changes. Return one JSON object only with `recommendedId`
 and `candidates`. Provide 2 or 3 candidates; every candidate needs `id`,
@@ -73,6 +100,92 @@ cost, and maintenance.''';
           AgentConversationItem.text(role: 'user', content: taskContext),
         ],
       );
+
+  static AgentDeliberationRequest routeRequest(String taskContext) =>
+      AgentDeliberationRequest(
+        profile: const AgentRequestProfile(
+          systemPromptOverride: _routerPrompt,
+          allowedNativeToolNames: {},
+        ),
+        messages: [
+          AgentConversationItem.text(role: 'user', content: taskContext),
+        ],
+      );
+
+  static AgentRouteDecision? parseRoute(String response) {
+    try {
+      final value = jsonDecode(_extractJsonObject(response));
+      if (value is! Map || value['route'] is! String) return null;
+      final route = switch (value['route']) {
+        'fast' => AgentDecisionRoute.fast,
+        'deep' => AgentDecisionRoute.deep,
+        _ => null,
+      };
+      if (route == null) return null;
+      final rawConfidence = value['confidence'];
+      final confidence = rawConfidence is num
+          ? rawConfidence.toDouble().clamp(0.0, 1.0)
+          : 0.5;
+      final rawSignals = value['signals'];
+      final signals = rawSignals is List
+          ? rawSignals
+                .whereType<String>()
+                .map((signal) => signal.trim())
+                .where((signal) => signal.isNotEmpty)
+                .take(3)
+                .toList(growable: false)
+          : const <String>[];
+      return AgentRouteDecision(
+        route: route,
+        confidence: confidence,
+        signals: signals,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Model providers often wrap an otherwise valid routing payload in a JSON
+  /// fence or a brief sentence. Accept the object instead of silently routing
+  /// the task to fast execution.
+  static String _extractJsonObject(String response) {
+    final trimmed = response.trim();
+    final fenced = RegExp(
+      r'```(?:json)?\s*([\s\S]*?)\s*```',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (fenced != null) return fenced.group(1)!.trim();
+    final start = trimmed.indexOf('{');
+    final end = trimmed.lastIndexOf('}');
+    return start >= 0 && end > start
+        ? trimmed.substring(start, end + 1)
+        : trimmed;
+  }
+
+  /// Invalid or failed routing is deliberately treated as fast by the caller,
+  /// avoiding surprise planning work or extra cost.
+  static Future<AgentDeliberationResult<AgentRouteDecision>> route({
+    required AgentConfig config,
+    required String taskContext,
+  }) async {
+    final request = routeRequest(taskContext);
+    final response = await LlmService.chat(
+      config: config,
+      messages: request.messages,
+      profile: request.profile,
+    );
+    return AgentDeliberationResult(
+      value: response.error != null || response.toolCalls.isNotEmpty
+          ? null
+          : parseRoute(response.text),
+      usage: response.usage,
+      error:
+          response.error ??
+          (response.toolCalls.isEmpty && parseRoute(response.text) == null
+              ? 'The routing response was invalid.'
+              : null),
+    );
+  }
 
   static AgentDeliberationRequest critiqueRequest({
     required String taskContext,

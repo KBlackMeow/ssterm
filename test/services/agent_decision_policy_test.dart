@@ -12,20 +12,30 @@ void main() {
       );
     });
 
-    test('routes explicit alternatives and recommendations to deep work', () {
+    test('routes explicit depth requests directly to deep work', () {
       expect(
         AgentDecisionPolicy.classify(
-          'Compare two deployment approaches and recommend the safest.',
+          'Compare two deployment approaches with deep analysis.',
           enabled,
         ),
         AgentDecisionRoute.deep,
       );
     });
 
-    test('returns fast when adaptive decisions are disabled', () {
+    test('leaves broad task signals for the routing Agent', () {
       expect(
         AgentDecisionPolicy.classify(
           'Compare two deployment approaches and recommend the safest.',
+          enabled,
+        ),
+        AgentDecisionRoute.uncertain,
+      );
+    });
+
+    test('returns fast when adaptive decisions are disabled', () {
+      expect(
+        AgentDecisionPolicy.classify(
+          'Compare two deployment approaches with deep analysis.',
           const AgentDecisionSettings(enabled: false),
         ),
         AgentDecisionRoute.fast,

@@ -482,7 +482,7 @@ extension _AgentSettingsExt on _SettingsPageState {
               style: TextStyle(color: _kFg, fontSize: 13),
             ),
             subtitle: const Text(
-              'For complex tasks, uses separate planning and critique calls before execution. Simple tasks remain fast.',
+              'Explicit deep-analysis requests plan immediately; other tasks are conservatively classified by a tool-free routing Agent before execution.',
               style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
             ),
             value: settings.enabled,
@@ -995,7 +995,9 @@ extension _AgentSettingsExt on _SettingsPageState {
           maxOutputTokens: provider.modelMaxOutputTokens[model],
           onSave: (contextWindow, maxOutput) {
             final windows = Map<String, int>.of(provider.modelContextWindows);
-            final maxOutputs = Map<String, int>.of(provider.modelMaxOutputTokens);
+            final maxOutputs = Map<String, int>.of(
+              provider.modelMaxOutputTokens,
+            );
             if (contextWindow == null) {
               windows.remove(model);
             } else {

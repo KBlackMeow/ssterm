@@ -196,25 +196,27 @@ class AgentDecisionPlan {
 }
 
 abstract final class AgentDecisionPolicy {
-  static const _deepSignals = <String>[
-    'compare',
-    'recommend',
-    'alternative',
-    'migration',
-    'deployment',
-    'deploy',
-    'architecture',
-    'risk',
-    'cost',
-    'recover',
-    'failure',
-    '比较',
-    '推荐',
-    '方案',
-    '风险',
-    '成本',
-    '故障',
+  /// These are deliberate depth *requests*, not task-topic signals. A
+  /// deployment or comparison can be routine, so it must not bypass routing.
+  static const _explicitDeepKeywords = <String>[
+    'deep analysis',
+    'deeply analyze',
+    'think deeply',
+    'in-depth',
+    'thorough analysis',
+    '深入分析',
+    '深度分析',
+    '深思熟虑',
+    '全面推演',
   ];
+
+  /// Obvious one-step lookups do not need a model round-trip to establish
+  /// their complexity. Everything else that is not explicitly deep is left to
+  /// the routing Agent.
+  static final _directRequest = RegExp(
+    r'^(show|list|print|display|what is|where is|pwd\b|显示|列出|查看|当前目录)',
+    caseSensitive: false,
+  );
 
   static AgentDecisionRoute classify(
     String task,
@@ -224,8 +226,13 @@ abstract final class AgentDecisionPolicy {
       return AgentDecisionRoute.fast;
     }
     final normalized = task.toLowerCase();
-    if (_deepSignals.any(normalized.contains)) return AgentDecisionRoute.deep;
-    return AgentDecisionRoute.fast;
+    if (_explicitDeepKeywords.any(normalized.contains)) {
+      return AgentDecisionRoute.deep;
+    }
+    if (_directRequest.hasMatch(normalized.trim())) {
+      return AgentDecisionRoute.fast;
+    }
+    return AgentDecisionRoute.uncertain;
   }
 
   static String guideFor(AgentDecisionRoute route) => switch (route) {

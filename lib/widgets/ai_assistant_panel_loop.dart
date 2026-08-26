@@ -113,7 +113,40 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final decisionSettings = providerId == null || model == null
         ? const AgentDecisionSettings(enabled: false)
         : config.decisionSettingsFor(providerId, model);
-    final route = AgentDecisionPolicy.classify(userText, decisionSettings);
+    var route = AgentDecisionPolicy.classify(userText, decisionSettings);
+    if (route == AgentDecisionRoute.uncertain) {
+      // Broad task semantics do not decide this path. A constrained, tool-free
+      // router chooses direct execution or a solution workflow.
+      final routed = await AgentDeliberation.route(
+        config: config,
+        taskContext: body,
+      );
+      if (!mounted || gen != _generation) return;
+      final decision = routed.value;
+      route = decision?.route ?? AgentDecisionRoute.fast;
+      setState(() {
+        if (decision == null) {
+          _messages.add(
+            _ChatMessage.notice(
+              'Task routing: **fallback to direct execution** — ${routed.error ?? 'no usable routing decision'}.',
+            ),
+          );
+        } else {
+          final mode = decision.route == AgentDecisionRoute.deep
+              ? 'solution workflow'
+              : 'direct execution';
+          final evidence = decision.signals.isEmpty
+              ? ''
+              : ' · ${decision.signals.join(', ')}';
+          _messages.add(
+            _ChatMessage.notice(
+              'Task routing: **$mode** · confidence ${(decision.confidence * 100).round()}%$evidence',
+            ),
+          );
+        }
+      });
+      _scrollToBottom();
+    }
     final routedBody = route == AgentDecisionRoute.fast
         ? body
         : '$body\n\n<agent_route>${AgentDecisionPolicy.guideFor(route)}</agent_route>';
@@ -124,7 +157,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       final decisionCard = _DecisionCardData(
         stage: 'Planning options',
         detail:
-            'Deep route selected; evaluating alternatives before execution.',
+            'Solution workflow selected; evaluating alternatives before execution.',
       );
       _activeDecisionCard = decisionCard;
       setState(() {
