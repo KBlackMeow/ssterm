@@ -9,7 +9,6 @@ abstract final class AgentDecisionTranscript {
     '已完成方案梳理：',
     for (final candidate in plan.candidates)
       '- 方案 ${candidate.id}：${candidate.summary}\n'
-          '  适用性：${candidate.fit}\n'
           '  风险：${candidate.risk}',
   ].join('\n');
 

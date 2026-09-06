@@ -12,11 +12,7 @@ enum TransferType { upload, download }
 enum TransferStatus { running, paused, done, cancelled, error }
 
 class TransferTask extends ChangeNotifier {
-  TransferTask._({
-    required this.name,
-    required this.type,
-    required this.total,
-  });
+  TransferTask._({required this.name, required this.type, required this.total});
 
   final String name;
   final TransferType type;
@@ -25,7 +21,8 @@ class TransferTask extends ChangeNotifier {
   TransferStatus status = TransferStatus.running;
   String? error;
 
-  SftpFileWriter? _writer;
+  Future<void> Function()? _abortUpload;
+  Completer<void>? _uploadResumeGate;
   // Used only by isolated downloads for cancellation.
   Isolate? _downloadIsolate;
   ReceivePort? _downloadReceivePort;
@@ -41,21 +38,25 @@ class TransferTask extends ChangeNotifier {
 
   void pause() {
     if (status != TransferStatus.running) return;
-    _writer?.pause();
+    // SftpFileWriter resumes its own source subscription after every ACK.
+    // Pausing that subscription directly is therefore overwritten by the
+    // writer while an upload is in flight. Gate the source stream instead.
+    _uploadResumeGate ??= Completer<void>();
     status = TransferStatus.paused;
     notifyListeners();
   }
 
   void resume() {
     if (status != TransferStatus.paused) return;
-    _writer?.resume();
     status = TransferStatus.running;
+    _releaseUploadGate();
     notifyListeners();
   }
 
   Future<void> cancel() async {
     if (!isActive) return;
-    await _writer?.abort();
+    _releaseUploadGate();
+    await _abortUpload?.call();
     _downloadIsolate?.kill(priority: Isolate.immediate);
     _downloadIsolate = null;
     _downloadReceivePort?.close();
@@ -92,23 +93,40 @@ class TransferTask extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    // Only abort active transfers — the writer's completer may already
-    // be completed (by _complete / _fail), and dartssh2's abort()
-    // unconditionally calls _doneCompleter.complete().
     if (isActive) {
-      unawaited(_writer?.abort());
+      _releaseUploadGate();
+      unawaited(_abortUpload?.call());
     }
-    _writer = null;
+    _abortUpload = null;
     _downloadIsolate?.kill(priority: Isolate.immediate);
     _downloadIsolate = null;
     _downloadReceivePort?.close();
     _downloadReceivePort = null;
     super.dispose();
   }
+
+  Future<bool> _waitForUploadResume() async {
+    while (status == TransferStatus.paused) {
+      final gate = _uploadResumeGate ??= Completer<void>();
+      await gate.future;
+    }
+    return status == TransferStatus.running;
+  }
+
+  void _releaseUploadGate() {
+    final gate = _uploadResumeGate;
+    _uploadResumeGate = null;
+    if (gate != null && !gate.isCompleted) gate.complete();
+  }
 }
 
 class TransferManager extends ChangeNotifier {
   TransferManager({this.sshProfile});
+
+  // Keep only one SFTP WRITE request in flight. Some embedded and managed
+  // SFTP servers report the unhelpful status code 4 when concurrent writes
+  // target the same handle, despite accepting normal sequential writes.
+  static const _uploadWriteChunkSize = 16 * 1024;
 
   /// SSH credentials used to open a dedicated download connection in an
   /// isolate, keeping the main isolate free for Flutter rendering.
@@ -130,7 +148,11 @@ class TransferManager extends ChangeNotifier {
     final total = await localFile.length();
     final name = localPath.split(Platform.pathSeparator).last;
 
-    final task = TransferTask._(name: name, type: TransferType.upload, total: total);
+    final task = TransferTask._(
+      name: name,
+      type: TransferType.upload,
+      total: total,
+    );
     _tasks.insert(0, task);
     notifyListeners();
 
@@ -148,14 +170,20 @@ class TransferManager extends ChangeNotifier {
   }) async {
     final profile = sshProfile;
     if (profile == null) {
-      throw StateError('TransferManager has no sshProfile; cannot start isolated download');
+      throw StateError(
+        'TransferManager has no sshProfile; cannot start isolated download',
+      );
     }
 
     final attr = await sftp.stat(remotePath);
     final total = attr.size ?? 0;
     final name = remotePath.split('/').last;
 
-    final task = TransferTask._(name: name, type: TransferType.download, total: total);
+    final task = TransferTask._(
+      name: name,
+      type: TransferType.download,
+      total: total,
+    );
     _tasks.insert(0, task);
     notifyListeners();
 
@@ -184,22 +212,69 @@ class TransferManager extends ChangeNotifier {
     File localFile,
     String remotePath,
   ) async {
+    SftpFile? remoteFile;
+    var remoteFileClosed = false;
+
+    Future<void> closeRemoteFile() async {
+      if (remoteFileClosed || remoteFile == null) return;
+      remoteFileClosed = true;
+      await remoteFile.close();
+    }
+
     try {
-      final remoteFile = await sftp.open(
+      remoteFile = await sftp.open(
         remotePath,
-        mode: SftpFileOpenMode.write |
+        mode:
+            SftpFileOpenMode.write |
             SftpFileOpenMode.create |
             SftpFileOpenMode.truncate,
       );
-      final stream = localFile.openRead().map(Uint8List.fromList);
-      final writer = remoteFile.write(stream, onProgress: task._onProgress);
-      task._writer = writer;
-      await writer.done;
-      await remoteFile.close();
+      if (!task.isActive) {
+        await closeRemoteFile();
+        return;
+      }
+
+      // SftpFileWriter runs asynchronous listener callbacks without awaiting
+      // their failures. A server-side write error then escapes as an uncaught
+      // exception. Write each local block here instead so errors are caught by
+      // this task, and so the pause gate is checked before every block.
+      task._abortUpload = closeRemoteFile;
+      var written = 0;
+      await for (final chunk in localFile.openRead()) {
+        if (!await task._waitForUploadResume()) return;
+        final data = Uint8List.fromList(chunk);
+        for (var offset = 0; offset < data.length;) {
+          if (!await task._waitForUploadResume()) return;
+          final end = offset + _uploadWriteChunkSize <= data.length
+              ? offset + _uploadWriteChunkSize
+              : data.length;
+          final block = Uint8List.sublistView(data, offset, end);
+          await remoteFile.writeBytes(block, offset: written);
+          written += block.length;
+          offset = end;
+          task._onProgress(written);
+        }
+      }
       task._complete();
     } catch (e) {
-      task._fail(e);
+      task._fail(_uploadErrorMessage(e, remotePath));
+    } finally {
+      task._abortUpload = null;
+      try {
+        await closeRemoteFile();
+      } catch (_) {
+        // Preserve the write failure (if any) as the task's error.
+      }
     }
+  }
+
+  String _uploadErrorMessage(Object error, String remotePath) {
+    if (error is SftpStatusError && error.code == 4) {
+      return 'The server rejected a write to "$remotePath" (SFTP code 4). '
+          'Check that the directory and existing file are writable, and that '
+          'the account has available disk space and quota.';
+    }
+    return error.toString();
   }
 
   Future<void> _runIsolatedDownload(

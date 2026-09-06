@@ -12,6 +12,7 @@ typedef _AgentStreamResult = ({
   int malformedEventCount,
   int? promptTokenCount,
   int? completionTokenCount,
+  int? reasoningTokenCount,
 });
 
 /// Streaming and tool-approval implementation used by the agent loop.
@@ -299,6 +300,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       malformedEventCount: malformedEventCount,
       promptTokenCount: promptTokenCount,
       completionTokenCount: completionTokenCount,
+      reasoningTokenCount: exactReasoningTokenCount,
     );
   }
 

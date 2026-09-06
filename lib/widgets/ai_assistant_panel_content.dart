@@ -1039,7 +1039,8 @@ class _DecisionCard extends StatelessWidget {
           Row(
             children: [
               Text(
-                '${data.elapsedSeconds}s · ${data.modelRequests} model calls',
+                '${data.elapsedSeconds}s · ${data.modelRequests} calls '
+                '(decision ${data.decisionRequests}, execution ${data.executionRequests})',
                 style: TextStyle(color: dim, fontSize: 10.5),
               ),
               const Spacer(),
@@ -1050,7 +1051,8 @@ class _DecisionCard extends StatelessWidget {
           Text(
             data.promptTokenCount == null && data.completionTokenCount == null
                 ? 'Token data unavailable'
-                : 'Tokens: in ${data.promptTokenCount ?? 0} · out ${data.completionTokenCount ?? 0}',
+                : 'Tokens: in ${data.promptTokenCount ?? 0} · out ${data.completionTokenCount ?? 0}'
+                      '${data.reasoningTokenCount == null ? '' : ' · reasoning ${data.reasoningTokenCount}'}',
             style: TextStyle(color: dim, fontSize: 10.5),
           ),
           if (data.isStalled)

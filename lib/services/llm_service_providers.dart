@@ -29,6 +29,8 @@ Future<LlmResponse> _callOpenAiCompatible(
   List<AgentConversationItem> messages,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
@@ -44,10 +46,18 @@ Future<LlmResponse> _callOpenAiCompatible(
         includeReasoningContent: provider.id == 'deepseek',
       ),
     ],
-    'max_tokens': provider.maxOutputTokensFor(model),
+    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
     if (tools.isNotEmpty) 'tool_choice': 'auto',
     if (tools.isNotEmpty) 'parallel_tool_calls': false,
+    if (provider.id == 'deepseek' &&
+        reasoningLevel != null &&
+        reasoningLevel != AgentReasoningLevel.disabled)
+      'thinking': {'type': 'enabled'},
+    if (provider.id == 'deepseek' &&
+        reasoningLevel != null &&
+        reasoningLevel != AgentReasoningLevel.disabled)
+      'reasoning_effort': reasoningLevel.name,
   };
 
   final client = HttpClient();
@@ -119,6 +129,8 @@ Future<LlmResponse> _callAnthropic(
   List<AgentConversationItem> messages,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
@@ -129,11 +141,22 @@ Future<LlmResponse> _callAnthropic(
     'model': model,
     'system': _anthropicSystemBlock(systemPrompt),
     'messages': apiMessages,
-    'max_tokens': provider.maxOutputTokensFor(model),
+    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
     if (tools.isNotEmpty)
       'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
   };
+  final thinkingBudget = switch (reasoningLevel) {
+    AgentReasoningLevel.low => 512,
+    AgentReasoningLevel.medium => 1024,
+    _ => 2048,
+  };
+  if (_anthropicSupportsThinking(model) &&
+      reasoningLevel != null &&
+      reasoningLevel != AgentReasoningLevel.disabled &&
+      (maxOutputTokens == null || maxOutputTokens > thinkingBudget)) {
+    body['thinking'] = {'type': 'enabled', 'budget_tokens': thinkingBudget};
+  }
 
   final client = HttpClient();
   try {
@@ -180,6 +203,7 @@ Future<LlmResponse> _callGemini(
   List<AgentConversationItem> messages,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
 }) async {
   final baseUrl =
       provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -195,7 +219,9 @@ Future<LlmResponse> _callGemini(
       ],
     },
     'contents': contents,
-    'generationConfig': {'maxOutputTokens': provider.maxOutputTokensFor(model)},
+    'generationConfig': {
+      'maxOutputTokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+    },
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
@@ -403,6 +429,8 @@ Stream<LlmStreamEvent> _streamOpenAi(
   HttpClient client,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
@@ -419,7 +447,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
         includeReasoningContent: isDeepSeek || provider.id == 'glm',
       ),
     ],
-    'max_tokens': provider.maxOutputTokensFor(model),
+    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     'stream': true,
     // Chat Completions sends stream usage only when explicitly requested.
     // Limit this extension to our known OpenAI-compatible providers so custom
@@ -439,8 +467,10 @@ Stream<LlmStreamEvent> _streamOpenAi(
     // DeepSeek thinking-mode tool calls require the model's original
     // `reasoning_content` in the following assistant turn. The transcript
     // adapter above preserves that opaque state, and this toggles the mode.
-    if (isDeepSeek) 'thinking': {'type': 'enabled'},
-    if (isDeepSeek) 'reasoning_effort': 'high',
+    if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
+      'thinking': {'type': 'enabled'},
+    if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
+      'reasoning_effort': (reasoningLevel ?? AgentReasoningLevel.high).name,
   };
 
   final request = await client.postUrl(Uri.parse(url));
@@ -492,6 +522,8 @@ Stream<LlmStreamEvent> _streamAnthropic(
   HttpClient client,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
@@ -502,7 +534,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
     'model': model,
     'system': _anthropicSystemBlock(systemPrompt),
     'messages': apiMessages,
-    'max_tokens': provider.maxOutputTokensFor(model),
+    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     'stream': true,
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
     if (tools.isNotEmpty)
@@ -513,8 +545,15 @@ Stream<LlmStreamEvent> _streamAnthropic(
   // or claude-3-opus elicits a 400 "thinking is not supported for this
   // model" — gate the parameter behind a model-name match so the user can
   // freely switch models without hitting that wall.
-  if (_anthropicSupportsThinking(model)) {
-    body['thinking'] = {'type': 'enabled', 'budget_tokens': 2048};
+  final thinkingBudget = switch (reasoningLevel) {
+    AgentReasoningLevel.low => 512,
+    AgentReasoningLevel.medium => 1024,
+    _ => 2048,
+  };
+  if (_anthropicSupportsThinking(model) &&
+      reasoningLevel != AgentReasoningLevel.disabled &&
+      (maxOutputTokens == null || maxOutputTokens > thinkingBudget)) {
+    body['thinking'] = {'type': 'enabled', 'budget_tokens': thinkingBudget};
   }
 
   final request = await client.postUrl(Uri.parse(url));
@@ -638,6 +677,7 @@ Stream<LlmStreamEvent> _streamGemini(
   HttpClient client,
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
+  int? maxOutputTokens,
 }) async* {
   final baseUrl =
       provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -656,7 +696,9 @@ Stream<LlmStreamEvent> _streamGemini(
       ],
     },
     'contents': contents,
-    'generationConfig': {'maxOutputTokens': provider.maxOutputTokensFor(model)},
+    'generationConfig': {
+      'maxOutputTokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+    },
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
 
@@ -754,8 +796,9 @@ Future<LlmResponse> _callOllama(
   ProviderConfig provider,
   String model,
   List<AgentConversationItem> messages,
-  String systemPrompt,
-) async {
+  String systemPrompt, {
+  int? maxOutputTokens,
+}) async {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
 
@@ -770,7 +813,9 @@ Future<LlmResponse> _callOllama(
     'model': model,
     'messages': apiMessages,
     'stream': false,
-    'options': {'num_predict': provider.maxOutputTokensFor(model)},
+    'options': {
+      'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+    },
   };
 
   final client = HttpClient();
@@ -808,8 +853,9 @@ Stream<LlmStreamEvent> _streamOllama(
   String model,
   List<AgentConversationItem> messages,
   HttpClient client,
-  String systemPrompt,
-) async* {
+  String systemPrompt, {
+  int? maxOutputTokens,
+}) async* {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
 
@@ -822,7 +868,9 @@ Stream<LlmStreamEvent> _streamOllama(
     'model': model,
     'messages': apiMessages,
     'stream': true,
-    'options': {'num_predict': provider.maxOutputTokensFor(model)},
+    'options': {
+      'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+    },
   };
 
   final request = await client.postUrl(Uri.parse(url));

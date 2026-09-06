@@ -256,8 +256,11 @@ class _DecisionCardData {
   String? detail;
   int elapsedSeconds = 0;
   int modelRequests = 0;
+  int decisionRequests = 0;
+  int executionRequests = 0;
   int? promptTokenCount;
   int? completionTokenCount;
+  int? reasoningTokenCount;
   bool isStalled = false;
   bool isRunning = true;
   DateTime lastProgressAt = DateTime.now();
@@ -282,6 +285,10 @@ class _DecisionCardData {
     if (usage.completionTokenCount != null) {
       completionTokenCount =
           (completionTokenCount ?? 0) + usage.completionTokenCount!;
+    }
+    if (usage.reasoningTokenCount != null) {
+      reasoningTokenCount =
+          (reasoningTokenCount ?? 0) + usage.reasoningTokenCount!;
     }
   }
 

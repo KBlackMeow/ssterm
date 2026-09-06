@@ -41,6 +41,18 @@ class AgentVerificationVerdict {
   final String? recovery;
 }
 
+class AgentCritiqueVerdict {
+  const AgentCritiqueVerdict({
+    required this.accept,
+    this.issue,
+    this.replacementId,
+  });
+
+  final bool accept;
+  final String? issue;
+  final String? replacementId;
+}
+
 class AgentDeliberationResult<T> {
   const AgentDeliberationResult({
     required this.value,
@@ -70,31 +82,34 @@ class AgentDeliberationStreamUpdate {
 /// deliberately advertise no tools, so their output cannot directly act.
 abstract final class AgentDeliberation {
   static const _routerPrompt = '''You are a conservative task router. You
-cannot use tools or authorize changes. Return exactly one JSON object:
-`{"route":"fast"|"deep","confidence":0.0-1.0,"signals":["..."]}`.
+cannot use tools or authorize changes. Return only minified JSON, with no
+Markdown, prose, or extra keys: `{"route":"direct"}`. The value must be
+exactly `direct`, `standard`, or `deep`.
 
-Choose `fast` when one direct tool operation or a clear, single-path change
-will fulfill the request. Choose `deep` when the agent must first create and
+Choose `direct` for one obvious read-only operation. Choose `standard` for a
+clear single-path change, even when it needs several execution steps. Choose
+`deep` when the agent must first create and
 execute a solution workflow: identify unknowns, compare material options, make
 architecture or operational tradeoffs, manage high-impact risk, or coordinate
 dependent steps and validation. Do not require the user to say "deep". Be
 conservative, but do not discard a genuinely complex problem merely because it
-does not use planning keywords. Signals must be short, concrete evidence from
-the request (for example `multiple_options`, `rollback_required`, or
-`cross_service_dependencies`).''';
+does not use planning keywords.''';
 
-  static const _plannerPrompt = '''You are a planning reviewer. You cannot use
+  static const _plannerPrompt =
+      '''You are a concise planning reviewer. You cannot use
 tools or authorize changes. Return one JSON object only with `recommendedId`
-and `candidates`. Provide 2 or 3 candidates; every candidate needs `id`,
-`summary`, `fit`, `evidence`, `cost`, `maintenance`, `risk`, and `validation`.
+and exactly 2 `candidates`. Every candidate needs only `id`, `summary`,
+`evidence`, `risk`, and `validation`.
 Recommend the candidate that best balances outcome, evidence, reversibility,
-cost, and maintenance.''';
+cost, and maintenance. Keep every string brief.''';
 
   static AgentDeliberationRequest planRequest(String taskContext) =>
       AgentDeliberationRequest(
         profile: const AgentRequestProfile(
           systemPromptOverride: _plannerPrompt,
           allowedNativeToolNames: {},
+          maxOutputTokens: 384,
+          reasoningLevel: AgentReasoningLevel.medium,
         ),
         messages: [
           AgentConversationItem.text(role: 'user', content: taskContext),
@@ -106,6 +121,8 @@ cost, and maintenance.''';
         profile: const AgentRequestProfile(
           systemPromptOverride: _routerPrompt,
           allowedNativeToolNames: {},
+          maxOutputTokens: 96,
+          reasoningLevel: AgentReasoningLevel.disabled,
         ),
         messages: [
           AgentConversationItem.text(role: 'user', content: taskContext),
@@ -113,14 +130,13 @@ cost, and maintenance.''';
       );
 
   static AgentRouteDecision? parseRoute(String response) {
+    final extracted = _extractJsonObject(response);
     try {
-      final value = jsonDecode(_extractJsonObject(response));
-      if (value is! Map || value['route'] is! String) return null;
-      final route = switch (value['route']) {
-        'fast' => AgentDecisionRoute.fast,
-        'deep' => AgentDecisionRoute.deep,
-        _ => null,
-      };
+      final value = jsonDecode(extracted);
+      if (value is! Map) return _parseLooseRoute(response);
+      final route = _routeFromValue(
+        value['route'] ?? value['mode'] ?? value['decision'],
+      );
       if (route == null) return null;
       final rawConfidence = value['confidence'];
       final confidence = rawConfidence is num
@@ -140,14 +156,48 @@ cost, and maintenance.''';
         confidence: confidence,
         signals: signals,
       );
-    } on FormatException {
-      return null;
+    } on Object {
+      return _parseLooseRoute(response);
     }
+  }
+
+  static AgentRouteDecision? _parseLooseRoute(String response) {
+    final normalized = response.trim().toLowerCase();
+    final standalone = _routeFromValue(normalized);
+    if (standalone != null) {
+      return AgentRouteDecision(
+        route: standalone,
+        confidence: 0.5,
+        signals: const [],
+      );
+    }
+    final match = RegExp(
+      r'''(?:route|mode|decision)\W{0,8}(direct|simple|fast|standard|normal|deep|complex|deliberate)\b''',
+      caseSensitive: false,
+    ).firstMatch(response);
+    final route = match == null ? null : _routeFromValue(match.group(1));
+    return route == null
+        ? null
+        : AgentRouteDecision(route: route, confidence: 0.5, signals: const []);
+  }
+
+  static AgentDecisionRoute? _routeFromValue(Object? value) {
+    if (value is! String) return null;
+    return switch (value.trim().toLowerCase().replaceAll(
+      RegExp(r'[_\s-]'),
+      '',
+    )) {
+      'direct' || 'simple' => AgentDecisionRoute.direct,
+      // Accept old router responses during rolling upgrades.
+      'fast' || 'standard' || 'normal' => AgentDecisionRoute.standard,
+      'deep' || 'complex' || 'deliberate' => AgentDecisionRoute.deep,
+      _ => null,
+    };
   }
 
   /// Model providers often wrap an otherwise valid routing payload in a JSON
   /// fence or a brief sentence. Accept the object instead of silently routing
-  /// the task to fast execution.
+  /// the task to standard execution.
   static String _extractJsonObject(String response) {
     final trimmed = response.trim();
     final fenced = RegExp(
@@ -174,16 +224,30 @@ cost, and maintenance.''';
       messages: request.messages,
       profile: request.profile,
     );
+    final decision = response.error != null || response.toolCalls.isNotEmpty
+        ? null
+        : parseRoute(response.text);
+
+    // Routing only chooses how much deliberation to spend; it must never stop
+    // a valid task because a provider returned empty text or ignored the JSON
+    // format instruction. Standard execution is the safe, no-extra-token
+    // fallback for an unparseable but otherwise successful response.
+    final safeFallback =
+        response.error == null &&
+        response.toolCalls.isEmpty &&
+        decision == null;
     return AgentDeliberationResult(
-      value: response.error != null || response.toolCalls.isNotEmpty
-          ? null
-          : parseRoute(response.text),
-      usage: response.usage,
-      error:
-          response.error ??
-          (response.toolCalls.isEmpty && parseRoute(response.text) == null
-              ? 'The routing response was invalid.'
+      value:
+          decision ??
+          (safeFallback
+              ? const AgentRouteDecision(
+                  route: AgentDecisionRoute.standard,
+                  confidence: 0.5,
+                  signals: [],
+                )
               : null),
+      usage: response.usage,
+      error: response.error,
     );
   }
 
@@ -194,10 +258,13 @@ cost, and maintenance.''';
     profile: const AgentRequestProfile(
       systemPromptOverride:
           'You are an independent critic. You cannot use tools or authorize '
-          'changes. Return one corrected decision-plan JSON object only. '
-          'Keep 2 or 3 candidates, preserve every comparison field, and '
-          'challenge unsupported assumptions.',
+          'changes. Return exactly one compact JSON object with accept '
+          '(boolean), issue (string or null), and replacementId (candidate id '
+          'or null). Do not repeat or rewrite the plan. Challenge only '
+          'material unsupported assumptions.',
       allowedNativeToolNames: {},
+      maxOutputTokens: 256,
+      reasoningLevel: AgentReasoningLevel.medium,
     ),
     messages: [
       AgentConversationItem.text(
@@ -228,7 +295,28 @@ cost, and maintenance.''';
     );
   }
 
-  static Future<AgentDeliberationResult<AgentDecisionPlan>> critique({
+  static AgentCritiqueVerdict? parseCritique(String response) {
+    try {
+      final value = jsonDecode(_extractJsonObject(response));
+      if (value is! Map || value['accept'] is! bool) return null;
+      final issue = value['issue'];
+      final replacementId = value['replacementId'];
+      if (issue != null && issue is! String) return null;
+      if (replacementId != null && replacementId is! String) return null;
+      return AgentCritiqueVerdict(
+        accept: value['accept'] as bool,
+        issue: issue is String && issue.trim().isNotEmpty ? issue.trim() : null,
+        replacementId:
+            replacementId is String && replacementId.trim().isNotEmpty
+            ? replacementId.trim()
+            : null,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  static Future<AgentDeliberationResult<AgentCritiqueVerdict>> critique({
     required AgentConfig config,
     required String taskContext,
     required AgentDecisionPlan plan,
@@ -242,7 +330,7 @@ cost, and maintenance.''';
     return AgentDeliberationResult(
       value: response.error != null || response.toolCalls.isNotEmpty
           ? null
-          : parsePlan(response.text),
+          : parseCritique(response.text),
       usage: response.usage,
     );
   }
@@ -261,20 +349,37 @@ cost, and maintenance.''';
     onUpdate: onUpdate,
   );
 
-  static Future<AgentDeliberationResult<AgentDecisionPlan>> streamCritique({
+  static Future<AgentDeliberationResult<AgentCritiqueVerdict>> streamCritique({
     required AgentConfig config,
     required String taskContext,
     required AgentDecisionPlan plan,
     required AgentStreamClientSession session,
     required void Function(String text) onText,
     void Function(AgentDeliberationStreamUpdate update)? onUpdate,
-  }) => _streamPlanRequest(
-    config: config,
-    request: critiqueRequest(taskContext: taskContext, plan: plan),
-    session: session,
-    onText: onText,
-    onUpdate: onUpdate,
-  );
+  }) async {
+    final request = critiqueRequest(taskContext: taskContext, plan: plan);
+    try {
+      final response = LlmService.chatStream(
+        config: config,
+        messages: request.messages,
+        session: session,
+        profile: request.profile,
+      );
+      return await _collectStream(
+        response.stream,
+        onText,
+        parser: parseCritique,
+        invalidError: 'The stream returned an invalid critique response.',
+        onUpdate: onUpdate,
+      );
+    } catch (_) {
+      return const AgentDeliberationResult(
+        value: null,
+        usage: ProviderTokenUsage(),
+        error: 'Unable to start critique stream.',
+      );
+    }
+  }
 
   static Future<AgentDeliberationResult<AgentDecisionPlan>> _streamPlanRequest({
     required AgentConfig config,
@@ -310,10 +415,25 @@ cost, and maintenance.''';
     Stream<LlmStreamEvent> stream,
     void Function(String text) onText, {
     void Function(AgentDeliberationStreamUpdate update)? onUpdate,
+  }) => _collectStream(
+    stream,
+    onText,
+    parser: parsePlan,
+    invalidError: 'The stream returned an invalid decision response.',
+    onUpdate: onUpdate,
+  );
+
+  static Future<AgentDeliberationResult<T>> _collectStream<T>(
+    Stream<LlmStreamEvent> stream,
+    void Function(String text) onText, {
+    required T? Function(String response) parser,
+    required String invalidError,
+    void Function(AgentDeliberationStreamUpdate update)? onUpdate,
   }) async {
     final buffer = StringBuffer();
     int? promptTokenCount;
     int? completionTokenCount;
+    int? reasoningTokenCount;
     try {
       await for (final event in stream) {
         if ((event.kind == 'text' || event.kind == 'reasoning') &&
@@ -332,6 +452,8 @@ cost, and maintenance.''';
           promptTokenCount = event.promptTokenCount ?? promptTokenCount;
           completionTokenCount =
               event.completionTokenCount ?? completionTokenCount;
+          reasoningTokenCount =
+              event.reasoningTokenCount ?? reasoningTokenCount;
         }
       }
     } catch (error) {
@@ -340,21 +462,23 @@ cost, and maintenance.''';
         usage: ProviderTokenUsage(
           promptTokenCount: promptTokenCount,
           completionTokenCount: completionTokenCount,
+          reasoningTokenCount: reasoningTokenCount,
         ),
         error: error.toString(),
       );
     }
-    final plan = parsePlan(buffer.toString());
+    final value = parser(buffer.toString());
     return AgentDeliberationResult(
-      value: plan,
+      value: value,
       usage: ProviderTokenUsage(
         promptTokenCount: promptTokenCount,
         completionTokenCount: completionTokenCount,
+        reasoningTokenCount: reasoningTokenCount,
       ),
       error: buffer.isEmpty
           ? 'The stream ended without text.'
-          : plan == null
-          ? 'The stream returned an invalid decision response.'
+          : value == null
+          ? invalidError
           : null,
     );
   }
@@ -395,6 +519,8 @@ cost, and maintenance.''';
             '(string), and optional recovery (string). Mark complete only when '
             'the supplied evidence proves the plan validation conditions.',
         allowedNativeToolNames: {},
+        maxOutputTokens: 160,
+        reasoningLevel: AgentReasoningLevel.low,
       ),
       messages: [
         AgentConversationItem.text(

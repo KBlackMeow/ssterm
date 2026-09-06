@@ -466,6 +466,9 @@ extension _AgentSettingsExt on _SettingsPageState {
         AgentDecisionSettings(
           enabled: enabled ?? settings.enabled,
           firstTurnToolFocus: focus ?? settings.firstTurnToolFocus,
+          maxExecutionModelRequests: settings.maxExecutionModelRequests,
+          maxDecisionModelRequests: settings.maxDecisionModelRequests,
+          maxRecoveryRounds: settings.maxRecoveryRounds,
         ),
       );
       _agentApply(next);
@@ -482,7 +485,7 @@ extension _AgentSettingsExt on _SettingsPageState {
               style: TextStyle(color: _kFg, fontSize: 13),
             ),
             subtitle: const Text(
-              'Explicit deep-analysis requests plan immediately; other tasks are conservatively classified by a tool-free routing Agent before execution.',
+              'Direct lookups and clear single-path changes avoid separate deliberation; only ambiguous tasks use the compact router.',
               style: TextStyle(color: _kFgMuted, fontSize: 11, height: 1.3),
             ),
             value: settings.enabled,
@@ -510,7 +513,7 @@ extension _AgentSettingsExt on _SettingsPageState {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Budget: up to 5 decision calls and 2 recovery calls.',
+                'Budget: up to 8 execution calls, 2 decision calls, and 1 recovery round (high-risk review may add 1 decision call).',
                 style: TextStyle(color: _kFgMuted, fontSize: 10.5),
               ),
             ),

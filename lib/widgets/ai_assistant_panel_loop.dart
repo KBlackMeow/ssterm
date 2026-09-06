@@ -114,6 +114,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         ? const AgentDecisionSettings(enabled: false)
         : config.decisionSettingsFor(providerId, model);
     var route = AgentDecisionPolicy.classify(userText, decisionSettings);
+    ProviderTokenUsage? routingUsage;
     if (route == AgentDecisionRoute.uncertain) {
       // Broad task semantics do not decide this path. A constrained, tool-free
       // router chooses direct execution or a solution workflow.
@@ -123,18 +124,21 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       );
       if (!mounted || gen != _generation) return;
       final decision = routed.value;
-      route = decision?.route ?? AgentDecisionRoute.fast;
+      routingUsage = routed.usage;
+      route = decision?.route ?? AgentDecisionRoute.standard;
       setState(() {
         if (decision == null) {
           _messages.add(
             _ChatMessage.notice(
-              'Task routing: **fallback to direct execution** — ${routed.error ?? 'no usable routing decision'}.',
+              'Task routing: **fallback to standard execution** — ${routed.error ?? 'no usable routing decision'}.',
             ),
           );
         } else {
-          final mode = decision.route == AgentDecisionRoute.deep
-              ? 'solution workflow'
-              : 'direct execution';
+          final mode = switch (decision.route) {
+            AgentDecisionRoute.deep => 'solution workflow',
+            AgentDecisionRoute.direct => 'direct execution',
+            _ => 'standard execution',
+          };
           final evidence = decision.signals.isEmpty
               ? ''
               : ' · ${decision.signals.join(', ')}';
@@ -147,22 +151,30 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       });
       _scrollToBottom();
     }
-    final routedBody = route == AgentDecisionRoute.fast
+    final routedBody = route == AgentDecisionRoute.direct
         ? body
         : '$body\n\n<agent_route>${AgentDecisionPolicy.guideFor(route)}</agent_route>';
     var executionBody = routedBody;
 
     if (route == AgentDecisionRoute.deep) {
-      _activeDecisionRun = AgentDecisionRun.deep(decisionSettings);
+      _activeDecisionRun = AgentDecisionRun.deep(
+        decisionSettings,
+        highRisk: AgentDecisionPolicy.isHighRisk(userText),
+      );
       final decisionCard = _DecisionCardData(
         stage: 'Planning options',
         detail:
             'Solution workflow selected; evaluating alternatives before execution.',
       );
       _activeDecisionCard = decisionCard;
+      if (routingUsage != null) {
+        decisionCard.modelRequests++;
+        decisionCard.decisionRequests++;
+        decisionCard.recordUsage(routingUsage);
+      }
       setState(() {
         _messages.add(_ChatMessage.decisionCard(decisionCard));
-        _agentLoopStatus = 'Planning and reviewing options…';
+        _agentLoopStatus = 'Planning concise options…';
       });
       final startedAt = DateTime.now();
       _decisionCardTimer?.cancel();
@@ -184,13 +196,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       });
       _scrollToBottom();
       decisionCard.modelRequests++;
+      decisionCard.decisionRequests++;
       final planningSubagent = decisionCard.startSubagent('规划子 Agent');
       AgentDeliberationResult<AgentDecisionPlan>? plannedResult;
       final planningSession = AgentStreamClientSession();
       final cancelPlanning = planningSession.reset;
       _cancelStream = cancelPlanning;
       try {
-        plannedResult = _activeDecisionRun!.consumeModelRequest()
+        plannedResult = _activeDecisionRun!.consumeDecisionRequest()
             ? await AgentDeliberation.streamPlan(
                 config: config,
                 taskContext: routedBody,
@@ -214,6 +227,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (identical(_cancelStream, cancelPlanning)) _cancelStream = null;
       }
       final planned = plannedResult?.value;
+      final shouldCritique =
+          planned != null &&
+          AgentDecisionPolicy.shouldCritique(userText, planned);
       if (!mounted || gen != _generation) return;
       setState(() {
         planningSubagent.finish(error: plannedResult?.error);
@@ -228,15 +244,21 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           planningSubagent.replaceText('规划请求未返回可用方案，已切换为标准执行流程。');
         }
         decisionCard.markProgress();
-        decisionCard.stage = 'Reviewing plan';
+        decisionCard.stage = shouldCritique
+            ? 'Reviewing high-risk plan'
+            : 'Plan selected';
         decisionCard.detail = planned == null
             ? 'Planning response was unavailable; checking whether execution can continue.'
-            : 'An independent review is checking the proposed alternatives.';
+            : shouldCritique
+            ? 'A targeted review is checking material risk.'
+            : 'The concise recommendation is ready for execution.';
       });
       _scrollToBottom();
-      AgentDeliberationResult<AgentDecisionPlan>? reviewedResult;
-      if (planned != null && _activeDecisionRun!.consumeModelRequest()) {
+      AgentDeliberationResult<AgentCritiqueVerdict>? reviewedResult;
+      if (shouldCritique) _activeDecisionRun!.elevateRisk();
+      if (shouldCritique && _activeDecisionRun!.consumeDecisionRequest()) {
         decisionCard.modelRequests++;
+        decisionCard.decisionRequests++;
         final reviewSubagent = decisionCard.startSubagent('审查子 Agent');
         setState(decisionCard.markProgress);
         _scrollToBottom();
@@ -267,7 +289,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           if (identical(_cancelStream, cancelReview)) _cancelStream = null;
         }
       }
-      final reviewed = reviewedResult?.value;
+      final critique = reviewedResult?.value;
       if (!mounted || gen != _generation) return;
       if (reviewedResult != null) {
         setState(() {
@@ -276,16 +298,19 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           );
           reviewSubagent.finish(error: reviewedResult!.error);
           reviewSubagent.replaceText(
-            reviewed == null
+            critique == null
                 ? '审查未返回可用结论，将采用初步方案继续执行。'
-                : AgentDecisionTranscript.recommendation(reviewed),
+                : critique.accept
+                ? '审查通过：未发现需要改变方案的重大风险。'
+                : '审查发现：${critique.issue ?? '存在未解决的重大风险。'}'
+                      '${critique.replacementId == null ? '' : '\n建议改用方案：${critique.replacementId}'}',
           );
           decisionCard.recordUsage(reviewedResult.usage);
           decisionCard.markProgress();
         });
         _scrollToBottom();
       }
-      final plan = reviewed ?? planned;
+      final plan = planned?.withRecommendedId(critique?.replacementId);
       if (plan == null) {
         _activeDecisionRun = null;
         setState(() {
@@ -424,10 +449,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     void stopIter(int iter, String reason) =>
         _logAgentStop(iter, reason, turnId: turnId);
 
-    // Reserve one deep-model request for independent final verification.
-    final remainingDeepRequests = _activeDecisionRun == null
-        ? null
-        : (_activeDecisionRun!.remainingModelRequests - 1).clamp(1, 100);
+    final remainingDeepRequests = _activeDecisionRun?.remainingExecutionRequests
+        .clamp(1, 100);
     final budget = AgentExecutionBudget(
       maxModelRequests: remainingDeepRequests,
     );
@@ -460,7 +483,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         stopIter(loopIterations, 'context_hard_limit');
         break;
       }
-      if (_activeDecisionRun?.remainingModelRequests == 0) {
+      if (_activeDecisionRun?.remainingExecutionRequests == 0) {
         stopIter(loopIterations, 'budget_deep_model_requests');
         break;
       }
@@ -470,13 +493,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
         break;
       }
-      _activeDecisionRun?.consumeModelRequest();
+      _activeDecisionRun?.consumeExecutionRequest();
       final aiMsg = _ChatMessage.ai(text: '');
       setState(() {
         _messages.add(aiMsg);
         // Deep routing also executes the normal streamed Agent turn. Count
         // it with the planning/review calls shown on the decision card.
         _activeDecisionCard?.modelRequests++;
+        _activeDecisionCard?.executionRequests++;
         _activeDecisionCard?.markProgress();
       });
 
@@ -519,6 +543,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           ProviderTokenUsage(
             promptTokenCount: resolvedStreamResult.promptTokenCount,
             completionTokenCount: resolvedStreamResult.completionTokenCount,
+            reasoningTokenCount: resolvedStreamResult.reasoningTokenCount,
           ),
         );
         _activeDecisionCard?.markProgress();
@@ -1042,26 +1067,38 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _activeDecisionCard?.detail =
               'Checking the completed work against the recommendation.';
         });
-        final evidence = _conversationHistory
-            .expand(
-              (item) => [
-                if (item.content != null) item.content!,
-                ...item.toolResults.map((result) => result.content),
-              ],
-            )
-            .join('\n\n');
-        _activeDecisionCard?.modelRequests++;
-        final verdictResult = _activeDecisionRun!.consumeModelRequest()
-            ? await AgentDeliberation.verify(
-                config: config,
-                plan: _activeDecisionPlan!,
-                finalAnswer: displayText,
-                evidence: evidence.length <= 12000
-                    ? evidence
-                    : evidence.substring(evidence.length - 12000),
+        final evidenceContents = _conversationHistory.expand(
+          (item) => [
+            if (item.content != null) item.content!,
+            ...item.toolResults.map((result) => result.content),
+          ],
+        );
+        final evidence = AgentDecisionPolicy.compactVerificationEvidence(
+          evidenceContents,
+        );
+        final deterministicPass =
+            AgentDecisionPolicy.hasDeterministicValidationEvidence(
+              _activeDecisionPlan!,
+              evidence,
+            );
+        AgentDeliberationResult<AgentVerificationVerdict>? verdictResult;
+        if (!deterministicPass &&
+            _activeDecisionRun!.consumeDecisionRequest()) {
+          _activeDecisionCard?.modelRequests++;
+          _activeDecisionCard?.decisionRequests++;
+          verdictResult = await AgentDeliberation.verify(
+            config: config,
+            plan: _activeDecisionPlan!,
+            finalAnswer: displayText,
+            evidence: evidence,
+          );
+        }
+        final verdict = deterministicPass
+            ? const AgentVerificationVerdict(
+                complete: true,
+                evidence: 'Validation commands completed successfully.',
               )
-            : null;
-        final verdict = verdictResult?.value;
+            : verdictResult?.value;
         if (!mounted || gen != _generation) return;
         if (verdictResult != null) {
           _activeDecisionCard?.recordUsage(verdictResult.usage);
@@ -1070,6 +1107,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         if (verdict != null &&
             !verdict.complete &&
             verdict.recovery != null &&
+            _activeDecisionRun!.remainingExecutionRequests > 0 &&
             _activeDecisionRun!.requestRecovery(evidence: verdict.evidence)) {
           _conversationHistory.add({
             'role': 'user',

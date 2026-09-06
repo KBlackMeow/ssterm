@@ -17,9 +17,25 @@ void main() {
     );
     expect(
       AgentDeliberation.parseRoute(
-        '{"route":"fast","confidence":0.7,"signals":[]}',
+        '{"route":"standard","confidence":0.7,"signals":[]}',
       )?.confidence,
       0.7,
+    );
+    expect(
+      AgentDeliberation.parseRoute('standard')?.route,
+      AgentDecisionRoute.standard,
+    );
+    expect(
+      AgentDeliberation.parseRoute('{"mode":"normal",}')?.route,
+      AgentDecisionRoute.standard,
+    );
+    expect(
+      AgentDeliberation.parseRoute('Route: complex')?.route,
+      AgentDecisionRoute.deep,
+    );
+    expect(
+      AgentDeliberation.parseRoute(r'{\"route\":\"standard\"}')?.route,
+      AgentDecisionRoute.standard,
     );
     expect(AgentDeliberation.parseRoute('{"route":"uncertain"}'), isNull);
   });
@@ -28,7 +44,8 @@ void main() {
     final request = AgentDeliberation.planRequest('Compare deployment paths.');
 
     expect(request.profile.allowedNativeToolNames, isEmpty);
-    expect(request.profile.systemPromptOverride, contains('2 or 3 candidates'));
+    expect(request.profile.systemPromptOverride, contains('exactly 2'));
+    expect(request.profile.maxOutputTokens, 384);
     expect(
       request.messages.single.content,
       contains('Compare deployment paths.'),
@@ -54,6 +71,25 @@ void main() {
     expect(verdict?.recovery, 'run focused tests');
   });
 
+  test('critic returns only a compact verdict and optional replacement', () {
+    final request = AgentDeliberation.critiqueRequest(
+      taskContext: 'Choose a deployment.',
+      plan: AgentDecisionPlan.tryParseJson('''
+{"recommendedId":"a","candidates":[
+ {"id":"a","summary":"A","evidence":"some","risk":"high","validation":"test"},
+ {"id":"b","summary":"B","evidence":"more","risk":"low","validation":"test"}]}
+''')!,
+    );
+    final verdict = AgentDeliberation.parseCritique(
+      '{"accept":false,"issue":"A is unsupported","replacementId":"b"}',
+    );
+
+    expect(request.profile.maxOutputTokens, 256);
+    expect(request.profile.systemPromptOverride, contains('Do not repeat'));
+    expect(verdict?.accept, isFalse);
+    expect(verdict?.replacementId, 'b');
+  });
+
   test(
     'planner stream forwards text and parses its final diagnostics',
     () async {
@@ -65,11 +101,10 @@ void main() {
           LlmStreamEvent('text', '{"recommendedId":"a",'),
           LlmStreamEvent(
             'text',
-            '"candidates":[{"id":"a","summary":"safe","fit":"fit",'
-                '"evidence":"proof","cost":"low","maintenance":"low",'
+            '"candidates":[{"id":"a","summary":"safe",'
+                '"evidence":"proof",'
                 '"risk":"small","validation":"test"},{"id":"b",'
-                '"summary":"fast","fit":"fit","evidence":"proof",'
-                '"cost":"low","maintenance":"low","risk":"small",'
+                '"summary":"fast","evidence":"proof","risk":"small",'
                 '"validation":"test"}]}',
           ),
           LlmStreamEvent.diagnostics(

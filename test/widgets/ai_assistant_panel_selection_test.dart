@@ -32,16 +32,20 @@ void main() {
     },
   );
 
-  test('deep decisions keep planning and recommendation inside their card', () {
-    final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
-    ).readAsStringSync();
+  test(
+    'deep decisions keep planning and compact critique inside their card',
+    () {
+      final loop = File(
+        'lib/widgets/ai_assistant_panel_loop.dart',
+      ).readAsStringSync();
 
-    expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
-      expect(loop, contains('AgentDecisionTranscript.recommendation(reviewed)'));
-    expect(loop, contains('planningSubagent.replaceText'));
-    expect(loop, contains('reviewSubagent.replaceText'));
-  });
+      expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
+      expect(loop, contains('critique.accept'));
+      expect(loop, contains('critique.replacementId'));
+      expect(loop, contains('planningSubagent.replaceText'));
+      expect(loop, contains('reviewSubagent.replaceText'));
+    },
+  );
 
   test('deep planning and review stream into their decision subagents', () {
     final loop = File(

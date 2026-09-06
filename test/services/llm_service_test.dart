@@ -17,10 +17,14 @@ void main() {
       const profile = AgentRequestProfile(
         systemPromptOverride: 'Return JSON only. Do not use tools.',
         allowedNativeToolNames: {},
+        maxOutputTokens: 96,
+        reasoningLevel: AgentReasoningLevel.disabled,
       );
 
       expect(profile.allowsNativeTools, isFalse);
       expect(profile.systemPromptOverride, contains('Do not use tools'));
+      expect(profile.maxOutputTokens, 96);
+      expect(profile.reasoningLevel, AgentReasoningLevel.disabled);
     },
   );
 

@@ -35,7 +35,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 | **Custom skills** | Add user-defined skills from the Settings page; no built-in playbooks are enabled by default |
 | **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
 | **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
-| **Adaptive decision quality** | Explicit deep-analysis requests go directly to planning; other tasks are conservatively classified by a tool-free routing Agent before optional planning, critique, and evidence verification; disabled by default |
+| **Adaptive decision quality** | Direct and clear single-path tasks avoid separate deliberation; ambiguous tasks may use a compact router, while complex or high-risk work gets concise planning plus conditional critique and verification; disabled by default |
 
 ### Tool calling
 
