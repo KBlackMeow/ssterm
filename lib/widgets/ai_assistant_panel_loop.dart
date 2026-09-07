@@ -120,7 +120,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // router chooses direct execution or a solution workflow.
       final routed = await AgentDeliberation.route(
         config: config,
-        taskContext: body,
+        // Route only the user's request. Session paths and environment labels
+        // are execution context and must not accidentally become risk signals.
+        taskContext: userText,
       );
       if (!mounted || gen != _generation) return;
       final decision = routed.value;
@@ -134,24 +136,23 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             ),
           );
         } else {
-          final mode = switch (decision.route) {
+          final mode = switch (route) {
             AgentDecisionRoute.deep => 'solution workflow',
             AgentDecisionRoute.direct => 'direct execution',
-            _ => 'standard execution',
+            AgentDecisionRoute.uncertain => 'evidence-first execution',
+            AgentDecisionRoute.standard => 'standard execution',
           };
-          final evidence = decision.signals.isEmpty
-              ? ''
-              : ' · ${decision.signals.join(', ')}';
           _messages.add(
-            _ChatMessage.notice(
-              'Task routing: **$mode** · confidence ${(decision.confidence * 100).round()}%$evidence',
-            ),
+            _ChatMessage.notice('Task routing: **$mode** · source model'),
           );
         }
       });
       _scrollToBottom();
     }
-    final routedBody = route == AgentDecisionRoute.direct
+    // Keep the disabled baseline byte-for-byte unchanged. When adaptive
+    // routing is enabled, every route (including direct) receives its bounded
+    // execution anchor.
+    final routedBody = !decisionSettings.enabled
         ? body
         : '$body\n\n<agent_route>${AgentDecisionPolicy.guideFor(route)}</agent_route>';
     var executionBody = routedBody;
@@ -310,17 +311,26 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
         _scrollToBottom();
       }
-      final plan = planned?.withRecommendedId(critique?.replacementId);
+      final plan = planned == null
+          ? null
+          : AgentDeliberation.applyCritique(planned, critique);
+      final critiqueRejectedWithoutReplacement =
+          planned != null && critique?.accept == false && plan == null;
       if (plan == null) {
         _activeDecisionRun = null;
         setState(() {
           decisionCard.stage = 'Standard execution';
-          decisionCard.summary = 'Planning unavailable';
+          decisionCard.summary = critiqueRejectedWithoutReplacement
+              ? 'Recommendation rejected by review'
+              : 'Planning unavailable';
           decisionCard.detail =
               'Continued with the standard Agent loop; no recommendation was accepted.';
         });
+        final fallbackReason = critiqueRejectedWithoutReplacement
+            ? 'Independent review rejected the recommendation without a valid replacement.'
+            : 'Planning was unavailable.';
         executionBody =
-            '$routedBody\n\n<decision_fallback>Planning was unavailable. Continue with the standard Agent loop; do not claim an optimal recommendation without evidence.</decision_fallback>';
+            '$routedBody\n\n<decision_fallback>$fallbackReason Continue with the standard Agent loop; do not claim an optimal recommendation without evidence.</decision_fallback>';
       } else {
         _activeDecisionPlan = plan;
         final recommended = plan.candidates.firstWhere(
@@ -1067,7 +1077,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _activeDecisionCard?.detail =
               'Checking the completed work against the recommendation.';
         });
-        final evidenceContents = _conversationHistory.expand(
+        final decisionStart = _conversationHistory.lastIndexWhere(
+          (item) => item.content?.contains('<decision_plan>') == true,
+        );
+        final evidenceItems = decisionStart < 0
+            ? _conversationHistory
+            : _conversationHistory.skip(decisionStart + 1);
+        final evidenceContents = evidenceItems.expand(
           (item) => [
             if (item.content != null) item.content!,
             ...item.toolResults.map((result) => result.content),

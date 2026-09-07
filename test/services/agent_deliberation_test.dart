@@ -8,18 +8,20 @@ void main() {
     final request = AgentDeliberation.routeRequest('Assess the change.');
 
     expect(request.profile.allowedNativeToolNames, isEmpty);
-    expect(request.profile.systemPromptOverride, contains('solution workflow'));
+    expect(
+      request.profile.systemPromptOverride,
+      contains('pre-execution deliberation'),
+    );
+    expect(
+      request.profile.systemPromptOverride,
+      contains('exactly one uppercase label'),
+    );
+    expect(request.profile.systemPromptOverride, contains('UNCERTAIN'));
     expect(
       AgentDeliberation.parseRoute('''```json
 {"route":"deep","confidence":0.86,"signals":["rollback_required"]}
 ```''')?.route,
       AgentDecisionRoute.deep,
-    );
-    expect(
-      AgentDeliberation.parseRoute(
-        '{"route":"standard","confidence":0.7,"signals":[]}',
-      )?.confidence,
-      0.7,
     );
     expect(
       AgentDeliberation.parseRoute('standard')?.route,
@@ -37,7 +39,29 @@ void main() {
       AgentDeliberation.parseRoute(r'{\"route\":\"standard\"}')?.route,
       AgentDecisionRoute.standard,
     );
-    expect(AgentDeliberation.parseRoute('{"route":"uncertain"}'), isNull);
+    expect(
+      AgentDeliberation.parseRoute('{"route":"uncertain"}')?.route,
+      AgentDecisionRoute.uncertain,
+    );
+  });
+
+  test('router accepts the four portable single-label responses', () {
+    expect(
+      AgentDeliberation.parseRoute('DIRECT')?.route,
+      AgentDecisionRoute.direct,
+    );
+    expect(
+      AgentDeliberation.parseRoute('STANDARD')?.route,
+      AgentDecisionRoute.standard,
+    );
+    expect(
+      AgentDeliberation.parseRoute('DEEP')?.route,
+      AgentDecisionRoute.deep,
+    );
+    expect(
+      AgentDeliberation.parseRoute('UNCERTAIN')?.route,
+      AgentDecisionRoute.uncertain,
+    );
   });
 
   test('planner request is tool-free and asks for comparable candidates', () {
@@ -59,6 +83,17 @@ void main() {
         '{"recommendedId":"a","candidates":[{"id":"a"}]}',
       ),
       isNull,
+    );
+  });
+
+  test('planner parsing accepts a fenced JSON object', () {
+    expect(
+      AgentDeliberation.parsePlan('''```json
+{"recommendedId":"a","candidates":[
+ {"id":"a","summary":"A","evidence":"proof","risk":"low","validation":"test"},
+ {"id":"b","summary":"B","evidence":"proof","risk":"low","validation":"test"}]}
+```''')?.recommendedId,
+      'a',
     );
   });
 
@@ -88,6 +123,33 @@ void main() {
     expect(request.profile.systemPromptOverride, contains('Do not repeat'));
     expect(verdict?.accept, isFalse);
     expect(verdict?.replacementId, 'b');
+  });
+
+  test('a critic rejection cannot silently keep the rejected candidate', () {
+    final plan = AgentDecisionPlan.tryParseJson('''
+{"recommendedId":"a","candidates":[
+ {"id":"a","summary":"A","evidence":"some","risk":"high","validation":"test"},
+ {"id":"b","summary":"B","evidence":"more","risk":"low","validation":"test"}]}
+''')!;
+
+    expect(
+      AgentDeliberation.applyCritique(
+        plan,
+        const AgentCritiqueVerdict(accept: false, issue: 'unsafe'),
+      ),
+      isNull,
+    );
+    expect(
+      AgentDeliberation.applyCritique(
+        plan,
+        const AgentCritiqueVerdict(
+          accept: false,
+          issue: 'prefer B',
+          replacementId: 'b',
+        ),
+      )?.recommendedId,
+      'b',
+    );
   });
 
   test(

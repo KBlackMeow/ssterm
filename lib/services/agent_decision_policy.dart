@@ -236,11 +236,11 @@ abstract final class AgentDecisionPolicy {
   );
 
   static final _comparisonRequest = RegExp(
-    r'\b(compare|choose between|trade-?offs?|architecture|redesign)\b|比较.*方案|方案对比|权衡|架构设计|重新设计',
+    r'\b(compare|choose between|trade-?offs?|architecture|redesign|recommend|options?|alternatives?)\b|比较.*方案|方案对比|权衡|架构设计|重新设计|推荐|选项|备选方案',
     caseSensitive: false,
   );
 
-  static final _standardRequest = RegExp(
+  static final _changeRequest = RegExp(
     r'\b(fix|implement|add|update|change|refactor|test|diagnose|remove)\b|修复|实现|新增|更新|修改|重构|测试|诊断|移除',
     caseSensitive: false,
   );
@@ -258,17 +258,25 @@ abstract final class AgentDecisionPolicy {
     if (_explicitDeepKeywords.any(normalized.contains)) {
       return AgentDecisionRoute.deep;
     }
-    if (_directRequest.hasMatch(normalized.trim()) &&
-        !_standardRequest.hasMatch(normalized)) {
-      return AgentDecisionRoute.direct;
-    }
-    if (_highRiskRequest.hasMatch(normalized) ||
-        _comparisonRequest.hasMatch(normalized)) {
+    // Material-choice signals must outrank surface forms such as "show" or
+    // "list". Otherwise "show migration trade-offs" silently bypasses the
+    // decision workflow.
+    if (_comparisonRequest.hasMatch(normalized)) {
       return AgentDecisionRoute.deep;
     }
-    if (_standardRequest.hasMatch(normalized)) {
-      return AgentDecisionRoute.standard;
+    if (_directRequest.hasMatch(normalized.trim()) &&
+        !_changeRequest.hasMatch(normalized)) {
+      return AgentDecisionRoute.direct;
     }
+    // Merely reading production state is not a high-impact operation. Apply
+    // the risk escalation after the exact read-only shortcut so topic words
+    // do not masquerade as operational impact.
+    if (_highRiskRequest.hasMatch(normalized)) {
+      return AgentDecisionRoute.deep;
+    }
+    // An action verb does not prove that a change is bounded or single-path.
+    // Leave non-trivial changes to the semantic router instead of treating
+    // every "fix" or "implement" request as standard by construction.
     return AgentDecisionRoute.uncertain;
   }
 

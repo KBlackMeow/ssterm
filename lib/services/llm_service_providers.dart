@@ -50,10 +50,12 @@ Future<LlmResponse> _callOpenAiCompatible(
     if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
     if (tools.isNotEmpty) 'tool_choice': 'auto',
     if (tools.isNotEmpty) 'parallel_tool_calls': false,
-    if (provider.id == 'deepseek' &&
-        reasoningLevel != null &&
-        reasoningLevel != AgentReasoningLevel.disabled)
-      'thinking': {'type': 'enabled'},
+    if (provider.id == 'deepseek' && reasoningLevel != null)
+      'thinking': {
+        'type': reasoningLevel == AgentReasoningLevel.disabled
+            ? 'disabled'
+            : 'enabled',
+      },
     if (provider.id == 'deepseek' &&
         reasoningLevel != null &&
         reasoningLevel != AgentReasoningLevel.disabled)
@@ -467,8 +469,12 @@ Stream<LlmStreamEvent> _streamOpenAi(
     // DeepSeek thinking-mode tool calls require the model's original
     // `reasoning_content` in the following assistant turn. The transcript
     // adapter above preserves that opaque state, and this toggles the mode.
-    if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
-      'thinking': {'type': 'enabled'},
+    if (isDeepSeek)
+      'thinking': {
+        'type': reasoningLevel == AgentReasoningLevel.disabled
+            ? 'disabled'
+            : 'enabled',
+      },
     if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
       'reasoning_effort': (reasoningLevel ?? AgentReasoningLevel.high).name,
   };
@@ -792,12 +798,23 @@ bool _anthropicSupportsThinking(String model) {
 // `parseJsonStream: false` (default) is what makes streaming work — when
 // it's true the daemon buffers the WHOLE answer and emits one object.
 
+Object _ollamaThinkValue(String model, AgentReasoningLevel level) {
+  final requiresEffort = model.toLowerCase().contains('gpt-oss');
+  return switch (level) {
+    AgentReasoningLevel.disabled => requiresEffort ? 'low' : false,
+    AgentReasoningLevel.low => requiresEffort ? 'low' : true,
+    AgentReasoningLevel.medium => requiresEffort ? 'medium' : true,
+    AgentReasoningLevel.high => requiresEffort ? 'high' : true,
+  };
+}
+
 Future<LlmResponse> _callOllama(
   ProviderConfig provider,
   String model,
   List<AgentConversationItem> messages,
   String systemPrompt, {
   int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
@@ -813,6 +830,8 @@ Future<LlmResponse> _callOllama(
     'model': model,
     'messages': apiMessages,
     'stream': false,
+    if (reasoningLevel != null)
+      'think': _ollamaThinkValue(model, reasoningLevel),
     'options': {
       'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     },
@@ -855,6 +874,7 @@ Stream<LlmStreamEvent> _streamOllama(
   HttpClient client,
   String systemPrompt, {
   int? maxOutputTokens,
+  AgentReasoningLevel? reasoningLevel,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
@@ -868,6 +888,8 @@ Stream<LlmStreamEvent> _streamOllama(
     'model': model,
     'messages': apiMessages,
     'stream': true,
+    if (reasoningLevel != null)
+      'think': _ollamaThinkValue(model, reasoningLevel),
     'options': {
       'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     },

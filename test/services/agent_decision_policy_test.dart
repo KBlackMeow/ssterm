@@ -32,10 +32,27 @@ void main() {
       );
     });
 
-    test('keeps clear single-path changes on the standard path', () {
+    test('leaves apparent single-path changes to the semantic router', () {
       expect(
         AgentDecisionPolicy.classify('Fix the failing parser test.', enabled),
-        AgentDecisionRoute.standard,
+        AgentDecisionRoute.uncertain,
+      );
+    });
+
+    test('risk and comparison signals outrank read-only surface verbs', () {
+      expect(
+        AgentDecisionPolicy.classify(
+          'Show architecture trade-offs for the database migration.',
+          enabled,
+        ),
+        AgentDecisionRoute.deep,
+      );
+      expect(
+        AgentDecisionPolicy.classify(
+          'List rollback options for production.',
+          enabled,
+        ),
+        AgentDecisionRoute.deep,
       );
     });
 

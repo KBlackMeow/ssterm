@@ -17,4 +17,16 @@ void main() {
       );
     }
   });
+
+  test('macOS build declares why terminal commands modify app bundles', () {
+    final infoPlist = File('macos/Runner/Info.plist').readAsStringSync();
+
+    expect(
+      infoPlist,
+      contains('<key>NSAppBundlesUsageDescription</key>'),
+      reason:
+          'macOS requires an App Management usage description before SSTerm '
+          'can let terminal commands modify another application bundle.',
+    );
+  });
 }

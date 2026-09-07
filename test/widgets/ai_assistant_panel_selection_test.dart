@@ -18,6 +18,15 @@ void main() {
     expect(content, contains('class _DecisionCard'));
   });
 
+  test('task routing displays its source without fabricated confidence', () {
+    final loop = File(
+      'lib/widgets/ai_assistant_panel_loop.dart',
+    ).readAsStringSync();
+
+    expect(loop, contains('source model'));
+    expect(loop, isNot(contains('decision.confidence')));
+  });
+
   test(
     'deep decision run records planning, recommendation, and fallback in its card',
     () {

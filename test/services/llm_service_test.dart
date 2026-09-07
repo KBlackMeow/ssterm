@@ -104,6 +104,25 @@ void main() {
     expect(source, contains("'clear_thinking': false"));
   });
 
+  test('DeepSeek routing can explicitly disable thinking in every path', () {
+    final source = File(
+      'lib/services/llm_service_providers.dart',
+    ).readAsStringSync();
+
+    expect(
+      RegExp(
+        r"provider\.id == 'deepseek'[\s\S]*?reasoningLevel == AgentReasoningLevel\.disabled[\s\S]*?'disabled'",
+      ).allMatches(source),
+      hasLength(greaterThanOrEqualTo(1)),
+    );
+    expect(
+      RegExp(
+        r"isDeepSeek\)[\s\S]*?reasoningLevel == AgentReasoningLevel\.disabled[\s\S]*?'disabled'",
+      ).allMatches(source),
+      hasLength(greaterThanOrEqualTo(1)),
+    );
+  });
+
   group('OpenAiStreamAccumulator', () {
     test('assembles tool arguments by index when later chunks omit id', () {
       final accumulator = OpenAiStreamAccumulator();
