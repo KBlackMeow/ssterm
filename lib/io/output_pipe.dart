@@ -55,6 +55,7 @@ class OutputPipe {
     this.onBytesConsumed,
     this.onBytesAccepted,
     this.holdOutputUntilRelease = false,
+    this.pauseSourceOnBackpressure = true,
     int? maxBytesPerWrite,
     int? queueHighWatermarkBytes,
     int? queueLowWatermarkBytes,
@@ -81,6 +82,11 @@ class OutputPipe {
   final void Function(int bytes)? onBytesConsumed;
   final void Function(int bytes)? onBytesAccepted;
   bool holdOutputUntilRelease;
+
+  /// Whether the bound source subscriptions may be paused at the queue high
+  /// watermark. Keep this disabled for SSH channel streams: pausing them can
+  /// stop channel-window updates and leave a remote writer blocked forever.
+  final bool pauseSourceOnBackpressure;
 
   OutputPipeMetrics get metrics => OutputPipeMetrics(
     queuedBytes: _buf.length,
@@ -180,6 +186,7 @@ class OutputPipe {
   }
 
   void _applyBackpressure() {
+    if (!pauseSourceOnBackpressure) return;
     if (_streamsPaused) {
       if (!holdOutputUntilRelease && _buf.length <= _queueLowWatermarkBytes) {
         for (final sub in _subs) {

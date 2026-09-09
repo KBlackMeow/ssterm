@@ -190,6 +190,35 @@ void main() {
       },
     );
 
+    test('can keep a protocol source flowing above the high watermark', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        var pauseCount = 0;
+        final ctrl = StreamController<List<int>>(onPause: () => pauseCount++);
+        final pipe = OutputPipe(
+          terminal,
+          pauseSourceOnBackpressure: false,
+          maxBytesPerWrite: 8,
+          queueHighWatermarkBytes: 10,
+          queueLowWatermarkBytes: 4,
+        );
+        pipe.bind(ctrl.stream);
+
+        ctrl.add(List.filled(12, 65));
+        fake.flushMicrotasks();
+
+        expect(pauseCount, equals(0));
+        expect(pipe.metrics.streamsPaused, isFalse);
+        expect(pipe.metrics.queuedBytes, equals(12));
+
+        fake.elapse(const Duration(milliseconds: 40));
+        expect(terminal.buffer.lines[0].getText(), contains('AAAAAAAAAAAA'));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
     test(
       'holds initial output until release and accepts bytes after release',
       () {

@@ -159,6 +159,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       terminal,
       logSink: logger,
       holdOutputUntilRelease: true,
+      pauseSourceOnBackpressure: false,
       transform: _sshOutputTransform(tab, 0, cwdParser),
     );
 
@@ -326,6 +327,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final pipe = OutputPipe(
       splitTerminal,
       holdOutputUntilRelease: true,
+      pauseSourceOnBackpressure: false,
       transform: _sshOutputTransform(tab, 1, cwdParser),
     );
 
@@ -456,6 +458,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         tab.terminal!,
         logSink: logger,
         holdOutputUntilRelease: true,
+        pauseSourceOnBackpressure: false,
         transform: _sshOutputTransform(tab, 0, cwdParser),
       );
 

@@ -247,6 +247,7 @@
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
+				A2B2C2D2E2F2000000000001 /* Bundle Rust Terminal and PTY Cores */,
 				3E59626A0A09B0BF90F76AA8 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
@@ -333,6 +334,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A2B2C2D2E2F2000000000001 /* Bundle Rust Terminal and PTY Cores */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle Rust Terminal and PTY Cores";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nROOT=\"$PROJECT_DIR/..\"\ncargo build --manifest-path \"$ROOT/native/terminal_core/Cargo.toml\" --release\ncargo build --manifest-path \"$ROOT/native/pty_core/Cargo.toml\" --release\ncp \"$ROOT/native/terminal_core/target/release/libssterm_terminal_core.dylib\" \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/libssterm_terminal_core.dylib\"\ncp \"$ROOT/native/pty_core/target/release/libssterm_pty_core.dylib\" \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/libssterm_pty_core.dylib\"\n";
+		};
 		3399D490228B24CF009A79C7 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

@@ -60,6 +60,31 @@ add_subdirectory("runner")
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
+# Build and bundle the Rust terminal data core beside Flutter's native
+# libraries. The Dart FFI loader resolves it from `$ORIGIN/lib` at runtime.
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+set(TERMINAL_CORE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../native/terminal_core/Cargo.toml")
+set(TERMINAL_CORE_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../native/terminal_core/target/release/libssterm_terminal_core.so")
+set(PTY_CORE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/Cargo.toml")
+set(PTY_CORE_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/target/release/libssterm_pty_core.so")
+add_custom_command(
+  OUTPUT "${TERMINAL_CORE_LIBRARY}"
+  COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${TERMINAL_CORE_MANIFEST}" --release
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+  DEPENDS "${TERMINAL_CORE_MANIFEST}" "${CMAKE_CURRENT_SOURCE_DIR}/../native/terminal_core/src/lib.rs"
+  VERBATIM
+)
+add_custom_target(ssterm_terminal_core ALL DEPENDS "${TERMINAL_CORE_LIBRARY}")
+add_custom_command(
+  OUTPUT "${PTY_CORE_LIBRARY}"
+  COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${PTY_CORE_MANIFEST}" --release
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+  DEPENDS "${PTY_CORE_MANIFEST}" "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/src/lib.rs"
+  VERBATIM
+)
+add_custom_target(ssterm_pty_core ALL DEPENDS "${PTY_CORE_LIBRARY}")
+add_dependencies(${BINARY_NAME} ssterm_terminal_core ssterm_pty_core)
+
 # Only the install-generated bundle's copy of the executable will launch
 # correctly, since the resources must in the right relative locations. To avoid
 # people trying to run the unbundled copy, put it in a subdirectory instead of
@@ -98,6 +123,12 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+install(FILES "${TERMINAL_CORE_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+install(FILES "${PTY_CORE_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})

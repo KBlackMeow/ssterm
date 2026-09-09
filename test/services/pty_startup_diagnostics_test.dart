@@ -40,4 +40,18 @@ void main() {
       expect(nativeSource, isNot(contains('printf("error no:')));
     },
   );
+
+  test('Unix PTY defaults to the Rust core with an explicit C fallback', () {
+    final nativeSource = File(
+      'packages/flutter_pty/src/flutter_pty_unix.c',
+    ).readAsStringSync();
+
+    expect(nativeSource, contains('ssterm_pty_create_with_environment'));
+    expect(nativeSource, contains('SSTERM_USE_RUST_PTY=0'));
+    expect(nativeSource, contains('strcmp(enabled, "0") == 0'));
+    expect(nativeSource, contains('libssterm_pty_core'));
+    expect(nativeSource, contains('handle->ackRead = options->ackRead'));
+    expect(nativeSource, contains('pthread_cond_wait'));
+    expect(nativeSource, isNot(contains('handle->ackRead = false')));
+  });
 }

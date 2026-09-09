@@ -48,6 +48,28 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     ),
   );
 
+  RustTerminalCore? _openRustTerminalCore({
+    required int columns,
+    required int rows,
+  }) {
+    // The native screen core consumes real PTY bytes in shadow mode while
+    // xterm remains the renderer. It gives us production-stream validation
+    // without switching drawing, selection, or reflow before their parity
+    // suite is complete.
+    if (Platform.environment['SSTERM_RUST_TERMINAL_CORE'] != '1') return null;
+    try {
+      return RustTerminalCore.open(
+        columns: columns,
+        rows: rows,
+        maxScrollbackRows: 5000,
+      );
+    } catch (_) {
+      // An unavailable optional dylib must not prevent a user from opening a
+      // shell. PTY migration remains independently usable.
+      return null;
+    }
+  }
+
   void _syncPaneAfterShown(_Tab tab, {required int pane}) {
     if (pane == 1) {
       tab.splitViewKey.currentState?.syncAfterShown();
@@ -259,6 +281,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final isSplit = pane == 1;
     final home = userHomeDir();
     final env = await _environmentForLocalShell(shell);
+    final rustTerminalCore = _openRustTerminalCore(
+      columns: columns,
+      rows: rows,
+    );
     late Pty pty;
     try {
       pty = await Pty.start(
@@ -275,6 +301,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         ackRead: true,
       );
     } catch (e) {
+      rustTerminalCore?.close();
       if (!mounted) return;
       terminal.write('\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt');
       _setPaneSessionEnded(tab, pane, true);
@@ -285,11 +312,15 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     if (isSplit) {
       tab.splitPty?.kill();
       tab.splitPty?.dispose();
+      tab.splitRustTerminalCore?.close();
       tab.splitPty = pty;
+      tab.splitRustTerminalCore = rustTerminalCore;
     } else {
       tab.pty?.kill();
       tab.pty?.dispose();
+      tab.rustTerminalCore?.close();
       tab.pty = pty;
+      tab.rustTerminalCore = rustTerminalCore;
     }
 
     final cwdParser = RemoteCwdParser();
@@ -298,6 +329,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       holdOutputUntilRelease: true,
       onBytesAccepted: (_) => pty.ackRead(),
       transform: (bytes) {
+        // Feed before the Dart OSC-7 transform removes control sequences.
+        // This is intentionally an opt-in shadow path until native cells are
+        // consumed directly by the terminal painter.
+        rustTerminalCore?.feed(Uint8List.fromList(bytes));
         final parsed = cwdParser.process(bytes);
         var cwd = parsed.cwd;
         // PowerShell's OSC 7 prelude reports cwd in POSIX shape
@@ -404,6 +439,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         );
       } else if (activePty != null) {
         activePty.resize(h, w);
+        final rustTerminalCore = pane == 1
+            ? tab.splitRustTerminalCore
+            : tab.rustTerminalCore;
+        rustTerminalCore?.resize(w, h);
       }
     };
   }
@@ -498,6 +537,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final pipe = OutputPipe(
         terminal,
         holdOutputUntilRelease: true,
+        pauseSourceOnBackpressure: false,
         transform: _sshOutputTransform(tab, pane, cwdParser),
       );
 

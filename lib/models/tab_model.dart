@@ -8,6 +8,7 @@ import 'package:xterm/xterm.dart';
 import '../io/output_pipe.dart';
 import '../services/local_shell_discovery.dart';
 import '../services/port_forward_service.dart';
+import '../services/rust_terminal_core.dart';
 import '../views/file_editor_view.dart';
 import 'ssh_host.dart';
 import 'transfer_task.dart';
@@ -34,6 +35,7 @@ class AppTab {
   // ── Pane 0 ──────────────────────────────────────────────────────────────────
   Terminal? terminal;
   Pty? pty;
+  RustTerminalCore? rustTerminalCore;
   SSHClient? sshClient;
   SSHClient? jumpClient;
   SSHSession? sshSession;
@@ -136,6 +138,7 @@ class AppTab {
   Terminal? splitTerminal;
   SSHSession? splitSshSession;
   Pty? splitPty;
+  RustTerminalCore? splitRustTerminalCore;
   OutputPipe? splitPipe;
   final splitViewKey = GlobalKey<TerminalViewState>();
   Axis splitAxis = Axis.horizontal;
@@ -199,9 +202,11 @@ class AppTab {
     splitSshSession?.close();
     splitPty?.kill();
     splitPty?.dispose();
+    splitRustTerminalCore?.close();
     splitTerminal = null;
     splitSshSession = null;
     splitPty = null;
+    splitRustTerminalCore = null;
     splitPipe = null;
     splitSessionEnded = false;
     remoteCwdPane1 = null;
@@ -255,6 +260,8 @@ class AppTab {
     pipe = null;
     pty?.kill();
     pty?.dispose();
+    rustTerminalCore?.close();
+    rustTerminalCore = null;
     pty = null;
     sshSession?.close();
     sshSession = null;
@@ -263,6 +270,8 @@ class AppTab {
     splitTerminal = null;
     pty = splitPty;
     splitPty = null;
+    rustTerminalCore = splitRustTerminalCore;
+    splitRustTerminalCore = null;
     sshSession = splitSshSession;
     splitSshSession = null;
     pipe = splitPipe;
@@ -346,6 +355,8 @@ class AppTab {
     forwardService?.stopAll();
     pty?.kill();
     pty?.dispose();
+    rustTerminalCore?.close();
+    rustTerminalCore = null;
     final session = sshSession;
     if (session != null) safeSshTeardown(() => session.close());
     sshSession = null;
