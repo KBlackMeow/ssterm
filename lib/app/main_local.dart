@@ -80,6 +80,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   RustTerminalBridge? _openRustTerminalBridge({
     required Terminal terminal,
     required void Function(Uint8List bytes) onResponseBytes,
+    void Function(String path)? onWorkingDirectoryChange,
   }) {
     final core = _openRustTerminalCore(
       columns: terminal.viewWidth,
@@ -91,6 +92,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
             core: core,
             terminal: terminal,
             onResponseBytes: onResponseBytes,
+            onWorkingDirectoryChange: onWorkingDirectoryChange,
           );
   }
 
@@ -150,15 +152,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<int> Function(List<int>) _sshOutputTransform(
     _Tab tab,
     int pane,
-    RemoteCwdParser parser, {
-    bool metadataOnly = false,
-  }) {
+    RemoteCwdParser parser,
+  ) {
     return (bytes) {
-      if (metadataOnly) {
-        final cwd = parser.observe(bytes);
-        if (cwd != null) _noteRemoteCwd(tab, pane, cwd);
-        return bytes;
-      }
       final parsed = parser.process(bytes);
       if (parsed.cwd != null) {
         _noteRemoteCwd(tab, pane, parsed.cwd!);
@@ -621,18 +617,16 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final rustTerminalBridge = _openRustTerminalBridge(
         terminal: terminal,
         onResponseBytes: (bytes) => session.stdin.add(bytes),
+        onWorkingDirectoryChange: (cwd) => _noteRemoteCwd(tab, pane, cwd),
       );
       final pipe = OutputPipe(
         terminal,
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
         terminalByteSink: rustTerminalBridge,
-        transform: _sshOutputTransform(
-          tab,
-          pane,
-          cwdParser,
-          metadataOnly: rustTerminalBridge != null,
-        ),
+        transform: rustTerminalBridge == null
+            ? _sshOutputTransform(tab, pane, cwdParser)
+            : null,
       );
 
       _bindTerminalInput(

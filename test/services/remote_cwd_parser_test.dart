@@ -34,5 +34,16 @@ void main() {
 
       expect(parser.observe(bytes), '/second');
     });
+
+    test('normalizes native OSC 7 values with the same safety checks', () {
+      expect(
+        RemoteCwdParser.pathFromFileUri('file://host/tmp/project%20one'),
+        '/tmp/project one',
+      );
+      expect(
+        RemoteCwdParser.pathFromFileUri('file://host/tmp/../secret'),
+        isNull,
+      );
+    });
   });
 }

@@ -112,7 +112,18 @@ class RemoteCwdParser {
       r'file://[^/\x07\x1b\\]*(/[^\x07\x1b\\]*)',
     ).firstMatch(osc);
     if (m == null) return null;
-    final raw = m.group(1)!;
+    return decodeFileUriPath(m.group(1)!);
+  }
+
+  /// Converts the raw value retained by the native OSC 7 parser into the
+  /// path used by the terminal tab and SFTP view.
+  static String? pathFromFileUri(String value) {
+    final match = RegExp(r'^file://[^/]*(/.*)$').firstMatch(value);
+    if (match == null) return null;
+    return decodeFileUriPath(match.group(1)!);
+  }
+
+  static String? decodeFileUriPath(String raw) {
     if (raw.isEmpty) return '/';
     try {
       final decoded = Uri.decodeComponent(raw);

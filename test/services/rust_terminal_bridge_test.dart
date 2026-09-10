@@ -28,10 +28,12 @@ void main() {
         libraryPath: path,
       );
       final replies = <int>[];
+      final workingDirectories = <String>[];
       final bridge = RustTerminalBridge(
         core: core,
         terminal: terminal,
         onResponseBytes: replies.addAll,
+        onWorkingDirectoryChange: workingDirectories.add,
       );
       addTearDown(() {
         bridge.close();
@@ -41,6 +43,7 @@ void main() {
       bridge.write(
         utf8.encode(
           'aa\r\nbb\r\ncc\r\ndd'
+          '\x1b]7;file:///tmp\x07'
           '\x1b[?1h\x1b[?25l\x1b[?2004h\x1b[0c',
         ),
       );
@@ -54,6 +57,7 @@ void main() {
       expect(terminal.cursorVisibleMode, isFalse);
       expect(terminal.bracketedPasteMode, isTrue);
       expect(utf8.decode(replies), '\x1b[?1;2c');
+      expect(workingDirectories, ['/tmp']);
     },
     skip: available ? false : 'run cargo build --release before this ABI test',
   );

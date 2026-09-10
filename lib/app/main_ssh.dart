@@ -158,6 +158,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final rustTerminalBridge = _openRustTerminalBridge(
       terminal: terminal,
       onResponseBytes: (bytes) => session.stdin.add(bytes),
+      onWorkingDirectoryChange: (cwd) => _noteRemoteCwd(tab, 0, cwd),
     );
     final pipe = OutputPipe(
       terminal,
@@ -165,12 +166,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
       terminalByteSink: rustTerminalBridge,
-      transform: _sshOutputTransform(
-        tab,
-        0,
-        cwdParser,
-        metadataOnly: rustTerminalBridge != null,
-      ),
+      transform: rustTerminalBridge == null
+          ? _sshOutputTransform(tab, 0, cwdParser)
+          : null,
     );
 
     SftpClient? sftp;
@@ -346,18 +344,16 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final rustTerminalBridge = _openRustTerminalBridge(
       terminal: splitTerminal,
       onResponseBytes: (bytes) => session.stdin.add(bytes),
+      onWorkingDirectoryChange: (cwd) => _noteRemoteCwd(tab, 1, cwd),
     );
     final pipe = OutputPipe(
       splitTerminal,
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
       terminalByteSink: rustTerminalBridge,
-      transform: _sshOutputTransform(
-        tab,
-        1,
-        cwdParser,
-        metadataOnly: rustTerminalBridge != null,
-      ),
+      transform: rustTerminalBridge == null
+          ? _sshOutputTransform(tab, 1, cwdParser)
+          : null,
     );
 
     _wireSshSession(
@@ -505,6 +501,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       final rustTerminalBridge = _openRustTerminalBridge(
         terminal: tab.terminal!,
         onResponseBytes: (bytes) => session.stdin.add(bytes),
+        onWorkingDirectoryChange: (cwd) => _noteRemoteCwd(tab, 0, cwd),
       );
       final pipe = OutputPipe(
         tab.terminal!,
@@ -512,12 +509,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
         terminalByteSink: rustTerminalBridge,
-        transform: _sshOutputTransform(
-          tab,
-          0,
-          cwdParser,
-          metadataOnly: rustTerminalBridge != null,
-        ),
+        transform: rustTerminalBridge == null
+            ? _sshOutputTransform(tab, 0, cwdParser)
+            : null,
       );
 
       tab.primarySessionEnded = false;

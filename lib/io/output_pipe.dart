@@ -127,7 +127,9 @@ class OutputPipe {
   static const _kDefaultMaxBytesPerWrite = 65536; // 64 KB
   // Native parsing mutates a complete batch before publishing one screen
   // snapshot, so it can safely amortize a much larger output burst per frame.
-  static const _kNativeMaxBytesPerWrite = 1024 * 1024; // 1 MB
+  // Two MiB keeps ordinary ANSI-heavy parsing close to one frame while
+  // allowing plain line floods to amortize FFI and snapshot publication.
+  static const _kNativeMaxBytesPerWrite = 2 * 1024 * 1024;
   static const _kFlushInterval = Duration(milliseconds: 16); // ~60 fps
   static const _kDefaultQueueHighWatermarkBytes = 512 * 1024;
   static const _kDefaultQueueLowWatermarkBytes = 128 * 1024;

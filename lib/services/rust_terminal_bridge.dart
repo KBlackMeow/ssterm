@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:xterm/xterm.dart';
 
 import '../io/output_pipe.dart';
+import 'remote_cwd_parser.dart';
 import 'rust_terminal_core.dart';
 
 /// Makes the Rust parser/screen model authoritative while retaining xterm's
@@ -18,6 +19,7 @@ class RustTerminalBridge implements TerminalByteSink {
     required this.core,
     required this.terminal,
     this.onResponseBytes,
+    this.onWorkingDirectoryChange,
   }) : _renderBuffer = RustTerminalRenderBuffer(
          initialWordCapacity:
              terminal.viewWidth *
@@ -31,6 +33,7 @@ class RustTerminalBridge implements TerminalByteSink {
   final RustTerminalCore core;
   final Terminal terminal;
   final void Function(Uint8List bytes)? onResponseBytes;
+  final void Function(String path)? onWorkingDirectoryChange;
   final RustTerminalRenderBuffer _renderBuffer;
   final RustTerminalRenderBuffer _historyBuffer;
   var _closed = false;
@@ -72,6 +75,10 @@ class RustTerminalBridge implements TerminalByteSink {
       }
     }
     if (update.titleChanged) terminal.onTitleChange?.call(core.title);
+    if (update.workingDirectoryChanged) {
+      final path = RemoteCwdParser.pathFromFileUri(core.workingDirectory);
+      if (path != null) onWorkingDirectoryChange?.call(path);
+    }
     _publish(update);
   }
 

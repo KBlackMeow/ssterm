@@ -919,11 +919,136 @@ impl TerminalCore {
         }
     }
 
+    /// Drops the prefix of a plain line flood that cannot possibly remain in
+    /// either the visible screen or bounded scrollback.
+    ///
+    /// This is deliberately strict. Any escape sequence, non-ASCII byte,
+    /// unusual control character, wrapped line, alternate screen, or custom
+    /// scrolling region falls back to the byte-for-byte parser below.
+    fn fast_forward_plain_line_flood(&mut self, input: &[u8]) -> usize {
+        if self.using_alt
+            || self.state != ParseState::Ground
+            || !self.utf8.is_empty()
+            || self.margin_top != 0
+            || self.margin_bottom != self.rows - 1
+            || self.insert_mode
+            || self.use_g1_charset
+            || self.g0_dec_graphics
+        {
+            return 0;
+        }
+
+        let retained_line_feeds = self
+            .max_scrollback_rows
+            .saturating_add(self.rows)
+            .saturating_sub(1);
+        if retained_line_feeds == 0 {
+            return 0;
+        }
+
+        let mut line_feeds = 0usize;
+        let mut column = self.cursor_col;
+        let mut index = 0usize;
+        while index < input.len() {
+            match input[index] {
+                0x20..=0x7e => {
+                    if column >= self.columns {
+                        return 0;
+                    }
+                    column += 1;
+                    index += 1;
+                }
+                b'\r' if input.get(index + 1) == Some(&b'\n') => {
+                    line_feeds += 1;
+                    column = 0;
+                    index += 2;
+                }
+                _ => return 0,
+            }
+        }
+
+        if line_feeds <= retained_line_feeds {
+            return 0;
+        }
+
+        let skipped_line_feeds = line_feeds - retained_line_feeds;
+        let mut seen = 0usize;
+        let mut suffix_start = 0usize;
+        for (index, &byte) in input.iter().enumerate() {
+            if byte == b'\n' {
+                seen += 1;
+                if seen == skipped_line_feeds {
+                    suffix_start = index + 1;
+                    break;
+                }
+            }
+        }
+
+        let total_scrolls = self
+            .cursor_row
+            .saturating_add(line_feeds)
+            .saturating_sub(self.rows - 1);
+        self.scrollback_sequence = self.scrollback_sequence.wrapping_add(total_scrolls as u64);
+
+        self.cells.fill(TerminalCell::default());
+        self.screen_head = 0;
+        self.scrollback_head = 0;
+        self.scrollback_len = self.max_scrollback_rows;
+        self.scrollback[..self.scrollback_len * self.columns].fill(TerminalCell::default());
+
+        let mut logical_row = 0usize;
+        let mut line_start = suffix_start;
+        for line_end in suffix_start..input.len() {
+            if input[line_end] != b'\n' {
+                continue;
+            }
+            let content_end = line_end - 1; // Input was validated as CRLF.
+            let row = if logical_row < self.scrollback_len {
+                &mut self.scrollback[logical_row * self.columns..(logical_row + 1) * self.columns]
+            } else {
+                let screen_row = logical_row - self.scrollback_len;
+                &mut self.cells[screen_row * self.columns..(screen_row + 1) * self.columns]
+            };
+            for (column, &byte) in input[line_start..content_end].iter().enumerate() {
+                row[column] = TerminalCell {
+                    codepoint: u32::from(byte),
+                    foreground: self.cursor_style.foreground,
+                    background: self.cursor_style.background,
+                    attributes: self.cursor_style.attributes,
+                    underline_color: self.cursor_style.underline_color,
+                    width: 1,
+                    reserved: [0; 3],
+                };
+            }
+            logical_row += 1;
+            line_start = line_end + 1;
+        }
+
+        let final_row = &mut self.cells[(self.rows - 1) * self.columns..self.rows * self.columns];
+        for (column, &byte) in input[line_start..].iter().enumerate() {
+            final_row[column] = TerminalCell {
+                codepoint: u32::from(byte),
+                foreground: self.cursor_style.foreground,
+                background: self.cursor_style.background,
+                attributes: self.cursor_style.attributes,
+                underline_color: self.cursor_style.underline_color,
+                width: 1,
+                reserved: [0; 3],
+            };
+        }
+        self.cursor_col = input.len() - line_start;
+        self.cursor_row = self.rows - 1;
+        self.history_epoch = self.history_epoch.wrapping_add(1);
+        self.mark_all_dirty();
+        input.len()
+    }
+
     pub fn feed(&mut self, input: &[u8]) -> TerminalUpdate {
         self.reset_update();
         if !input.is_empty() {
             self.generation = self.generation.wrapping_add(1);
         }
+        let input = &input[self.fast_forward_plain_line_flood(input)..];
         for &byte in input {
             match self.state {
                 ParseState::Ground => match byte {
@@ -1755,6 +1880,43 @@ mod tests {
         terminal.feed(b"aa\r\nbb\r\ncc");
         assert_eq!(terminal.scrollback_len, 1);
         assert_eq!(terminal.scrollback[0].codepoint, 'a' as u32);
+    }
+
+    #[test]
+    fn plain_line_flood_fast_forward_matches_incremental_parsing() {
+        let mut input = Vec::new();
+        let mut lines = Vec::new();
+        for value in 1..=1000 {
+            let line = format!("{value}\r\n");
+            input.extend_from_slice(line.as_bytes());
+            lines.push(line);
+        }
+
+        let mut fast = TerminalCore::with_scrollback(8, 4, 6);
+        let mut incremental = TerminalCore::with_scrollback(8, 4, 6);
+        fast.feed(&input);
+        for line in lines {
+            incremental.feed(line.as_bytes());
+        }
+
+        assert_eq!(fast.cursor_col, incremental.cursor_col);
+        assert_eq!(fast.cursor_row, incremental.cursor_row);
+        assert_eq!(fast.scrollback_len, incremental.scrollback_len);
+        assert_eq!(fast.scrollback_sequence, incremental.scrollback_sequence);
+        for row in 0..fast.rows {
+            assert_eq!(fast.row_text(row), incremental.row_text(row));
+        }
+        for row in 0..fast.scrollback_len {
+            let fast_row = (fast.scrollback_head + row) % fast.max_scrollback_rows;
+            let incremental_row =
+                (incremental.scrollback_head + row) % incremental.max_scrollback_rows;
+            let fast_start = fast_row * fast.columns;
+            let incremental_start = incremental_row * incremental.columns;
+            assert_eq!(
+                &fast.scrollback[fast_start..fast_start + fast.columns],
+                &incremental.scrollback[incremental_start..incremental_start + incremental.columns],
+            );
+        }
     }
 
     #[test]
