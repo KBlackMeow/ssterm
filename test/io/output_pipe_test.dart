@@ -16,6 +16,13 @@ class _LogStub implements LogSink {
   Future<void> close() async {}
 }
 
+class _ByteSinkStub implements TerminalByteSink {
+  final List<List<int>> calls = [];
+
+  @override
+  void write(List<int> bytes) => calls.add(List<int>.from(bytes));
+}
+
 void main() {
   test('source exposes no terminal command-capture API', () {
     final source = File('lib/io/output_pipe.dart').readAsStringSync();
@@ -34,6 +41,55 @@ void main() {
   });
 
   group('OutputPipe', () {
+    test('external byte sink receives raw bytes and bypasses Dart parsing', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final sink = _ByteSinkStub();
+        var transformCalls = 0;
+        final pipe = OutputPipe(
+          terminal,
+          terminalByteSink: sink,
+          transform: (bytes) {
+            transformCalls++;
+            return [65, 65, 65];
+          },
+        );
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add([0x1b, 0x5b, 0x32, 0x4a]);
+        fake.elapse(const Duration(milliseconds: 20));
+
+        expect(transformCalls, 1, reason: 'side-effect transforms still run');
+        expect(sink.calls, [
+          [0x1b, 0x5b, 0x32, 0x4a],
+        ]);
+        expect(terminal.buffer.lines[0].getText(), isEmpty);
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
+    test('native sink amortizes a 512 KB burst into one screen batch', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final sink = _ByteSinkStub();
+        final pipe = OutputPipe(terminal, terminalByteSink: sink);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add(Uint8List(512 * 1024));
+        fake.elapse(const Duration(milliseconds: 20));
+
+        expect(sink.calls, hasLength(1));
+        expect(sink.calls.single, hasLength(512 * 1024));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
     test('buffers incoming chunks and flushes to terminal after 16 ms', () {
       fakeAsync((fake) {
         final terminal = Terminal();
@@ -125,6 +181,32 @@ void main() {
         // Second flush: remaining 65536 bytes.
         fake.elapse(const Duration(milliseconds: 20));
         expect(written.length, equals(128 * 1024));
+
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
+    test('drains fragmented chunks without disturbing queued byte order', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final pipe = OutputPipe(terminal, maxBytesPerWrite: 4);
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl.add([97, 98, 99]); // abc
+        ctrl.add([100, 101, 102, 103, 104]); // defgh
+        fake.flushMicrotasks();
+
+        expect(pipe.metrics.queuedBytes, equals(8));
+
+        fake.elapse(const Duration(milliseconds: 20));
+        expect(terminal.buffer.lines[0].getText(), contains('abcd'));
+        expect(pipe.metrics.queuedBytes, equals(4));
+
+        fake.elapse(const Duration(milliseconds: 20));
+        expect(terminal.buffer.lines[0].getText(), contains('abcdefgh'));
+        expect(pipe.metrics.queuedBytes, isZero);
 
         pipe.dispose();
         ctrl.close();

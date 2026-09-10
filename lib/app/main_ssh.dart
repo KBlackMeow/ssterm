@@ -155,12 +155,22 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     }
 
     final cwdParser = RemoteCwdParser();
+    final rustTerminalBridge = _openRustTerminalBridge(
+      terminal: terminal,
+      onResponseBytes: (bytes) => session.stdin.add(bytes),
+    );
     final pipe = OutputPipe(
       terminal,
       logSink: logger,
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
-      transform: _sshOutputTransform(tab, 0, cwdParser),
+      terminalByteSink: rustTerminalBridge,
+      transform: _sshOutputTransform(
+        tab,
+        0,
+        cwdParser,
+        metadataOnly: rustTerminalBridge != null,
+      ),
     );
 
     SftpClient? sftp;
@@ -175,6 +185,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
     if (!mounted || tab.manuallyDisconnected) {
       pipe.dispose();
+      rustTerminalBridge?.close();
+      rustTerminalBridge?.core.close();
       remotePath.dispose();
       transferManager?.dispose();
       session.close();
@@ -198,6 +210,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     tab.sshProfile = r.profile;
     tab.activeSshPane = 0;
     tab.pipe = pipe;
+    tab.rustTerminalBridge = rustTerminalBridge;
+    tab.rustTerminalCore = rustTerminalBridge?.core;
     tab.connectionError = null;
     tab.primarySessionEnded = false;
 
@@ -207,6 +221,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       terminal,
       pipe,
       isSplit: false,
+      rustTerminalBridge: rustTerminalBridge,
       profile: r.profile,
     );
 
@@ -219,7 +234,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       unawaited(
         fwdService.startAll(r.client, r.profile.forwardRules).catchError((e) {
           if (mounted) {
-            tab.terminal?.write('[Port forward error: $e]\r\n');
+            _writeTerminalOutput(
+              tab,
+              tab.terminal,
+              '[Port forward error: $e]\r\n',
+            );
           }
         }),
       );
@@ -324,20 +343,39 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     }
 
     final cwdParser = RemoteCwdParser();
+    final rustTerminalBridge = _openRustTerminalBridge(
+      terminal: splitTerminal,
+      onResponseBytes: (bytes) => session.stdin.add(bytes),
+    );
     final pipe = OutputPipe(
       splitTerminal,
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
-      transform: _sshOutputTransform(tab, 1, cwdParser),
+      terminalByteSink: rustTerminalBridge,
+      transform: _sshOutputTransform(
+        tab,
+        1,
+        cwdParser,
+        metadataOnly: rustTerminalBridge != null,
+      ),
     );
 
-    _wireSshSession(tab, session, splitTerminal, pipe, isSplit: true);
+    _wireSshSession(
+      tab,
+      session,
+      splitTerminal,
+      pipe,
+      isSplit: true,
+      rustTerminalBridge: rustTerminalBridge,
+    );
 
     pipe.bind(session.stdout);
     pipe.bind(session.stderr);
 
     if (!mounted) {
       pipe.dispose();
+      rustTerminalBridge?.close();
+      rustTerminalBridge?.core.close();
       session.close();
       return;
     }
@@ -346,6 +384,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.splitTerminal = splitTerminal;
       tab.splitSshSession = session;
       tab.splitPipe = pipe;
+      tab.splitRustTerminalBridge = rustTerminalBridge;
+      tab.splitRustTerminalCore = rustTerminalBridge?.core;
       tab.splitAxis = axis;
       tab.remoteCwdPane1 = tab.remoteCwdPane0;
     });
@@ -389,7 +429,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final profile = tab.sshProfile;
     if (profile == null || !mounted) return;
 
-    tab.terminal?.write('[Reconnecting to ${profile.alias}…]\r\n');
+    _writeTerminalOutput(
+      tab,
+      tab.terminal,
+      '[Reconnecting to ${profile.alias}…]\r\n',
+    );
 
     try {
       final result = await connectSshHost(
@@ -441,7 +485,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         transferManager = TransferManager(sshProfile: result.profile);
         remoteHome = await fetchRemoteHome(result.client);
       } catch (e) {
-        tab.terminal?.write('[SFTP unavailable after reconnect: $e]\r\n');
+        _writeTerminalOutput(
+          tab,
+          tab.terminal,
+          '[SFTP unavailable after reconnect: $e]\r\n',
+        );
       }
 
       if (!mounted || tab.manuallyDisconnected) {
@@ -454,12 +502,22 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         return;
       }
 
+      final rustTerminalBridge = _openRustTerminalBridge(
+        terminal: tab.terminal!,
+        onResponseBytes: (bytes) => session.stdin.add(bytes),
+      );
       final pipe = OutputPipe(
         tab.terminal!,
         logSink: logger,
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
-        transform: _sshOutputTransform(tab, 0, cwdParser),
+        terminalByteSink: rustTerminalBridge,
+        transform: _sshOutputTransform(
+          tab,
+          0,
+          cwdParser,
+          metadataOnly: rustTerminalBridge != null,
+        ),
       );
 
       tab.primarySessionEnded = false;
@@ -469,6 +527,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         tab.terminal!,
         pipe,
         isSplit: false,
+        rustTerminalBridge: rustTerminalBridge,
         profile: profile,
       );
 
@@ -478,7 +537,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       });
 
       tab.pipe?.dispose();
+      tab.rustTerminalBridge?.close();
+      tab.rustTerminalCore?.close();
       tab.pipe = pipe;
+      tab.rustTerminalBridge = rustTerminalBridge;
+      tab.rustTerminalCore = rustTerminalBridge?.core;
       _scheduleSyncPaneAfterShown(tab, pane: 0);
       tab.sshSession = session;
       tab.sshClient = result.client;
@@ -503,7 +566,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
             e,
           ) {
             if (mounted) {
-              tab.terminal?.write('[Port forward error: $e]\r\n');
+              _writeTerminalOutput(
+                tab,
+                tab.terminal,
+                '[Port forward error: $e]\r\n',
+              );
             }
           }),
         );
@@ -537,12 +604,14 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       // Success — clear the backoff counter so the NEXT disconnect starts
       // from the bottom of the ladder again.
       tab.reconnectAttempt = 0;
-      tab.terminal?.write('[Reconnected]\r\n');
+      _writeTerminalOutput(tab, tab.terminal, '[Reconnected]\r\n');
       if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       tab.clearDeadSshTransport();
-      tab.terminal?.write(
+      _writeTerminalOutput(
+        tab,
+        tab.terminal,
         '[Reconnect failed: $e]\r\n${_TerminalHomeLocalMethods._kRestartPrompt}',
       );
       tab.primarySessionEnded = true;
@@ -555,7 +624,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       const maxAttempts = _kMaxReconnectAttempts;
       tab.reconnectAttempt += 1;
       if (tab.reconnectAttempt > maxAttempts) {
-        tab.terminal?.write(
+        _writeTerminalOutput(
+          tab,
+          tab.terminal,
           '[Reconnect aborted after $maxAttempts attempts — host appears '
           'permanently unreachable. Press a key to retry manually.]\r\n',
         );
@@ -566,7 +637,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         2,
         60,
       ); // 2,4,8,16,32,60,60,…
-      tab.terminal?.write(
+      _writeTerminalOutput(
+        tab,
+        tab.terminal,
         '[Retry ${tab.reconnectAttempt}/$maxAttempts in ${delaySeconds}s…]\r\n',
       );
       await Future<void>.delayed(Duration(seconds: delaySeconds));

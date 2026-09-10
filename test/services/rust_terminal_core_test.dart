@@ -43,6 +43,27 @@ void main() {
       expect(terminal.cell(0, 0).codepoint, '你'.runes.single);
       expect(terminal.cell(0, 0).width, 2);
       expect(terminal.cell(0, 1).width, 0);
+
+      final snapshot = RustTerminalSnapshotBuffer();
+      addTearDown(snapshot.close);
+      expect(terminal.snapshotInto(snapshot), 2);
+      expect(snapshot.columns, 12);
+      expect(snapshot.rows, 2);
+      expect(snapshot.cellCount, 24);
+      expect(snapshot.cursorColumn, 2);
+      expect(snapshot.cursorRow, 0);
+      expect(snapshot.usingAlternateScreen, isFalse);
+      expect(snapshot.cell(0, 0).codepoint, '你'.runes.single);
+      expect(snapshot.cell(0, 0).width, 2);
+      expect(snapshot.cell(0, 1).width, 0);
+
+      final render = RustTerminalRenderBuffer();
+      addTearDown(render.close);
+      expect(terminal.renderSnapshotInto(render), 2);
+      expect(render.wordCount, 12 * 2 * 5);
+      expect(render.rowWords(0)[3] & 0x1fffff, '你'.runes.single);
+      expect(render.rowWords(0)[3] >> 22, 2);
+      expect(render.rowWords(0)[8] >> 22, 0);
     },
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
@@ -212,14 +233,63 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
-  test('local PTY output can opt into the Rust terminal shadow path', () {
+  test(
+    'Rust ABI exports modes, query responses, and scrollback deltas',
+    () {
+      final rust = RustTerminalCore.open(
+        columns: 4,
+        rows: 2,
+        libraryPath: path,
+        backgroundRgb: 0x123456,
+      );
+      addTearDown(rust.close);
+
+      rust.feed(
+        Uint8List.fromList(
+          utf8.encode(
+            'aa\r\nbb\r\ncc'
+            '\x1b[?1h\x1b[?25l\x1b[?1006h\x1b[?2004h'
+            '\x1b[?u\x1b]11;?\x07',
+          ),
+        ),
+      );
+
+      expect(
+        utf8.decode(rust.takeResponse()),
+        '\x1b[?0u\x1b]11;rgb:1212/3434/5656\x07',
+      );
+      expect(rust.takeResponse(), isEmpty);
+
+      final visible = RustTerminalRenderBuffer();
+      final history = RustTerminalRenderBuffer();
+      addTearDown(visible.close);
+      addTearDown(history.close);
+      rust.renderSnapshotInto(visible);
+      expect(visible.scrollbackRows, 1);
+      expect(visible.scrollbackSequence, 1);
+      expect(visible.modeFlags & (1 << 2), isNonZero);
+      expect(visible.modeFlags & (1 << 7), 0);
+      expect(visible.modeFlags & (1 << 11), isNonZero);
+      expect(visible.mouseReportMode, 2);
+
+      rust.historySnapshotInto(history, startRow: 0, rowCount: 1);
+      expect(history.wordCount, 4 * 5);
+      expect(history.words[3] & 0x1fffff, 'a'.codeUnitAt(0));
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test('local PTY output defaults to the Rust-authoritative render path', () {
     final localSource = File('lib/app/main_local.dart').readAsStringSync();
     final tabSource = File('lib/models/tab_model.dart').readAsStringSync();
 
-    expect(localSource, contains("SSTERM_RUST_TERMINAL_CORE'] != '1'"));
-    expect(localSource, contains('rustTerminalCore?.feed('));
-    expect(localSource, contains('rustTerminalCore?.resize(w, h)'));
+    expect(localSource, contains("SSTERM_DART_TERMINAL_CORE'] == '1'"));
+    expect(localSource, contains("SSTERM_RUST_TERMINAL_CORE'] == '0'"));
+    expect(localSource, contains('terminalByteSink: rustTerminalBridge'));
+    expect(localSource, isNot(contains('rustTerminalCore?.feed(')));
+    expect(localSource, contains('rustTerminalBridge?.resize(w, h)'));
     expect(tabSource, contains('RustTerminalCore? rustTerminalCore'));
+    expect(tabSource, contains('RustTerminalBridge? rustTerminalBridge'));
     expect(tabSource, contains('rustTerminalCore?.close()'));
   });
 }

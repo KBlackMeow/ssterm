@@ -32,6 +32,7 @@ import 'services/port_forward_service.dart';
 import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/rust_terminal_core.dart';
+import 'services/rust_terminal_bridge.dart';
 import 'services/session_logger.dart';
 import 'services/llm_service.dart';
 import 'services/mcp_service.dart';

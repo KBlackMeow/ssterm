@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -11,6 +12,11 @@ import 'output_pipe_metrics.dart';
 abstract interface class LogSink {
   void write(List<int> bytes);
   Future<void> close();
+}
+
+/// Byte-oriented terminal backend used when parsing is owned outside Dart.
+abstract interface class TerminalByteSink {
+  void write(List<int> bytes);
 }
 
 /// The result of one agent command executed in a background process.
@@ -54,12 +60,17 @@ class OutputPipe {
     this.logSink,
     this.onBytesConsumed,
     this.onBytesAccepted,
+    this.terminalByteSink,
     this.holdOutputUntilRelease = false,
     this.pauseSourceOnBackpressure = true,
     int? maxBytesPerWrite,
     int? queueHighWatermarkBytes,
     int? queueLowWatermarkBytes,
-  }) : _maxBytesPerWrite = maxBytesPerWrite ?? _kDefaultMaxBytesPerWrite,
+  }) : _maxBytesPerWrite =
+           maxBytesPerWrite ??
+           (terminalByteSink == null
+               ? _kDefaultMaxBytesPerWrite
+               : _kNativeMaxBytesPerWrite),
        _queueHighWatermarkBytes =
            queueHighWatermarkBytes ?? _kDefaultQueueHighWatermarkBytes,
        _queueLowWatermarkBytes =
@@ -81,6 +92,7 @@ class OutputPipe {
   final LogSink? logSink;
   final void Function(int bytes)? onBytesConsumed;
   final void Function(int bytes)? onBytesAccepted;
+  final TerminalByteSink? terminalByteSink;
   bool holdOutputUntilRelease;
 
   /// Whether the bound source subscriptions may be paused at the queue high
@@ -89,13 +101,19 @@ class OutputPipe {
   final bool pauseSourceOnBackpressure;
 
   OutputPipeMetrics get metrics => OutputPipeMetrics(
-    queuedBytes: _buf.length,
+    queuedBytes: _queuedBytes,
     streamsPaused: _streamsPaused,
     pendingAcceptedBytes: _pendingAcceptedBytes,
     holdOutputUntilRelease: holdOutputUntilRelease,
   );
 
-  final _buf = BytesBuilder(copy: false);
+  // Keep source chunks segmented.  A BytesBuilder requires takeBytes() to
+  // materialize the entire backlog; taking 64 KB from a multi-megabyte flood
+  // and then putting the remainder back therefore recopies the shrinking
+  // backlog on every frame (quadratic total work).  A deque lets each flush
+  // consume only the bytes it is actually going to parse.
+  final _chunks = ListQueue<Uint8List>();
+  var _queuedBytes = 0;
   Timer? _timer;
   final _subs = <StreamSubscription<List<int>>>[];
   var _streamsPaused = false;
@@ -107,6 +125,9 @@ class OutputPipe {
   var _pendingAcceptedBytes = 0;
 
   static const _kDefaultMaxBytesPerWrite = 65536; // 64 KB
+  // Native parsing mutates a complete batch before publishing one screen
+  // snapshot, so it can safely amortize a much larger output burst per frame.
+  static const _kNativeMaxBytesPerWrite = 1024 * 1024; // 1 MB
   static const _kFlushInterval = Duration(milliseconds: 16); // ~60 fps
   static const _kDefaultQueueHighWatermarkBytes = 512 * 1024;
   static const _kDefaultQueueLowWatermarkBytes = 128 * 1024;
@@ -116,7 +137,9 @@ class OutputPipe {
   }
 
   void _onChunk(List<int> chunk) {
-    _buf.add(chunk);
+    if (chunk.isEmpty) return;
+    _chunks.addLast(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
+    _queuedBytes += chunk.length;
     _pendingAcceptedBytes += chunk.length;
     _applyBackpressure();
     _acceptPendingBytesIfReady();
@@ -133,7 +156,7 @@ class OutputPipe {
     holdOutputUntilRelease = false;
     _applyBackpressure();
     _acceptPendingBytesIfReady();
-    if (_buf.isNotEmpty) {
+    if (_queuedBytes != 0) {
       _scheduleFlush();
     }
   }
@@ -148,7 +171,7 @@ class OutputPipe {
     if (holdOutputUntilRelease) return;
     _timer?.cancel();
     _timer = null;
-    while (_buf.isNotEmpty) {
+    while (_queuedBytes != 0) {
       _flush();
     }
   }
@@ -156,25 +179,30 @@ class OutputPipe {
   void _flush() {
     _timer = null;
     if (holdOutputUntilRelease) return;
-    final all = _buf.takeBytes();
-    if (all.isEmpty) return;
+    if (_queuedBytes == 0) return;
 
-    final Uint8List toWrite;
-    if (all.length > _maxBytesPerWrite) {
-      toWrite = Uint8List.sublistView(all, 0, _maxBytesPerWrite);
-      _buf.add(Uint8List.sublistView(all, _maxBytesPerWrite));
+    final toWrite = _takeQueuedBytes(_maxBytesPerWrite);
+    if (_queuedBytes != 0) {
       _scheduleFlush();
-    } else {
-      toWrite = all;
     }
 
     logSink?.write(toWrite);
 
-    List<int> out = toWrite;
-    if (transform != null) {
-      out = Uint8List.fromList(transform!(toWrite));
-    }
-    if (out.isNotEmpty) {
+    if (terminalByteSink != null) {
+      // The transform may observe OSC metadata (for example cwd), but Rust
+      // must receive the untouched byte stream. Avoid materializing the
+      // transform's cleaned copy when Dart will not parse it.
+      transform?.call(toWrite);
+      terminalByteSink!.write(toWrite);
+    } else {
+      final out = transform == null
+          ? toWrite
+          : Uint8List.fromList(transform!(toWrite));
+      if (out.isEmpty) {
+        onBytesConsumed?.call(toWrite.length);
+        _applyBackpressure();
+        return;
+      }
       _utf8Sink.add(out);
       final text = _textSink.take();
       if (text.isNotEmpty) {
@@ -185,10 +213,45 @@ class OutputPipe {
     _applyBackpressure();
   }
 
+  Uint8List _takeQueuedBytes(int maximum) {
+    final count = _queuedBytes < maximum ? _queuedBytes : maximum;
+    final first = _chunks.removeFirst();
+
+    if (first.length >= count) {
+      final result = first.length == count
+          ? first
+          : Uint8List.sublistView(first, 0, count);
+      if (first.length > count) {
+        _chunks.addFirst(Uint8List.sublistView(first, count));
+      }
+      _queuedBytes -= count;
+      return result;
+    }
+
+    final result = Uint8List(count);
+    var offset = 0;
+    result.setRange(offset, offset + first.length, first);
+    offset += first.length;
+
+    while (offset < count) {
+      final chunk = _chunks.removeFirst();
+      final remaining = count - offset;
+      final copied = chunk.length < remaining ? chunk.length : remaining;
+      result.setRange(offset, offset + copied, chunk);
+      offset += copied;
+      if (copied < chunk.length) {
+        _chunks.addFirst(Uint8List.sublistView(chunk, copied));
+      }
+    }
+
+    _queuedBytes -= count;
+    return result;
+  }
+
   void _applyBackpressure() {
     if (!pauseSourceOnBackpressure) return;
     if (_streamsPaused) {
-      if (!holdOutputUntilRelease && _buf.length <= _queueLowWatermarkBytes) {
+      if (!holdOutputUntilRelease && _queuedBytes <= _queueLowWatermarkBytes) {
         for (final sub in _subs) {
           sub.resume();
         }
@@ -198,7 +261,7 @@ class OutputPipe {
       return;
     }
 
-    if (_buf.length > _queueHighWatermarkBytes) {
+    if (_queuedBytes > _queueHighWatermarkBytes) {
       for (final sub in _subs) {
         sub.pause();
       }

@@ -20,28 +20,32 @@ Measure the release parser/buffer hot path with:
 cargo run --manifest-path native/terminal_core/Cargo.toml --release --example throughput
 ```
 
-## Production-stream shadow mode
+## Production integration
 
-The xterm renderer remains authoritative while VT feature parity is expanded.
-On desktop, set the following before launching SSTerm to feed every local PTY
-output chunk into this native core as well as xterm:
+Rust is the default parser and screen authority for local PTY and SSH sessions.
+Flutter's vendored xterm package remains the painter, selection model, and
+keyboard/mouse encoder, but it does not parse session output. It receives
+packed dirty rows, incremental scrollback rows, cursor/mode metadata, and
+terminal query responses from this crate.
+
+For diagnostics only, the old Dart parser can be selected before launch:
 
 ```sh
-SSTERM_RUST_TERMINAL_CORE=1 flutter run -d macos
+SSTERM_DART_TERMINAL_CORE=1 flutter run -d macos
 ```
 
-This mode exercises the deployed FFI parser, resizing, ownership, and teardown
-against real shell output without changing what users see. It is deliberately
-opt-in because it performs both parsers' work; it is a compatibility gate, not
-the final rendering-performance mode.
+Native output batches are allowed to grow to 1 MB, while screen publication is
+still paced by the Flutter output pipe. Large history bursts are coalesced and
+rebuilt once after the burst instead of copying the full history every frame.
 
 The ABI contract is in `include/ssterm_terminal_core.h`. Its tests cover
-incremental UTF-8, split terminal control sequences, OSC 7 cwd notifications,
-scrolling, bounded scrollback, resizing, SGR cell styles, and row snapshots.
+incremental UTF-8, split terminal control sequences, OSC/DCS terminal queries,
+input modes, scrolling, bounded incremental scrollback, resizing, SGR cell
+styles, and packed row snapshots.
 
 This ABI supports the common terminal data path: printable UTF-8, C0 controls,
 cursor/erase/character and line-edit CSI, scrolling regions, standard SGR
-attributes and colors, OSC title/cwd, DEC alternate buffers, cells, and bounded
-scrollback. Selection, reflow, and the remaining VT mode surface stay on the
-Dart engine until their fixture parity suite is complete; the application must
-not switch its default terminal engine before that gate passes.
+attributes and colors, OSC title/cwd, common shell capability probes, DEC
+alternate buffers and input modes, cells, and bounded scrollback. Selection and
+painting intentionally stay in Flutter; session byte parsing and screen state
+do not.

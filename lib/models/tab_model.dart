@@ -9,6 +9,7 @@ import '../io/output_pipe.dart';
 import '../services/local_shell_discovery.dart';
 import '../services/port_forward_service.dart';
 import '../services/rust_terminal_core.dart';
+import '../services/rust_terminal_bridge.dart';
 import '../views/file_editor_view.dart';
 import 'ssh_host.dart';
 import 'transfer_task.dart';
@@ -36,6 +37,7 @@ class AppTab {
   Terminal? terminal;
   Pty? pty;
   RustTerminalCore? rustTerminalCore;
+  RustTerminalBridge? rustTerminalBridge;
   SSHClient? sshClient;
   SSHClient? jumpClient;
   SSHSession? sshSession;
@@ -139,6 +141,7 @@ class AppTab {
   SSHSession? splitSshSession;
   Pty? splitPty;
   RustTerminalCore? splitRustTerminalCore;
+  RustTerminalBridge? splitRustTerminalBridge;
   OutputPipe? splitPipe;
   final splitViewKey = GlobalKey<TerminalViewState>();
   Axis splitAxis = Axis.horizontal;
@@ -202,10 +205,12 @@ class AppTab {
     splitSshSession?.close();
     splitPty?.kill();
     splitPty?.dispose();
+    splitRustTerminalBridge?.close();
     splitRustTerminalCore?.close();
     splitTerminal = null;
     splitSshSession = null;
     splitPty = null;
+    splitRustTerminalBridge = null;
     splitRustTerminalCore = null;
     splitPipe = null;
     splitSessionEnded = false;
@@ -260,6 +265,8 @@ class AppTab {
     pipe = null;
     pty?.kill();
     pty?.dispose();
+    rustTerminalBridge?.close();
+    rustTerminalBridge = null;
     rustTerminalCore?.close();
     rustTerminalCore = null;
     pty = null;
@@ -270,6 +277,8 @@ class AppTab {
     splitTerminal = null;
     pty = splitPty;
     splitPty = null;
+    rustTerminalBridge = splitRustTerminalBridge;
+    splitRustTerminalBridge = null;
     rustTerminalCore = splitRustTerminalCore;
     splitRustTerminalCore = null;
     sshSession = splitSshSession;
@@ -296,6 +305,15 @@ class AppTab {
     pipe = null;
     splitPipe?.dispose();
     splitPipe = null;
+    splitRustTerminalBridge?.close();
+    splitRustTerminalBridge = null;
+    splitRustTerminalCore?.close();
+    splitRustTerminalCore = null;
+
+    rustTerminalBridge?.close();
+    rustTerminalBridge = null;
+    rustTerminalCore?.close();
+    rustTerminalCore = null;
 
     final splitSession = splitSshSession;
     if (splitSession != null) safeSshTeardown(() => splitSession.close());
@@ -355,6 +373,8 @@ class AppTab {
     forwardService?.stopAll();
     pty?.kill();
     pty?.dispose();
+    rustTerminalBridge?.close();
+    rustTerminalBridge = null;
     rustTerminalCore?.close();
     rustTerminalCore = null;
     final session = sshSession;

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' show max;
+import 'dart:typed_data';
 
 import 'package:xterm/src/base/observable.dart';
 import 'package:xterm/src/core/buffer/buffer.dart';
@@ -286,6 +287,144 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   void write(String data) {
     _parser.write(data);
     notifyListeners();
+  }
+
+  /// Replaces visible screen rows with cells produced by an external terminal
+  /// engine. [packedCells] uses five uint32 values per cell in BufferLine
+  /// order: foreground, background, attributes, encoded content, underline.
+  ///
+  /// This is the renderer bridge for native terminal engines. It deliberately
+  /// bypasses the Dart escape parser: the external engine is authoritative and
+  /// this object supplies input mapping, selection, and the existing painter.
+  void applyPackedScreen({
+    required Uint32List packedCells,
+    required int columns,
+    required int rows,
+    required int cursorColumn,
+    required int cursorRow,
+    required bool usingAlternateScreen,
+    int dirtyRowStart = 0,
+    int? dirtyRowEnd,
+  }) {
+    const wordsPerCell = 5;
+    if (columns != _viewWidth || rows != _viewHeight) {
+      throw ArgumentError(
+        'Native screen dimensions ${columns}x$rows do not match '
+        'terminal dimensions ${_viewWidth}x$_viewHeight.',
+      );
+    }
+    final requiredWords = columns * rows * wordsPerCell;
+    if (packedCells.length < requiredWords) {
+      throw ArgumentError.value(
+        packedCells.length,
+        'packedCells',
+        'requires at least $requiredWords words',
+      );
+    }
+
+    final target = usingAlternateScreen ? _altBuffer : _mainBuffer;
+    final switched = !identical(_buffer, target);
+    _buffer = target;
+    final first = switched ? 0 : dirtyRowStart.clamp(0, rows - 1);
+    final last =
+        switched ? rows - 1 : (dirtyRowEnd ?? rows - 1).clamp(first, rows - 1);
+    final visibleStart = target.scrollBack;
+    final wordsPerRow = columns * wordsPerCell;
+    for (var row = first; row <= last; row++) {
+      final line = target.lines[visibleStart + row];
+      line.data.setRange(
+        0,
+        wordsPerRow,
+        packedCells,
+        row * wordsPerRow,
+      );
+      markDirtyRow(row);
+    }
+    target.setCursor(cursorColumn, cursorRow);
+    notifyListeners();
+  }
+
+  /// Imports main-buffer scrollback rows produced by an external engine.
+  ///
+  /// With [replace] false the rows are inserted immediately above the current
+  /// viewport. With [replace] true the retained history is rebuilt, which is
+  /// used after resize, erase-scrollback, or when the renderer missed more
+  /// rows than the native ring still retains.
+  void applyPackedHistory({
+    required Uint32List packedRows,
+    required int columns,
+    required int rowCount,
+    required bool replace,
+  }) {
+    const wordsPerCell = 5;
+    if (columns != _viewWidth) {
+      throw ArgumentError(
+        'Native history width $columns does not match terminal width $_viewWidth.',
+      );
+    }
+    final wordsPerRow = columns * wordsPerCell;
+    final requiredWords = rowCount * wordsPerRow;
+    if (packedRows.length < requiredWords) {
+      throw ArgumentError.value(
+        packedRows.length,
+        'packedRows',
+        'requires at least $requiredWords words',
+      );
+    }
+
+    BufferLine importRow(int row) {
+      final line = BufferLine(columns);
+      line.data.setRange(0, wordsPerRow, packedRows, row * wordsPerRow);
+      return line;
+    }
+
+    if (replace) {
+      final lines = <BufferLine>[
+        for (var row = 0; row < rowCount; row++) importRow(row),
+        for (var row = 0; row < _viewHeight; row++) BufferLine(columns),
+      ];
+      _mainBuffer.lines.replaceWith(lines);
+      return;
+    }
+
+    for (var row = 0; row < rowCount; row++) {
+      _mainBuffer.lines.insert(_mainBuffer.scrollBack, importRow(row));
+    }
+  }
+
+  /// Synchronizes input/render modes owned by an external parser.
+  void applyExternalModes({
+    required bool insertMode,
+    required bool lineFeedMode,
+    required bool cursorKeysMode,
+    required bool reverseDisplayMode,
+    required bool originMode,
+    required bool autoWrapMode,
+    required MouseMode mouseMode,
+    required MouseReportMode mouseReportMode,
+    required bool cursorBlinkMode,
+    required bool cursorVisibleMode,
+    required bool appKeypadMode,
+    required bool reportFocusMode,
+    required bool altBufferMouseScrollMode,
+    required bool bracketedPasteMode,
+    required int cursorShape,
+  }) {
+    _insertMode = insertMode;
+    _lineFeedMode = lineFeedMode;
+    _cursorKeysMode = cursorKeysMode;
+    _reverseDisplayMode = reverseDisplayMode;
+    _originMode = originMode;
+    _autoWrapMode = autoWrapMode;
+    _mouseMode = mouseMode;
+    _mouseReportMode = mouseReportMode;
+    _cursorBlinkMode = cursorBlinkMode;
+    _cursorVisibleMode = cursorVisibleMode;
+    _appKeypadMode = appKeypadMode;
+    _reportFocusMode = reportFocusMode;
+    _altBufferMouseScrollMode = altBufferMouseScrollMode;
+    _bracketedPasteMode = bracketedPasteMode;
+    _decscusrShape = cursorShape;
   }
 
   /// Removes [attributes] from cells already stored in the active buffer.

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:test/test.dart';
 import 'package:xterm/core.dart';
 
@@ -104,6 +106,99 @@ void main() {
       terminal.write('1\r\n2\r\n3\r\n4');
 
       expect(terminal.takeDirtyRows(), [0, 1, 2]);
+    });
+  });
+
+  group('Terminal.applyPackedScreen', () {
+    test('imports native cells and cursor without invoking the parser', () {
+      final terminal = Terminal()..resize(2, 2);
+      final words = Uint32List(2 * 2 * 5);
+      words[0] = CellColor.named | 2;
+      words[2] = CellAttr.bold;
+      words[3] = 'A'.codeUnitAt(0) | (1 << CellContent.widthShift);
+      words[8] = '中'.runes.single | (2 << CellContent.widthShift);
+      terminal.takeDirtyRows();
+
+      terminal.applyPackedScreen(
+        packedCells: words,
+        columns: 2,
+        rows: 2,
+        cursorColumn: 1,
+        cursorRow: 1,
+        usingAlternateScreen: false,
+        dirtyRowStart: 0,
+        dirtyRowEnd: 0,
+      );
+
+      expect(terminal.buffer.lines[0].getCodePoint(0), 'A'.codeUnitAt(0));
+      expect(terminal.buffer.lines[0].getForeground(0), CellColor.named | 2);
+      expect(terminal.buffer.lines[0].getAttributes(0), CellAttr.bold);
+      expect(terminal.buffer.lines[0].getWidth(0), 1);
+      expect(terminal.buffer.lines[0].getCodePoint(1), '中'.runes.single);
+      expect(terminal.buffer.cursorX, 1);
+      expect(terminal.buffer.cursorY, 1);
+      expect(terminal.takeDirtyRows(), [0]);
+    });
+
+    test('switches buffers and refreshes the complete native screen', () {
+      final terminal = Terminal()..resize(2, 1);
+      final words = Uint32List(10)
+        ..[3] = 'V'.codeUnitAt(0) | (1 << CellContent.widthShift);
+      terminal.takeDirtyRows();
+
+      terminal.applyPackedScreen(
+        packedCells: words,
+        columns: 2,
+        rows: 1,
+        cursorColumn: 0,
+        cursorRow: 0,
+        usingAlternateScreen: true,
+        dirtyRowStart: 1,
+        dirtyRowEnd: 0,
+      );
+
+      expect(terminal.isUsingAltBuffer, isTrue);
+      expect(terminal.buffer.lines[0].getCodePoint(0), 'V'.codeUnitAt(0));
+      expect(terminal.takeDirtyRows(), [0]);
+    });
+
+    test('imports native history and external input modes', () {
+      final terminal = Terminal(maxLines: 100)..resize(2, 2);
+      final history = Uint32List(2 * 5)
+        ..[3] = 'H'.codeUnitAt(0) | (1 << CellContent.widthShift);
+
+      terminal.applyPackedHistory(
+        packedRows: history,
+        columns: 2,
+        rowCount: 1,
+        replace: true,
+      );
+      terminal.applyExternalModes(
+        insertMode: true,
+        lineFeedMode: true,
+        cursorKeysMode: true,
+        reverseDisplayMode: false,
+        originMode: false,
+        autoWrapMode: true,
+        mouseMode: MouseMode.upDownScrollMove,
+        mouseReportMode: MouseReportMode.sgr,
+        cursorBlinkMode: true,
+        cursorVisibleMode: false,
+        appKeypadMode: true,
+        reportFocusMode: true,
+        altBufferMouseScrollMode: true,
+        bracketedPasteMode: true,
+        cursorShape: 5,
+      );
+
+      expect(terminal.mainBuffer.scrollBack, 1);
+      expect(terminal.mainBuffer.lines[0].toString(), 'H');
+      expect(terminal.cursorKeysMode, isTrue);
+      expect(terminal.mouseMode, MouseMode.upDownScrollMove);
+      expect(terminal.mouseReportMode, MouseReportMode.sgr);
+      expect(terminal.cursorVisibleMode, isFalse);
+      expect(terminal.bracketedPasteMode, isTrue);
+      expect(terminal.decscusrShape, 5);
     });
   });
 

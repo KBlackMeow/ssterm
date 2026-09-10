@@ -52,22 +52,46 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     required int columns,
     required int rows,
   }) {
-    // The native screen core consumes real PTY bytes in shadow mode while
-    // xterm remains the renderer. It gives us production-stream validation
-    // without switching drawing, selection, or reflow before their parity
-    // suite is complete.
-    if (Platform.environment['SSTERM_RUST_TERMINAL_CORE'] != '1') return null;
+    // Rust is the production parser and screen authority. xterm is retained
+    // only as the Flutter painting/input surface and receives packed native
+    // screen snapshots through RustTerminalBridge. Keep one explicit rollback
+    // switch for diagnosing platform-specific native-loader problems.
+    if (Platform.environment['SSTERM_DART_TERMINAL_CORE'] == '1' ||
+        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '0') {
+      return null;
+    }
     try {
       return RustTerminalCore.open(
         columns: columns,
         rows: rows,
-        maxScrollbackRows: 5000,
+        // xterm's `maxLines` includes the visible viewport, while the native
+        // core's limit counts history only.
+        maxScrollbackRows: rows >= 5000 ? 0 : 5000 - rows,
+        backgroundRgb:
+            _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
       );
     } catch (_) {
       // An unavailable optional dylib must not prevent a user from opening a
-      // shell. PTY migration remains independently usable.
+      // shell if a platform bundle is missing the native library.
       return null;
     }
+  }
+
+  RustTerminalBridge? _openRustTerminalBridge({
+    required Terminal terminal,
+    required void Function(Uint8List bytes) onResponseBytes,
+  }) {
+    final core = _openRustTerminalCore(
+      columns: terminal.viewWidth,
+      rows: terminal.viewHeight,
+    );
+    return core == null
+        ? null
+        : RustTerminalBridge(
+            core: core,
+            terminal: terminal,
+            onResponseBytes: onResponseBytes,
+          );
   }
 
   void _syncPaneAfterShown(_Tab tab, {required int pane}) {
@@ -126,9 +150,15 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<int> Function(List<int>) _sshOutputTransform(
     _Tab tab,
     int pane,
-    RemoteCwdParser parser,
-  ) {
+    RemoteCwdParser parser, {
+    bool metadataOnly = false,
+  }) {
     return (bytes) {
+      if (metadataOnly) {
+        final cwd = parser.observe(bytes);
+        if (cwd != null) _noteRemoteCwd(tab, pane, cwd);
+        return bytes;
+      }
       final parsed = parser.process(bytes);
       if (parsed.cwd != null) {
         _noteRemoteCwd(tab, pane, parsed.cwd!);
@@ -139,6 +169,21 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
   void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
     tab.noteRemoteCwd(pane: pane, cwd: cwd);
+  }
+
+  void _writeTerminalOutput(_Tab tab, Terminal? terminal, String text) {
+    if (terminal == null || text.isEmpty) return;
+    final pane = _paneIndexOf(tab, terminal);
+    final bridge = pane == 1
+        ? tab.splitRustTerminalBridge
+        : pane == 0
+        ? tab.rustTerminalBridge
+        : null;
+    if (bridge != null) {
+      bridge.write(utf8.encode(text));
+    } else {
+      terminal.write(text);
+    }
   }
 
   /// Which pane owns [terminal] right now (0 or 1). Resolves after split collapse.
@@ -237,9 +282,15 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     // without sending cleanup sequences, leaving the terminal in alt-buffer
     // mode, with SGR underline set, or with mouse/cursor modes active.
     if (terminal.isUsingAltBuffer) {
-      terminal.write('\x1b[?1049l'); // exit alt buffer + restore cursor
+      _writeTerminalOutput(
+        tab,
+        terminal,
+        '\x1b[?1049l',
+      ); // exit alt buffer + restore cursor
     }
-    terminal.write(
+    _writeTerminalOutput(
+      tab,
+      terminal,
       '\x1b[m' // reset all SGR attributes (underline, bold, etc.)
       '\x1b[?25h' // show cursor (in case it was hidden)
       '\x1b[?1l' // normal cursor keys (not application mode)
@@ -250,10 +301,14 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     );
 
     if (showExitMessage && exitCode != null && !ssh) {
-      terminal.write('\r\n[Process exited with code $exitCode]\r\n');
+      _writeTerminalOutput(
+        tab,
+        terminal,
+        '\r\n[Process exited with code $exitCode]\r\n',
+      );
     }
     if (ssh) {
-      terminal.write('\r\n[SSH connection closed]\r\n');
+      _writeTerminalOutput(tab, terminal, '\r\n[SSH connection closed]\r\n');
     }
 
     final paneNow = _paneIndexOf(tab, terminal) ?? pane;
@@ -262,7 +317,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       return;
     }
 
-    terminal.write(_kRestartPrompt);
+    _writeTerminalOutput(tab, terminal, _kRestartPrompt);
     _setPaneSessionEnded(tab, paneNow, true);
   }
 
@@ -286,6 +341,13 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       rows: rows,
     );
     late Pty pty;
+    final rustTerminalBridge = rustTerminalCore == null
+        ? null
+        : RustTerminalBridge(
+            core: rustTerminalCore,
+            terminal: terminal,
+            onResponseBytes: (bytes) => pty.write(bytes),
+          );
     try {
       pty = await Pty.start(
         shell.executable,
@@ -301,6 +363,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         ackRead: true,
       );
     } catch (e) {
+      rustTerminalBridge?.close();
       rustTerminalCore?.close();
       if (!mounted) return;
       terminal.write('\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt');
@@ -312,14 +375,18 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     if (isSplit) {
       tab.splitPty?.kill();
       tab.splitPty?.dispose();
+      tab.splitRustTerminalBridge?.close();
       tab.splitRustTerminalCore?.close();
       tab.splitPty = pty;
+      tab.splitRustTerminalBridge = rustTerminalBridge;
       tab.splitRustTerminalCore = rustTerminalCore;
     } else {
       tab.pty?.kill();
       tab.pty?.dispose();
+      tab.rustTerminalBridge?.close();
       tab.rustTerminalCore?.close();
       tab.pty = pty;
+      tab.rustTerminalBridge = rustTerminalBridge;
       tab.rustTerminalCore = rustTerminalCore;
     }
 
@@ -328,11 +395,22 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal,
       holdOutputUntilRelease: true,
       onBytesAccepted: (_) => pty.ackRead(),
+      terminalByteSink: rustTerminalBridge,
       transform: (bytes) {
-        // Feed before the Dart OSC-7 transform removes control sequences.
-        // This is intentionally an opt-in shadow path until native cells are
-        // consumed directly by the terminal painter.
-        rustTerminalCore?.feed(Uint8List.fromList(bytes));
+        if (rustTerminalBridge != null) {
+          var cwd = cwdParser.observe(bytes);
+          if (cwd != null && Platform.isWindows) {
+            final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
+            if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
+          }
+          if (cwd != null &&
+              tab.localPath != null &&
+              !tab.manuallyDisconnected) {
+            tab.localPath!.value = cwd;
+            tab.agentCwd = cwd;
+          }
+          return bytes;
+        }
         final parsed = cwdParser.process(bytes);
         var cwd = parsed.cwd;
         // PowerShell's OSC 7 prelude reports cwd in POSIX shape
@@ -381,7 +459,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
             if (!mounted) return;
             final recoverWindowsMainBuffer =
                 Platform.isWindows && !terminal.isUsingAltBuffer;
-            terminal.write(
+            _writeTerminalOutput(
+              tab,
+              terminal,
               '\x1b[m\x1b[?25h'
               '${recoverWindowsMainBuffer ? '\x1b[J' : ''}',
             );
@@ -439,10 +519,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         );
       } else if (activePty != null) {
         activePty.resize(h, w);
-        final rustTerminalCore = pane == 1
-            ? tab.splitRustTerminalCore
-            : tab.rustTerminalCore;
-        rustTerminalCore?.resize(w, h);
+        final rustTerminalBridge = pane == 1
+            ? tab.splitRustTerminalBridge
+            : tab.rustTerminalBridge;
+        rustTerminalBridge?.resize(w, h);
       }
     };
   }
@@ -479,8 +559,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final session = tab.sshSession;
       if (session != null) safeSshTeardown(() => session.close());
       tab.sshSession = null;
-      terminal.write('\r\n[SSH connection closed]\r\n');
-      terminal.write('[Reconnecting in 3 seconds…]\r\n');
+      _writeTerminalOutput(tab, terminal, '\r\n[SSH connection closed]\r\n');
+      _writeTerminalOutput(tab, terminal, '[Reconnecting in 3 seconds…]\r\n');
       await Future<void>.delayed(const Duration(seconds: 3));
       if (!mounted || tab.manuallyDisconnected) return;
       await _reconnectTab(tab);
@@ -515,7 +595,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       if (pane == 0 && tab.sshProfile != null) {
         await _reconnectTab(tab);
       } else {
-        terminal.write('[Not connected]\r\n$_kRestartPrompt');
+        _writeTerminalOutput(
+          tab,
+          terminal,
+          '[Not connected]\r\n$_kRestartPrompt',
+        );
         _setPaneSessionEnded(tab, pane, true);
       }
       return;
@@ -534,11 +618,21 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           .timeout(const Duration(seconds: 15));
 
       final cwdParser = RemoteCwdParser();
+      final rustTerminalBridge = _openRustTerminalBridge(
+        terminal: terminal,
+        onResponseBytes: (bytes) => session.stdin.add(bytes),
+      );
       final pipe = OutputPipe(
         terminal,
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
-        transform: _sshOutputTransform(tab, pane, cwdParser),
+        terminalByteSink: rustTerminalBridge,
+        transform: _sshOutputTransform(
+          tab,
+          pane,
+          cwdParser,
+          metadataOnly: rustTerminalBridge != null,
+        ),
       );
 
       _bindTerminalInput(
@@ -546,7 +640,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab,
         forward: (d) => session.stdin.add(utf8.encode(d)),
       );
-      terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+      terminal.onResize = (w, h, pw, ph) {
+        session.resizeTerminal(w, h);
+        rustTerminalBridge?.resize(w, h);
+      };
 
       pipe.bind(session.stdout);
       pipe.bind(session.stderr);
@@ -555,12 +652,20 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab.splitSshSession?.close();
         tab.splitSshSession = session;
         tab.splitPipe?.dispose();
+        tab.splitRustTerminalBridge?.close();
+        tab.splitRustTerminalCore?.close();
         tab.splitPipe = pipe;
+        tab.splitRustTerminalBridge = rustTerminalBridge;
+        tab.splitRustTerminalCore = rustTerminalBridge?.core;
       } else {
         tab.sshSession?.close();
         tab.sshSession = session;
         tab.pipe?.dispose();
+        tab.rustTerminalBridge?.close();
+        tab.rustTerminalCore?.close();
         tab.pipe = pipe;
+        tab.rustTerminalBridge = rustTerminalBridge;
+        tab.rustTerminalCore = rustTerminalBridge?.core;
       }
       _scheduleSyncPaneAfterShown(tab, pane: pane);
 
@@ -577,12 +682,20 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           await _reconnectTab(tab);
         } catch (e2) {
           if (!mounted) return;
-          terminal.write('[Reconnect failed: $e2]\r\n$_kRestartPrompt');
+          _writeTerminalOutput(
+            tab,
+            terminal,
+            '[Reconnect failed: $e2]\r\n$_kRestartPrompt',
+          );
           _setPaneSessionEnded(tab, pane, true);
         }
         return;
       }
-      terminal.write('[Reconnect failed: $e]\r\n$_kRestartPrompt');
+      _writeTerminalOutput(
+        tab,
+        terminal,
+        '[Reconnect failed: $e]\r\n$_kRestartPrompt',
+      );
       final paneNow = _paneIndexOf(tab, terminal) ?? pane;
       if (tab.isSplit) {
         _collapseSplitAfterExit(tab, paneIndex: paneNow);
@@ -623,6 +736,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       terminal.onResize = (w, h, pw, ph) {
         if (w >= 1 && h >= 1) {
           tab.pty!.resize(h, w);
+          tab.rustTerminalBridge?.resize(w, h);
         }
       };
     } else if (tab.sshSession != null) {
@@ -631,8 +745,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab,
         forward: (d) => tab.sshSession!.stdin.add(utf8.encode(d)),
       );
-      terminal.onResize = (w, h, pw, ph) =>
-          tab.sshSession!.resizeTerminal(w, h);
+      terminal.onResize = (w, h, pw, ph) {
+        tab.sshSession!.resizeTerminal(w, h);
+        tab.rustTerminalBridge?.resize(w, h);
+      };
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -647,6 +763,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     Terminal terminal,
     OutputPipe pipe, {
     required bool isSplit,
+    RustTerminalBridge? rustTerminalBridge,
     SshHost? profile,
   }) {
     _bindTerminalInput(
@@ -654,7 +771,10 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab,
       forward: (d) => session.stdin.add(utf8.encode(d)),
     );
-    terminal.onResize = (w, h, pw, ph) => session.resizeTerminal(w, h);
+    terminal.onResize = (w, h, pw, ph) {
+      session.resizeTerminal(w, h);
+      rustTerminalBridge?.resize(w, h);
+    };
     session.done.then(
       (_) => _handleSshSessionDone(tab, terminal, profile: profile),
     );
