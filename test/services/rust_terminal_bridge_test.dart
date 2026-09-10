@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/rust_terminal_bridge.dart';
 import 'package:ssterm/services/rust_terminal_core.dart';
@@ -84,4 +85,78 @@ void main() {
     },
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
+
+  testWidgets('bridge defers a resize publish until after terminal layout', (
+    tester,
+  ) async {
+    final terminal = Terminal();
+    final core = RustTerminalCore.open(
+      columns: terminal.viewWidth,
+      rows: terminal.viewHeight,
+      libraryPath: path,
+    );
+    final bridge = RustTerminalBridge(core: core, terminal: terminal);
+    addTearDown(() {
+      bridge.close();
+      core.close();
+    });
+    terminal.onResize = (columns, rows, _, _) => bridge.resize(columns, rows);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(width: 480, height: 320, child: TerminalView(terminal)),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  }, skip: !available);
+
+  testWidgets('bridge preserves text through a split-width round trip', (
+    tester,
+  ) async {
+    final terminal = Terminal()..resize(8, 2);
+    final core = RustTerminalCore.open(columns: 8, rows: 2, libraryPath: path);
+    final bridge = RustTerminalBridge(core: core, terminal: terminal);
+    addTearDown(() {
+      bridge.close();
+      core.close();
+    });
+    terminal.onResize = (columns, rows, _, _) => bridge.resize(columns, rows);
+
+    bridge.write(utf8.encode('abcdefgh'));
+    terminal.resize(4, 2);
+    await tester.pump();
+    expect(terminal.buffer.lines[0].toString(), 'abcd');
+    expect(terminal.buffer.lines[1].toString(), 'efgh');
+
+    terminal.resize(8, 2);
+    await tester.pump();
+    expect(terminal.buffer.lines[0].toString(), 'abcdefgh');
+    expect(terminal.buffer.lines[1].toString(), '');
+  }, skip: !available);
+
+  testWidgets('bridge does not add blank lines for a bottom-dock resize', (
+    tester,
+  ) async {
+    final terminal = Terminal()..resize(4, 4);
+    final core = RustTerminalCore.open(columns: 4, rows: 4, libraryPath: path);
+    final bridge = RustTerminalBridge(core: core, terminal: terminal);
+    addTearDown(() {
+      bridge.close();
+      core.close();
+    });
+    terminal.onResize = (columns, rows, _, _) => bridge.resize(columns, rows);
+
+    bridge.write(utf8.encode('top'));
+    terminal.resize(4, 2);
+    await tester.pump();
+    expect(terminal.buffer.lines[0].toString(), 'top');
+    expect(terminal.buffer.lines[1].toString(), '');
+
+    terminal.resize(4, 4);
+    await tester.pump();
+    expect(terminal.buffer.lines[0].toString(), 'top');
+  }, skip: !available);
 }

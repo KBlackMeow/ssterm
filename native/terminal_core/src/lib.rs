@@ -1075,17 +1075,79 @@ impl TerminalCore {
     pub fn resize(&mut self, columns: usize, rows: usize) {
         let columns = max(columns, 1);
         let rows = max(rows, 1);
+        if columns != self.columns && !self.using_alt {
+            self.resize_main_with_reflow(columns, rows);
+            return;
+        }
         let old_columns = self.columns;
+        let old_rows = self.rows;
+        let old_cells = self.cells.clone();
         let old_scrollback = std::mem::take(&mut self.scrollback);
         let old_scrollback_head = self.scrollback_head;
         let old_scrollback_len = self.scrollback_len;
         let mut cells = vec![TerminalCell::default(); columns * rows];
         let mut alt_cells = vec![TerminalCell::default(); columns * rows];
-        for row in 0..min(rows, self.rows) {
+        let copy_columns = min(old_columns, columns);
+
+        // Resizing the main screen changes the boundary between viewport and
+        // scrollback. Mirror xterm's height semantics: first move the cursor
+        // into the new viewport, then discard only rows below it. Moving every
+        // top row into history regardless of cursor position creates visible
+        // blank lines whenever a bottom-docked panel opens.
+        let shrinking_main = !self.using_alt && rows < old_rows;
+        let removed_main_rows = if shrinking_main {
+            min(old_rows - rows, self.cursor_row.saturating_sub(rows - 1))
+        } else {
+            0
+        };
+        let popped_main_rows = if shrinking_main {
+            old_rows - rows - removed_main_rows
+        } else {
+            0
+        };
+        let restored_history_rows = if !self.using_alt && rows > old_rows {
+            min(rows - old_rows, old_scrollback_len)
+        } else {
+            0
+        };
+        let main_source_row_start = removed_main_rows;
+        let main_current_rows = old_rows - main_source_row_start - popped_main_rows;
+        let main_destination_row_start = restored_history_rows;
+
+        // The alternate screen has no scrollback, but uses the same cursor
+        // rule so height-only changes do not insert artificial blank rows.
+        let alt_source_row_start = if rows < old_rows {
+            min(
+                old_rows - rows,
+                self.alt_cursor_row.saturating_sub(rows - 1),
+            )
+        } else {
+            0
+        };
+        let alt_copied_rows = min(rows, old_rows - alt_source_row_start);
+
+        for row in 0..restored_history_rows {
+            let old_row = (old_scrollback_head + old_scrollback_len - restored_history_rows + row)
+                % self.max_scrollback_rows;
+            let old_offset = old_row * old_columns;
+            let destination_offset = row * columns;
+            cells[destination_offset..destination_offset + copy_columns]
+                .copy_from_slice(&old_scrollback[old_offset..old_offset + copy_columns]);
+        }
+        for row in 0..main_current_rows {
+            let source_row = main_source_row_start + row;
+            let destination_row = main_destination_row_start + row;
+            for col in 0..copy_columns {
+                cells[destination_row * columns + col] = self.cells[self.index(source_row, col)];
+            }
+        }
+        for row in 0..alt_copied_rows {
+            let source_row = alt_source_row_start + row;
+            let destination_row = row;
             for col in 0..min(columns, self.columns) {
-                cells[row * columns + col] = self.cells[self.index(row, col)];
-                let alt_index = ((self.alt_screen_head + row) % self.rows) * self.columns + col;
-                alt_cells[row * columns + col] = self.alt_cells[alt_index];
+                let alt_index =
+                    ((self.alt_screen_head + source_row) % old_rows) * self.columns + col;
+                alt_cells[destination_row * columns + col] = self.alt_cells[alt_index];
             }
         }
         self.columns = columns;
@@ -1097,24 +1159,170 @@ impl TerminalCore {
         self.screen_head = 0;
         self.alt_screen_head = 0;
         self.cursor_col = min(self.cursor_col, columns - 1);
-        self.cursor_row = min(self.cursor_row, rows - 1);
+        self.cursor_row = min(
+            self.cursor_row.saturating_sub(main_source_row_start) + main_destination_row_start,
+            rows - 1,
+        );
         self.alt_cursor_col = min(self.alt_cursor_col, columns - 1);
-        self.alt_cursor_row = min(self.alt_cursor_row, rows - 1);
+        self.alt_cursor_row = min(
+            self.alt_cursor_row.saturating_sub(alt_source_row_start),
+            rows - 1,
+        );
         self.scrollback =
             vec![TerminalCell::default(); columns.saturating_mul(self.max_scrollback_rows)];
         self.scrollback_head = 0;
-        self.scrollback_len = min(old_scrollback_len, self.max_scrollback_rows);
+        let history_source_len = if shrinking_main {
+            old_scrollback_len + removed_main_rows
+        } else {
+            old_scrollback_len - restored_history_rows
+        };
+        self.scrollback_len = min(history_source_len, self.max_scrollback_rows);
         if self.max_scrollback_rows != 0 {
-            let retained_start = old_scrollback_len - self.scrollback_len;
+            let retained_start = history_source_len - self.scrollback_len;
             for row in 0..self.scrollback_len {
-                let old_row =
-                    (old_scrollback_head + retained_start + row) % self.max_scrollback_rows;
-                let copy_columns = min(old_columns, columns);
-                self.scrollback[row * columns..row * columns + copy_columns].copy_from_slice(
-                    &old_scrollback[old_row * old_columns..old_row * old_columns + copy_columns],
-                );
+                let source_row = retained_start + row;
+                let destination_offset = row * columns;
+                if source_row < old_scrollback_len {
+                    let old_row = (old_scrollback_head + source_row) % self.max_scrollback_rows;
+                    let old_offset = old_row * old_columns;
+                    self.scrollback[destination_offset..destination_offset + copy_columns]
+                        .copy_from_slice(&old_scrollback[old_offset..old_offset + copy_columns]);
+                } else {
+                    let screen_row = source_row - old_scrollback_len;
+                    let source_offset = ((self.screen_head + screen_row) % old_rows) * old_columns;
+                    self.scrollback[destination_offset..destination_offset + copy_columns]
+                        .copy_from_slice(&old_cells[source_offset..source_offset + copy_columns]);
+                }
             }
         }
+        self.history_epoch = self.history_epoch.wrapping_add(1);
+        self.mark_all_dirty();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Reflow the main screen and its history when the viewport width changes.
+    ///
+    /// The Flutter mirror deliberately disables its own reflow for SSH because
+    /// Rust owns the authoritative screen. Copying only `min(old, new)` cells
+    /// here would therefore permanently drop the right side of every line
+    /// during a side-by-side split. Reflowing the complete transcript keeps
+    /// those cells as wrapped rows instead.
+    fn resize_main_with_reflow(&mut self, columns: usize, rows: usize) {
+        let old_columns = self.columns;
+        let old_rows = self.rows;
+        let old_scrollback_len = self.scrollback_len;
+        let old_scrollback_head = self.scrollback_head;
+        let cursor_source_row = old_scrollback_len + self.cursor_row;
+        let cursor_source_col = min(self.cursor_col, old_columns - 1);
+        let mut cursor_row = 0;
+        let mut cursor_col = 0;
+        let mut reflowed = Vec::<Vec<TerminalCell>>::new();
+        let mut screen_source_rows = self.cursor_row + 1;
+        for row in 0..old_rows {
+            let start = self.index(row, 0);
+            if self.cells[start..start + old_columns]
+                .iter()
+                .any(|cell| *cell != TerminalCell::default())
+            {
+                screen_source_rows = max(screen_source_rows, row + 1);
+            }
+        }
+        let source_row_count = old_scrollback_len + screen_source_rows;
+        let mut logical = Vec::<TerminalCell>::new();
+        let mut logical_cursor_offset = None;
+
+        for source_row in 0..source_row_count {
+            let source = if source_row < old_scrollback_len {
+                let history_row = (old_scrollback_head + source_row) % self.max_scrollback_rows;
+                &self.scrollback[history_row * old_columns..(history_row + 1) * old_columns]
+            } else {
+                let screen_row = source_row - old_scrollback_len;
+                let start = self.index(screen_row, 0);
+                &self.cells[start..start + old_columns]
+            };
+
+            let mut length = source
+                .iter()
+                .rposition(|cell| *cell != TerminalCell::default())
+                .map_or(0, |index| index + 1);
+            if source_row == cursor_source_row {
+                length = max(length, cursor_source_col + 1);
+                logical_cursor_offset = Some(logical.len() + cursor_source_col);
+            }
+
+            logical.extend_from_slice(&source[..length]);
+
+            // A full row is normally an auto-wrap continuation. Coalescing it
+            // with the following row lets a later width increase reconstruct
+            // text that was wrapped for a temporary side-by-side split.
+            if length != old_columns || source_row + 1 == source_row_count {
+                let chunk_count = max(1, (logical.len() + columns - 1) / columns);
+                let output_start = reflowed.len();
+                for chunk in 0..chunk_count {
+                    let mut target = vec![TerminalCell::default(); columns];
+                    let start = chunk * columns;
+                    let end = min(start + columns, logical.len());
+                    if start < end {
+                        target[..end - start].copy_from_slice(&logical[start..end]);
+                    }
+                    reflowed.push(target);
+                }
+                if let Some(offset) = logical_cursor_offset.take() {
+                    cursor_row = output_start + offset / columns;
+                    cursor_col = offset % columns;
+                }
+                logical.clear();
+            }
+        }
+
+        let screen_start = reflowed.len().saturating_sub(rows);
+        let history_len = min(screen_start, self.max_scrollback_rows);
+        let history_start = screen_start - history_len;
+        let mut cells = vec![TerminalCell::default(); columns * rows];
+        for row in 0..min(rows, reflowed.len() - screen_start) {
+            cells[row * columns..(row + 1) * columns]
+                .copy_from_slice(&reflowed[screen_start + row]);
+        }
+        let mut scrollback =
+            vec![TerminalCell::default(); columns.saturating_mul(self.max_scrollback_rows)];
+        for row in 0..history_len {
+            scrollback[row * columns..(row + 1) * columns]
+                .copy_from_slice(&reflowed[history_start + row]);
+        }
+
+        // The alternate buffer has no history. Its applications generally
+        // redraw after SIGWINCH, so retain the newest visible rows while the
+        // resize is in flight rather than attempting to manufacture wrapping.
+        let alt_copied_rows = min(rows, old_rows);
+        let alt_source_start = old_rows - alt_copied_rows;
+        let mut alt_cells = vec![TerminalCell::default(); columns * rows];
+        let copy_columns = min(old_columns, columns);
+        for row in 0..alt_copied_rows {
+            let source_row = alt_source_start + row;
+            let source_offset = ((self.alt_screen_head + source_row) % old_rows) * old_columns;
+            let destination_offset = row * columns;
+            alt_cells[destination_offset..destination_offset + copy_columns]
+                .copy_from_slice(&self.alt_cells[source_offset..source_offset + copy_columns]);
+        }
+
+        self.columns = columns;
+        self.rows = rows;
+        self.margin_top = 0;
+        self.margin_bottom = rows - 1;
+        self.cells = cells;
+        self.alt_cells = alt_cells;
+        self.screen_head = 0;
+        self.alt_screen_head = 0;
+        self.cursor_col = cursor_col;
+        self.cursor_row = min(cursor_row.saturating_sub(screen_start), rows - 1);
+        self.alt_cursor_col = min(self.alt_cursor_col, columns - 1);
+        self.alt_cursor_row = min(
+            self.alt_cursor_row.saturating_sub(alt_source_start),
+            rows - 1,
+        );
+        self.scrollback = scrollback;
+        self.scrollback_head = 0;
+        self.scrollback_len = history_len;
         self.history_epoch = self.history_epoch.wrapping_add(1);
         self.mark_all_dirty();
         self.generation = self.generation.wrapping_add(1);
@@ -1474,6 +1682,63 @@ mod tests {
         terminal.feed(b"abcd");
         terminal.resize(2, 3);
         assert_eq!(terminal.row_text(0), "ab");
+    }
+
+    #[test]
+    fn resize_keeps_initial_screen_content_at_the_first_row() {
+        let mut terminal = TerminalCore::new(4, 3);
+        terminal.feed(b"aaaa\r\nbbbb\r\ncccc");
+        terminal.resize(4, 5);
+        assert_eq!(terminal.row_text(0), "aaaa");
+        assert_eq!(terminal.row_text(1), "bbbb");
+        assert_eq!(terminal.row_text(2), "cccc");
+        assert_eq!(terminal.cursor_row, 2);
+    }
+
+    #[test]
+    fn resize_restores_rows_hidden_by_a_shorter_viewport() {
+        let mut terminal = TerminalCore::with_scrollback(4, 4, 8);
+        terminal.feed(b"aaaa\r\nbbbb\r\ncccc\r\ndddd");
+
+        terminal.resize(4, 2);
+        assert_eq!(terminal.row_text(0), "cccc");
+        assert_eq!(terminal.row_text(1), "dddd");
+        assert_eq!(terminal.scrollback_len, 2);
+
+        terminal.resize(4, 4);
+        assert_eq!(terminal.row_text(0), "aaaa");
+        assert_eq!(terminal.row_text(1), "bbbb");
+        assert_eq!(terminal.row_text(2), "cccc");
+        assert_eq!(terminal.row_text(3), "dddd");
+        assert_eq!(terminal.scrollback_len, 0);
+        assert_eq!(terminal.cursor_row, 3);
+    }
+
+    #[test]
+    fn resize_shorter_keeps_top_content_when_cursor_is_already_visible() {
+        let mut terminal = TerminalCore::with_scrollback(4, 4, 8);
+        terminal.feed(b"top");
+
+        terminal.resize(4, 2);
+        assert_eq!(terminal.row_text(0), "top");
+        assert_eq!(terminal.row_text(1), "");
+        assert_eq!(terminal.scrollback_len, 0);
+        assert_eq!(terminal.cursor_row, 0);
+    }
+
+    #[test]
+    fn resize_reflows_columns_instead_of_discarding_the_right_side() {
+        let mut terminal = TerminalCore::with_scrollback(8, 2, 8);
+        terminal.feed(b"abcdefgh");
+
+        terminal.resize(4, 2);
+        assert_eq!(terminal.row_text(0), "abcd");
+        assert_eq!(terminal.row_text(1), "efgh");
+        assert_eq!(terminal.scrollback_len, 0);
+
+        terminal.resize(8, 2);
+        assert_eq!(terminal.row_text(0), "abcdefgh");
+        assert_eq!(terminal.row_text(1), "");
     }
     #[test]
     fn preserves_utf8_across_pty_chunks() {

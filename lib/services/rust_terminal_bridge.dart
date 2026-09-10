@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:xterm/xterm.dart';
 
 import '../io/output_pipe.dart';
@@ -39,6 +40,7 @@ class RustTerminalBridge implements TerminalByteSink {
   var _scrollbackSequence = 0;
   var _previousCursorRow = 0;
   Timer? _historyRebuildTimer;
+  var _resizePublishScheduled = false;
 
   static const _maxImmediateHistoryRows = 256;
   static const _historyRebuildDelay = Duration(milliseconds: 80);
@@ -184,7 +186,20 @@ class RustTerminalBridge implements TerminalByteSink {
     core.resize(columns, rows);
     _columns = columns;
     _rows = rows;
-    _publish(null);
+    // Terminal.resize is called from RenderTerminal.performLayout. Publishing
+    // synchronously would notify that same render object and make it dirty
+    // while it is still being laid out. Defer the packed-screen import to the
+    // completed frame and coalesce rapid width/height changes.
+    _scheduleResizePublish();
+  }
+
+  void _scheduleResizePublish() {
+    if (_resizePublishScheduled) return;
+    _resizePublishScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _resizePublishScheduled = false;
+      if (!_closed) _publish(null);
+    });
   }
 
   void _resizeCoreToTerminalIfNeeded() {

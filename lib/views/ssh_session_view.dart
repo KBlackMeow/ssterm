@@ -56,12 +56,9 @@ class _SshSessionViewState extends State<SshSessionView> {
   /// Default panel size when the user hasn't dragged the resize handle
   /// yet (`_customPanelSize == null`). A fixed pixel value rather than
   /// a fraction of the available width — the old `total * 2/5` default
-  /// meant the panel visibly shrank whenever `total` shrank, which
-  /// happens every time the AI Agent panel is also open (it's docked
-  /// in a Row alongside this view and claims its own share of the
-  /// window first, so this view's LayoutBuilder constraints are
-  /// whatever's left over, not the full window). A constant size means
-  /// the SFTP panel no longer reacts to what the AI panel is doing.
+  /// meant the panel visibly shrank whenever its host constraints changed.
+  /// A constant size keeps this floating panel stable while other chrome is
+  /// shown or hidden.
   static const _kDefaultPanelSize = 280.0;
 
   late SftpPanelPosition _position;
