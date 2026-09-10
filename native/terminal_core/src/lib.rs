@@ -809,9 +809,14 @@ impl TerminalCore {
                 self.cursor_row = if enabled { self.margin_top } else { 0 };
             }
             7 => self.auto_wrap = enabled,
+            9 => self.mouse_mode = if enabled { 1 } else { 0 },
             12 => self.cursor_blink_mode = enabled,
             25 => self.cursor_visible_mode = enabled,
-            1000 => self.mouse_mode = if enabled { 1 } else { 0 },
+            // VT200 button-event tracking reports both button presses and
+            // releases.  Mode 1 is reserved for the older X10 (?9h)
+            // press-only protocol; mapping ?1000h to it prevents ncurses
+            // applications such as htop from recognizing a complete click.
+            1000 => self.mouse_mode = if enabled { 2 } else { 0 },
             1002 => self.mouse_mode = if enabled { 3 } else { 0 },
             1003 => self.mouse_mode = if enabled { 4 } else { 0 },
             1004 => self.report_focus_mode = enabled,
@@ -1941,6 +1946,16 @@ mod tests {
         assert_eq!(snapshot.mouse_mode, 4);
         assert_eq!(snapshot.mouse_report_mode, 2);
         assert_eq!(terminal.response, b"\x1b[?0u\x1b[?1;2c");
+    }
+
+    #[test]
+    fn htop_mouse_modes_enable_press_and_release_reporting() {
+        let mut terminal = TerminalCore::new(80, 25);
+        terminal.feed(b"\x1b[?1006;1000h");
+
+        let snapshot = terminal.snapshot_metadata();
+        assert_eq!(snapshot.mouse_mode, 2);
+        assert_eq!(snapshot.mouse_report_mode, 2);
     }
 
     #[test]

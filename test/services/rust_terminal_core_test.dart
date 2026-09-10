@@ -248,7 +248,7 @@ void main() {
         Uint8List.fromList(
           utf8.encode(
             'aa\r\nbb\r\ncc'
-            '\x1b[?1h\x1b[?25l\x1b[?1006h\x1b[?2004h'
+            '\x1b[?1h\x1b[?25l\x1b[?1006;1000h\x1b[?2004h'
             '\x1b[?u\x1b]11;?\x07',
           ),
         ),
@@ -270,6 +270,7 @@ void main() {
       expect(visible.modeFlags & (1 << 2), isNonZero);
       expect(visible.modeFlags & (1 << 7), 0);
       expect(visible.modeFlags & (1 << 11), isNonZero);
+      expect(visible.mouseMode, 2);
       expect(visible.mouseReportMode, 2);
 
       rust.historySnapshotInto(history, startRow: 0, rowCount: 1);

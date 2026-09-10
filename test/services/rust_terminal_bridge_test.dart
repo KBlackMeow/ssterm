@@ -21,7 +21,8 @@ void main() {
   test(
     'bridge makes Rust screen, history, modes, and replies authoritative',
     () {
-      final terminal = Terminal()..resize(4, 2);
+      final mouseReports = <String>[];
+      final terminal = Terminal(onOutput: mouseReports.add)..resize(4, 2);
       final core = RustTerminalCore.open(
         columns: 4,
         rows: 2,
@@ -44,7 +45,7 @@ void main() {
         utf8.encode(
           'aa\r\nbb\r\ncc\r\ndd'
           '\x1b]7;file:///tmp\x07'
-          '\x1b[?1h\x1b[?25l\x1b[?2004h\x1b[0c',
+          '\x1b[?1h\x1b[?25l\x1b[?1006;1000h\x1b[?2004h\x1b[0c',
         ),
       );
 
@@ -56,6 +57,19 @@ void main() {
       expect(terminal.cursorKeysMode, isTrue);
       expect(terminal.cursorVisibleMode, isFalse);
       expect(terminal.bracketedPasteMode, isTrue);
+      expect(terminal.mouseMode, MouseMode.upDownScroll);
+      expect(terminal.mouseReportMode, MouseReportMode.sgr);
+      terminal.mouseInput(
+        TerminalMouseButton.left,
+        TerminalMouseButtonState.down,
+        const CellOffset(1, 1),
+      );
+      terminal.mouseInput(
+        TerminalMouseButton.left,
+        TerminalMouseButtonState.up,
+        const CellOffset(1, 1),
+      );
+      expect(mouseReports, ['\x1b[<0;2;2M', '\x1b[<0;2;2m']);
       expect(utf8.decode(replies), '\x1b[?1;2c');
       expect(workingDirectories, ['/tmp']);
     },

@@ -20,6 +20,7 @@ class McpService {
   static final Map<String, Timer> _reconnectTimers = {};
   static final Map<String, int> _retryAttempts = {};
   static bool _initialized = false;
+  static bool _logHandlerInstalled = false;
 
   static const _healthCheckInterval = Duration(seconds: 30);
 
@@ -36,6 +37,7 @@ class McpService {
   /// connections are logged and surfaced via [events]; they never
   /// prevent the app from launching.
   static Future<void> init(List<McpServerConfig> configs) async {
+    _ensureLogHandler();
     if (_initialized) return;
     _initialized = true;
     for (final config in configs) {
@@ -57,6 +59,7 @@ class McpService {
     McpServerConfig config, {
     bool isRetry = false,
   }) async {
+    _ensureLogHandler();
     await _removeServer(config.id, clearRetryState: !isRetry);
 
     final entry = _ServerEntry(config);
@@ -112,12 +115,17 @@ class McpService {
     if (clearRetryState) _retryAttempts.remove(id);
     final entry = _servers.remove(id);
     if (entry == null) return;
+    final wasConnected = entry.isConnected;
     await entry._dispose();
     _emit(
       McpServiceEvent(kind: McpServiceEventKind.disconnected, serverId: id),
     );
-    // ignore: avoid_print
-    print('[mcp] disconnected $id');
+    // Offline entries are routinely replaced by the reconnect timer. Logging
+    // those cleanups as disconnects produces one misleading line per retry.
+    if (wasConnected) {
+      // ignore: avoid_print
+      print('[mcp] disconnected $id');
+    }
     onToolsChanged?.call();
   }
 
@@ -309,14 +317,25 @@ class McpService {
 
   static Future<void> _handleFailure(_ServerEntry entry, String message) async {
     if (_servers[entry.config.id] != entry) return;
-    entry._setError(message);
+    final warning = failureWarning(entry.config, message);
+    entry._setError(warning);
     await entry._closeClient();
     _healthTimers.remove(entry.config.id)?.cancel();
+    // MCP availability is optional and automatically retried. Report a
+    // concise warning instead of letting the SDK emit duplicate ERROR lines
+    // (often including an embedded stack trace) for the same failure.
+    // Automatic retries preserve their retry counter, so the same offline
+    // server does not print another warning every three seconds. An explicit
+    // user retry clears the counter and may log a fresh failure.
+    if (!_retryAttempts.containsKey(entry.config.id)) {
+      // ignore: avoid_print
+      print('[mcp] warn ${entry.config.id}: $warning');
+    }
     _emit(
       McpServiceEvent(
         kind: McpServiceEventKind.error,
         serverId: entry.config.id,
-        message: message,
+        message: warning,
       ),
     );
     _emit(
@@ -327,6 +346,45 @@ class McpService {
     );
     onToolsChanged?.call();
     _scheduleReconnect(entry.config);
+  }
+
+  static void _ensureLogHandler() {
+    if (_logHandlerInstalled) return;
+    _logHandlerInstalled = true;
+    setMcpLogHandler((_, level, message) {
+      // Errors raised during connect/tool operations are caught by this
+      // service and logged once with the server id in _handleFailure.
+      if (level != LogLevel.warn) return;
+      // ignore: avoid_print
+      print('[mcp] warn ${conciseWarning(message)}');
+    });
+  }
+
+  /// Converts verbose SDK exceptions into a stable, single-line log message.
+  static String conciseWarning(Object value) {
+    var text = value.toString().trim();
+    if (text.isEmpty) return 'unknown failure';
+    text = text.split(RegExp(r'[\r\n]')).first.trim();
+    text = text
+        .replaceAll(RegExp(r'\b(?:Exception|StateError):\s*'), '')
+        .replaceAll(RegExp(r'\bBad state:\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    const maxLength = 200;
+    if (text.length > maxLength) {
+      text = '${text.substring(0, maxLength - 1).trimRight()}…';
+    }
+    return text.isEmpty ? 'unknown failure' : text;
+  }
+
+  /// Includes the configured HTTP endpoint so users can identify which MCP
+  /// URL failed when several servers are enabled at the same time.
+  static String failureWarning(McpServerConfig config, Object value) {
+    final reason = conciseWarning(value);
+    final url = config.transport == McpTransportType.streamableHttp
+        ? config.url?.trim()
+        : null;
+    return url == null || url.isEmpty ? reason : '$url — $reason';
   }
 
   static void _scheduleReconnect(McpServerConfig config) {
