@@ -4,7 +4,7 @@ import 'dart:math' as math;
 
 import 'package:image/image.dart' as img;
 
-const sourcePath = 'assets/icon/icon.png';
+const sourcePath = 'assets/icon/icon_new.png';
 
 void main() {
   final source = img.decodePng(File(sourcePath).readAsBytesSync());
@@ -12,40 +12,40 @@ void main() {
     throw StateError('Unable to decode $sourcePath');
   }
 
-  final iconSource = _trimTransparent(source);
-  final iosSource = _makeIosSource(iconSource);
-  final opaqueSource = _flatten(iconSource);
+  final squareSource = _cropSquare(source);
+  final roundedSource = _roundCorners(squareSource);
 
-  _writePng(iosSource, 'assets/icon/icon_ios.png', 1024);
+  _writePng(roundedSource, 'assets/icon/icon.png', 1024);
+  _writePng(squareSource, 'assets/icon/icon_ios.png', 1024);
 
-  _writeWebIcons(iconSource);
-  _writeAndroidIcons(iconSource);
+  _writeWebIcons(roundedSource, squareSource);
+  _writeAndroidIcons(roundedSource, squareSource);
   _writeAppleIcons(
-    iosSource,
+    squareSource,
     'ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json',
     'ios/Runner/Assets.xcassets/AppIcon.appiconset',
   );
   _writeMacIcons(
-    opaqueSource,
+    roundedSource,
     'macos/Runner/Assets.xcassets/AppIcon.appiconset',
   );
-  _writeWindowsIcon(iconSource);
+  _writeWindowsIcon(roundedSource);
 
   stdout.writeln(
     'Generated app icons from $sourcePath '
-    '(${source.width}x${source.height} -> ${iconSource.width}x${iconSource.height})',
+    '(${source.width}x${source.height} -> ${squareSource.width}x${squareSource.height})',
   );
 }
 
-void _writeWebIcons(img.Image source) {
-  _writePng(source, 'web/favicon.png', 32);
-  _writePng(source, 'web/icons/Icon-192.png', 192);
-  _writePng(source, 'web/icons/Icon-512.png', 512);
-  _writePng(source, 'web/icons/Icon-maskable-192.png', 192);
-  _writePng(source, 'web/icons/Icon-maskable-512.png', 512);
+void _writeWebIcons(img.Image roundedSource, img.Image squareSource) {
+  _writePng(roundedSource, 'web/favicon.png', 32);
+  _writePng(roundedSource, 'web/icons/Icon-192.png', 192);
+  _writePng(roundedSource, 'web/icons/Icon-512.png', 512);
+  _writePng(squareSource, 'web/icons/Icon-maskable-192.png', 192);
+  _writePng(squareSource, 'web/icons/Icon-maskable-512.png', 512);
 }
 
-void _writeAndroidIcons(img.Image source) {
+void _writeAndroidIcons(img.Image roundedSource, img.Image squareSource) {
   const launcherSizes = {
     'mipmap-mdpi': 48,
     'mipmap-hdpi': 72,
@@ -63,18 +63,68 @@ void _writeAndroidIcons(img.Image source) {
 
   for (final entry in launcherSizes.entries) {
     _writePng(
-      source,
+      roundedSource,
       'android/app/src/main/res/${entry.key}/ic_launcher.png',
       entry.value,
     );
   }
   for (final entry in foregroundSizes.entries) {
     _writePng(
-      source,
+      squareSource,
       'android/app/src/main/res/${entry.key}/ic_launcher_foreground.png',
       entry.value,
     );
   }
+}
+
+img.Image _cropSquare(img.Image source) {
+  final side = math.min(source.width, source.height);
+  return img.copyCrop(
+    source,
+    x: (source.width - side) ~/ 2,
+    y: (source.height - side) ~/ 2,
+    width: side,
+    height: side,
+  );
+}
+
+/// Adds transparent rounded corners for platforms that do not apply their own
+/// icon mask. iOS and adaptive/maskable icons deliberately keep the full,
+/// opaque source and let the operating system choose the final shape.
+img.Image _roundCorners(img.Image source) {
+  final out = img.Image(
+    width: source.width,
+    height: source.height,
+    numChannels: 4,
+  );
+  final radius = math.min(source.width, source.height) * 0.22;
+  final left = radius;
+  final top = radius;
+  final right = source.width - radius;
+  final bottom = source.height - radius;
+
+  for (var y = 0; y < source.height; y++) {
+    for (var x = 0; x < source.width; x++) {
+      final px = x + 0.5;
+      final py = y + 0.5;
+      final nearestX = px.clamp(left, right);
+      final nearestY = py.clamp(top, bottom);
+      final dx = px - nearestX;
+      final dy = py - nearestY;
+      final distance = math.sqrt(dx * dx + dy * dy);
+      final coverage = (radius + 0.5 - distance).clamp(0.0, 1.0);
+      final pixel = source.getPixel(x, y);
+      out.setPixelRgba(
+        x,
+        y,
+        pixel.r,
+        pixel.g,
+        pixel.b,
+        (pixel.a * coverage).round(),
+      );
+    }
+  }
+  return out;
 }
 
 void _writeAppleIcons(img.Image source, String contentsPath, String outputDir) {
@@ -120,14 +170,9 @@ void _writeWindowsIcon(img.Image source) {
   File('windows/runner/resources/app_icon.ico').writeAsBytesSync(ico);
 }
 
-void _writePng(
-  img.Image source,
-  String path,
-  int size, {
-  bool flatten = false,
-}) {
+void _writePng(img.Image source, String path, int size) {
   final resized = img.copyResize(
-    flatten ? _flatten(source) : source,
+    source,
     width: size,
     height: size,
     interpolation: img.Interpolation.cubic,
@@ -135,157 +180,6 @@ void _writePng(
   File(path)
     ..createSync(recursive: true)
     ..writeAsBytesSync(img.encodePng(resized));
-}
-
-img.Image _flatten(img.Image source) {
-  final background = img.Image(width: source.width, height: source.height);
-  final width = source.width;
-  final height = source.height;
-  final nearest = List<int>.filled(width * height, -1);
-  final queue = List<int>.filled(width * height, 0);
-  var head = 0;
-  var tail = 0;
-
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      final index = y * width + x;
-      final p = source.getPixel(x, y);
-      if (p.a >= 250) {
-        nearest[index] = index;
-        queue[tail++] = index;
-      }
-    }
-  }
-
-  void add(int x, int y, int seed) {
-    if (x < 0 || y < 0 || x >= width || y >= height) return;
-    final index = y * width + x;
-    if (nearest[index] != -1) return;
-    nearest[index] = seed;
-    queue[tail++] = index;
-  }
-
-  while (head < tail) {
-    final index = queue[head++];
-    final seed = nearest[index];
-    final x = index % width;
-    final y = index ~/ width;
-    add(x + 1, y, seed);
-    add(x - 1, y, seed);
-    add(x, y + 1, seed);
-    add(x, y - 1, seed);
-  }
-
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      final index = y * width + x;
-      final p = source.getPixel(x, y);
-      final seed = nearest[index];
-      final fill = seed == -1
-          ? source.getPixel(width ~/ 2, height ~/ 2)
-          : source.getPixel(seed % width, seed ~/ width);
-      final a = p.a / 255.0;
-      final r = (p.r * a + fill.r * (1 - a)).round();
-      final g = (p.g * a + fill.g * (1 - a)).round();
-      final b = (p.b * a + fill.b * (1 - a)).round();
-      background.setPixelRgba(x, y, r, g, b, 255);
-    }
-  }
-  final smoothed = img.gaussianBlur(background, radius: 48);
-  final out = img.Image(width: width, height: height);
-
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      final p = source.getPixel(x, y);
-      final fill = smoothed.getPixel(x, y);
-      final a = p.a / 255.0;
-      final r = (p.r * a + fill.r * (1 - a)).round();
-      final g = (p.g * a + fill.g * (1 - a)).round();
-      final b = (p.b * a + fill.b * (1 - a)).round();
-      out.setPixelRgba(x, y, r, g, b, 255);
-    }
-  }
-  return out;
-}
-
-img.Image _trimTransparent(img.Image source) {
-  const alphaThreshold = 12;
-  var minX = source.width;
-  var minY = source.height;
-  var maxX = -1;
-  var maxY = -1;
-
-  for (var y = 0; y < source.height; y++) {
-    for (var x = 0; x < source.width; x++) {
-      if (source.getPixel(x, y).a <= alphaThreshold) continue;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  }
-
-  if (maxX < minX || maxY < minY) return source;
-  final boundsWidth = maxX - minX + 1;
-  final boundsHeight = maxY - minY + 1;
-  final side = math.max(boundsWidth, boundsHeight);
-  var x = minX - ((side - boundsWidth) ~/ 2);
-  var y = minY - ((side - boundsHeight) ~/ 2);
-  x = x.clamp(0, source.width - side);
-  y = y.clamp(0, source.height - side);
-
-  return img.copyCrop(
-    source,
-    x: x,
-    y: y,
-    width: side,
-    height: side,
-  );
-}
-
-img.Image _makeIosSource(img.Image source) {
-  final width = source.width;
-  final height = source.height;
-  final out = img.Image(width: width, height: height);
-
-  for (var y = 0; y < height; y++) {
-    final ny = y / (height - 1);
-    for (var x = 0; x < width; x++) {
-      final nx = x / (width - 1);
-      final dx = nx - 0.38;
-      final dy = ny - 0.28;
-      final glow = math.max(0.0, 1.0 - math.sqrt(dx * dx + dy * dy) / 0.95);
-
-      final br = (4 + 9 * (1 - ny) + 4 * (1 - nx) + 5 * glow).round();
-      final bg = (15 + 11 * (1 - ny) + 3 * (1 - nx) + 5 * glow).round();
-      final bb = (30 + 18 * (1 - ny) + 4 * (1 - nx) + 8 * glow).round();
-      out.setPixelRgba(x, y, br, bg, bb, 255);
-    }
-  }
-
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      final p = source.getPixel(x, y);
-      if (!_isIosForeground(p)) continue;
-      final fill = out.getPixel(x, y);
-      final a = p.a / 255.0;
-      final r = (p.r * a + fill.r * (1 - a)).round();
-      final g = (p.g * a + fill.g * (1 - a)).round();
-      final b = (p.b * a + fill.b * (1 - a)).round();
-      out.setPixelRgba(x, y, r, g, b, 255);
-    }
-  }
-
-  return out;
-}
-
-bool _isIosForeground(img.Pixel p) {
-  if (p.a < 24) return false;
-  final maxChannel = math.max(p.r, math.max(p.g, p.b));
-  final minChannel = math.min(p.r, math.min(p.g, p.b));
-  final isWhite = minChannel >= 150 && maxChannel - minChannel <= 85;
-  final isGreen = p.g >= 115 && p.g > p.r + 35 && p.g > p.b + 10;
-  return isWhite || isGreen;
 }
 
 double _parsePointSize(String size) {
