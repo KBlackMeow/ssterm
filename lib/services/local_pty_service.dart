@@ -19,6 +19,10 @@ Map<String, String> buildWslEnvironment({
     'TERM': 'xterm-256color',
     'COLORTERM': 'truecolor',
     'TERM_PROGRAM': 'ssterm',
+    // ChatCode CLI opts into its alternate-screen, full-terminal renderer
+    // through this compatibility flag. Without it the TUI falls back to an
+    // inline region and leaves the shell's previous rows visible above it.
+    'CHATCODE_CLI_NO_FLICKER': '1',
     'WSLENV': '',
     'SystemRoot': systemRoot,
     'WINDIR': Platform.environment['WINDIR'] ?? systemRoot,
@@ -86,6 +90,7 @@ Map<String, String> buildGitBashEnvironment({
     'TERM': 'xterm-256color',
     'COLORTERM': 'truecolor',
     'TERM_PROGRAM': 'ssterm',
+    'CHATCODE_CLI_NO_FLICKER': '1',
     'SystemRoot': systemRoot,
     'WINDIR': systemRoot,
     'PATH': path,
@@ -126,7 +131,8 @@ Map<String, String> buildLocalShellEnvironment({
   final env = Map<String, String>.from(base ?? Platform.environment)
     ..['TERM'] = 'xterm-256color'
     ..['COLORTERM'] = 'truecolor'
-    ..['TERM_PROGRAM'] = 'ssterm';
+    ..['TERM_PROGRAM'] = 'ssterm'
+    ..['CHATCODE_CLI_NO_FLICKER'] = '1';
 
   if (extras != null) env.addAll(extras);
   return env;
@@ -145,9 +151,9 @@ Future<Map<String, String>> buildLocalShellEnvironmentWithLoginPath({
   LoginShellEnvironmentResolver? loginEnvironmentResolver,
 }) async {
   final env = buildLocalShellEnvironment(base: base, extras: extras);
-  final loginPath = await (loginEnvironmentResolver ??
-          LoginShellEnvironmentResolver())
-      .resolvePath(shell);
+  final loginPath =
+      await (loginEnvironmentResolver ?? LoginShellEnvironmentResolver())
+          .resolvePath(shell);
   env.addAll(loginPath);
   return env;
 }

@@ -15,10 +15,14 @@ void main() {
       expect(env['TERM'], equals('xterm-256color'));
     });
 
-    test('always sets COLORTERM to truecolor', () {
-      final env = buildWslEnvironment(systemRoot: r'C:\Windows');
-      expect(env['COLORTERM'], equals('truecolor'));
-    });
+    test(
+      'sets terminal capabilities and enables ChatCode full-screen mode',
+      () {
+        final env = buildWslEnvironment(systemRoot: r'C:\Windows');
+        expect(env['COLORTERM'], equals('truecolor'));
+        expect(env['CHATCODE_CLI_NO_FLICKER'], equals('1'));
+      },
+    );
 
     test('WSLENV is empty string to prevent Windows var translation', () {
       final env = buildWslEnvironment(systemRoot: r'C:\Windows');
@@ -44,6 +48,14 @@ void main() {
   });
 
   group('buildGitBashEnvironment', () {
+    test('enables ChatCode full-screen mode', () {
+      final env = buildGitBashEnvironment(
+        executable: r'C:\Program Files\Git\bin\bash.exe',
+        systemRoot: r'C:\Windows',
+      );
+      expect(env['CHATCODE_CLI_NO_FLICKER'], equals('1'));
+    });
+
     test('always sets TERM to xterm-256color', () {
       final env = buildGitBashEnvironment(
         executable: r'C:\Git\usr\bin\env.exe',
@@ -87,36 +99,43 @@ void main() {
   });
 
   group('buildLocalShellEnvironment', () {
-    test('always sets TERM, COLORTERM, TERM_PROGRAM', () {
-      final env = buildLocalShellEnvironment();
-      expect(env['TERM'], equals('xterm-256color'));
-      expect(env['COLORTERM'], equals('truecolor'));
-      expect(env['TERM_PROGRAM'], equals('ssterm'));
-    });
+    test(
+      'sets terminal capabilities and enables ChatCode full-screen mode',
+      () {
+        final env = buildLocalShellEnvironment();
+        expect(env['TERM'], equals('xterm-256color'));
+        expect(env['COLORTERM'], equals('truecolor'));
+        expect(env['TERM_PROGRAM'], equals('ssterm'));
+        expect(env['CHATCODE_CLI_NO_FLICKER'], equals('1'));
+      },
+    );
 
     test('merges extra env vars', () {
       final env = buildLocalShellEnvironment(extras: {'FOO': 'bar'});
       expect(env['FOO'], equals('bar'));
     });
 
-    test('uses the selected shell login PATH over a GUI process PATH', () async {
-      const fish = LocalShellOption(
-        id: 'fish',
-        displayName: 'Fish',
-        executable: '/opt/homebrew/bin/fish',
-      );
-      final resolver = LoginShellEnvironmentResolver(
-        readPath: (_) async => '/opt/homebrew/bin:/usr/bin:/bin',
-      );
+    test(
+      'uses the selected shell login PATH over a GUI process PATH',
+      () async {
+        const fish = LocalShellOption(
+          id: 'fish',
+          displayName: 'Fish',
+          executable: '/opt/homebrew/bin/fish',
+        );
+        final resolver = LoginShellEnvironmentResolver(
+          readPath: (_) async => '/opt/homebrew/bin:/usr/bin:/bin',
+        );
 
-      final env = await buildLocalShellEnvironmentWithLoginPath(
-        shell: fish,
-        base: {'PATH': '/usr/bin:/bin'},
-        loginEnvironmentResolver: resolver,
-      );
+        final env = await buildLocalShellEnvironmentWithLoginPath(
+          shell: fish,
+          base: {'PATH': '/usr/bin:/bin'},
+          loginEnvironmentResolver: resolver,
+        );
 
-      expect(env['PATH'], '/opt/homebrew/bin:/usr/bin:/bin');
-      expect(env['TERM'], 'xterm-256color');
-    });
+        expect(env['PATH'], '/opt/homebrew/bin:/usr/bin:/bin');
+        expect(env['TERM'], 'xterm-256color');
+      },
+    );
   });
 }

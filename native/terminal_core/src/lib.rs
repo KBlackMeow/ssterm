@@ -632,7 +632,10 @@ impl TerminalCore {
                     self.cursor_col = 0;
                 }
             }
-            b'm' => self.sgr(),
+            // SGR has no private prefix. ChatCode uses `CSI > 4 m` for
+            // modifyOtherKeys; interpreting that as SGR 4 leaks underline
+            // into every cell written afterwards.
+            b'm' if self.csi_prefix == 0 => self.sgr(),
             b's' => self.save_cursor(),
             b'u' if self.csi_prefix == 0 => self.restore_cursor(),
             b'h' | b'l' if self.csi_prefix == b'?' => {
@@ -1126,7 +1129,11 @@ impl TerminalCore {
                     _ => self.state = ParseState::Ground,
                 },
                 ParseState::Csi => match byte {
-                    b'?' | b'>' if self.params.len() == 1 && self.params[0] == 0 => {
+                    // ECMA-48 private parameter marker bytes. Retaining all
+                    // four matters beyond SGR too: ChatCode follows `CSI > 4 m`
+                    // with `CSI < u`, which must not become ordinary CSI u
+                    // (restore cursor) after the '<' is discarded.
+                    0x3c..=0x3f if self.params.len() == 1 && self.params[0] == 0 => {
                         self.csi_prefix = byte
                     }
                     b'0'..=b'9' => {
@@ -1946,6 +1953,32 @@ mod tests {
         assert_eq!(snapshot.mouse_mode, 4);
         assert_eq!(snapshot.mouse_report_mode, 2);
         assert_eq!(terminal.response, b"\x1b[?0u\x1b[?1;2c");
+    }
+
+    #[test]
+    fn private_csi_m_does_not_enable_underline() {
+        let mut terminal = TerminalCore::new(16, 2);
+        terminal.feed(b"\x1b[>4mChatCode");
+
+        assert_eq!(terminal.cursor_style.attributes & ATTR_UNDERLINE, 0);
+        for col in 0..8 {
+            assert_eq!(
+                terminal.cells[terminal.index(0, col)].attributes & ATTR_UNDERLINE,
+                0,
+                "column {col} unexpectedly has underline",
+            );
+        }
+    }
+
+    #[test]
+    fn chatcode_keyboard_teardown_keeps_style_and_cursor_position() {
+        let mut terminal = TerminalCore::new(32, 2);
+        terminal.feed(b"prompt");
+        terminal.feed(b"\x1b[>4m\x1b[<u\x1b[?2031l\x1b[?2004l");
+        terminal.feed(b" clean");
+
+        assert_eq!(terminal.row_text(0), "prompt clean");
+        assert_eq!(terminal.cursor_style.attributes & ATTR_UNDERLINE, 0);
     }
 
     #[test]
