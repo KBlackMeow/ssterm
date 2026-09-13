@@ -56,6 +56,7 @@ class _TerminalScrollGestureHandlerState
   Timer? _flushTimer;
 
   var _lastPointerPosition = Offset.zero;
+  var _pointerDown = false;
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
 
@@ -220,6 +221,23 @@ class _TerminalScrollGestureHandlerState
       },
       onPointerDown: (event) {
         _lastPointerPosition = event.localPosition;
+        _pointerDown = true;
+      },
+      onPointerMove: (event) {
+        // A normal drag is the scroll gesture for alternate-buffer programs
+        // such as less when mouse reporting is disabled. Pointer-signal and
+        // trackpad events are handled above; this covers touchscreen/mouse
+        // drags used by Flutter's test and desktop input backends.
+        if (_pointerDown && widget.simulateScroll && !_mouseMode.reportScroll) {
+          _handleTrackpad(-event.delta.dy);
+        }
+        _lastPointerPosition = event.localPosition;
+      },
+      onPointerUp: (_) {
+        _pointerDown = false;
+      },
+      onPointerCancel: (_) {
+        _pointerDown = false;
       },
       onPointerPanZoomStart: (event) {
         _lastPointerPosition = event.localPosition;

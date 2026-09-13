@@ -64,6 +64,7 @@ const MODE_APP_KEYPAD: u32 = 1 << 8;
 const MODE_REPORT_FOCUS: u32 = 1 << 9;
 const MODE_ALT_MOUSE_SCROLL: u32 = 1 << 10;
 const MODE_BRACKETED_PASTE: u32 = 1 << 11;
+const MODE_SYNCHRONIZED_OUTPUT: u32 = 1 << 12;
 
 #[derive(Clone, Copy, Default)]
 struct CursorStyle {
@@ -122,6 +123,7 @@ pub struct TerminalCore {
     max_scrollback_rows: usize,
     state: ParseState,
     params: Vec<u16>,
+    csi_raw: Vec<u8>,
     csi_prefix: u8,
     csi_intermediate: u8,
     osc: Vec<u8>,
@@ -140,6 +142,7 @@ pub struct TerminalCore {
     report_focus_mode: bool,
     alt_buffer_mouse_scroll_mode: bool,
     bracketed_paste_mode: bool,
+    synchronized_output_mode: bool,
     mouse_mode: u32,
     mouse_report_mode: u32,
     cursor_shape: u32,
@@ -190,6 +193,7 @@ impl TerminalCore {
             max_scrollback_rows,
             state: ParseState::Ground,
             params: Vec::with_capacity(8),
+            csi_raw: Vec::with_capacity(32),
             csi_prefix: 0,
             csi_intermediate: 0,
             osc: Vec::with_capacity(64),
@@ -208,6 +212,7 @@ impl TerminalCore {
             report_focus_mode: false,
             alt_buffer_mouse_scroll_mode: false,
             bracketed_paste_mode: false,
+            synchronized_output_mode: false,
             mouse_mode: 0,
             mouse_report_mode: 0,
             cursor_shape: 0,
@@ -685,6 +690,10 @@ impl TerminalCore {
     }
 
     fn sgr(&mut self) {
+        if self.csi_raw.contains(&b':') {
+            self.sgr_colon();
+            return;
+        }
         if self.params.is_empty() {
             self.cursor_style = CursorStyle::default();
             return;
@@ -737,6 +746,81 @@ impl TerminalCore {
                 _ => {}
             }
             index += 1;
+        }
+    }
+
+    /// Parse ECMA-48 colon-separated SGR subparameters used by modern
+    /// terminals for underline styles and truecolour.
+    fn sgr_colon(&mut self) {
+        let raw = String::from_utf8_lossy(&self.csi_raw).into_owned();
+        for group in raw.split(';') {
+            let parts: Vec<u32> = group
+                .split(':')
+                .map(|part| {
+                    if part.is_empty() {
+                        0
+                    } else {
+                        part.parse().unwrap_or(0)
+                    }
+                })
+                .collect();
+            if parts.is_empty() {
+                self.cursor_style = CursorStyle::default();
+                continue;
+            }
+            let value = parts[0];
+            match value {
+                0 => self.cursor_style = CursorStyle::default(),
+                1 => self.cursor_style.attributes |= ATTR_BOLD,
+                2 => self.cursor_style.attributes |= ATTR_FAINT,
+                3 => self.cursor_style.attributes |= ATTR_ITALIC,
+                4 => {
+                    if parts.get(1).copied().unwrap_or(1) == 0 {
+                        self.cursor_style.attributes &= !ATTR_UNDERLINE;
+                    } else {
+                        self.cursor_style.attributes |= ATTR_UNDERLINE;
+                    }
+                }
+                5 => self.cursor_style.attributes |= ATTR_BLINK,
+                7 => self.cursor_style.attributes |= ATTR_INVERSE,
+                8 => self.cursor_style.attributes |= ATTR_INVISIBLE,
+                9 => self.cursor_style.attributes |= ATTR_STRIKETHROUGH,
+                21 => self.cursor_style.attributes &= !ATTR_BOLD,
+                22 => self.cursor_style.attributes &= !(ATTR_BOLD | ATTR_FAINT),
+                23 => self.cursor_style.attributes &= !ATTR_ITALIC,
+                24 => self.cursor_style.attributes &= !ATTR_UNDERLINE,
+                25 => self.cursor_style.attributes &= !ATTR_BLINK,
+                27 => self.cursor_style.attributes &= !ATTR_INVERSE,
+                28 => self.cursor_style.attributes &= !ATTR_INVISIBLE,
+                29 => self.cursor_style.attributes &= !ATTR_STRIKETHROUGH,
+                39 => self.cursor_style.foreground = 0,
+                49 => self.cursor_style.background = 0,
+                53 => self.cursor_style.attributes |= ATTR_OVERLINE,
+                55 => self.cursor_style.attributes &= !ATTR_OVERLINE,
+                59 => self.cursor_style.underline_color = 0,
+                38 | 48 | 58 => {
+                    let mode = parts.get(1).copied().unwrap_or(0);
+                    if mode == 5 {
+                        if let Some(index) = parts.get(2) {
+                            self.set_extended_color(value, COLOR_PALETTE | (*index & 0xff));
+                        }
+                    } else if mode == 2 {
+                        let offset = if parts.len() >= 6 && parts[2] == 0 {
+                            3
+                        } else {
+                            2
+                        };
+                        if parts.len() >= offset + 3 {
+                            let color = COLOR_RGB
+                                | ((parts[offset] & 0xff) << 16)
+                                | ((parts[offset + 1] & 0xff) << 8)
+                                | (parts[offset + 2] & 0xff);
+                            self.set_extended_color(value, color);
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -828,6 +912,10 @@ impl TerminalCore {
             1007 => self.alt_buffer_mouse_scroll_mode = enabled,
             1015 => self.mouse_report_mode = if enabled { 3 } else { 0 },
             2004 => self.bracketed_paste_mode = enabled,
+            // DECSET 2026 (synchronized output) is surfaced in the snapshot
+            // so the Flutter bridge can publish one complete frame at the
+            // matching DECRST instead of repainting every partial update.
+            2026 => self.synchronized_output_mode = enabled,
             47 => {
                 if enabled {
                     self.save_cursor();
@@ -1075,6 +1163,7 @@ impl TerminalCore {
                     b'[' => {
                         self.params.clear();
                         self.params.push(0);
+                        self.csi_raw.clear();
                         self.csi_prefix = 0;
                         self.csi_intermediate = 0;
                         self.state = ParseState::Csi;
@@ -1137,12 +1226,17 @@ impl TerminalCore {
                         self.csi_prefix = byte
                     }
                     b'0'..=b'9' => {
+                        self.csi_raw.push(byte);
                         let last = self.params.len() - 1;
                         self.params[last] = self.params[last]
                             .saturating_mul(10)
                             .saturating_add(u16::from(byte - b'0'));
                     }
-                    b';' => self.params.push(0),
+                    b';' => {
+                        self.csi_raw.push(byte);
+                        self.params.push(0)
+                    }
+                    b':' => self.csi_raw.push(byte),
                     0x20..=0x2f => self.csi_intermediate = byte,
                     0x40..=0x7e => {
                         self.csi(byte);
@@ -1477,7 +1571,8 @@ impl TerminalCore {
             | (self.app_keypad_mode as u32) * MODE_APP_KEYPAD
             | (self.report_focus_mode as u32) * MODE_REPORT_FOCUS
             | (self.alt_buffer_mouse_scroll_mode as u32) * MODE_ALT_MOUSE_SCROLL
-            | (self.bracketed_paste_mode as u32) * MODE_BRACKETED_PASTE;
+            | (self.bracketed_paste_mode as u32) * MODE_BRACKETED_PASTE
+            | (self.synchronized_output_mode as u32) * MODE_SYNCHRONIZED_OUTPUT;
         TerminalSnapshot {
             columns: self.columns as u32,
             rows: self.rows as u32,
@@ -1982,6 +2077,21 @@ mod tests {
     }
 
     #[test]
+    fn synchronized_output_mode_is_reported_and_reset() {
+        let mut terminal = TerminalCore::new(16, 2);
+        terminal.feed(b"\x1b[?2026hframe");
+        assert_ne!(
+            terminal.snapshot_metadata().mode_flags & MODE_SYNCHRONIZED_OUTPUT,
+            0
+        );
+        terminal.feed(b"\x1b[?2026l");
+        assert_eq!(
+            terminal.snapshot_metadata().mode_flags & MODE_SYNCHRONIZED_OUTPUT,
+            0
+        );
+    }
+
+    #[test]
     fn htop_mouse_modes_enable_press_and_release_reporting() {
         let mut terminal = TerminalCore::new(80, 25);
         terminal.feed(b"\x1b[?1006;1000h");
@@ -2041,6 +2151,18 @@ mod tests {
 
         terminal.feed(b"\x1b[3;3r\x1b[3;1Hlast\x1b[L");
         assert_eq!(terminal.row_text(2), "");
+    }
+
+    #[test]
+    fn parses_colon_sgr_truecolor_and_underline() {
+        let mut terminal = TerminalCore::new(8, 2);
+        terminal.feed(b"\x1b[38:2::255:128:0;4:3mX");
+        let cell = terminal.cells[terminal.index(0, 0)];
+        assert_eq!(cell.foreground, COLOR_RGB | 0xff8000);
+        assert_ne!(cell.attributes & ATTR_UNDERLINE, 0);
+        terminal.feed(b"\x1b[4:0mY");
+        let next = terminal.cells[terminal.index(0, 1)];
+        assert_eq!(next.attributes & ATTR_UNDERLINE, 0);
     }
 
     #[test]

@@ -18,14 +18,22 @@ SSH 会话，不进入滚屏内容。
 不会公布或执行 iTerm2 私有的 File/图片传输、profile 切换、专有剪贴板、
 超链接等功能。Fish 4.7+ 不再使用 `no-query-term` 启动参数。
 
-基于与 iTerm2 的对比分析，记录当前 `packages/xterm` 的缺陷与缺失功能。  
-分为 **Bug**（代码写错，改动小）和 **未实现**（功能缺失，需新增）两类。
+原生 Rust terminal-core 与 vendored xterm 共享上述保守能力边界，并额外保证
+ChatCode CLI 的键盘协议（`CSI > 1 u`、`CSI > 4;2 m`、`CSI < u`）不会改变
+文字样式或光标位置。`DECSET 2026` synchronized output 在桥接层合并为一帧，
+避免全屏 TUI 在 iTerm2 中常见的半帧闪烁和残影。Rust 路径也支持冒号式 SGR
+真彩色、256 色、下划线样式及下划线颜色；未实现的 iTerm2 专有扩展保持
+安全 no-op，不会把控制序列写入屏幕。
+
+基于与 iTerm2 的对比分析，记录兼容性缺陷与缺失功能；已标记“已修复”的项目
+保留在这里作为回归清单。分为 **Bug**（代码写错，改动小）和 **未实现**
+（功能缺失，需新增）两类。
 
 ---
 
 ## 一、Bug（代码写错）
 
-### 1. SGR 冒号子参数被静默损坏
+### 1. SGR 冒号子参数被静默损坏（已修复）
 **影响**：真彩色 `38:2:r:g:b`、256色 `38:5:n`、波浪下划线 `4:3` 等现代格式全部失效。  
 **现象**：`ESC[38:2:255:0:0m` 被解析成 param=38225500，命中 `unsupportedStyle`，颜色丢失。  
 **根因**：`parser.dart` `_consumeCsi()` 只把分号 `;`（ASCII 59）当分隔符，冒号 `:` 不满足任何条件直接跳过，但 `param` 不重置，导致后续数字继续累积。
@@ -45,7 +53,7 @@ if (char == Ascii.colon) {
 
 ---
 
-### 2. Focus Reporting 只存 flag，从不发出事件
+### 2. Focus Reporting 只存 flag，从不发出事件（已修复）
 **影响**：neovim 的焦点自动保存（`FocusLost` autocmd）、tmux 活动检测失效。  
 **现象**：`\e[?1004h` 被正确解析，`_reportFocusMode = true`，但焦点变化时 `\e[I`（获得焦点）和 `\e[O`（失去焦点）从未写入 PTY。  
 **根因**：`render.dart` `_onFocusChange()` 只调 `markNeedsPaint()`，未检查 `reportFocusMode`。
@@ -160,8 +168,8 @@ void _onFocusChange() {
 
 | 优先级 | 项目 | 类型 | 估算工作量 |
 |--------|------|------|-----------|
-| 🔴 P0 | SGR 冒号子参数 | Bug | 1 行 |
-| 🔴 P0 | Focus reporting 发送事件 | Bug | 5 行 |
+| ✅ | SGR 冒号子参数 | 已修复 | — |
+| ✅ | Focus reporting 发送事件 | 已修复 | — |
 | 🟡 P1 | DECSCUSR 光标形状 | 未实现 | ~60 行 |
 | 🟡 P1 | OSC 7 当前目录 | 未实现 | ~30 行 |
 | 🟡 P1 | OSC 8 超链接 | 未实现 | ~200 行 |

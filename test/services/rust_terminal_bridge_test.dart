@@ -104,6 +104,30 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
+  test(
+    'bridge publishes synchronized output as one complete frame',
+    () {
+      final terminal = Terminal()..resize(4, 2);
+      final core = RustTerminalCore.open(
+        columns: 4,
+        rows: 2,
+        libraryPath: path,
+      );
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      addTearDown(() {
+        bridge.close();
+        core.close();
+      });
+
+      bridge.write(utf8.encode('\x1b[?2026hA'));
+      expect(terminal.buffer.lines[0].toString(), isEmpty);
+
+      bridge.write(utf8.encode('\x1b[?2026l'));
+      expect(terminal.buffer.lines[0].toString(), 'A');
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
   testWidgets('bridge defers a resize publish until after terminal layout', (
     tester,
   ) async {

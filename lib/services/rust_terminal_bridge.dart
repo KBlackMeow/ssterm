@@ -43,6 +43,8 @@ class RustTerminalBridge implements TerminalByteSink {
   var _scrollbackSequence = 0;
   var _previousCursorRow = 0;
   Timer? _historyRebuildTimer;
+  Timer? _synchronizedOutputFlushTimer;
+  var _synchronizedOutputPending = false;
   var _resizePublishScheduled = false;
 
   static const _maxImmediateHistoryRows = 256;
@@ -60,6 +62,7 @@ class RustTerminalBridge implements TerminalByteSink {
   static const _modeReportFocus = 1 << 9;
   static const _modeAltMouseScroll = 1 << 10;
   static const _modeBracketedPaste = 1 << 11;
+  static const _modeSynchronizedOutput = 1 << 12;
 
   @override
   void write(List<int> bytes) {
@@ -85,18 +88,43 @@ class RustTerminalBridge implements TerminalByteSink {
   void _publish(
     RustTerminalCoreUpdate? update, {
     bool forceHistoryRebuild = false,
+    bool forceSynchronizedOutput = false,
   }) {
     _resizeCoreToTerminalIfNeeded();
     core.renderSnapshotInto(_renderBuffer);
+    final synchronizedOutput =
+        _renderBuffer.modeFlags & _modeSynchronizedOutput != 0;
+    if (synchronizedOutput && !forceSynchronizedOutput) {
+      _synchronizedOutputPending = true;
+      _synchronizedOutputFlushTimer ??= Timer(
+        const Duration(milliseconds: 120),
+        () {
+          _synchronizedOutputFlushTimer = null;
+          if (!_closed) {
+            _publish(update, forceSynchronizedOutput: true);
+          }
+        },
+      );
+      return;
+    }
+    final repaintSynchronizedFrame =
+        forceSynchronizedOutput || _synchronizedOutputPending;
+    _synchronizedOutputPending = false;
+    _synchronizedOutputFlushTimer?.cancel();
+    _synchronizedOutputFlushTimer = null;
     final historyRebuilt = _syncHistory(forceRebuild: forceHistoryRebuild);
     _syncModes();
     final cursorRow = _renderBuffer.cursorRow;
-    final dirtyStart = historyRebuilt
+    final dirtyStart = repaintSynchronizedFrame
+        ? 0
+        : historyRebuilt
         ? 0
         : update?.hasDirtyRows == true
         ? update!.dirtyRowStart
         : (_previousCursorRow < cursorRow ? _previousCursorRow : cursorRow);
-    final dirtyEnd = historyRebuilt
+    final dirtyEnd = repaintSynchronizedFrame
+        ? _renderBuffer.rows - 1
+        : historyRebuilt
         ? _renderBuffer.rows - 1
         : update?.hasDirtyRows == true
         ? update!.dirtyRowEnd
@@ -224,6 +252,7 @@ class RustTerminalBridge implements TerminalByteSink {
     if (_closed) return;
     _closed = true;
     _historyRebuildTimer?.cancel();
+    _synchronizedOutputFlushTimer?.cancel();
     _renderBuffer.close();
     _historyBuffer.close();
   }

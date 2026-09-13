@@ -30,7 +30,7 @@ description: Helps with Git tasks.
         ..addFile(
           ArchiveFile.string('git-helper/references/notes.md', 'notes'),
         );
-      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive)!);
+      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive));
 
       final result = await SkillArchiveImporter(
         skillsDirectory: '${tempRoot.path}/installed',
@@ -59,7 +59,7 @@ description: Helps with Git tasks.
           ),
         )
         ..addFile(ArchiveFile.string('../outside.txt', 'not allowed'));
-      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive)!);
+      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive));
 
       expect(
         SkillArchiveImporter(
@@ -77,7 +77,7 @@ description: Helps with Git tasks.
       final archiveFile = File('${tempRoot.path}/missing-skill-md.zip');
       final archive = Archive()
         ..addFile(ArchiveFile.string('missing/readme.md', '# Not a skill'));
-      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive)!);
+      await archiveFile.writeAsBytes(ZipEncoder().encodeBytes(archive));
 
       expect(
         SkillArchiveImporter(
