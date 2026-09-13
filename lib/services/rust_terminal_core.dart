@@ -460,7 +460,6 @@ class RustTerminalCore {
     }
     final replacement = calloc<Uint8>(next);
     if (_inputBuffer != nullptr) calloc.free(_inputBuffer);
-    if (_responseBuffer != nullptr) calloc.free(_responseBuffer);
     _inputBuffer = replacement;
     _inputCapacity = next;
   }
@@ -502,6 +501,7 @@ class RustTerminalCore {
     }
     _closed = true;
     if (_inputBuffer != nullptr) calloc.free(_inputBuffer);
+    if (_responseBuffer != nullptr) calloc.free(_responseBuffer);
     _destroy(_handle);
   }
 

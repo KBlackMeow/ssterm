@@ -137,6 +137,74 @@ void main() {
     expect(agent.defaultModel, 'deepseek-v4-pro');
   });
 
+  testWidgets('Agent provider menu only offers enabled providers', (
+    tester,
+  ) async {
+    var agent = AgentConfig(
+      defaultProvider: 'claude',
+      providers: [
+        ProviderConfig.deepseek().copyWith(enabled: true),
+        ProviderConfig.chatgpt().copyWith(enabled: true),
+        ProviderConfig.claude(),
+      ],
+    );
+    await tester.binding.setSurfaceSize(const Size(1200, 2400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: agent,
+          onAgentChanged: (next) => agent = next,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+
+    DropdownButtonFormField<String> providerMenu(String selected) =>
+        tester.widget(find.byKey(Key('settings-default-provider-$selected')));
+    DropdownButton<String> providerButton(String selected) => tester.widget(
+      find.descendant(
+        of: find.byKey(Key('settings-default-provider-$selected')),
+        matching: find.byType(DropdownButton<String>),
+      ),
+    );
+
+    expect(providerMenu('deepseek').initialValue, 'deepseek');
+    expect(providerButton('deepseek').items!.map((item) => item.value), [
+      'deepseek',
+      'chatgpt',
+    ]);
+
+    final deepseekSwitch = find.byKey(
+      const Key('settings-provider-enabled-deepseek'),
+    );
+    await tester.ensureVisible(deepseekSwitch);
+    await tester.tap(deepseekSwitch);
+    await tester.pump();
+
+    expect(providerMenu('chatgpt').initialValue, 'chatgpt');
+    expect(providerButton('chatgpt').items!.map((item) => item.value), [
+      'chatgpt',
+    ]);
+    expect(tester.takeException(), isNull);
+
+    final chatgptSwitch = find.byKey(
+      const Key('settings-provider-enabled-chatgpt'),
+    );
+    await tester.ensureVisible(chatgptSwitch);
+    await tester.tap(chatgptSwitch);
+    await tester.pump();
+
+    expect(providerMenu('null').initialValue, isNull);
+    expect(providerButton('null').items, isEmpty);
+    expect(providerMenu('null').onChanged, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('skills and MCP are independent settings destinations', (
     tester,
   ) async {

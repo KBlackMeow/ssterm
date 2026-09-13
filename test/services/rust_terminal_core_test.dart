@@ -280,6 +280,32 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
+  test(
+    'growing the PTY input buffer preserves the independent response buffer',
+    () {
+      final rust = RustTerminalCore.open(
+        columns: 80,
+        rows: 24,
+        libraryPath: path,
+      );
+      addTearDown(rust.close);
+
+      rust.feed(Uint8List.fromList('\x1b[?u'.codeUnits));
+      expect(utf8.decode(rust.takeResponse()), '\x1b[?0u');
+
+      // Codex can emit large frames after querying terminal capabilities.
+      // Input growth must not free the reusable response allocation.
+      rust.feed(Uint8List.fromList(List.filled(8192, 0x78)));
+      rust.feed(Uint8List.fromList('\x1b[?u'.codeUnits));
+      expect(utf8.decode(rust.takeResponse()), '\x1b[?0u');
+
+      rust.feed(Uint8List.fromList(List.filled(16384, 0x79)));
+      rust.feed(Uint8List.fromList('\x1b[?u'.codeUnits));
+      expect(utf8.decode(rust.takeResponse()), '\x1b[?0u');
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
   test('local PTY output defaults to the Rust-authoritative render path', () {
     final localSource = File('lib/app/main_local.dart').readAsStringSync();
     final tabSource = File('lib/models/tab_model.dart').readAsStringSync();

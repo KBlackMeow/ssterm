@@ -622,11 +622,8 @@ extension _AgentSettingsExt on _SettingsPageState {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             DropdownButtonFormField<String>(
-              initialValue:
-                  _agentConfig.defaultProvider ??
-                  (enabledProviders.isNotEmpty
-                      ? enabledProviders.first.id
-                      : null),
+              key: ValueKey('settings-default-provider-${currentProvider?.id}'),
+              initialValue: currentProvider?.id,
               decoration: const InputDecoration(
                 labelText: 'Provider',
                 labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
@@ -638,20 +635,24 @@ extension _AgentSettingsExt on _SettingsPageState {
               ),
               style: const TextStyle(color: _kFg, fontSize: 13),
               dropdownColor: _kSurface,
-              items: _agentConfig.providers.map((p) {
+              hint: const Text('Enable a provider below'),
+              items: enabledProviders.map((p) {
                 return DropdownMenuItem(
                   value: p.id,
                   child: Text(p.displayName),
                 );
               }).toList(),
-              onChanged: (v) {
-                if (v == null) return;
-                _agentApply(_agentConfig.copyWith(defaultProvider: v));
-              },
+              onChanged: enabledProviders.isEmpty
+                  ? null
+                  : (v) {
+                      if (v == null) return;
+                      _agentApply(_agentConfig.copyWith(defaultProvider: v));
+                    },
             ),
             if (currentProvider != null) ...[
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                key: ValueKey('settings-default-model-${currentProvider.id}'),
                 initialValue:
                     _agentConfig.defaultModel != null &&
                         allModels.contains(_agentConfig.defaultModel)
@@ -721,6 +722,7 @@ extension _AgentSettingsExt on _SettingsPageState {
                 ),
               ),
               Switch(
+                key: Key('settings-provider-enabled-${provider.id}'),
                 value: provider.enabled,
                 onChanged: (v) {
                   final next = _agentConfig.copyWith(
