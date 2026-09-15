@@ -37,12 +37,12 @@ class FilePickerService {
       await (_macOsEntitlementsCheckSkip ??=
           FilePicker.skipEntitlementsChecks());
     }
-    final result = await FilePicker.pickFiles(
+    final file = await FilePicker.pickFile(
       type: type,
       allowedExtensions: allowedExtensions,
       initialDirectory: initialDirectory,
     );
-    return result?.files.single.path;
+    return file?.path;
   }
 
   /// The user's Pictures directory on desktop, or `null` to let the picker
