@@ -105,6 +105,39 @@ void main() {
   );
 
   test(
+    'bridge retains Codex history inserted through a partial scroll region',
+    () {
+      final terminal = Terminal()..resize(8, 5);
+      final core = RustTerminalCore.open(
+        columns: 8,
+        rows: 5,
+        libraryPath: path,
+      );
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      addTearDown(() {
+        bridge.close();
+        core.close();
+      });
+
+      bridge.write(
+        utf8.encode(
+          'old-one\r\nold-two'
+          '\x1b[1;3r\x1b[3;1H'
+          '\r\nnew-one\r\nnew-two'
+          '\x1b[r',
+        ),
+      );
+
+      expect(terminal.mainBuffer.scrollBack, 2);
+      expect(terminal.mainBuffer.lines[0].toString(), 'old-one');
+      expect(terminal.mainBuffer.lines[1].toString(), 'old-two');
+      expect(terminal.mainBuffer.lines[3].toString(), 'new-one');
+      expect(terminal.mainBuffer.lines[4].toString(), 'new-two');
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'bridge publishes synchronized output as one complete frame',
     () {
       final terminal = Terminal()..resize(4, 2);

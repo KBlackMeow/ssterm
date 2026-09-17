@@ -66,13 +66,17 @@ const MODE_ALT_MOUSE_SCROLL: u32 = 1 << 10;
 const MODE_BRACKETED_PASTE: u32 = 1 << 11;
 const MODE_SYNCHRONIZED_OUTPUT: u32 = 1 << 12;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 struct CursorStyle {
     foreground: u32,
     background: u32,
     attributes: u32,
     underline_color: u32,
 }
+
+const MAX_STRING_BYTES: usize = 1 << 20;
+const MAX_CSI_BYTES: usize = 4096;
+const MAX_CSI_PARAMS: usize = 64;
 
 const ATTR_BOLD: u32 = 1 << 0;
 const ATTR_FAINT: u32 = 1 << 1;
@@ -117,6 +121,11 @@ pub struct TerminalCore {
     alt_cursor_row: usize,
     saved_cursor_col: usize,
     saved_cursor_row: usize,
+    saved_cursor_style: CursorStyle,
+    saved_g0_dec_graphics: bool,
+    saved_g1_dec_graphics: bool,
+    saved_use_g1_charset: bool,
+    tab_stops: Vec<bool>,
     scrollback: Vec<TerminalCell>,
     scrollback_head: usize,
     scrollback_len: usize,
@@ -187,6 +196,11 @@ impl TerminalCore {
             alt_cursor_row: 0,
             saved_cursor_col: 0,
             saved_cursor_row: 0,
+            saved_cursor_style: CursorStyle::default(),
+            saved_g0_dec_graphics: false,
+            saved_g1_dec_graphics: false,
+            saved_use_g1_charset: false,
+            tab_stops: (0..columns).map(|column| column % 8 == 0).collect(),
             scrollback: vec![TerminalCell::default(); columns.saturating_mul(max_scrollback_rows)],
             scrollback_head: 0,
             scrollback_len: 0,
@@ -252,7 +266,11 @@ impl TerminalCore {
     }
 
     fn scroll_up_region(&mut self, top: usize, bottom: usize) {
-        if top == 0 && bottom == self.rows - 1 && !self.using_alt && self.max_scrollback_rows > 0 {
+        // A scroll region that begins at the first screen row still scrolls
+        // content out of the terminal and into history, even when its bottom
+        // edge is above the last screen row. Inline TUIs such as Codex rely on
+        // this to insert finalized transcript rows above a live composer.
+        if top == 0 && !self.using_alt && self.max_scrollback_rows > 0 {
             let row = if self.scrollback_len < self.max_scrollback_rows {
                 let row = (self.scrollback_head + self.scrollback_len) % self.max_scrollback_rows;
                 self.scrollback_len += 1;
@@ -320,11 +338,19 @@ impl TerminalCore {
         // Wide glyphs deliberately occupy two cells in this initial ABI. The
         // second cell is a space so Flutter can safely paint one scalar per
         // reported cell while the renderer integration is rolled out.
-        let width = if char_width(value) == 2 { 2 } else { 1 };
+        let character_width = char_width(value);
+        if character_width == 0 {
+            return;
+        }
+        let width = if character_width == 2 { 2 } else { 1 };
         // VT terminals defer wrapping until the *next printable character*.
         // Cursor motions after the final cell (for example CSI D) therefore
         // operate on the pending column instead of a line already scrolled.
         if self.cursor_col >= self.columns {
+            if self.auto_wrap {
+                let first = self.index(self.cursor_row, 0);
+                self.cells[first].reserved[0] |= 1;
+            }
             self.cursor_col = 0;
             self.line_feed();
         }
@@ -420,6 +446,26 @@ impl TerminalCore {
             let index = self.index(row, column);
             self.cells[index] = cell;
         }
+        self.normalize_row(self.cursor_row);
+    }
+
+    fn normalize_row(&mut self, row: usize) {
+        if row >= self.rows {
+            return;
+        }
+        for column in 0..self.columns {
+            let index = self.index(row, column);
+            if self.cells[index].width == 0
+                && (column == 0 || self.cells[self.index(row, column - 1)].width != 2)
+            {
+                self.cells[index] = self.erase_cell();
+            } else if self.cells[index].width == 2
+                && (column + 1 >= self.columns
+                    || self.cells[self.index(row, column + 1)].width != 0)
+            {
+                self.cells[index].width = 1;
+            }
+        }
     }
 
     fn erase_chars(&mut self, count: usize) {
@@ -443,6 +489,7 @@ impl TerminalCore {
             .copy_within(start..row_start + self.columns - count, start + count);
         let cell = self.erase_cell();
         self.cells[start..start + count].fill(cell);
+        self.normalize_row(self.cursor_row);
         self.mark_dirty(self.cursor_row);
     }
 
@@ -457,6 +504,7 @@ impl TerminalCore {
             .copy_within(start + count..row_start + self.columns, start);
         let cell = self.erase_cell();
         self.cells[row_start + self.columns - count..row_start + self.columns].fill(cell);
+        self.normalize_row(self.cursor_row);
         self.mark_dirty(self.cursor_row);
     }
 
@@ -518,7 +566,7 @@ impl TerminalCore {
         match byte {
             0x07 => self.bells += 1,
             0x08 => self.cursor_col = self.cursor_col.saturating_sub(1),
-            0x09 => self.cursor_col = min(((self.cursor_col / 8) + 1) * 8, self.columns - 1),
+            0x09 => self.tab_forward(),
             0x0e => self.use_g1_charset = true,
             0x0f => self.use_g1_charset = false,
             b'\n' | 0x0b | 0x0c => {
@@ -529,6 +577,29 @@ impl TerminalCore {
             }
             b'\r' => self.cursor_col = 0,
             _ => {}
+        }
+    }
+
+    fn tab_forward(&mut self) {
+        let start = min(self.cursor_col.saturating_add(1), self.columns - 1);
+        if let Some(column) = (start..self.columns).find(|column| self.tab_stops[*column]) {
+            self.cursor_col = column;
+        } else if self.auto_wrap {
+            self.cursor_col = self.columns;
+        } else {
+            self.cursor_col = self.columns - 1;
+        }
+    }
+
+    fn resize_tab_stops(&mut self, columns: usize) {
+        let old = std::mem::take(&mut self.tab_stops);
+        self.tab_stops = vec![false; columns];
+        let preserved = min(old.len(), columns);
+        self.tab_stops[..preserved].copy_from_slice(&old[..preserved]);
+        for column in (0..columns).step_by(8) {
+            if column >= preserved {
+                self.tab_stops[column] = true;
+            }
         }
     }
 
@@ -633,7 +704,7 @@ impl TerminalCore {
                 if top < bottom {
                     self.margin_top = top;
                     self.margin_bottom = bottom;
-                    self.cursor_row = 0;
+                    self.cursor_row = if self.origin_mode { top } else { 0 };
                     self.cursor_col = 0;
                 }
             }
@@ -641,8 +712,26 @@ impl TerminalCore {
             // modifyOtherKeys; interpreting that as SGR 4 leaks underline
             // into every cell written afterwards.
             b'm' if self.csi_prefix == 0 => self.sgr(),
-            b's' => self.save_cursor(),
+            b's' if self.csi_prefix == 0 => self.save_cursor(),
             b'u' if self.csi_prefix == 0 => self.restore_cursor(),
+            b'I' => {
+                for _ in 0..amount {
+                    self.tab_forward();
+                }
+            }
+            b'Z' => {
+                for _ in 0..amount {
+                    self.cursor_col = (0..self.cursor_col)
+                        .rev()
+                        .find(|column| self.tab_stops[*column])
+                        .unwrap_or(0);
+                }
+            }
+            b'g' if self.csi_prefix == 0 => match self.parameter(0, 0) {
+                0 => self.tab_stops[self.cursor_col.min(self.columns - 1)] = false,
+                3 => self.tab_stops.fill(false),
+                _ => {}
+            },
             b'h' | b'l' if self.csi_prefix == b'?' => {
                 let enabled = final_byte == b'h';
                 let modes = self.params.clone();
@@ -661,6 +750,7 @@ impl TerminalCore {
                     }
                 }
             }
+            b'p' if self.csi_intermediate == b'!' && self.csi_prefix == 0 => self.soft_reset(),
             b'c' if self.csi_prefix == 0 && self.parameter(0, 0) == 0 => {
                 self.response.extend_from_slice(b"\x1b[?1;2c");
             }
@@ -673,6 +763,12 @@ impl TerminalCore {
                         min(self.cursor_col, self.columns - 1) + 1
                     )
                     .as_bytes(),
+                ),
+                _ => {}
+            },
+            b't' if self.csi_prefix == 0 => match self.parameter(0, 0) {
+                18 | 19 => self.response.extend_from_slice(
+                    format!("\x1b[8;{};{}t", self.rows, self.columns).as_bytes(),
                 ),
                 _ => {}
             },
@@ -841,11 +937,62 @@ impl TerminalCore {
     fn save_cursor(&mut self) {
         self.saved_cursor_col = self.cursor_col;
         self.saved_cursor_row = self.cursor_row;
+        self.saved_cursor_style = self.cursor_style;
+        self.saved_g0_dec_graphics = self.g0_dec_graphics;
+        self.saved_g1_dec_graphics = self.g1_dec_graphics;
+        self.saved_use_g1_charset = self.use_g1_charset;
     }
 
     fn restore_cursor(&mut self) {
         self.cursor_col = min(self.saved_cursor_col, self.columns);
         self.cursor_row = min(self.saved_cursor_row, self.rows - 1);
+        self.cursor_style = self.saved_cursor_style;
+        self.g0_dec_graphics = self.saved_g0_dec_graphics;
+        self.g1_dec_graphics = self.saved_g1_dec_graphics;
+        self.use_g1_charset = self.saved_use_g1_charset;
+    }
+
+    fn soft_reset(&mut self) {
+        self.margin_top = 0;
+        self.margin_bottom = self.rows - 1;
+        self.auto_wrap = true;
+        self.insert_mode = false;
+        self.line_feed_mode = false;
+        self.origin_mode = false;
+        self.cursor_visible_mode = true;
+        self.cursor_blink_mode = false;
+        self.cursor_keys_mode = false;
+        self.reverse_display_mode = false;
+        self.cursor_style = CursorStyle::default();
+        self.g0_dec_graphics = false;
+        self.g1_dec_graphics = false;
+        self.use_g1_charset = false;
+        self.cursor_col = 0;
+        self.cursor_row = 0;
+        self.mark_all_dirty();
+    }
+
+    fn hard_reset(&mut self) {
+        self.cells.fill(TerminalCell::default());
+        self.alt_cells.fill(TerminalCell::default());
+        self.scrollback.fill(TerminalCell::default());
+        self.scrollback_head = 0;
+        self.scrollback_len = 0;
+        self.tab_stops.fill(false);
+        for column in (0..self.columns).step_by(8) {
+            self.tab_stops[column] = true;
+        }
+        self.screen_head = 0;
+        self.alt_screen_head = 0;
+        self.using_alt = false;
+        self.response.clear();
+        self.osc.clear();
+        self.dcs.clear();
+        self.utf8.clear();
+        self.state = ParseState::Ground;
+        self.soft_reset();
+        self.mark_all_dirty();
+        self.history_epoch = self.history_epoch.wrapping_add(1);
     }
 
     fn use_alt_buffer(&mut self) {
@@ -933,6 +1080,13 @@ impl TerminalCore {
                 } else {
                     self.clear_alt_buffer();
                     self.use_main_buffer();
+                }
+            }
+            1048 => {
+                if enabled {
+                    self.save_cursor();
+                } else {
+                    self.restore_cursor();
                 }
             }
             1049 => {
@@ -1148,6 +1302,22 @@ impl TerminalCore {
         for &byte in input {
             match self.state {
                 ParseState::Ground => match byte {
+                    0x9b if self.utf8.is_empty() => {
+                        self.params.clear();
+                        self.params.push(0);
+                        self.csi_raw.clear();
+                        self.csi_prefix = 0;
+                        self.csi_intermediate = 0;
+                        self.state = ParseState::Csi;
+                    }
+                    0x9d if self.utf8.is_empty() => {
+                        self.osc.clear();
+                        self.state = ParseState::Osc;
+                    }
+                    0x90 if self.utf8.is_empty() => {
+                        self.dcs.clear();
+                        self.state = ParseState::Dcs;
+                    }
                     0x1b => {
                         self.emit_utf8(true);
                         self.state = ParseState::Escape;
@@ -1207,6 +1377,16 @@ impl TerminalCore {
                         }
                         self.state = ParseState::Ground;
                     }
+                    b'H' => {
+                        if self.cursor_col < self.columns {
+                            self.tab_stops[self.cursor_col] = true;
+                        }
+                        self.state = ParseState::Ground;
+                    }
+                    b'c' => {
+                        self.hard_reset();
+                        self.state = ParseState::Ground;
+                    }
                     b'=' => {
                         self.app_keypad_mode = true;
                         self.state = ParseState::Ground;
@@ -1218,6 +1398,8 @@ impl TerminalCore {
                     _ => self.state = ParseState::Ground,
                 },
                 ParseState::Csi => match byte {
+                    0x18 | 0x1a => self.state = ParseState::Ground,
+                    0x1b => self.state = ParseState::Escape,
                     // ECMA-48 private parameter marker bytes. Retaining all
                     // four matters beyond SGR too: ChatCode follows `CSI > 4 m`
                     // with `CSI < u`, which must not become ordinary CSI u
@@ -1233,10 +1415,18 @@ impl TerminalCore {
                             .saturating_add(u16::from(byte - b'0'));
                     }
                     b';' => {
-                        self.csi_raw.push(byte);
-                        self.params.push(0)
+                        if self.csi_raw.len() < MAX_CSI_BYTES {
+                            self.csi_raw.push(byte);
+                        }
+                        if self.params.len() < MAX_CSI_PARAMS {
+                            self.params.push(0);
+                        }
                     }
-                    b':' => self.csi_raw.push(byte),
+                    b':' => {
+                        if self.csi_raw.len() < MAX_CSI_BYTES {
+                            self.csi_raw.push(byte);
+                        }
+                    }
                     0x20..=0x2f => self.csi_intermediate = byte,
                     0x40..=0x7e => {
                         self.csi(byte);
@@ -1245,34 +1435,66 @@ impl TerminalCore {
                     _ => {}
                 },
                 ParseState::Osc => match byte {
+                    0x9c => {
+                        self.finish_osc(b'\\');
+                        self.state = ParseState::Ground;
+                    }
+                    0x18 | 0x1a => {
+                        self.osc.clear();
+                        self.state = ParseState::Ground;
+                    }
                     0x07 => {
                         self.finish_osc(0x07);
                         self.state = ParseState::Ground;
                     }
                     0x1b => self.state = ParseState::OscEscape,
-                    _ => self.osc.push(byte),
+                    _ => {
+                        if self.osc.len() < MAX_STRING_BYTES {
+                            self.osc.push(byte);
+                        }
+                    }
                 },
                 ParseState::OscEscape => {
                     if byte == b'\\' {
                         self.finish_osc(b'\\');
                         self.state = ParseState::Ground;
                     } else {
-                        self.osc.push(0x1b);
-                        self.osc.push(byte);
+                        if self.osc.len() < MAX_STRING_BYTES {
+                            self.osc.push(0x1b);
+                        }
+                        if self.osc.len() < MAX_STRING_BYTES {
+                            self.osc.push(byte);
+                        }
                         self.state = ParseState::Osc;
                     }
                 }
                 ParseState::Dcs => match byte {
+                    0x9c => {
+                        self.finish_dcs();
+                        self.state = ParseState::Ground;
+                    }
+                    0x18 | 0x1a => {
+                        self.dcs.clear();
+                        self.state = ParseState::Ground;
+                    }
                     0x1b => self.state = ParseState::DcsEscape,
-                    _ => self.dcs.push(byte),
+                    _ => {
+                        if self.dcs.len() < MAX_STRING_BYTES {
+                            self.dcs.push(byte);
+                        }
+                    }
                 },
                 ParseState::DcsEscape => {
                     if byte == b'\\' {
                         self.finish_dcs();
                         self.state = ParseState::Ground;
                     } else {
-                        self.dcs.push(0x1b);
-                        self.dcs.push(byte);
+                        if self.dcs.len() < MAX_STRING_BYTES {
+                            self.dcs.push(0x1b);
+                        }
+                        if self.dcs.len() < MAX_STRING_BYTES {
+                            self.dcs.push(byte);
+                        }
                         self.state = ParseState::Dcs;
                     }
                 }
@@ -1381,6 +1603,7 @@ impl TerminalCore {
                 alt_cells[destination_row * columns + col] = self.alt_cells[alt_index];
             }
         }
+        self.resize_tab_stops(columns);
         self.columns = columns;
         self.rows = rows;
         self.margin_top = 0;
@@ -1486,7 +1709,8 @@ impl TerminalCore {
             // A full row is normally an auto-wrap continuation. Coalescing it
             // with the following row lets a later width increase reconstruct
             // text that was wrapped for a temporary side-by-side split.
-            if length != old_columns || source_row + 1 == source_row_count {
+            let soft_wrapped = source.first().is_some_and(|cell| cell.reserved[0] & 1 != 0);
+            if !soft_wrapped || source_row + 1 == source_row_count {
                 let chunk_count = max(1, (logical.len() + columns - 1) / columns);
                 let output_start = reflowed.len();
                 for chunk in 0..chunk_count {
@@ -1495,6 +1719,9 @@ impl TerminalCore {
                     let end = min(start + columns, logical.len());
                     if start < end {
                         target[..end - start].copy_from_slice(&logical[start..end]);
+                    }
+                    if chunk_count > 1 {
+                        target[0].reserved[0] |= 1;
                     }
                     reflowed.push(target);
                 }
@@ -1536,6 +1763,7 @@ impl TerminalCore {
                 .copy_from_slice(&self.alt_cells[source_offset..source_offset + copy_columns]);
         }
 
+        self.resize_tab_stops(columns);
         self.columns = columns;
         self.rows = rows;
         self.margin_top = 0;
@@ -1609,6 +1837,13 @@ impl TerminalCore {
 
 fn char_width(value: char) -> usize {
     match value as u32 {
+        0x0300..=0x036f
+        | 0x1ab0..=0x1aff
+        | 0x1dc0..=0x1dff
+        | 0x20d0..=0x20ff
+        | 0xfe00..=0xfe0f
+        | 0xfe20..=0xfe2f
+        | 0x200d => 0,
         0x1100..=0x115f
         | 0x2329..=0x232a
         | 0x2e80..=0xa4cf
@@ -1618,7 +1853,8 @@ fn char_width(value: char) -> usize {
         | 0xfe30..=0xfe6f
         | 0xff00..=0xff60
         | 0xffe0..=0xffe6
-        | 0x1f300..=0x1faff => 2,
+        | 0x1f300..=0x1faff
+        | 0x20000..=0x2fffd => 2,
         _ => 1,
     }
 }
@@ -1676,7 +1912,12 @@ pub unsafe extern "C" fn ssterm_terminal_feed(
     if terminal.is_null() || (bytes.is_null() && length != 0) {
         return TerminalUpdate::default();
     }
-    (*terminal).feed(std::slice::from_raw_parts(bytes, length))
+    let input = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(bytes, length)
+    };
+    (*terminal).feed(input)
 }
 #[no_mangle]
 /// # Safety
@@ -1972,6 +2213,15 @@ mod tests {
         assert_eq!(terminal.row_text(0), "abcdefgh");
         assert_eq!(terminal.row_text(1), "");
     }
+
+    #[test]
+    fn resize_does_not_merge_hard_newlines() {
+        let mut terminal = TerminalCore::with_scrollback(4, 3, 8);
+        terminal.feed(b"abcd\r\nefgh");
+        terminal.resize(8, 3);
+        assert_eq!(terminal.row_text(0), "abcd");
+        assert_eq!(terminal.row_text(1), "efgh");
+    }
     #[test]
     fn preserves_utf8_across_pty_chunks() {
         let mut terminal = TerminalCore::new(8, 1);
@@ -1979,6 +2229,32 @@ mod tests {
         assert_eq!(terminal.row_text(0), "");
         terminal.feed(&[0xa0]);
         assert_eq!(terminal.row_text(0), "你");
+    }
+
+    #[test]
+    fn combining_marks_and_zwj_do_not_consume_cells() {
+        let mut terminal = TerminalCore::new(12, 1);
+        terminal.feed("e\u{301}\u{200d}X".as_bytes());
+        assert_eq!(terminal.row_text(0), "eX");
+        assert_eq!(terminal.cursor_col, 2);
+    }
+
+    #[test]
+    fn supplementary_cjk_is_double_width() {
+        let mut terminal = TerminalCore::new(4, 1);
+        terminal.feed("𠀀X".as_bytes());
+        assert_eq!(terminal.cursor_col, 3);
+        assert_eq!(terminal.cells[terminal.index(0, 0)].width, 2);
+    }
+
+    #[test]
+    fn editing_wide_cells_clears_orphan_continuations() {
+        let mut terminal = TerminalCore::new(4, 1);
+        terminal.feed("你X".as_bytes());
+        terminal.feed(b"\x1b[1;1H\x1b[P");
+        assert_eq!(terminal.row_text(0), "X");
+        assert_eq!(terminal.cells[terminal.index(0, 0)].width, 0);
+        assert_eq!(terminal.cells[terminal.index(0, 0)].codepoint, 0);
     }
 
     #[test]
@@ -2051,6 +2327,13 @@ mod tests {
     }
 
     #[test]
+    fn answers_terminal_size_query() {
+        let mut terminal = TerminalCore::new(80, 24);
+        terminal.feed(b"\x1b[18t\x1b[19t");
+        assert_eq!(terminal.response, b"\x1b[8;24;80t\x1b[8;24;80t");
+    }
+
+    #[test]
     fn private_csi_m_does_not_enable_underline() {
         let mut terminal = TerminalCore::new(16, 2);
         terminal.feed(b"\x1b[>4mChatCode");
@@ -2092,6 +2375,41 @@ mod tests {
     }
 
     #[test]
+    fn supports_tab_set_clear_and_backward_tab() {
+        let mut terminal = TerminalCore::new(16, 2);
+        terminal.feed(b"\x1b[3g\x1b[5G\x1bH\x1b[1G\t");
+        assert_eq!(terminal.cursor_col, 4);
+        terminal.feed(b"\x1b[Z");
+        assert_eq!(terminal.cursor_col, 0);
+    }
+
+    #[test]
+    fn soft_and_hard_reset_restore_terminal_state() {
+        let mut terminal = TerminalCore::new(8, 2);
+        terminal.feed(b"\x1b[31m\x1b[?7l\x1b[1;2r\x1b[!p");
+        assert!(terminal.auto_wrap);
+        assert_eq!(terminal.margin_top, 0);
+        assert_eq!(terminal.margin_bottom, 1);
+        assert_eq!(terminal.cursor_style, CursorStyle::default());
+        terminal.feed(b"\x1b[31mX\x1bc");
+        assert_eq!(terminal.row_text(0), "");
+        assert_eq!(terminal.cursor_style, CursorStyle::default());
+        assert_eq!(terminal.scrollback_len, 0);
+    }
+
+    #[test]
+    fn decsc_restores_style_and_1048_restores_position() {
+        let mut terminal = TerminalCore::new(8, 3);
+        terminal.feed(b"\x1b[31m\x1b7\x1b[32m\x1b8X");
+        assert_eq!(
+            terminal.cells[terminal.index(0, 0)].foreground,
+            COLOR_NAMED | 1
+        );
+        terminal.feed(b"\x1b[2;3H\x1b[?1048h\x1b[1;1H\x1b[?1048lY");
+        assert_eq!((terminal.cursor_row, terminal.cursor_col), (1, 3));
+    }
+
+    #[test]
     fn htop_mouse_modes_enable_press_and_release_reporting() {
         let mut terminal = TerminalCore::new(80, 25);
         terminal.feed(b"\x1b[?1006;1000h");
@@ -2114,6 +2432,66 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_control_strings_resume_ground_state() {
+        let mut terminal = TerminalCore::new(16, 2);
+        terminal.feed(b"\x1b]2;discard\x18ok\x1bPdiscard\x1aok\x1b[12\x18yes");
+        assert_eq!(terminal.row_text(0), "okokyes");
+    }
+
+    #[test]
+    fn accepts_8_bit_c1_sequences() {
+        let mut terminal = TerminalCore::new(16, 2);
+        terminal.feed(b"\x9b2;3H X\x9d7;file:///tmp\x9c");
+        assert_eq!((terminal.cursor_row, terminal.cursor_col), (1, 4));
+        assert_eq!(terminal.working_directory.to_str().unwrap(), "file:///tmp");
+    }
+
+    #[test]
+    fn utf8_continuation_bytes_are_not_c1_controls() {
+        let mut terminal = TerminalCore::new(16, 2);
+        // These UTF-8 scalars contain 0x9b, 0x90 and 0x9d continuation bytes.
+        terminal.feed("ÛАÝ".as_bytes());
+        assert_eq!(terminal.row_text(0), "ÛАÝ");
+        assert_eq!(terminal.cursor_col, 3);
+    }
+
+    #[test]
+    fn cjk_input_echo_survives_every_pty_chunk_boundary() {
+        let text = "各体检机构体检项目详情";
+        let mut terminal = TerminalCore::new(32, 2);
+
+        // PTY reads may split anywhere, including after E5 in `各` and before
+        // its 0x90 continuation byte. 0x90 is also the legacy 8-bit DCS byte,
+        // but inside a pending UTF-8 scalar it is ordinary text data.
+        for byte in text.as_bytes() {
+            terminal.feed(std::slice::from_ref(byte));
+        }
+
+        assert_eq!(terminal.row_text(0), text);
+        assert_eq!(terminal.cursor_col, text.chars().count() * 2);
+    }
+
+    #[test]
+    fn utf8_output_cannot_swallow_codex_exit_cleanup() {
+        let mut terminal = TerminalCore::new(32, 3);
+        terminal.feed(b"shell\x1b[?1049h\x1b[?1004h\x1b[?2004h");
+        assert!(terminal.using_alt);
+        assert!(terminal.report_focus_mode);
+        assert!(terminal.bracketed_paste_mode);
+
+        // Each scalar contains a byte that is also an 8-bit C1 introducer.
+        // They must remain part of UTF-8 instead of changing parser state and
+        // swallowing the teardown emitted when Codex handles Ctrl-C.
+        terminal.feed("ÛАÝ".as_bytes());
+        terminal.feed(b"\x1b[?2004l\x1b[?1004l\x1b[?1049l prompt$ ");
+
+        assert!(!terminal.using_alt);
+        assert!(!terminal.report_focus_mode);
+        assert!(!terminal.bracketed_paste_mode);
+        assert_eq!(terminal.row_text(0), "shell prompt$");
+    }
+
+    #[test]
     fn keeps_logical_rows_ordered_after_screen_ring_wraps() {
         let mut terminal = TerminalCore::with_scrollback(2, 2, 8);
         terminal.feed(b"aa\r\nbb\r\ncc\r\ndd\r\nee");
@@ -2121,6 +2499,42 @@ mod tests {
         assert_eq!(terminal.row_text(1), "ee");
         assert_eq!(terminal.scrollback_len, 3);
         assert_ne!(terminal.screen_head, 0);
+    }
+
+    #[test]
+    fn top_anchored_partial_scroll_region_preserves_history() {
+        let mut terminal = TerminalCore::with_scrollback(8, 5, 8);
+        terminal.feed(b"old-one\r\nold-two");
+
+        // Codex's standard history insertion strategy restricts scrolling to
+        // the rows above its live viewport, then emits CRLF at the bottom of
+        // that partial region. Those departed rows are native scrollback.
+        terminal.feed(b"\x1b[1;3r\x1b[3;1H\r\nnew-one\r\nnew-two");
+
+        assert_eq!(terminal.scrollback_len, 2);
+        let first = terminal.scrollback_head * terminal.columns;
+        let second =
+            ((terminal.scrollback_head + 1) % terminal.max_scrollback_rows) * terminal.columns;
+        let row_text = |row: &[TerminalCell]| {
+            row.iter()
+                .filter_map(|cell| match cell.codepoint {
+                    0 => None,
+                    value => char::from_u32(value),
+                })
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(
+            row_text(&terminal.scrollback[first..first + terminal.columns]),
+            "old-one"
+        );
+        assert_eq!(
+            row_text(&terminal.scrollback[second..second + terminal.columns]),
+            "old-two"
+        );
+        assert_eq!(terminal.row_text(1), "new-one");
+        assert_eq!(terminal.row_text(2), "new-two");
     }
 
     #[test]
