@@ -992,15 +992,15 @@ class _SessionPickerState extends State<_SessionPicker> {
     final foreground = colors?.foreground ?? _kFgActive;
     final foregroundDim = colors?.foregroundDim ?? _kFgInactive;
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+    return SizedBox(
+      width: 480,
+      height: 560,
       child: PopupSurface(
         color: FrostedGlassStyle.menuFillSolid,
         radius: 16,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
@@ -1030,17 +1030,20 @@ class _SessionPickerState extends State<_SessionPicker> {
                 ),
               ],
               const SizedBox(height: 8),
-              Flexible(
+              Expanded(
                 child: _sessions.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                        child: Text(
-                          'No available sessions.',
-                          style: TextStyle(color: foregroundDim),
+                    ? Align(
+                        alignment: Alignment.topLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Text(
+                            'No available sessions.',
+                            style: TextStyle(color: foregroundDim),
+                          ),
                         ),
                       )
                     : ListView.separated(
-                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
                         itemCount: _sessions.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {

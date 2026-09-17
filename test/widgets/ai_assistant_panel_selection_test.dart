@@ -207,6 +207,11 @@ void main() {
       expect(source, contains('PopupSurface('));
       expect(source, contains('FrostedGlassStyle.menuFillSolid'));
       expect(source, isNot(contains('FrostedGlassSurface(')));
+      expect(source, contains('width: 480'));
+      expect(source, contains('height: 560'));
+      expect(source, contains('Expanded('));
+      expect(source, contains('padding: EdgeInsets.zero'));
+      expect(source, isNot(contains('shrinkWrap: true')));
       expect(source, contains('_sessionRegistry.delete(session.id)'));
       expect(source, contains("tooltip: 'Delete session'"));
     },
