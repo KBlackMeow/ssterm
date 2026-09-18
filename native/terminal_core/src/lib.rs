@@ -561,6 +561,39 @@ impl TerminalCore {
         }
     }
 
+    /// Tracks UTF-8 sequence progress while OSC/DCS payload bytes are
+    /// collected. The C1 terminator byte 0x9c (ST) must only terminate a
+    /// string when it stands alone: as the middle or final byte of a CJK
+    /// scalar (e.g. 菜 = E8 8F 9C, 机 = E6 9C BA) it is ordinary payload.
+    /// Mirrors the Ground-state `self.utf8.is_empty()` guards for 8-bit C1
+    /// introducers. The buffer only ever holds a valid incomplete prefix, so
+    /// the trailing emit_utf8(false) in feed() retains it silently instead of
+    /// printing replacement characters.
+    fn track_string_utf8(&mut self, byte: u8) {
+        if self.utf8.is_empty() {
+            if matches!(byte, 0xc2..=0xf4) {
+                self.utf8.push(byte);
+            }
+            return;
+        }
+        let expected = match self.utf8[0] {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            _ => 4,
+        };
+        if matches!(byte, 0x80..=0xbf) && self.utf8.len() < expected {
+            self.utf8.push(byte);
+            if self.utf8.len() == expected {
+                self.utf8.clear();
+            }
+        } else {
+            self.utf8.clear();
+            if matches!(byte, 0xc2..=0xf4) {
+                self.utf8.push(byte);
+            }
+        }
+    }
+
     fn control(&mut self, byte: u8) {
         self.emit_utf8(true);
         match byte {
@@ -1435,20 +1468,26 @@ impl TerminalCore {
                     _ => {}
                 },
                 ParseState::Osc => match byte {
-                    0x9c => {
+                    0x9c if self.utf8.is_empty() => {
                         self.finish_osc(b'\\');
                         self.state = ParseState::Ground;
                     }
                     0x18 | 0x1a => {
                         self.osc.clear();
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     }
                     0x07 => {
                         self.finish_osc(0x07);
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     }
-                    0x1b => self.state = ParseState::OscEscape,
+                    0x1b => {
+                        self.utf8.clear();
+                        self.state = ParseState::OscEscape;
+                    }
                     _ => {
+                        self.track_string_utf8(byte);
                         if self.osc.len() < MAX_STRING_BYTES {
                             self.osc.push(byte);
                         }
@@ -1457,6 +1496,7 @@ impl TerminalCore {
                 ParseState::OscEscape => {
                     if byte == b'\\' {
                         self.finish_osc(b'\\');
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     } else {
                         if self.osc.len() < MAX_STRING_BYTES {
@@ -1465,20 +1505,27 @@ impl TerminalCore {
                         if self.osc.len() < MAX_STRING_BYTES {
                             self.osc.push(byte);
                         }
+                        self.track_string_utf8(byte);
                         self.state = ParseState::Osc;
                     }
                 }
                 ParseState::Dcs => match byte {
-                    0x9c => {
+                    0x9c if self.utf8.is_empty() => {
                         self.finish_dcs();
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     }
                     0x18 | 0x1a => {
                         self.dcs.clear();
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     }
-                    0x1b => self.state = ParseState::DcsEscape,
+                    0x1b => {
+                        self.utf8.clear();
+                        self.state = ParseState::DcsEscape;
+                    }
                     _ => {
+                        self.track_string_utf8(byte);
                         if self.dcs.len() < MAX_STRING_BYTES {
                             self.dcs.push(byte);
                         }
@@ -1487,6 +1534,7 @@ impl TerminalCore {
                 ParseState::DcsEscape => {
                     if byte == b'\\' {
                         self.finish_dcs();
+                        self.utf8.clear();
                         self.state = ParseState::Ground;
                     } else {
                         if self.dcs.len() < MAX_STRING_BYTES {
@@ -1495,6 +1543,7 @@ impl TerminalCore {
                         if self.dcs.len() < MAX_STRING_BYTES {
                             self.dcs.push(byte);
                         }
+                        self.track_string_utf8(byte);
                         self.state = ParseState::Dcs;
                     }
                 }
@@ -2229,6 +2278,84 @@ mod tests {
         assert_eq!(terminal.row_text(0), "");
         terminal.feed(&[0xa0]);
         assert_eq!(terminal.row_text(0), "你");
+    }
+
+    #[test]
+    fn preserves_cjk_at_every_pty_chunk_boundary() {
+        let text = "各体检机构体检项目详情";
+        let bytes = text.as_bytes();
+        for split in 1..bytes.len() {
+            let mut terminal = TerminalCore::new(32, 1);
+            terminal.feed(&bytes[..split]);
+            terminal.feed(&bytes[split..]);
+            assert_eq!(terminal.row_text(0), text, "split at byte {split}");
+        }
+    }
+
+    #[test]
+    fn preserves_cjk_when_pty_delivers_one_byte_at_a_time() {
+        let text = "各体检机构体检项目详情";
+        let mut terminal = TerminalCore::new(32, 1);
+        for byte in text.as_bytes() {
+            terminal.feed(std::slice::from_ref(byte));
+        }
+        assert_eq!(terminal.row_text(0), text);
+    }
+
+    #[test]
+    fn osc_titles_containing_cjk_st_bytes_stay_consumed() {
+        // Captured from a real zsh + syntax-highlighting accept-line redraw:
+        // the echo, four backspaces over the wide cells, the styled repaint,
+        // zle's cursor cleanup, and OSC 2/1 titles whose 菜 (E8 8F 9C) and
+        // 单 (E5 8D 95) payload must never reach the screen even though the
+        // 0x9C byte is also the 8-bit ST terminator.
+        let stream: &[u8] = b"\x1b[?2004h\xe8\x8f\x9c\xe5\x8d\x95\x08\x08\x08\x08\
+\x1b[1m\x1b[31m\xe8\x8f\x9c\x1b[1m\x1b[31m\x1b[1m\x1b[31m\xe5\x8d\x95\
+\x1b[0m\x1b[39m\x1b[1m\x1b[31m\x1b[0m\x1b[39m\x1b[?1l\x1b>\x1b[?2004l\
+\x0d\x0d\x0a\x1b[J\x1b[A\x1b[30C\x0d\x0d\x0a\
+\x1b]2;\xe8\x8f\x9c\xe5\x8d\x95\x07\x1b]1;\xe8\x8f\x9c\xe5\x8d\x95\x07\
+zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
+        let mut terminal = TerminalCore::new(120, 4);
+        terminal.feed(stream);
+        assert_eq!(terminal.row_text(0), "菜单");
+        assert_eq!(terminal.row_text(1), "zsh: command not found: 菜单");
+        assert_eq!(terminal.row_text(2), "");
+        assert_eq!(terminal.title.to_string_lossy(), "菜单");
+    }
+
+    #[test]
+    fn osc_directory_titles_survive_cjk_st_continuation_bytes() {
+        // Captured after `cd 集团安排的体检机构`: the OSC 2 title, OSC 1 short
+        // title, and OSC 7 cwd all contain 机 (E6 9C BA), whose middle byte
+        // 0x9C must not terminate the string and leak the remaining title
+        // bytes onto the prompt row.
+        let stream: &[u8] = b"\
+\x1b]2;illya@host/tmp/\xe5\x90\x84\xe4\xbd\x93\xe6\xa3\x80\xe6\x9c\xba\xe6\x9e\x84/\xe9\x9b\x86\xe5\x9b\xa2\xe5\xae\x89\xe6\x8e\x92\xe7\x9a\x84\xe4\xbd\x93\xe6\xa3\x80\xe6\x9c\xba\xe6\x9e\x84\x07\
+\x1b]1;..\xe6\x8e\x92\xe7\x9a\x84\xe4\xbd\x93\xe6\xa3\x80\xe6\x9c\xba\xe6\x9e\x84\x07\
+\x1b]7;file://host/tmp/%E9%9B\x86%E5%9B%A2\x1b\x5c\
+\x0d\x1b[0m\x1b[27m\x1b[24m\x1b[J\x1b[01;32m\xe2\x9e\x9c  ";
+        let mut terminal = TerminalCore::new(120, 4);
+        terminal.feed(stream);
+        assert_eq!(terminal.row_text(0), "➜");
+        assert!(
+            !terminal.row_text(0).contains('\u{fffd}'),
+            "title bytes leaked into the row"
+        );
+        // The OSC 1 short title runs after OSC 2 and wins; both contain 机
+        // and both must have been consumed whole.
+        assert_eq!(terminal.title.to_string_lossy(), "..排的体检机构");
+    }
+
+    #[test]
+    fn standalone_8bit_st_still_terminates_strings() {
+        let mut terminal = TerminalCore::new(20, 2);
+        terminal.feed(b"\x1b]2;hello\x9cX");
+        assert_eq!(terminal.row_text(0), "X");
+        assert_eq!(terminal.title.to_string_lossy(), "hello");
+
+        let mut dcs = TerminalCore::new(20, 2);
+        dcs.feed("\u{1b}P1;2;q菜\u{1b}\\Y".as_bytes());
+        assert_eq!(dcs.row_text(0), "Y");
     }
 
     #[test]
