@@ -101,6 +101,8 @@ void main() {
     expect(tooling, contains('identical(_cancelStream, cancelAttempt)'));
     expect(tooling, contains(r'backoff_ms=${retryDelay.inMilliseconds}'));
     expect(tooling, contains('AgentStreamLogSanitizer.message(e)'));
+    expect(tooling, contains('_isRateLimitError(e)'));
+    expect(tooling, contains('Rate limited. Retrying in 3 seconds…'));
   });
 
   test('panel disposal invalidates command cancellation generation', () {

@@ -73,6 +73,16 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         s.contains('Connection closed');
   }
 
+  bool _isRateLimitError(Object e) {
+    if (e is LlmHttpException) return e.statusCode == 429;
+    final message = e.toString().toLowerCase();
+    return RegExp(r'\bhttp\s*429\b').hasMatch(message) ||
+        RegExp(r'\bstatus(?:\s+code)?[=: ]+429\b').hasMatch(message) ||
+        message.contains('rate limit') ||
+        message.contains('too many requests') ||
+        message.contains('resource_exhausted');
+  }
+
   Future<_AgentStreamResult?> _streamAiResponse(
     int gen,
     int historyLenBefore,
@@ -96,7 +106,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // failed with a transient network error. Anything more aggressive
     // would risk duplicating
     // half-streamed answers.
-    const maxAttempts = 3;
+    const maxAttempts = AgentStreamRetryPolicy.maxRateLimitRetries + 1;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
       try {
@@ -234,7 +244,11 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           continue;
         }
         // Catch EVERYTHING — stream errors, SSE parse failures, etc.
-        final retryDelay = AgentStreamRetryPolicy.delayAfterAttempt(attempt);
+        final isRateLimited = _isRateLimitError(e);
+        final retryDelay = AgentStreamRetryPolicy.delayAfterAttempt(
+          attempt,
+          isRateLimited: isRateLimited,
+        );
         final canRetry = AgentStreamRetryPolicy.canRetry(
           attempt: attempt,
           hasText: fullText.isNotEmpty,
@@ -242,6 +256,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
           hasToolCalls: nativeToolCalls.isNotEmpty,
           isActive: mounted && gen == _generation,
           isTransient: _isTransientStreamError(e),
+          isRateLimited: isRateLimited,
         );
         if (canRetry && retryDelay != null) {
           final provider = config.current;
@@ -258,8 +273,16 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
             _cancelStream = null;
           }
           streamSession.reset();
+          if (isRateLimited && mounted && gen == _generation) {
+            setState(() {
+              _agentLoopStatus = 'Rate limited. Retrying in 3 seconds…';
+            });
+          }
           await Future<void>.delayed(retryDelay);
           if (!mounted || gen != _generation) return null;
+          if (isRateLimited) {
+            setState(() => _agentLoopStatus = 'Retrying after rate limit…');
+          }
           continue;
         }
         _logAgent(

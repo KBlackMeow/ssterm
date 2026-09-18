@@ -57,14 +57,26 @@ class AgentStreamClientSession {
 }
 
 class AgentStreamRetryPolicy {
+  static const rateLimitDelay = Duration(seconds: 3);
+  static const maxRateLimitRetries = 5;
+
   static const _delays = [
     Duration(milliseconds: 500),
     Duration(milliseconds: 1500),
   ];
 
-  static Duration? delayAfterAttempt(int attempt) {
+  static Duration? delayAfterAttempt(
+    int attempt, {
+    bool isRateLimited = false,
+  }) {
+    if (isRateLimited) {
+      return attempt >= 1 && attempt <= maxRateLimitRetries
+          ? rateLimitDelay
+          : null;
+    }
     final index = attempt - 1;
-    return index >= 0 && index < _delays.length ? _delays[index] : null;
+    if (index < 0 || index >= _delays.length) return null;
+    return _delays[index];
   }
 
   static bool canRetry({
@@ -74,13 +86,14 @@ class AgentStreamRetryPolicy {
     required bool hasToolCalls,
     required bool isActive,
     required bool isTransient,
+    bool isRateLimited = false,
   }) {
-    return delayAfterAttempt(attempt) != null &&
+    return delayAfterAttempt(attempt, isRateLimited: isRateLimited) != null &&
         !hasText &&
         !hasReasoning &&
         !hasToolCalls &&
         isActive &&
-        isTransient;
+        (isTransient || isRateLimited);
   }
 }
 

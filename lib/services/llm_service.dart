@@ -30,6 +30,21 @@ class LlmResponse {
   });
 }
 
+/// HTTP failure returned by a model provider.
+///
+/// Keeping the status code structured lets callers distinguish retryable
+/// throttling from permanent authentication, validation, and server errors
+/// without parsing provider-specific message text.
+class LlmHttpException implements Exception {
+  const LlmHttpException(this.statusCode, this.message);
+
+  final int statusCode;
+  final String message;
+
+  @override
+  String toString() => 'HTTP $statusCode: $message';
+}
+
 /// Per-request constraints for internal deliberation and focused first turns.
 /// Null values retain the normal Agent prompt and full tool catalogue.
 enum AgentReasoningLevel { disabled, low, medium, high }

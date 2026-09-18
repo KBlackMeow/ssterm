@@ -101,6 +101,37 @@ void main() {
       );
     });
 
+    test('rate limits retry five times after exactly three seconds', () {
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(1, isRateLimited: true),
+        const Duration(seconds: 3),
+      );
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(2, isRateLimited: true),
+        const Duration(seconds: 3),
+      );
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(5, isRateLimited: true),
+        const Duration(seconds: 3),
+      );
+      expect(
+        AgentStreamRetryPolicy.delayAfterAttempt(6, isRateLimited: true),
+        isNull,
+      );
+      expect(
+        AgentStreamRetryPolicy.canRetry(
+          attempt: 1,
+          hasText: false,
+          hasReasoning: false,
+          hasToolCalls: false,
+          isActive: true,
+          isTransient: false,
+          isRateLimited: true,
+        ),
+        isTrue,
+      );
+    });
+
     test('rejects retry after content, tool calls, or stale generation', () {
       bool retry({
         bool text = false,

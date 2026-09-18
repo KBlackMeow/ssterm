@@ -487,7 +487,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
 
   if (response.statusCode != 200) {
     final errorBody = await response.transform(utf8.decoder).join();
-    throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
+    throw LlmHttpException(response.statusCode, _extractError(errorBody));
   }
 
   final accumulator = OpenAiStreamAccumulator();
@@ -571,7 +571,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
 
   if (response.statusCode != 200) {
     final errorBody = await response.transform(utf8.decoder).join();
-    throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
+    throw LlmHttpException(response.statusCode, _extractError(errorBody));
   }
 
   final toolNames = <String, String>{};
@@ -715,7 +715,7 @@ Stream<LlmStreamEvent> _streamGemini(
 
   if (response.statusCode != 200) {
     final errorBody = await response.transform(utf8.decoder).join();
-    throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
+    throw LlmHttpException(response.statusCode, _extractError(errorBody));
   }
 
   await for (final line
@@ -902,7 +902,7 @@ Stream<LlmStreamEvent> _streamOllama(
 
   if (response.statusCode != 200) {
     final errorBody = await response.transform(utf8.decoder).join();
-    throw Exception('HTTP ${response.statusCode}: ${_extractError(errorBody)}');
+    throw LlmHttpException(response.statusCode, _extractError(errorBody));
   }
 
   // NDJSON: one JSON object per line, no `data:` prefix, no `[DONE]`
