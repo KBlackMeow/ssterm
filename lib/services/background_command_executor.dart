@@ -273,12 +273,12 @@ class BackgroundCommandExecutor {
       final stdoutDone = process.stdout.listen((chunk) {
         stdout.add(chunk);
         lastOutputAt = DateTime.now();
-        liveOutput.add(chunk);
+        liveOutput.addStdout(chunk);
       }).asFuture<void>();
       final stderrDone = process.stderr.listen((chunk) {
         stderr.add(chunk);
         lastOutputAt = DateTime.now();
-        liveOutput.add(chunk);
+        liveOutput.addStderr(chunk);
       }).asFuture<void>();
       final completed = Future.wait<void>([
         process.exitCode.then<void>((_) {}),
@@ -430,12 +430,12 @@ class BackgroundCommandExecutor {
     final stdoutDone = session.stdout.listen((chunk) {
       stdout.add(chunk);
       lastOutputAt = DateTime.now();
-      liveOutput.add(chunk);
+      liveOutput.addStdout(chunk);
     }).asFuture<void>();
     final stderrDone = session.stderr.listen((chunk) {
       stderr.add(chunk);
       lastOutputAt = DateTime.now();
-      liveOutput.add(chunk);
+      liveOutput.addStderr(chunk);
     }).asFuture<void>();
     final completed = Future.wait<void>([session.done, stdoutDone, stderrDone]);
     final poll = Timer.periodic(const Duration(milliseconds: 50), (timer) {
@@ -989,27 +989,71 @@ List<String> _gitBashCommandArguments(
 }
 
 class _LiveOutputTail {
-  _LiveOutputTail(this.onUpdate);
+  _LiveOutputTail(this.onUpdate) {
+    _stdoutDecoder = _newDecoder();
+    _stderrDecoder = _newDecoder();
+  }
 
   final CommandExecutionUpdateListener? onUpdate;
   final List<String> _lines = [];
   String _partial = '';
-  List<String> get lastThreeLines => List.unmodifiable(_lines);
+  late final ByteConversionSink _stdoutDecoder;
+  late final ByteConversionSink _stderrDecoder;
+  final _decodedText = _TakeableStringSink();
 
-  void add(List<int> chunk) {
+  List<String> get lastThreeLines => List.unmodifiable(_visibleLines());
+
+  ByteConversionSink _newDecoder() => const Utf8Decoder(
+    allowMalformed: true,
+  ).startChunkedConversion(StringConversionSink.fromStringSink(_decodedText));
+
+  void addStdout(List<int> chunk) => _add(chunk, _stdoutDecoder);
+
+  void addStderr(List<int> chunk) => _add(chunk, _stderrDecoder);
+
+  void _add(List<int> chunk, ByteConversionSink decoder) {
     if (onUpdate == null || chunk.isEmpty) return;
-    final text = utf8.decode(chunk, allowMalformed: true);
+    decoder.add(chunk);
+    final text = _decodedText.take();
+    // An incomplete UTF-8 scalar is intentionally retained by the decoder
+    // until its continuation bytes arrive in a later process-stream chunk.
+    if (text.isEmpty) return;
     final parts = ('$_partial$text').split('\n');
     _partial = parts.removeLast();
     _lines.addAll(parts.map((line) => line.replaceFirst(RegExp(r'\r$'), '')));
-    if (_partial.isNotEmpty) {
-      if (_lines.isEmpty || _lines.last != _partial) _lines.add(_partial);
-    }
     while (_lines.length > 3) {
       _lines.removeAt(0);
     }
-    onUpdate!(CommandExecutionUpdate(List.unmodifiable(_lines)));
+    onUpdate!(CommandExecutionUpdate(List.unmodifiable(_visibleLines())));
   }
+
+  List<String> _visibleLines() {
+    final visible = <String>[..._lines, if (_partial.isNotEmpty) _partial];
+    return visible.length <= 3 ? visible : visible.sublist(visible.length - 3);
+  }
+}
+
+class _TakeableStringSink implements StringSink {
+  final _buffer = StringBuffer();
+
+  String take() {
+    final value = _buffer.toString();
+    _buffer.clear();
+    return value;
+  }
+
+  @override
+  void write(Object? object) => _buffer.write(object);
+
+  @override
+  void writeAll(Iterable<Object?> objects, [String separator = '']) =>
+      _buffer.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _buffer.writeCharCode(charCode);
+
+  @override
+  void writeln([Object? object = '']) => _buffer.writeln(object);
 }
 
 class _BoundedOutput {

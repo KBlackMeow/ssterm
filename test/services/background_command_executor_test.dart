@@ -70,6 +70,10 @@ class _FakeProcess implements Process {
 
   bool killed = false;
 
+  void addStdout(List<int> bytes) => _stdout.add(bytes);
+
+  void addStderr(List<int> bytes) => _stderr.add(bytes);
+
   @override
   Stream<List<int>> get stdout => _stdout.stream;
 
@@ -625,6 +629,47 @@ void main() {
           ? 'Covered by tool/windows_background_smoke.dart with the packaged DLL.'
           : false,
     );
+
+    test('live output preserves UTF-8 split into single-byte chunks', () async {
+      final process = _FakeProcess();
+      final updates = <CommandExecutionUpdate>[];
+      final executor = BackgroundCommandExecutor(
+        processStarter:
+            (
+              executable,
+              arguments, {
+              workingDirectory,
+              runInShell = false,
+              includeParentEnvironment = true,
+              environment,
+            }) async {
+              scheduleMicrotask(() {
+                for (final byte in utf8.encode('各体检机构体检项目详情\n')) {
+                  process.addStdout([byte]);
+                }
+                process.complete();
+              });
+              return process;
+            },
+      );
+
+      final result = await executor.executeLocal(
+        BackgroundCommandTarget.local(
+          shell: zsh,
+          cwd: Directory.current.path,
+          platform: BackgroundCommandPlatform.macos,
+        ),
+        'printf ok',
+        onUpdate: updates.add,
+      );
+
+      expect(result.output, contains('各体检机构体检项目详情'));
+      expect(updates.last.lastThreeLines, const ['各体检机构体检项目详情']);
+      expect(
+        updates.expand((update) => update.lastThreeLines),
+        isNot(contains('�')),
+      );
+    });
 
     test(
       'cancels and awaits an in-flight POSIX command process tree',
