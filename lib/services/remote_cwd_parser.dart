@@ -2,7 +2,10 @@ import 'dart:convert';
 
 /// Parses OSC 7 (`file://host/path`) sequences emitted by the remote shell.
 class RemoteCwdParser {
-  String _carry = '';
+  final List<int> _processPrefix = <int>[];
+  final List<int> _processOsc = <int>[];
+  var _processInOsc7 = false;
+  var _processSawEscape = false;
   final List<int> _metadataOsc = <int>[];
   var _metadataPrefixLength = 0;
   var _metadataInOsc7 = false;
@@ -61,50 +64,69 @@ class RemoteCwdParser {
 
   /// Strips OSC 7 from [chunk] and returns the cleaned bytes plus any new cwd.
   ({List<int> cleaned, String? cwd}) process(List<int> chunk) {
-    final input = _carry + utf8.decode(chunk, allowMalformed: true);
-    _carry = '';
-
+    final out = <int>[];
     String? cwd;
-    final out = StringBuffer();
-    var i = 0;
-
-    while (i < input.length) {
-      final start = input.indexOf('\x1b]7;', i);
-      if (start == -1) {
-        final tail = input.substring(i);
-        _carry = _partialOscPrefix(tail);
-        out.write(tail.substring(0, tail.length - _carry.length));
-        break;
+    for (final byte in chunk) {
+      if (_processInOsc7) {
+        _processOsc.add(byte);
+        final terminated = byte == 0x07 || (_processSawEscape && byte == 0x5c);
+        _processSawEscape = byte == 0x1b;
+        if (terminated) {
+          final osc = utf8.decode(_processOsc, allowMalformed: true);
+          cwd = _pathFromOsc(osc) ?? cwd;
+          _resetProcessOsc();
+        } else if (_processOsc.length > _maxMetadataOscBytes) {
+          // This was not credible cwd metadata. Preserve it byte-for-byte
+          // instead of silently swallowing arbitrary terminal output.
+          out.addAll(_processOsc);
+          _resetProcessOsc();
+        }
+        continue;
       }
 
-      out.write(input.substring(i, start));
-      final endBell = input.indexOf('\x07', start);
-      final endSt = input.indexOf('\x1b\\', start);
-
-      int end;
-      if (endBell != -1 && (endSt == -1 || endBell < endSt)) {
-        end = endBell + 1;
-      } else if (endSt != -1) {
-        end = endSt + 2;
-      } else {
-        _carry = input.substring(start);
-        break;
-      }
-
-      cwd = _pathFromOsc(input.substring(start, end)) ?? cwd;
-      i = end;
+      _processOrdinaryByte(byte, out);
     }
-
-    return (cleaned: utf8.encode(out.toString()), cwd: cwd);
+    return (cleaned: out, cwd: cwd);
   }
 
-  static String _partialOscPrefix(String tail) {
-    const markers = ['\x1b', '\x1b]', '\x1b]7', '\x1b]7;'];
-    for (var n = markers.length; n > 0; n--) {
-      final m = markers[n - 1];
-      if (tail.endsWith(m)) return m;
+  void _processOrdinaryByte(int byte, List<int> out) {
+    if (_processPrefix.isEmpty) {
+      if (byte == _osc7Prefix.first) {
+        _processPrefix.add(byte);
+      } else {
+        out.add(byte);
+      }
+      return;
     }
-    return '';
+
+    final expected = _osc7Prefix[_processPrefix.length];
+    if (byte == expected) {
+      _processPrefix.add(byte);
+      if (_processPrefix.length == _osc7Prefix.length) {
+        _processInOsc7 = true;
+        _processOsc
+          ..clear()
+          ..addAll(_processPrefix);
+        _processPrefix.clear();
+        _processSawEscape = false;
+      }
+      return;
+    }
+
+    out.addAll(_processPrefix);
+    _processPrefix.clear();
+    // A mismatching ESC may itself begin the next OSC 7 prefix.
+    if (byte == _osc7Prefix.first) {
+      _processPrefix.add(byte);
+    } else {
+      out.add(byte);
+    }
+  }
+
+  void _resetProcessOsc() {
+    _processOsc.clear();
+    _processInOsc7 = false;
+    _processSawEscape = false;
   }
 
   static String? _pathFromOsc(String osc) {

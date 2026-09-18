@@ -12,11 +12,15 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
 use std::sync::Mutex;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
+    #[cfg(unix)]
+    master_fd: Option<libc::c_int>,
     reader: Mutex<Box<dyn Read + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
@@ -52,10 +56,14 @@ impl PtySession {
         let child = pair.slave.spawn_command(command).map_err(to_io)?;
         let pid = child.process_id();
         drop(pair.slave);
+        #[cfg(unix)]
+        let master_fd = pair.master.as_raw_fd();
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
         let writer = pair.master.take_writer().map_err(to_io)?;
         Ok(Self {
             master: pair.master,
+            #[cfg(unix)]
+            master_fd,
             reader: Mutex::new(reader),
             writer: Mutex::new(writer),
             child: Mutex::new(child),
@@ -65,10 +73,53 @@ impl PtySession {
 
     /// Blocking read for the bridge-owned reader thread.
     pub fn read(&self, output: &mut [u8]) -> io::Result<usize> {
-        self.reader
-            .lock()
-            .expect("PTY reader mutex poisoned")
-            .read(output)
+        let mut reader = self.reader.lock().expect("PTY reader mutex poisoned");
+        let mut total = reader.read(output)?;
+
+        // macOS PTYs frequently wake readers with only a handful of bytes
+        // during line floods. Forwarding each tiny read across the C/Dart
+        // boundary creates millions of port messages. After the first byte is
+        // available, spend at most 1 ms draining immediately-following data
+        // into the same buffer. Interactive output still arrives promptly,
+        // while sustained output is delivered in useful batches.
+        #[cfg(unix)]
+        if total != 0 {
+            if let Some(fd) = self.master_fd {
+                let deadline = Instant::now() + Duration::from_millis(1);
+                while total < output.len() {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break;
+                    }
+                    let remaining = deadline.duration_since(now);
+                    let timeout_ms = remaining.as_millis().max(1).min(i32::MAX as u128) as i32;
+                    let mut descriptor = libc::pollfd {
+                        fd,
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    let ready = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
+                    if ready == 0 {
+                        break;
+                    }
+                    if ready < 0 {
+                        let error = io::Error::last_os_error();
+                        if error.kind() == io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        break;
+                    }
+                    match reader.read(&mut output[total..]) {
+                        Ok(0) => break,
+                        Ok(read) => total += read,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+
+        Ok(total)
     }
 
     pub fn write_all(&self, input: &[u8]) -> io::Result<()> {
@@ -533,6 +584,36 @@ mod tests {
         }
         assert!(String::from_utf8_lossy(&output).contains("reply:hello"));
         assert_eq!(session.wait().expect("wait PTY"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn coalesces_high_volume_pty_output_into_bounded_batches() {
+        let session = PtySession::spawn(
+            "/usr/bin/seq",
+            &["1".to_owned(), "200000".to_owned()],
+            None,
+            std::iter::empty(),
+            120,
+            40,
+        )
+        .expect("spawn seq");
+        let mut chunk = vec![0_u8; 64 * 1024];
+        let mut bytes = 0_usize;
+        let mut reads = 0_usize;
+        loop {
+            let count = session.read(&mut chunk).expect("read seq output");
+            if count == 0 {
+                break;
+            }
+            bytes += count;
+            reads += 1;
+        }
+
+        assert!(bytes > 1_000_000);
+        assert!(reads < 10_000, "expected coalesced reads, got {reads}");
+        assert!(bytes / reads > 128, "average batch was too small");
+        assert_eq!(session.wait().expect("wait for seq"), 0);
     }
 
     #[cfg(unix)]

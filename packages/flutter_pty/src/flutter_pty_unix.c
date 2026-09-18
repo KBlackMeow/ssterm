@@ -19,6 +19,19 @@
 #include "include/dart_api_dl.h"
 #include "include/dart_native_api.h"
 
+// Large output floods must not pay for one native-thread/Dart-isolate ACK
+// round trip per kilobyte. read() still returns immediately with whatever is
+// available, so this capacity does not add latency to interactive output.
+// One in-flight chunk also remains well below OutputPipe's 512 KiB queue
+// high-water mark, preserving the existing backpressure bound.
+#define PTY_READ_BUFFER_SIZE (64 * 1024)
+
+// Keep several reads in flight so the native reader and Dart isolate run as
+// a pipeline instead of serializing every chunk behind one ACK round trip.
+// The window is deliberately bounded: even if each read fills the 64 KiB
+// buffer, at most 2 MiB can be queued beyond Dart's last acknowledgement.
+#define PTY_RUST_READ_WINDOW 32
+
 // The Rust core is intentionally loaded at runtime. This keeps the existing
 // plugin ABI untouched. Rust is the desktop default; setting
 // SSTERM_USE_RUST_PTY=0 gives operations an immediate legacy-C fallback. The
@@ -125,14 +138,14 @@ typedef struct PtyHandle
 
     bool ackRead;
 
-    // Rust reader threads are owned and joined, so use a real condition gate
-    // instead of the legacy cross-thread mutex-unlock handshake. This also
-    // lets teardown wake a reader that is waiting for Dart acknowledgement.
+    // Rust reader threads are owned and joined, so use a condition-backed
+    // credit window instead of the legacy cross-thread mutex-unlock handshake.
+    // This also lets teardown wake a reader waiting for Dart capacity.
     pthread_mutex_t rust_ack_mutex;
 
     pthread_cond_t rust_ack_condition;
 
-    bool rust_read_permit;
+    size_t rust_read_credits;
 
     bool rust_read_stopping;
 
@@ -174,7 +187,7 @@ static void *read_loop(void *arg)
 {
     ReadLoopOptions *options = (ReadLoopOptions *)arg;
 
-    char buffer[1024];
+    char buffer[PTY_READ_BUFFER_SIZE];
 
     while (1)
     {
@@ -184,7 +197,7 @@ static void *read_loop(void *arg)
             {
                 PtyHandle *handle = options->handle;
                 pthread_mutex_lock(&handle->rust_ack_mutex);
-                while (!handle->rust_read_permit && !handle->rust_read_stopping)
+                while (handle->rust_read_credits == 0 && !handle->rust_read_stopping)
                 {
                     pthread_cond_wait(&handle->rust_ack_condition,
                                       &handle->rust_ack_mutex);
@@ -194,7 +207,7 @@ static void *read_loop(void *arg)
                     pthread_mutex_unlock(&handle->rust_ack_mutex);
                     break;
                 }
-                handle->rust_read_permit = false;
+                handle->rust_read_credits--;
                 pthread_mutex_unlock(&handle->rust_ack_mutex);
             }
             else
@@ -388,7 +401,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
         pthread_mutex_init(&handle->mutex, NULL);
         pthread_mutex_init(&handle->rust_ack_mutex, NULL);
         pthread_cond_init(&handle->rust_ack_condition, NULL);
-        handle->rust_read_permit = true;
+        handle->rust_read_credits = PTY_RUST_READ_WINDOW;
         handle->rust_read_stopping = false;
         if (start_read_thread(-1, rust_pty, true, options->stdout_port,
                               &handle->mutex, options->ackRead, handle,
@@ -468,6 +481,24 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     return handle;
 }
 
+static void *destroy_rust_pty(void *arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
+
+    // Both bridge threads may be blocked in native calls.  Waiting for them is
+    // required before releasing rust_pty, but it must never happen on the
+    // Flutter platform thread: an unusually slow PTY EOF would otherwise
+    // freeze the whole application while a tab is closing.
+    pthread_join(handle->rust_read_thread, NULL);
+    pthread_join(handle->rust_wait_thread, NULL);
+    rust_pty_api.destroy(handle->rust_pty);
+    pthread_cond_destroy(&handle->rust_ack_condition);
+    pthread_mutex_destroy(&handle->rust_ack_mutex);
+    pthread_mutex_destroy(&handle->mutex);
+    free(handle);
+    return NULL;
+}
+
 FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
 {
     if (handle == NULL)
@@ -482,13 +513,16 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         pthread_cond_broadcast(&handle->rust_ack_condition);
         pthread_mutex_unlock(&handle->rust_ack_mutex);
         rust_pty_api.kill(handle->rust_pty);
-        pthread_join(handle->rust_read_thread, NULL);
-        pthread_join(handle->rust_wait_thread, NULL);
-        rust_pty_api.destroy(handle->rust_pty);
-        pthread_cond_destroy(&handle->rust_ack_condition);
-        pthread_mutex_destroy(&handle->rust_ack_mutex);
-        pthread_mutex_destroy(&handle->mutex);
-        free(handle);
+
+        pthread_t destroy_thread;
+        if (pthread_create(&destroy_thread, NULL, destroy_rust_pty, handle) == 0)
+        {
+            pthread_detach(destroy_thread);
+        }
+        // If a cleanup thread cannot be created, deliberately retain the
+        // handle.  The stop signal and SIGKILL above still end the session;
+        // leaking this one allocation is safer than either blocking the UI or
+        // freeing memory still used by the reader/waiter threads.
         return;
     }
 
@@ -530,8 +564,11 @@ FFI_PLUGIN_EXPORT void pty_ack_read(PtyHandle *handle)
         if (handle->uses_rust)
         {
             pthread_mutex_lock(&handle->rust_ack_mutex);
-            handle->rust_read_permit = true;
-            pthread_cond_signal(&handle->rust_ack_condition);
+            if (handle->rust_read_credits < PTY_RUST_READ_WINDOW)
+            {
+                handle->rust_read_credits++;
+                pthread_cond_signal(&handle->rust_ack_condition);
+            }
             pthread_mutex_unlock(&handle->rust_ack_mutex);
         }
         else

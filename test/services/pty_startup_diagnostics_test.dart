@@ -54,4 +54,79 @@ void main() {
     expect(nativeSource, contains('pthread_cond_wait'));
     expect(nativeSource, isNot(contains('handle->ackRead = false')));
   });
+
+  test('Unix Rust PTY teardown never joins bridge threads on the caller', () {
+    final nativeSource = File(
+      'packages/flutter_pty/src/flutter_pty_unix.c',
+    ).readAsStringSync();
+
+    final destroyWorkerStart = nativeSource.indexOf(
+      'static void *destroy_rust_pty(void *arg)',
+    );
+    final publicDestroyStart = nativeSource.indexOf(
+      'FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)',
+    );
+    final publicDestroyEnd = nativeSource.indexOf(
+      'FFI_PLUGIN_EXPORT void pty_write',
+      publicDestroyStart,
+    );
+
+    expect(destroyWorkerStart, greaterThanOrEqualTo(0));
+    expect(publicDestroyStart, greaterThan(destroyWorkerStart));
+    expect(publicDestroyEnd, greaterThan(publicDestroyStart));
+
+    final worker = nativeSource.substring(
+      destroyWorkerStart,
+      publicDestroyStart,
+    );
+    final caller = nativeSource.substring(publicDestroyStart, publicDestroyEnd);
+    expect(worker, contains('pthread_join(handle->rust_read_thread'));
+    expect(worker, contains('pthread_join(handle->rust_wait_thread'));
+    expect(caller, contains('pthread_create(&destroy_thread'));
+    expect(caller, contains('pthread_detach(destroy_thread)'));
+    expect(caller, isNot(contains('pthread_join(')));
+  });
+
+  test('Unix PTY uses a bounded asynchronous ACK window', () {
+    final nativeSource = File(
+      'packages/flutter_pty/src/flutter_pty_unix.c',
+    ).readAsStringSync();
+
+    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (64 * 1024)'));
+    expect(nativeSource, contains('#define PTY_RUST_READ_WINDOW 32'));
+    expect(nativeSource, contains('char buffer[PTY_READ_BUFFER_SIZE]'));
+    expect(nativeSource, contains('if (options->waitForReadAck)'));
+    expect(
+      nativeSource,
+      contains('handle->rust_read_credits = PTY_RUST_READ_WINDOW'),
+    );
+    expect(nativeSource, contains('handle->rust_read_credits--'));
+    expect(
+      nativeSource,
+      contains('handle->rust_read_credits < PTY_RUST_READ_WINDOW'),
+    );
+    expect(nativeSource, contains('handle->rust_read_credits++'));
+    expect(nativeSource, isNot(contains('char buffer[1024]')));
+    expect(nativeSource, isNot(contains('rust_read_permit')));
+  });
+
+  test('macOS build isolates and load-checks Rust dylibs', () {
+    final project = File(
+      'macos/Runner.xcodeproj/project.pbxproj',
+    ).readAsStringSync();
+
+    expect(project, contains('RUST_BUILD_ROOT='));
+    expect(project, contains('CARGO_TARGET_DIR='));
+    expect(project, contains('TARGET_TEMP_DIR'));
+    expect(project, contains('/usr/bin/shlock'));
+    expect(project, contains('trap cleanup_rust_lock EXIT INT TERM'));
+    expect(project, contains('env -u MACOSX_DEPLOYMENT_TARGET'));
+    expect(project, contains("ctypes.CDLL(sys.argv[1])"));
+    expect(
+      project,
+      isNot(
+        contains('native/pty_core/target/release/libssterm_pty_core.dylib'),
+      ),
+    );
+  });
 }

@@ -395,11 +395,11 @@ class Pty {
     _destroyNative();
   }
 
-  // pty_destroy hands the actual teardown off to a native thread and returns
-  // near-instantly (see its doc comment in flutter_pty_win.c) — deliberately
-  // NOT routed through a Dart isolate, since spawning or messaging one at the
-  // exact moment the app's window is closing can race the engine's own
-  // isolate-group shutdown and hang the whole process.
+  // Desktop pty_destroy implementations hand potentially blocking teardown
+  // to a native thread and return near-instantly. This is deliberately NOT
+  // routed through a Dart isolate: spawning or messaging one at the exact
+  // moment the app's window is closing can race the engine's own isolate-group
+  // shutdown and hang the whole process.
   void _destroyNative() {
     if (_nativeDestroyed) return;
     _nativeDestroyed = true;
