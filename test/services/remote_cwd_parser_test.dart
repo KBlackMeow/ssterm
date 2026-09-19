@@ -58,26 +58,16 @@ void main() {
     });
   });
 
-  group('RemoteCwdParser.observe', () {
-    test('ignores large ordinary and ANSI output', () {
+  group('RemoteCwdParser.process floods and terminators', () {
+    test('passes large ordinary and ANSI output through untouched', () {
       final parser = RemoteCwdParser();
       final ordinary = List.filled(100000, '1234567890\n').join();
       final bytes = utf8.encode('$ordinary\x1b[31mred\x1b[0m');
 
-      expect(parser.observe(bytes), isNull);
-    });
+      final parsed = parser.process(bytes);
 
-    test('recognizes OSC 7 split across chunks', () {
-      final parser = RemoteCwdParser();
-
-      expect(
-        parser.observe(utf8.encode('prompt\x1b]7;file://host/tmp/pro')),
-        isNull,
-      );
-      expect(
-        parser.observe(utf8.encode('ject%20one\x1b\\rest')),
-        '/tmp/project one',
-      );
+      expect(parsed.cwd, isNull);
+      expect(parsed.cleaned, bytes);
     });
 
     test('recognizes BEL termination and keeps the last cwd', () {
@@ -86,7 +76,10 @@ void main() {
         '\x1b]7;file://host/first\x07text\x1b]7;file://host/second\x07',
       );
 
-      expect(parser.observe(bytes), '/second');
+      final parsed = parser.process(bytes);
+
+      expect(parsed.cwd, '/second');
+      expect(utf8.decode(parsed.cleaned), 'text');
     });
 
     test('normalizes native OSC 7 values with the same safety checks', () {

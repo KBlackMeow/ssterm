@@ -63,15 +63,15 @@ void main() {
   test('local OSC 7 cwd updates the Agent execution context', () {
     final source = File('lib/app/main_local.dart').readAsStringSync();
 
-    final localCwdUpdate = source.substring(
-      source.indexOf('if (cwd != null && tab.localPath != null'),
-      source.indexOf(
-        'return parsed.cleaned;',
-        source.indexOf('if (cwd != null && tab.localPath != null'),
-      ),
-    );
+    final start = source.indexOf('void noteLocalCwd(String path)');
+    final wiring = 'onWorkingDirectoryChange: noteLocalCwd,';
+    final end = source.indexOf(wiring, start) + wiring.length;
+    final localCwdUpdate = source.substring(start, end);
     expect(localCwdUpdate, contains('tab.localPath!.value = cwd;'));
     expect(localCwdUpdate, contains('tab.agentCwd = cwd;'));
+    // The local cwd rides the native core's OSC 7 callback instead of a
+    // second Dart-side scan of every output batch.
+    expect(localCwdUpdate, contains(wiring));
   });
 
   test('README describes Agent context as scoped rather than complete', () {

@@ -341,12 +341,37 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       rows: terminal.viewHeight,
     );
     late Pty pty;
+    // The native core parses OSC 7 while it feeds on the raw bytes, so local
+    // cwd tracking rides its callback instead of a second full Dart-side scan
+    // of every output batch. SSH panes use the same plumbing through
+    // _noteRemoteCwd().
+    void noteLocalCwd(String path) {
+      var cwd = path;
+      // PowerShell's OSC 7 prelude reports cwd in POSIX shape
+      // (`/C:/Users/foo`, see powershell_shell_wrapper.dart) since the
+      // OSC7 URI convention has no native drive-letter form; native
+      // Windows child processes (Pty.start on _restartSession) need
+      // `C:\Users\foo` instead.
+      if (Platform.isWindows) {
+        final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
+        if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
+      }
+      if (tab.localPath != null && !tab.manuallyDisconnected) {
+        tab.localPath!.value = cwd;
+        // Keep the Agent's independent execution context aligned with the
+        // visible local shell. SSH tabs do this through noteRemoteCwd(); the
+        // local OSC-7 path must update both consumers as well.
+        tab.agentCwd = cwd;
+      }
+    }
+
     final rustTerminalBridge = rustTerminalCore == null
         ? null
         : RustTerminalBridge(
             core: rustTerminalCore,
             terminal: terminal,
             onResponseBytes: (bytes) => pty.write(bytes),
+            onWorkingDirectoryChange: noteLocalCwd,
           );
     var columns = terminal.viewWidth;
     var rows = terminal.viewHeight;
@@ -405,41 +430,26 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         }
       },
       terminalByteSink: rustTerminalBridge,
-      transform: (bytes) {
-        if (rustTerminalBridge != null) {
-          var cwd = cwdParser.observe(bytes);
-          if (cwd != null && Platform.isWindows) {
-            final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
-            if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
-          }
-          if (cwd != null &&
-              tab.localPath != null &&
-              !tab.manuallyDisconnected) {
-            tab.localPath!.value = cwd;
-            tab.agentCwd = cwd;
-          }
-          return bytes;
-        }
-        final parsed = cwdParser.process(bytes);
-        var cwd = parsed.cwd;
-        // PowerShell's OSC 7 prelude reports cwd in POSIX shape
-        // (`/C:/Users/foo`, see powershell_shell_wrapper.dart) since the
-        // OSC7 URI convention has no native drive-letter form; native
-        // Windows child processes (Pty.start on _restartSession) need
-        // `C:\Users\foo` instead.
-        if (cwd != null && Platform.isWindows) {
-          final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
-          if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
-        }
-        if (cwd != null && tab.localPath != null && !tab.manuallyDisconnected) {
-          tab.localPath!.value = cwd;
-          // Keep the Agent's independent execution context aligned with the
-          // visible local shell. SSH tabs do this through noteRemoteCwd(); the
-          // local OSC-7 path must update both consumers as well.
-          tab.agentCwd = cwd;
-        }
-        return parsed.cleaned;
-      },
+      // Only the Dart-parsing fallback needs the OSC 7 observer transform;
+      // Rust-backed terminals report cwd through onWorkingDirectoryChange
+      // above, parsed once by the native core.
+      transform: rustTerminalBridge == null
+          ? (bytes) {
+              final parsed = cwdParser.process(bytes);
+              var cwd = parsed.cwd;
+              if (cwd != null && Platform.isWindows) {
+                final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
+                if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
+              }
+              if (cwd != null &&
+                  tab.localPath != null &&
+                  !tab.manuallyDisconnected) {
+                tab.localPath!.value = cwd;
+                tab.agentCwd = cwd;
+              }
+              return parsed.cleaned;
+            }
+          : null,
     )..bind(pty.output);
 
     if (isSplit) {
