@@ -339,12 +339,14 @@ void main() {
       fakeAsync((fake) {
         final terminal = Terminal();
         final accepted = <int>[];
+        final acceptedChunks = <int>[];
         final pipe = OutputPipe(
           terminal,
           maxBytesPerWrite: 8,
           queueHighWatermarkBytes: 10,
           queueLowWatermarkBytes: 4,
           onBytesAccepted: accepted.add,
+          onChunksAccepted: acceptedChunks.add,
         );
         final ctrl = StreamController<List<int>>();
         pipe.bind(ctrl.stream);
@@ -357,7 +359,38 @@ void main() {
         fake.elapse(const Duration(milliseconds: 20));
 
         expect(accepted, equals([12]));
+        expect(acceptedChunks, equals([1]));
 
+        pipe.dispose();
+        ctrl.close();
+      });
+    });
+
+    test('returns every native chunk credit after a batched pause', () {
+      fakeAsync((fake) {
+        final terminal = Terminal();
+        final acceptedChunks = <int>[];
+        final pipe = OutputPipe(
+          terminal,
+          holdOutputUntilRelease: true,
+          maxBytesPerWrite: 32,
+          queueHighWatermarkBytes: 10,
+          queueLowWatermarkBytes: 4,
+          onChunksAccepted: acceptedChunks.add,
+        );
+        final ctrl = StreamController<List<int>>();
+        pipe.bind(ctrl.stream);
+
+        ctrl
+          ..add(List.filled(6, 65))
+          ..add(List.filled(6, 66));
+        fake.flushMicrotasks();
+        expect(acceptedChunks, isEmpty);
+
+        pipe.releaseHeldOutput();
+        fake.elapse(const Duration(milliseconds: 20));
+
+        expect(acceptedChunks, equals([2]));
         pipe.dispose();
         ctrl.close();
       });

@@ -60,6 +60,7 @@ class OutputPipe {
     this.logSink,
     this.onBytesConsumed,
     this.onBytesAccepted,
+    this.onChunksAccepted,
     this.terminalByteSink,
     this.holdOutputUntilRelease = false,
     this.pauseSourceOnBackpressure = true,
@@ -92,6 +93,10 @@ class OutputPipe {
   final LogSink? logSink;
   final void Function(int bytes)? onBytesConsumed;
   final void Function(int bytes)? onBytesAccepted;
+
+  /// Invoked with the number of source chunks accepted into the bounded queue.
+  /// Native PTY read credits are chunk-based, unlike [onBytesAccepted].
+  final void Function(int chunks)? onChunksAccepted;
   final TerminalByteSink? terminalByteSink;
   bool holdOutputUntilRelease;
 
@@ -123,6 +128,7 @@ class OutputPipe {
   final _textSink = _TakeableStringSink();
   late final ByteConversionSink _utf8Sink;
   var _pendingAcceptedBytes = 0;
+  var _pendingAcceptedChunks = 0;
 
   static const _kDefaultMaxBytesPerWrite = 65536; // 64 KB
   // Native parsing mutates a complete batch before publishing one screen
@@ -143,6 +149,7 @@ class OutputPipe {
     _chunks.addLast(chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
     _queuedBytes += chunk.length;
     _pendingAcceptedBytes += chunk.length;
+    _pendingAcceptedChunks++;
     _applyBackpressure();
     _acceptPendingBytesIfReady();
     _scheduleFlush();
@@ -278,8 +285,11 @@ class OutputPipe {
       return;
     }
     final bytes = _pendingAcceptedBytes;
+    final chunks = _pendingAcceptedChunks;
     _pendingAcceptedBytes = 0;
+    _pendingAcceptedChunks = 0;
     onBytesAccepted?.call(bytes);
+    onChunksAccepted?.call(chunks);
   }
 
   void dispose() {

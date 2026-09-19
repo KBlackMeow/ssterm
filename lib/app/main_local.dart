@@ -390,7 +390,14 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     final pipe = OutputPipe(
       terminal,
       holdOutputUntilRelease: true,
-      onBytesAccepted: (_) => pty.ackRead(),
+      // PTY credits are consumed once per native output chunk. OutputPipe may
+      // batch many chunks after a high-water pause, so returning just one
+      // credit here would throttle a flood to one chunk per 16 ms flush.
+      onChunksAccepted: (count) {
+        for (var index = 0; index < count; index++) {
+          pty.ackRead();
+        }
+      },
       terminalByteSink: rustTerminalBridge,
       transform: (bytes) {
         if (rustTerminalBridge != null) {
