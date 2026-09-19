@@ -150,6 +150,75 @@ void main() {
     );
   });
 
+  group('LocalShellDiscovery.isLaunchableExecutable', () {
+    test('accepts a WindowsApps alias that PATH resolves to itself', () {
+      // App execution aliases are reparse points File.existsSync cannot see;
+      // WSL distro launchers are aliases, so PATH identity must accept them
+      // (case-insensitively — `where` output casing varies).
+      const alias =
+          r'C:\Users\alice\AppData\Local\Microsoft\WindowsApps\ubuntu.exe';
+      expect(
+        LocalShellDiscovery.isLaunchableExecutable(
+          executable: alias,
+          fileExists: (_) => false,
+          resolveOnPath: (name) =>
+              name == 'ubuntu.exe' ? alias.toUpperCase() : null,
+        ),
+        isTrue,
+      );
+    });
+
+    test('rejects an absent fixed path whose name resolves elsewhere', () {
+      // Launched from Git Bash, `where bash.exe` finds the x64 install; the
+      // x86 candidate must not ride that resolution.
+      expect(
+        LocalShellDiscovery.isLaunchableExecutable(
+          executable: r'C:\Program Files (x86)\Git\bin\bash.exe',
+          fileExists: (_) => false,
+          resolveOnPath: (name) => name == 'bash.exe'
+              ? r'C:\Program Files\Git\usr\bin\bash.exe'
+              : null,
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects an absent absolute path with no PATH resolution', () {
+      expect(
+        LocalShellDiscovery.isLaunchableExecutable(
+          executable: r'C:\Program Files (x86)\PowerShell\7\pwsh.exe',
+          fileExists: (_) => false,
+          resolveOnPath: (_) => null,
+        ),
+        isFalse,
+      );
+    });
+
+    test('keeps the bare-name PATH fallback for real files', () {
+      expect(
+        LocalShellDiscovery.isLaunchableExecutable(
+          executable: 'wsl.exe',
+          fileExists: (_) => false,
+          resolveOnPath: (name) => name == 'wsl.exe'
+              ? r'C:\Windows\System32\wsl.exe'
+              : null,
+        ),
+        isTrue,
+      );
+    });
+
+    test('existing files pass without probing PATH', () {
+      expect(
+        LocalShellDiscovery.isLaunchableExecutable(
+          executable: r'C:\Windows\System32\wsl.exe',
+          fileExists: (_) => true,
+          resolveOnPath: (_) => throw StateError('must not probe PATH'),
+        ),
+        isTrue,
+      );
+    });
+  });
+
   group(
     'LocalShellDiscovery.discoverSync on Windows',
     () {

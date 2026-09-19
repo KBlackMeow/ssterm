@@ -430,7 +430,7 @@ class LocalShellDiscovery {
       for (final distro in distros) {
         final launcher = _findDistroLauncher(distro);
         if (launcher != null) {
-          _addShell(
+          final added = _addShell(
             shells,
             seen,
             id: 'wsl:$distro',
@@ -439,7 +439,9 @@ class LocalShellDiscovery {
             arguments: buildWslLauncherArguments(),
             isWsl: true,
           );
-          continue;
+          // An unlaunchable launcher must not erase the distro from the
+          // menu; fall back to invoking it through wsl.exe.
+          if (added) continue;
         }
 
         _addShell(
@@ -591,22 +593,46 @@ class LocalShellDiscovery {
     return isOsc7CompatiblePosixShellPath(path);
   }
 
-  static bool _isLaunchableExecutable(String executable) {
-    if (_fileExists(executable)) return true;
-    // Only bare names may fall back to PATH resolution. A fixed absolute
-    // path must exist as stated: when the app is launched from Git Bash,
-    // `where bash.exe` resolves the x64 install, which would otherwise let
-    // the `C:\Program Files (x86)` candidates pass as installed shells and
-    // surface a second, unlaunchable "Git Bash" entry.
-    if (_isAbsoluteWindowsPath(executable)) return false;
-    final base = executable.split(RegExp(r'[/\\]')).last;
-    return _resolveExecutable(base) != null;
+  static bool _isLaunchableExecutable(String executable) =>
+      isLaunchableExecutable(
+        executable: executable,
+        fileExists: _fileExists,
+        resolveOnPath: _resolveExecutable,
+      );
+
+  /// Decides whether [executable] can be launched, with injectable probes so
+  /// the Windows PATH-identity rule stays unit-testable off-Windows.
+  ///
+  /// A bare name is launchable whenever PATH resolves it. An absolute path
+  /// must exist as stated, with one exception: when PATH resolves the path's
+  /// own base name back to exactly this path. That exception is the
+  /// WindowsApps app execution alias — WSL distro launchers such as
+  /// `ubuntu.exe` are absolute reparse points `File.existsSync` cannot see,
+  /// yet `where` resolves them to this exact path. A mere name collision
+  /// must not qualify: launched from Git Bash, `where bash.exe` finds the
+  /// x64 install, which would otherwise let the `C:\Program Files (x86)`
+  /// candidates pass as installed shells and surface a second,
+  /// unlaunchable "Git Bash" entry.
+  static bool isLaunchableExecutable({
+    required String executable,
+    required bool Function(String path) fileExists,
+    required String? Function(String name) resolveOnPath,
+  }) {
+    if (fileExists(executable)) return true;
+    final resolved = resolveOnPath(executable.split(RegExp(r'[/\\]')).last);
+    if (resolved == null) return false;
+    if (!_isAbsoluteWindowsPath(executable)) return true;
+    return _normalizePath(resolved) == _normalizePath(executable);
   }
 
   static bool _isAbsoluteWindowsPath(String path) =>
       RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path) || path.startsWith(r'\\');
 
-  static void _addShell(
+  /// Returns whether the shell was added. A candidate that already exists
+  /// under [seen] or fails launch validation is dropped silently; WSL uses
+  /// the result to fall back to the `wsl.exe -d <distro>` entry instead of
+  /// losing the distro from the menu entirely.
+  static bool _addShell(
     List<LocalShellOption> shells,
     Set<String> seen, {
     required String id,
@@ -619,8 +645,8 @@ class LocalShellDiscovery {
     bool isWsl = false,
   }) {
     final key = isWsl ? id : _normalizePath(executable);
-    if (seen.contains(key)) return;
-    if (!_isLaunchableExecutable(executable)) return;
+    if (seen.contains(key)) return false;
+    if (!_isLaunchableExecutable(executable)) return false;
     seen.add(key);
 
     shells.add(
@@ -635,6 +661,7 @@ class LocalShellDiscovery {
         isWsl: isWsl,
       ),
     );
+    return true;
   }
 
   static String displayNameFor(String path, {String? wslDistro}) {
