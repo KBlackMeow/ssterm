@@ -189,6 +189,22 @@ void main() {
         }
       });
 
+      test('absent fixed-path candidates are not validated via PATH', () {
+        // Launched from Git Bash, `where bash.exe` resolves the x64 install;
+        // that must not let the (x86) fixed-path candidate masquerade as an
+        // installed shell when its own path does not exist.
+        if (!File(r'C:\Program Files (x86)\Git\bin\bash.exe').existsSync()) {
+          expect(byId('git-bash-x86'), isNull);
+        }
+        for (final shell in shells.where((s) => !s.isWsl)) {
+          expect(
+            File(shell.executable).existsSync(),
+            isTrue,
+            reason: '${shell.id} -> ${shell.executable}',
+          );
+        }
+      });
+
       test(
         'native shell processes are discovered without startup arguments',
         () {

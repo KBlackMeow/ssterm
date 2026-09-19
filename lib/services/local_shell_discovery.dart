@@ -593,9 +593,18 @@ class LocalShellDiscovery {
 
   static bool _isLaunchableExecutable(String executable) {
     if (_fileExists(executable)) return true;
+    // Only bare names may fall back to PATH resolution. A fixed absolute
+    // path must exist as stated: when the app is launched from Git Bash,
+    // `where bash.exe` resolves the x64 install, which would otherwise let
+    // the `C:\Program Files (x86)` candidates pass as installed shells and
+    // surface a second, unlaunchable "Git Bash" entry.
+    if (_isAbsoluteWindowsPath(executable)) return false;
     final base = executable.split(RegExp(r'[/\\]')).last;
     return _resolveExecutable(base) != null;
   }
+
+  static bool _isAbsoluteWindowsPath(String path) =>
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path) || path.startsWith(r'\\');
 
   static void _addShell(
     List<LocalShellOption> shells,
