@@ -72,6 +72,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         maxScrollbackRows: rows >= 5000 ? 0 : 5000 - rows,
         backgroundRgb:
             _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
+        foregroundRgb:
+            _config.terminal.resolveTheme().foreground.toARGB32() & 0xffffff,
       );
     } catch (_) {
       // An unavailable optional dylib must not prevent a user from opening a

@@ -306,6 +306,30 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
+  test(
+    'OSC 10 queries answer with the configured foreground color',
+    () {
+      final rust = RustTerminalCore.open(
+        columns: 10,
+        rows: 2,
+        backgroundRgb: 0x123456,
+        foregroundRgb: 0xaabbcc,
+        libraryPath: path,
+      );
+      addTearDown(rust.close);
+
+      rust.feed(Uint8List.fromList(utf8.encode('\x1b]10;?\x1b\\')));
+      rust.feed(Uint8List.fromList(utf8.encode('\x1b[c')));
+
+      expect(
+        utf8.decode(rust.takeResponse()),
+        '\x1b]10;rgb:aaaa/bbbb/cccc\x1b\\'
+        '\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c',
+      );
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
   test('local PTY output defaults to the Rust-authoritative render path', () {
     final localSource = File('lib/app/main_local.dart').readAsStringSync();
     final tabSource = File('lib/models/tab_model.dart').readAsStringSync();

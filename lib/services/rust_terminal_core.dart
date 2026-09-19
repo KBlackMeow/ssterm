@@ -292,6 +292,10 @@ class RustTerminalCore {
         .lookupFunction<_SetBackgroundRgbNative, _SetBackgroundRgbDart>(
           'ssterm_terminal_set_background_rgb',
         );
+    _setForegroundRgb = _library
+        .lookupFunction<_SetForegroundRgbNative, _SetForegroundRgbDart>(
+          'ssterm_terminal_set_foreground_rgb',
+        );
     _title = _library.lookupFunction<_StringValueNative, _StringValueDart>(
       'ssterm_terminal_title',
     );
@@ -313,6 +317,7 @@ class RustTerminalCore {
   late final _HistorySnapshotDart _historySnapshot;
   late final _TakeResponseDart _takeResponse;
   late final _SetBackgroundRgbDart _setBackgroundRgb;
+  late final _SetForegroundRgbDart _setForegroundRgb;
   late final _StringValueDart _title;
   late final _StringValueDart _workingDirectory;
   Pointer<Uint8> _inputBuffer = nullptr.cast<Uint8>();
@@ -328,6 +333,7 @@ class RustTerminalCore {
     required int rows,
     int maxScrollbackRows = 1000,
     int backgroundRgb = 0x1e1e1e,
+    int foregroundRgb = 0xcccccc,
     String? libraryPath,
   }) {
     final library = DynamicLibrary.open(libraryPath ?? _bundledLibraryPath());
@@ -341,6 +347,7 @@ class RustTerminalCore {
     }
     final core = RustTerminalCore._(library, handle);
     core._setBackgroundRgb(handle, backgroundRgb);
+    core._setForegroundRgb(handle, foregroundRgb);
     return core;
   }
 
@@ -642,5 +649,8 @@ typedef _TakeResponseDart =
 typedef _SetBackgroundRgbNative =
     Void Function(Pointer<Void> handle, Uint32 rgb);
 typedef _SetBackgroundRgbDart = void Function(Pointer<Void> handle, int rgb);
+typedef _SetForegroundRgbNative =
+    Void Function(Pointer<Void> handle, Uint32 rgb);
+typedef _SetForegroundRgbDart = void Function(Pointer<Void> handle, int rgb);
 typedef _StringValueNative = Pointer<Utf8> Function(Pointer<Void> handle);
 typedef _StringValueDart = Pointer<Utf8> Function(Pointer<Void> handle);

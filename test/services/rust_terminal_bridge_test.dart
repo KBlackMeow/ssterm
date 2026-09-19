@@ -70,7 +70,12 @@ void main() {
         const CellOffset(1, 1),
       );
       expect(mouseReports, ['\x1b[<0;2;2M', '\x1b[<0;2;2m']);
-      expect(utf8.decode(replies), '\x1b[?1;2c');
+      // VT500-class DA1 answer, identical to Windows Terminal/xterm.js and
+      // the pty_core ConPTY sidecar handshake reply.
+      expect(
+        utf8.decode(replies),
+        '\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c',
+      );
       expect(workingDirectories, ['/tmp']);
     },
     skip: available ? false : 'run cargo build --release before this ABI test',

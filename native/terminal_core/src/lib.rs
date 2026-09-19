@@ -160,6 +160,7 @@ pub struct TerminalCore {
     use_g1_charset: bool,
     response: Vec<u8>,
     background_rgb: u32,
+    foreground_rgb: u32,
     title: CString,
     working_directory: CString,
     bells: u32,
@@ -235,6 +236,7 @@ impl TerminalCore {
             use_g1_charset: false,
             response: Vec::with_capacity(128),
             background_rgb: 0x1e1e1e,
+            foreground_rgb: 0xcccccc,
             title: CString::default(),
             working_directory: CString::default(),
             bells: 0,
@@ -785,7 +787,13 @@ impl TerminalCore {
             }
             b'p' if self.csi_intermediate == b'!' && self.csi_prefix == 0 => self.soft_reset(),
             b'c' if self.csi_prefix == 0 && self.parameter(0, 0) == 0 => {
-                self.response.extend_from_slice(b"\x1b[?1;2c");
+                // VT500-class answer identical to what Windows Terminal and
+                // xterm.js send, and to the reply the pty_core ConPTY sidecar
+                // handshakes with. Tools probe these feature bits to decide
+                // between full and degraded behavior; a VT100-level answer
+                // needlessly pushes children onto legacy paths.
+                self.response
+                    .extend_from_slice(b"\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c");
             }
             b'n' if self.csi_prefix == 0 => match self.parameter(0, 0) {
                 5 => self.response.extend_from_slice(b"\x1b[0n"),
@@ -1157,6 +1165,23 @@ impl TerminalCore {
                 if let Ok(value) = CString::new(value) {
                     self.working_directory = value;
                     self.cwd_changed = true;
+                }
+            }
+            "10" if value == "?" => {
+                let red = (self.foreground_rgb >> 16) & 0xff;
+                let green = (self.foreground_rgb >> 8) & 0xff;
+                let blue = self.foreground_rgb & 0xff;
+                self.response.extend_from_slice(
+                    format!(
+                        "\x1b]10;rgb:{0:02x}{0:02x}/{1:02x}{1:02x}/{2:02x}{2:02x}",
+                        red, green, blue
+                    )
+                    .as_bytes(),
+                );
+                if terminator == 0x07 {
+                    self.response.push(0x07);
+                } else {
+                    self.response.extend_from_slice(b"\x1b\\");
                 }
             }
             "11" if value == "?" => {
@@ -1990,6 +2015,13 @@ pub unsafe extern "C" fn ssterm_terminal_set_background_rgb(terminal: *mut Termi
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn ssterm_terminal_set_foreground_rgb(terminal: *mut TerminalCore, rgb: u32) {
+    if let Some(terminal) = terminal.as_mut() {
+        terminal.foreground_rgb = rgb & 0x00ff_ffff;
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ssterm_terminal_take_response(
     terminal: *mut TerminalCore,
     destination: *mut u8,
@@ -2450,7 +2482,7 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
         assert_ne!(snapshot.mode_flags & MODE_BRACKETED_PASTE, 0);
         assert_eq!(snapshot.mouse_mode, 4);
         assert_eq!(snapshot.mouse_report_mode, 2);
-        assert_eq!(terminal.response, b"\x1b[?0u\x1b[?1;2c");
+        assert_eq!(terminal.response, b"\x1b[?0u\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c");
     }
 
     #[test]
@@ -2555,6 +2587,27 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
         assert_eq!(
             terminal.response,
             b"\x1bP1+r696e646e=1b5b257031256453\x1b\\\x1b]11;rgb:1212/3434/5656\x07"
+        );
+    }
+
+    #[test]
+    fn answers_foreground_color_query_with_st_terminator() {
+        let mut terminal = TerminalCore::new(10, 2);
+        terminal.foreground_rgb = 0xaabbcc;
+        terminal.feed(b"\x1b]10;?\x1b\\");
+        assert_eq!(terminal.response, b"\x1b]10;rgb:aaaa/bbbb/cccc\x1b\\");
+    }
+
+    #[test]
+    fn answers_da1_as_a_vt500_class_device() {
+        let mut terminal = TerminalCore::new(10, 2);
+        terminal.feed(b"\x1b[c");
+        // Same answer Windows Terminal and xterm.js send, and the one the
+        // pty_core ConPTY sidecar handshake relies on; keep them identical so
+        // children see one terminal identity on every platform.
+        assert_eq!(
+            terminal.response,
+            b"\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c"
         );
     }
 
