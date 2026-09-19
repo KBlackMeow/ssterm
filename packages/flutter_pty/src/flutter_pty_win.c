@@ -9,6 +9,112 @@
 #include "include/dart_api_dl.h"
 #include "include/dart_native_api.h"
 
+// Keep Windows on the same high-throughput Rust PTY bridge as Unix.  The
+// Rust core uses ConPTY on Windows, so this covers cmd/PowerShell as well as
+// wsl.exe and distribution launchers without a separate WSL output path.
+#define PTY_READ_BUFFER_SIZE (64 * 1024)
+#define PTY_RUST_READ_WINDOW 32
+
+typedef struct SstermPtyCore SstermPtyCore;
+typedef SstermPtyCore *(*RustPtyCreateFn)(const char *, const char *const *, size_t,
+                                          const char *, const char *const *, size_t,
+                                          uint16_t, uint16_t);
+typedef void (*RustPtyDestroyFn)(SstermPtyCore *);
+typedef int64_t (*RustPtyReadFn)(SstermPtyCore *, uint8_t *, size_t);
+typedef int32_t (*RustPtyWriteFn)(SstermPtyCore *, const uint8_t *, size_t);
+typedef int32_t (*RustPtyResizeFn)(SstermPtyCore *, uint16_t, uint16_t);
+typedef int32_t (*RustPtyKillFn)(SstermPtyCore *);
+typedef int32_t (*RustPtyWaitFn)(SstermPtyCore *, int32_t *);
+typedef uint32_t (*RustPtyPidFn)(SstermPtyCore *);
+typedef const char *(*RustPtyErrorFn)(void);
+
+typedef struct RustPtyApi {
+    HMODULE library;
+    RustPtyCreateFn create;
+    RustPtyDestroyFn destroy;
+    RustPtyReadFn read;
+    RustPtyWriteFn write;
+    RustPtyResizeFn resize;
+    RustPtyKillFn kill;
+    RustPtyWaitFn wait;
+    RustPtyPidFn pid;
+    RustPtyErrorFn error;
+} RustPtyApi;
+
+static RustPtyApi rust_pty_api;
+static INIT_ONCE rust_pty_api_once = INIT_ONCE_STATIC_INIT;
+
+static HMODULE load_rust_pty_library(void)
+{
+    WCHAR path[MAX_PATH];
+    DWORD length = GetModuleFileNameW(NULL, path, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH)
+    {
+        return NULL;
+    }
+    WCHAR *name = wcsrchr(path, L'\\');
+    if (name == NULL)
+    {
+        return NULL;
+    }
+    const WCHAR library_name[] = L"ssterm_pty_core.dll";
+    if ((size_t)(name - path) + 1 + _countof(library_name) > _countof(path))
+    {
+        return NULL;
+    }
+    wcscpy_s(name + 1, _countof(path) - (size_t)(name + 1 - path), library_name);
+    return LoadLibraryW(path);
+}
+
+static BOOL CALLBACK load_rust_pty_api(PINIT_ONCE once, PVOID parameter, PVOID *context)
+{
+    (void)once;
+    (void)parameter;
+    (void)context;
+    rust_pty_api.library = load_rust_pty_library();
+    if (rust_pty_api.library == NULL)
+    {
+        return TRUE;
+    }
+    rust_pty_api.create = (RustPtyCreateFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_create_with_environment");
+    rust_pty_api.destroy = (RustPtyDestroyFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_destroy");
+    rust_pty_api.read = (RustPtyReadFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_read");
+    rust_pty_api.write = (RustPtyWriteFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_write");
+    rust_pty_api.resize = (RustPtyResizeFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_resize");
+    rust_pty_api.kill = (RustPtyKillFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_kill");
+    rust_pty_api.wait = (RustPtyWaitFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_wait");
+    rust_pty_api.pid = (RustPtyPidFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_pid");
+    rust_pty_api.error = (RustPtyErrorFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_error");
+    if (rust_pty_api.create == NULL || rust_pty_api.destroy == NULL ||
+        rust_pty_api.read == NULL || rust_pty_api.write == NULL || rust_pty_api.resize == NULL ||
+        rust_pty_api.kill == NULL || rust_pty_api.wait == NULL ||
+        rust_pty_api.pid == NULL || rust_pty_api.error == NULL)
+    {
+        FreeLibrary(rust_pty_api.library);
+        ZeroMemory(&rust_pty_api, sizeof(rust_pty_api));
+    }
+    return TRUE;
+}
+
+static BOOL use_rust_pty(void)
+{
+    const char *enabled = getenv("SSTERM_USE_RUST_PTY");
+    if (enabled != NULL && strcmp(enabled, "0") == 0)
+    {
+        return FALSE;
+    }
+    InitOnceExecuteOnce(&rust_pty_api_once, load_rust_pty_api, NULL, NULL);
+    return rust_pty_api.create != NULL;
+}
+
+static size_t string_vector_length(char **values)
+{
+    size_t length = 0;
+    if (values == NULL) return 0;
+    while (values[length] != NULL) length++;
+    return length;
+}
+
 static int arg_needs_quotes(const char *arg)
 {
     if (arg == NULL || arg[0] == '\0')
@@ -289,11 +395,23 @@ typedef struct ReadLoopOptions
 {
     HANDLE fd;
 
+    SstermPtyCore *rust_pty;
+
+    BOOL uses_rust;
+
     Dart_Port port;
 
     HANDLE hMutex;
 
     BOOL ackRead;
+
+    CRITICAL_SECTION *rust_ack_lock;
+
+    CONDITION_VARIABLE *rust_ack_condition;
+
+    size_t *rust_read_credits;
+
+    BOOL *rust_read_stopping;
 
 } ReadLoopOptions;
 
@@ -301,7 +419,7 @@ static DWORD WINAPI read_loop(LPVOID arg)
 {
     ReadLoopOptions *options = (ReadLoopOptions *)arg;
 
-    char buffer[1024];
+    char buffer[PTY_READ_BUFFER_SIZE];
 
     while (1)
     {
@@ -309,10 +427,43 @@ static DWORD WINAPI read_loop(LPVOID arg)
 
         if (options->ackRead)
         {
-            WaitForSingleObject(options->hMutex, INFINITE);
+            if (options->uses_rust)
+            {
+                EnterCriticalSection(options->rust_ack_lock);
+                while (*options->rust_read_credits == 0 && !*options->rust_read_stopping)
+                {
+                    SleepConditionVariableCS(options->rust_ack_condition,
+                                             options->rust_ack_lock, INFINITE);
+                }
+                if (*options->rust_read_stopping)
+                {
+                    LeaveCriticalSection(options->rust_ack_lock);
+                    break;
+                }
+                (*options->rust_read_credits)--;
+                LeaveCriticalSection(options->rust_ack_lock);
+            }
+            else
+            {
+                WaitForSingleObject(options->hMutex, INFINITE);
+            }
         }
 
-        BOOL ok = ReadFile(options->fd, buffer, sizeof(buffer), &readlen, NULL);
+        BOOL ok;
+        if (options->uses_rust)
+        {
+            int64_t count = rust_pty_api.read(options->rust_pty, (uint8_t *)buffer, sizeof(buffer));
+            if (count <= 0)
+            {
+                break;
+            }
+            readlen = (DWORD)count;
+            ok = TRUE;
+        }
+        else
+        {
+            ok = ReadFile(options->fd, buffer, sizeof(buffer), &readlen, NULL);
+        }
 
         if (!ok)
         {
@@ -333,17 +484,32 @@ static DWORD WINAPI read_loop(LPVOID arg)
         Dart_PostCObject_DL(options->port, &result);
     }
 
+    free(options);
     return 0;
 }
 
-static void start_read_thread(HANDLE fd, Dart_Port port, HANDLE mutex, BOOL ackRead)
+static BOOL start_read_thread(HANDLE fd, SstermPtyCore *rust_pty, BOOL uses_rust,
+                              Dart_Port port, HANDLE mutex, BOOL ackRead,
+                              CRITICAL_SECTION *rust_ack_lock,
+                              CONDITION_VARIABLE *rust_ack_condition,
+                              size_t *rust_read_credits,
+                              BOOL *rust_read_stopping,
+                              HANDLE *thread_out)
 {
     ReadLoopOptions *options = malloc(sizeof(ReadLoopOptions));
 
+    if (options == NULL) return FALSE;
+
     options->fd = fd;
+    options->rust_pty = rust_pty;
+    options->uses_rust = uses_rust;
     options->port = port;
     options->hMutex = mutex;
     options->ackRead = ackRead;
+    options->rust_ack_lock = rust_ack_lock;
+    options->rust_ack_condition = rust_ack_condition;
+    options->rust_read_credits = rust_read_credits;
+    options->rust_read_stopping = rust_read_stopping;
 
     DWORD thread_id;
 
@@ -352,16 +518,19 @@ static void start_read_thread(HANDLE fd, Dart_Port port, HANDLE mutex, BOOL ackR
     if (thread == NULL)
     {
         free(options);
+        return FALSE;
     }
-    else
-    {
-        CloseHandle(thread);
-    }
+    *thread_out = thread;
+    return TRUE;
 }
 
 typedef struct WaitExitOptions
 {
     HANDLE pid;
+
+    SstermPtyCore *rust_pty;
+
+    BOOL uses_rust;
 
     Dart_Port port;
 
@@ -372,26 +541,38 @@ static DWORD WINAPI wait_exit_thread(LPVOID arg)
 {
     WaitExitOptions *options = (WaitExitOptions *)arg;
 
-    DWORD exit_code = 0;
-
-    WaitForSingleObject(options->pid, INFINITE);
-
-    GetExitCodeProcess(options->pid, &exit_code);
-
-    CloseHandle(options->pid);
-    CloseHandle(options->hMutex);
-
-    Dart_PostInteger_DL(options->port, exit_code);
+    if (options->uses_rust)
+    {
+        int32_t exit_code = -1;
+        if (rust_pty_api.wait(options->rust_pty, &exit_code) == 0)
+        {
+            Dart_PostInteger_DL(options->port, exit_code);
+        }
+    }
+    else
+    {
+        DWORD exit_code = 0;
+        WaitForSingleObject(options->pid, INFINITE);
+        GetExitCodeProcess(options->pid, &exit_code);
+        CloseHandle(options->pid);
+        CloseHandle(options->hMutex);
+        Dart_PostInteger_DL(options->port, exit_code);
+    }
 
     free(options);
     return 0;
 }
 
-static void start_wait_exit_thread(HANDLE pid, Dart_Port port, HANDLE mutex)
+static BOOL start_wait_exit_thread(HANDLE pid, SstermPtyCore *rust_pty, BOOL uses_rust,
+                                   Dart_Port port, HANDLE mutex, HANDLE *thread_out)
 {
     WaitExitOptions *options = malloc(sizeof(WaitExitOptions));
 
+    if (options == NULL) return FALSE;
+
     options->pid = pid;
+    options->rust_pty = rust_pty;
+    options->uses_rust = uses_rust;
     options->port = port;
     options->hMutex = mutex;
 
@@ -402,11 +583,10 @@ static void start_wait_exit_thread(HANDLE pid, Dart_Port port, HANDLE mutex)
     if (thread == NULL)
     {
         free(options);
+        return FALSE;
     }
-    else
-    {
-        CloseHandle(thread);
-    }
+    *thread_out = thread;
+    return TRUE;
 }
 
 typedef struct PtyHandle
@@ -423,10 +603,36 @@ typedef struct PtyHandle
 
     HANDLE hMutex;
 
+    SstermPtyCore *rust_pty;
+
+    BOOL uses_rust;
+
+    HANDLE rust_read_thread;
+
+    HANDLE rust_wait_thread;
+
+    CRITICAL_SECTION rust_ack_lock;
+
+    CONDITION_VARIABLE rust_ack_condition;
+
+    size_t rust_read_credits;
+
+    BOOL rust_read_stopping;
+
 } PtyHandle;
 
 static __declspec(thread) char error_buffer[1024];
 static __declspec(thread) BOOL has_error = FALSE;
+
+static void set_rust_error_message(const char *message)
+{
+    if (message == NULL || message[0] == '\0')
+    {
+        message = "Rust PTY operation failed";
+    }
+    snprintf(error_buffer, sizeof(error_buffer), "%s", message);
+    has_error = TRUE;
+}
 
 static void set_windows_error(const char *stage, DWORD code)
 {
@@ -522,6 +728,76 @@ static void set_hresult_error(const char *stage, HRESULT result)
 FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
 {
     has_error = FALSE;
+    if (use_rust_pty())
+    {
+        const size_t argument_count = string_vector_length(options->arguments);
+        const size_t environment_count = string_vector_length(options->environment);
+        const char *const *arguments = argument_count == 0
+                                           ? NULL
+                                           : (const char *const *)(options->arguments + 1);
+        const size_t rust_argument_count = argument_count == 0 ? 0 : argument_count - 1;
+        SstermPtyCore *rust_pty = rust_pty_api.create(
+            options->executable, arguments, rust_argument_count,
+            options->working_directory,
+            (const char *const *)options->environment, environment_count,
+            (uint16_t)options->cols, (uint16_t)options->rows);
+        if (rust_pty == NULL)
+        {
+            set_rust_error_message(rust_pty_api.error());
+            return NULL;
+        }
+        // The Rust core opens the pseudoconsole without
+        // PSEUDOCONSOLE_INHERIT_CURSOR, so ConPTY never issues its startup
+        // cursor-position query and no reply is required here.
+
+        PtyHandle *handle = calloc(1, sizeof(PtyHandle));
+        if (handle == NULL)
+        {
+            rust_pty_api.destroy(rust_pty);
+            set_rust_error_message("Unable to allocate Rust PTY handle");
+            return NULL;
+        }
+        handle->rust_pty = rust_pty;
+        handle->uses_rust = TRUE;
+        handle->dwProcessId = rust_pty_api.pid(rust_pty);
+        handle->ackRead = options->ackRead;
+        InitializeCriticalSection(&handle->rust_ack_lock);
+        InitializeConditionVariable(&handle->rust_ack_condition);
+        handle->rust_read_credits = PTY_RUST_READ_WINDOW;
+
+        if (!start_read_thread(NULL, rust_pty, TRUE, options->stdout_port,
+                               NULL, options->ackRead, &handle->rust_ack_lock,
+                               &handle->rust_ack_condition, &handle->rust_read_credits,
+                               &handle->rust_read_stopping, &handle->rust_read_thread) ||
+            !start_wait_exit_thread(NULL, rust_pty, TRUE, options->exit_port,
+                                    NULL, &handle->rust_wait_thread))
+        {
+            EnterCriticalSection(&handle->rust_ack_lock);
+            handle->rust_read_stopping = TRUE;
+            WakeAllConditionVariable(&handle->rust_ack_condition);
+            LeaveCriticalSection(&handle->rust_ack_lock);
+            rust_pty_api.kill(rust_pty);
+            if (handle->rust_read_thread != NULL)
+            {
+                WaitForSingleObject(handle->rust_read_thread, INFINITE);
+                CloseHandle(handle->rust_read_thread);
+            }
+            if (handle->rust_wait_thread != NULL)
+            {
+                // The child has been killed above, so this wait is bounded by
+                // process termination and cannot leave the Rust handle live.
+                WaitForSingleObject(handle->rust_wait_thread, INFINITE);
+                CloseHandle(handle->rust_wait_thread);
+            }
+            rust_pty_api.destroy(rust_pty);
+            DeleteCriticalSection(&handle->rust_ack_lock);
+            free(handle);
+            set_rust_error_message("Unable to start Rust PTY bridge threads");
+            return NULL;
+        }
+        return handle;
+    }
+
     HANDLE inputReadSide = NULL;
     HANDLE inputWriteSide = NULL;
     HANDLE outputReadSide = NULL;
@@ -663,8 +939,23 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
         goto cleanup;
     }
 
-    start_read_thread(outputReadSide, options->stdout_port, mutex, options->ackRead);
-    start_wait_exit_thread(processInfo.hProcess, options->exit_port, mutex);
+    // The legacy path never joins these threads; closing the handles right
+    // away simply drops our reference while the threads keep running.
+    HANDLE ignored_read_thread = NULL;
+    start_read_thread(outputReadSide, NULL, FALSE, options->stdout_port, mutex,
+                      options->ackRead, NULL, NULL, NULL, NULL,
+                      &ignored_read_thread);
+    if (ignored_read_thread != NULL)
+    {
+        CloseHandle(ignored_read_thread);
+    }
+    HANDLE ignored_wait_thread = NULL;
+    start_wait_exit_thread(processInfo.hProcess, NULL, FALSE, options->exit_port,
+                           mutex, &ignored_wait_thread);
+    if (ignored_wait_thread != NULL)
+    {
+        CloseHandle(ignored_wait_thread);
+    }
 
     pty->inputWriteSide = inputWriteSide;
     pty->outputReadSide = outputReadSide;
@@ -672,6 +963,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     pty->dwProcessId = processInfo.dwProcessId;
     pty->ackRead = options->ackRead;
     pty->hMutex = mutex;
+    pty->uses_rust = FALSE;
 
     return pty;
 
@@ -702,6 +994,24 @@ cleanup:
 static DWORD WINAPI close_pseudo_console_thread(LPVOID arg)
 {
     ClosePseudoConsole((HPCON)arg);
+    return 0;
+}
+
+static DWORD WINAPI destroy_rust_pty_thread(LPVOID arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
+
+    // Rust owns the ConPTY handles.  Its reader and waiter must be finished
+    // before the opaque owner is destroyed, but this worker is never the
+    // Flutter platform thread.  For WSL, a slow relay can therefore only
+    // retain this worker, never freeze tab close or application shutdown.
+    WaitForSingleObject(handle->rust_read_thread, INFINITE);
+    WaitForSingleObject(handle->rust_wait_thread, INFINITE);
+    CloseHandle(handle->rust_read_thread);
+    CloseHandle(handle->rust_wait_thread);
+    rust_pty_api.destroy(handle->rust_pty);
+    DeleteCriticalSection(&handle->rust_ack_lock);
+    free(handle);
     return 0;
 }
 
@@ -754,6 +1064,25 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         return;
     }
 
+    if (handle->uses_rust)
+    {
+        EnterCriticalSection(&handle->rust_ack_lock);
+        handle->rust_read_stopping = TRUE;
+        WakeAllConditionVariable(&handle->rust_ack_condition);
+        LeaveCriticalSection(&handle->rust_ack_lock);
+        rust_pty_api.kill(handle->rust_pty);
+
+        HANDLE thread = CreateThread(NULL, 0, destroy_rust_pty_thread, handle, 0, NULL);
+        if (thread != NULL)
+        {
+            CloseHandle(thread);
+        }
+        // Do not free a live handle if worker creation fails. The process has
+        // already been terminated; retaining this small owner is safer than
+        // racing its blocking bridge threads.
+        return;
+    }
+
     // Hand the whole teardown off to a plain Win32 thread and return
     // immediately. This call USED to run on a throwaway Dart isolate
     // (`Isolate.run`/`Isolate.spawn`) so the slow steps below wouldn't block
@@ -778,6 +1107,14 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)
 {
+    if (handle != NULL && handle->uses_rust)
+    {
+        if (length >= 0)
+        {
+            rust_pty_api.write(handle->rust_pty, (const uint8_t *)buffer, (size_t)length);
+        }
+        return;
+    }
     DWORD bytesWritten;
 
     WriteFile(handle->inputWriteSide, buffer, length, &bytesWritten, NULL);
@@ -789,14 +1126,35 @@ FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)
 
 FFI_PLUGIN_EXPORT void pty_ack_read(PtyHandle *handle)
 {
+    if (handle == NULL)
+    {
+        return;
+    }
     if (handle->ackRead)
     {
-        ReleaseSemaphore(handle->hMutex, 1, NULL);
+        if (handle->uses_rust)
+        {
+            EnterCriticalSection(&handle->rust_ack_lock);
+            if (handle->rust_read_credits < PTY_RUST_READ_WINDOW)
+            {
+                handle->rust_read_credits++;
+                WakeConditionVariable(&handle->rust_ack_condition);
+            }
+            LeaveCriticalSection(&handle->rust_ack_lock);
+        }
+        else
+        {
+            ReleaseSemaphore(handle->hMutex, 1, NULL);
+        }
     }
 }
 
 FFI_PLUGIN_EXPORT int pty_resize(PtyHandle *handle, int rows, int cols)
 {
+    if (handle != NULL && handle->uses_rust)
+    {
+        return rust_pty_api.resize(handle->rust_pty, (uint16_t)cols, (uint16_t)rows);
+    }
     COORD size;
 
     size.X = cols;

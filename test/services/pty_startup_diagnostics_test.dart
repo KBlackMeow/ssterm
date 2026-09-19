@@ -55,6 +55,47 @@ void main() {
     expect(nativeSource, isNot(contains('handle->ackRead = false')));
   });
 
+  test('Windows PTY defaults to the Rust ConPTY bridge with bounded reads', () {
+    final nativeSource = File(
+      'packages/flutter_pty/src/flutter_pty_win.c',
+    ).readAsStringSync();
+
+    expect(nativeSource, contains('ssterm_pty_core.dll'));
+    expect(nativeSource, contains('ssterm_pty_create_with_environment'));
+    expect(nativeSource, contains('SSTERM_USE_RUST_PTY'));
+    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (64 * 1024)'));
+    expect(nativeSource, contains('#define PTY_RUST_READ_WINDOW 32'));
+    expect(nativeSource, contains('char buffer[PTY_READ_BUFFER_SIZE]'));
+    expect(nativeSource, contains('handle->rust_read_credits = PTY_RUST_READ_WINDOW'));
+    expect(nativeSource, contains('WakeConditionVariable'));
+    // The Rust core opens ConPTY without PSEUDOCONSOLE_INHERIT_CURSOR, so the
+    // bridge must not inject a synthetic cursor-position reply at startup.
+    expect(nativeSource, isNot(contains('1;1R')));
+    expect(nativeSource, contains('wsl.exe'));
+  });
+
+  test('Windows Rust core answers the sidecar DA1 query and ships the host', () {
+    final rustSource = File('native/pty_core/src/windows.rs').readAsStringSync();
+
+    // A sidecar OpenConsole opens with CSI c (DA1) and stalls the session
+    // for ~3 s when nothing answers; the core must reply and consume the
+    // query so the Dart terminal never answers it a second time.
+    expect(rustSource, contains('answer_startup_query'));
+    expect(rustSource, contains(r'b"\x1b[c"'));
+    expect(rustSource, contains('copy_within(3..count, 0)'));
+
+    final cmakeSource = File('windows/CMakeLists.txt').readAsStringSync();
+    expect(cmakeSource, contains('conpty/x64/conpty.dll'));
+    expect(cmakeSource, contains('conpty/x64/OpenConsole.exe'));
+
+    expect(
+      File('windows/conpty/x64/conpty.dll').existsSync(),
+      isTrue,
+      reason: 'the vendored ConPTY sidecar must stay in the repository',
+    );
+    expect(File('windows/conpty/x64/OpenConsole.exe').existsSync(), isTrue);
+  });
+
   test('Unix Rust PTY teardown never joins bridge threads on the caller', () {
     final nativeSource = File(
       'packages/flutter_pty/src/flutter_pty_unix.c',

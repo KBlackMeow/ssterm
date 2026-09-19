@@ -70,7 +70,9 @@ add_custom_command(
   OUTPUT "${PTY_CORE_LIBRARY}"
   COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${PTY_CORE_MANIFEST}" --release
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
-  DEPENDS "${PTY_CORE_MANIFEST}" "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/src/lib.rs"
+  DEPENDS "${PTY_CORE_MANIFEST}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/src/lib.rs"
+          "${CMAKE_CURRENT_SOURCE_DIR}/../native/pty_core/src/windows.rs"
   VERBATIM
 )
 add_custom_target(ssterm_pty_core ALL DEPENDS "${PTY_CORE_LIBRARY}")
@@ -109,6 +111,14 @@ install(FILES "${TERMINAL_CORE_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 install(FILES "${PTY_CORE_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+# Windows Terminal-style ConPTY sidecar. ssterm_pty_core.dll prefers
+# conpty.dll over the inbox kernel32 pseudoconsole when both sit next to the
+# executable; conpty.dll then spawns OpenConsole.exe as the session host.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/conpty/x64/conpty.dll"
+              "${CMAKE_CURRENT_SOURCE_DIR}/conpty/x64/OpenConsole.exe"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)

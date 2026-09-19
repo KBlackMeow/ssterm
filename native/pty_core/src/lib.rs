@@ -5,18 +5,27 @@
 //! chunks to Dart ports, so the Dart-facing API can migrate without changing
 //! stream semantics.
 
+#[cfg(not(windows))]
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
-use std::io::{self, Read, Write};
+use std::io;
+#[cfg(not(windows))]
+use std::io::{Read, Write};
 use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
+#[cfg(not(windows))]
 use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::PtySession;
 
+#[cfg(not(windows))]
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     #[cfg(unix)]
@@ -27,6 +36,7 @@ pub struct PtySession {
     pid: Option<u32>,
 }
 
+#[cfg(not(windows))]
 impl PtySession {
     pub fn spawn(
         executable: &str,
@@ -74,7 +84,10 @@ impl PtySession {
     /// Blocking read for the bridge-owned reader thread.
     pub fn read(&self, output: &mut [u8]) -> io::Result<usize> {
         let mut reader = self.reader.lock().expect("PTY reader mutex poisoned");
+        #[cfg(unix)]
         let mut total = reader.read(output)?;
+        #[cfg(not(unix))]
+        let total = reader.read(output)?;
 
         // macOS PTYs frequently wake readers with only a handful of bytes
         // during line floods. Forwarding each tiny read across the C/Dart
@@ -190,6 +203,7 @@ impl PtySession {
     }
 }
 
+#[cfg(not(windows))]
 fn to_io(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
@@ -545,6 +559,8 @@ pub extern "C" fn ssterm_pty_error() -> *const c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use std::process::Command;
     use std::time::{Duration, Instant};
 
     #[cfg(unix)]
@@ -584,6 +600,127 @@ mod tests {
         }
         assert!(String::from_utf8_lossy(&output).contains("reply:hello"));
         assert_eq!(session.wait().expect("wait PTY"), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn spawns_and_reads_a_windows_conpty_command() {
+        let session = PtySession::spawn(
+            "cmd.exe",
+            &["/C".to_owned(), "echo rust-windows-conpty".to_owned()],
+            None,
+            std::iter::empty(),
+            120,
+            40,
+        )
+        .expect("spawn cmd through ConPTY");
+        // The pseudoconsole is created without PSEUDOCONSOLE_INHERIT_CURSOR,
+        // so no startup cursor query needs answering in these headless tests.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        let mut chunk = [0_u8; 64 * 1024];
+        while Instant::now() < deadline {
+            let count = session.read(&mut chunk).expect("read ConPTY output");
+            if count == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..count]);
+            if String::from_utf8_lossy(&output).contains("rust-windows-conpty") {
+                break;
+            }
+        }
+        assert!(String::from_utf8_lossy(&output).contains("rust-windows-conpty"));
+        assert_eq!(session.wait().expect("wait for cmd"), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wsl_uses_the_same_conpty_transport_when_available() {
+        if Command::new("wsl.exe").arg("--status").output().is_err() {
+            return;
+        }
+        let session = PtySession::spawn(
+            "wsl.exe",
+            &[
+                "--".to_owned(),
+                "sh".to_owned(),
+                "-lc".to_owned(),
+                "printf rust-wsl-conpty".to_owned(),
+            ],
+            None,
+            std::iter::empty(),
+            120,
+            40,
+        )
+        .expect("spawn WSL through ConPTY");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut output = Vec::new();
+        let mut chunk = [0_u8; 64 * 1024];
+        while Instant::now() < deadline {
+            let count = session.read(&mut chunk).expect("read WSL output");
+            if count == 0 {
+                break;
+            }
+            output.extend_from_slice(&chunk[..count]);
+            if String::from_utf8_lossy(&output).contains("rust-wsl-conpty") {
+                break;
+            }
+        }
+        assert!(String::from_utf8_lossy(&output).contains("rust-wsl-conpty"));
+        // A sidecar session's DA1 query must be consumed by the core, never
+        // forwarded: a terminal above this bridge would answer it again and
+        // leak a stray reply into the child's input.
+        assert!(!output.starts_with(b"\x1b[c"));
+        assert_eq!(session.wait().expect("wait for WSL"), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual transport throughput benchmark"]
+    fn benchmarks_wsl_conpty_line_flood() {
+        let session = PtySession::spawn(
+            "wsl.exe",
+            &[
+                "--".to_owned(),
+                "sh".to_owned(),
+                "-lc".to_owned(),
+                "seq 1 1000000; printf '\\n__SSTERM_BENCH_DONE__\\n'".to_owned(),
+            ],
+            None,
+            std::iter::empty(),
+            120,
+            40,
+        )
+        .expect("spawn WSL benchmark");
+        let started = Instant::now();
+        let mut bytes = 0usize;
+        let mut reads = 0usize;
+        let mut tail = Vec::new();
+        let mut chunk = [0_u8; 128 * 1024];
+        loop {
+            let count = session.read(&mut chunk).expect("read WSL output");
+            if count == 0 {
+                break;
+            }
+            bytes += count;
+            reads += 1;
+            tail.extend_from_slice(&chunk[..count]);
+            if tail
+                .windows(b"__SSTERM_BENCH_DONE__".len())
+                .any(|part| part == b"__SSTERM_BENCH_DONE__")
+            {
+                break;
+            }
+            if tail.len() > 64 {
+                tail.drain(..tail.len() - 64);
+            }
+        }
+        eprintln!(
+            "drained {bytes} bytes in {:?} using {reads} reads ({} bytes/read)",
+            started.elapsed(),
+            bytes / reads.max(1)
+        );
+        assert_eq!(session.wait().expect("wait for WSL"), 0);
     }
 
     #[cfg(unix)]
