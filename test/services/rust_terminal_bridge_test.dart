@@ -105,6 +105,28 @@ void main() {
   );
 
   test(
+    'bridge reconciles a core opened with dimensions captured before a resize',
+    () {
+      // Reproduces the rare first-launch blank local tab: the deferred PTY
+      // spawn captured its size from the onResize that started it, the pane
+      // then resized while the spawn awaited login-PATH resolution, and the
+      // native core was still opened with the stale captured size.
+      final terminal = Terminal()..resize(4, 2);
+      terminal.resize(7, 3);
+      final core = RustTerminalCore.open(columns: 4, rows: 2, libraryPath: path);
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      addTearDown(() {
+        bridge.close();
+        core.close();
+      });
+
+      expect(() => bridge.write(utf8.encode('ready')), returnsNormally);
+      expect(terminal.buffer.lines[0].toString(), contains('ready'));
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'bridge retains Codex history inserted through a partial scroll region',
     () {
       final terminal = Terminal()..resize(8, 5);

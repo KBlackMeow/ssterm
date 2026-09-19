@@ -27,8 +27,14 @@ class RustTerminalBridge implements TerminalByteSink {
              RustTerminalRenderBuffer.wordsPerCell,
        ),
        _historyBuffer = RustTerminalRenderBuffer(),
-       _columns = terminal.viewWidth,
-       _rows = terminal.viewHeight;
+       // Deliberately impossible dimensions. The core is opened in the same
+       // sync section as this constructor but only after async spawn gaps,
+       // so its size may not match the terminal's yet; claiming the
+       // terminal's size here would make every later reconcile skip itself
+       // and every packed import throw. Starting mismatched forces the
+       // first write()/resize() to align the core before importing rows.
+       _columns = 0,
+       _rows = 0;
 
   final RustTerminalCore core;
   final Terminal terminal;

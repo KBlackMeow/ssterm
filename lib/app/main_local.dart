@@ -13,6 +13,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   List<SshHost> _configHosts = [];
   List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
   final _localShellLoginEnvironmentResolver = LoginShellEnvironmentResolver();
+  // Panes whose deferred local PTY spawn is still between its first await and
+  // its tab wiring; see _wireDeferredLocalPty.
+  final _localPtySpawnInFlight = <({_Tab tab, int pane})>{};
   AppConfig _config = AppConfig();
   int _mobileTabIndex = 0; // 0=terminal 1=files 2=commands 3=settings
 
@@ -233,8 +236,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab: tab,
         terminal: terminal,
         shell: shell,
-        columns: terminal.viewWidth,
-        rows: terminal.viewHeight,
         workingDirectory: (cwd != null && cwd.isNotEmpty) ? cwd : home,
         pane: pane,
       );
@@ -321,20 +322,23 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     required _Tab tab,
     required Terminal terminal,
     required LocalShellOption shell,
-    required int columns,
-    required int rows,
     String? workingDirectory,
     required int pane,
     bool showExitMessage = true,
   }) async {
-    if (columns < 1 || rows < 1) return;
+    // Dimensions are read live from the terminal instead of being carried in
+    // from the onResize that started this spawn: first-launch font/config/
+    // window settling can resize the pane while the awaits below run, and a
+    // stale size would desynchronize the PTY and the native core from the
+    // painted screen.
+    if (terminal.viewWidth < 1 || terminal.viewHeight < 1) return;
 
     final isSplit = pane == 1;
     final home = userHomeDir();
     final env = await _environmentForLocalShell(shell);
     final rustTerminalCore = _openRustTerminalCore(
-      columns: columns,
-      rows: rows,
+      columns: terminal.viewWidth,
+      rows: terminal.viewHeight,
     );
     late Pty pty;
     final rustTerminalBridge = rustTerminalCore == null
@@ -344,6 +348,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
             terminal: terminal,
             onResponseBytes: (bytes) => pty.write(bytes),
           );
+    var columns = terminal.viewWidth;
+    var rows = terminal.viewHeight;
     try {
       pty = await Pty.start(
         shell.executable,
@@ -479,6 +485,18 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       },
     );
 
+    // The pane can resize again while Pty.start is in flight. Reconcile the
+    // live PTY (zsh redraws its prompt off the SIGWINCH) and the bridge with
+    // the terminal so the first output frame lands at the right size.
+    final liveColumns = terminal.viewWidth;
+    final liveRows = terminal.viewHeight;
+    if (liveColumns >= 1 &&
+        liveRows >= 1 &&
+        (liveColumns != columns || liveRows != rows)) {
+      pty.resize(liveRows, liveColumns);
+      rustTerminalBridge?.resize(liveColumns, liveRows);
+    }
+
     pty.exitCode.then((code) {
       if (!mounted) return;
       _handlePaneExited(
@@ -506,6 +524,12 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       final pane = _paneIndexOf(tab, terminal) ?? (isSplit ? 1 : 0);
       final activePty = pane == 1 ? tab.splitPty : tab.pty;
       if (activePty == null && !_paneSessionEnded(tab, pane)) {
+        // First-launch layout churn (async font load, config settle, window
+        // frame restore) can fire this callback again while the first spawn
+        // is still resolving its login environment or creating the PTY.
+        // Starting a second spawn would kill and replace the first shell;
+        // the in-flight one reconciles the final pane size once wired up.
+        if (!_localPtySpawnInFlight.add((tab: tab, pane: pane))) return;
         // Use unawaited since onResize is a synchronous void callback.
         // _spawnLocalPty handles its own errors via internal try/catch.
         unawaited(
@@ -513,11 +537,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
             tab: tab,
             terminal: terminal,
             shell: shell,
-            columns: w,
-            rows: h,
             workingDirectory: workingDirectory,
             pane: pane,
             showExitMessage: showExitMessage,
+          ).whenComplete(
+            () => _localPtySpawnInFlight.remove((tab: tab, pane: pane)),
           ),
         );
       } else if (activePty != null) {
