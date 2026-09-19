@@ -12,7 +12,9 @@
 // Keep Windows on the same high-throughput Rust PTY bridge as Unix.  The
 // Rust core uses ConPTY on Windows, so this covers cmd/PowerShell as well as
 // wsl.exe and distribution launchers without a separate WSL output path.
-#define PTY_READ_BUFFER_SIZE (64 * 1024)
+// 128 KiB read chunks match the sidecar pipe's NT buffer size so overlapped
+// reads drain full batches without extra round trips.
+#define PTY_READ_BUFFER_SIZE (128 * 1024)
 #define PTY_RUST_READ_WINDOW 32
 
 typedef struct SstermPtyCore SstermPtyCore;

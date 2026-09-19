@@ -73,9 +73,15 @@ class OutputPipe {
                ? _kDefaultMaxBytesPerWrite
                : _kNativeMaxBytesPerWrite),
        _queueHighWatermarkBytes =
-           queueHighWatermarkBytes ?? _kDefaultQueueHighWatermarkBytes,
+           queueHighWatermarkBytes ??
+           (terminalByteSink == null
+               ? _kDefaultQueueHighWatermarkBytes
+               : _kNativeQueueHighWatermarkBytes),
        _queueLowWatermarkBytes =
-           queueLowWatermarkBytes ?? _kDefaultQueueLowWatermarkBytes {
+           queueLowWatermarkBytes ??
+           (terminalByteSink == null
+               ? _kDefaultQueueLowWatermarkBytes
+               : _kNativeQueueLowWatermarkBytes) {
     if (_queueLowWatermarkBytes > _queueHighWatermarkBytes) {
       throw ArgumentError.value(
         _queueLowWatermarkBytes,
@@ -139,6 +145,13 @@ class OutputPipe {
   static const _kFlushInterval = Duration(milliseconds: 16); // ~60 fps
   static const _kDefaultQueueHighWatermarkBytes = 512 * 1024;
   static const _kDefaultQueueLowWatermarkBytes = 128 * 1024;
+  // The native sink drains a full 2 MiB parse budget per flush tick, so a
+  // flood must be allowed to queue at least that budget (plus the reader's
+  // in-flight window) before pausing its source. Pausing at the Dart-parse
+  // default instead would cap sustained floods well below what one native
+  // batch can absorb and force rapid pause/resume cycling of the credits.
+  static const _kNativeQueueHighWatermarkBytes = 2 * 1024 * 1024;
+  static const _kNativeQueueLowWatermarkBytes = 512 * 1024;
 
   void bind(Stream<List<int>> stream) {
     _subs.add(stream.listen(_onChunk));

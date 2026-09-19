@@ -735,7 +735,9 @@ mod tests {
             40,
         )
         .expect("spawn seq");
-        let mut chunk = vec![0_u8; 64 * 1024];
+        // Mirror the bridge's read chunk so the batch shape under test is the
+        // one production actually experiences.
+        let mut chunk = vec![0_u8; 128 * 1024];
         let mut bytes = 0_usize;
         let mut reads = 0_usize;
         loop {
@@ -751,6 +753,53 @@ mod tests {
         assert!(reads < 10_000, "expected coalesced reads, got {reads}");
         assert!(bytes / reads > 128, "average batch was too small");
         assert_eq!(session.wait().expect("wait for seq"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "manual transport throughput benchmark"]
+    fn benchmarks_unix_pty_line_flood() {
+        let session = PtySession::spawn(
+            "/bin/sh",
+            &[
+                "-c".to_owned(),
+                "seq 1 1000000; printf '\\n__SSTERM_BENCH_DONE__\\n'".to_owned(),
+            ],
+            None,
+            std::iter::empty(),
+            120,
+            40,
+        )
+        .expect("spawn unix benchmark");
+        let started = Instant::now();
+        let mut bytes = 0usize;
+        let mut reads = 0usize;
+        let mut tail = Vec::new();
+        let mut chunk = vec![0_u8; 128 * 1024];
+        loop {
+            let count = session.read(&mut chunk).expect("read benchmark output");
+            if count == 0 {
+                break;
+            }
+            bytes += count;
+            reads += 1;
+            tail.extend_from_slice(&chunk[..count]);
+            if tail
+                .windows(b"__SSTERM_BENCH_DONE__".len())
+                .any(|part| part == b"__SSTERM_BENCH_DONE__")
+            {
+                break;
+            }
+            if tail.len() > 64 {
+                tail.drain(..tail.len() - 64);
+            }
+        }
+        eprintln!(
+            "drained {bytes} bytes in {:?} using {reads} reads ({} bytes/read)",
+            started.elapsed(),
+            bytes / reads.max(1)
+        );
+        assert_eq!(session.wait().expect("wait for benchmark"), 0);
     }
 
     #[cfg(unix)]

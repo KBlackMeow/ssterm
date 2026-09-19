@@ -63,7 +63,7 @@ void main() {
     expect(nativeSource, contains('ssterm_pty_core.dll'));
     expect(nativeSource, contains('ssterm_pty_create_with_environment'));
     expect(nativeSource, contains('SSTERM_USE_RUST_PTY'));
-    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (64 * 1024)'));
+    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (128 * 1024)'));
     expect(nativeSource, contains('#define PTY_RUST_READ_WINDOW 32'));
     expect(nativeSource, contains('char buffer[PTY_READ_BUFFER_SIZE]'));
     expect(nativeSource, contains('handle->rust_read_credits = PTY_RUST_READ_WINDOW'));
@@ -133,7 +133,7 @@ void main() {
       'packages/flutter_pty/src/flutter_pty_unix.c',
     ).readAsStringSync();
 
-    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (64 * 1024)'));
+    expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (128 * 1024)'));
     expect(nativeSource, contains('#define PTY_RUST_READ_WINDOW 32'));
     expect(nativeSource, contains('char buffer[PTY_READ_BUFFER_SIZE]'));
     expect(nativeSource, contains('if (options->waitForReadAck)'));

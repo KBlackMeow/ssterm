@@ -22,14 +22,17 @@
 // Large output floods must not pay for one native-thread/Dart-isolate ACK
 // round trip per kilobyte. read() still returns immediately with whatever is
 // available, so this capacity does not add latency to interactive output.
-// One in-flight chunk also remains well below OutputPipe's 512 KiB queue
-// high-water mark, preserving the existing backpressure bound.
-#define PTY_READ_BUFFER_SIZE (64 * 1024)
+// The Rust read() coalesces within its 1 ms poll window up to this size, so a
+// larger buffer directly halves the port messages and FFI round trips of a
+// sustained flood. One in-flight chunk also remains below OutputPipe's
+// default 512 KiB queue high-water mark, preserving the existing
+// backpressure bound for the Dart-parsing fallback.
+#define PTY_READ_BUFFER_SIZE (128 * 1024)
 
 // Keep several reads in flight so the native reader and Dart isolate run as
 // a pipeline instead of serializing every chunk behind one ACK round trip.
-// The window is deliberately bounded: even if each read fills the 64 KiB
-// buffer, at most 2 MiB can be queued beyond Dart's last acknowledgement.
+// The window is deliberately bounded: even if each read fills the 128 KiB
+// buffer, at most 4 MiB can be queued beyond Dart's last acknowledgement.
 #define PTY_RUST_READ_WINDOW 32
 
 // The Rust core is intentionally loaded at runtime. This keeps the existing
