@@ -12,7 +12,7 @@
 - **🔀 Split Panes** — Horizontal and vertical splits within every tab. Run a local shell and an SSH session side-by-side, or monitor logs while editing remotely.
 - **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Concurrent transfers with a live progress queue. Drag-and-drop upload support.
 - **🔐 Full SSH Client** — Password and private-key auth, `~/.ssh/config` import, jump host / ProxyJump, port forwarding (local, remote, SOCKS5), keepalive with auto-reconnect, and session logging.
-- **🎨 Deep Customization** — 9 terminal theme presets, custom colors, JetBrains Mono / SF Mono / Monaco with CJK fallback, cursor shape & blink, wallpaper with frosted glass blur and opacity.
+- **🎨 Deep Customization** — 9 terminal theme presets, custom colors, bundled JetBrains Mono plus platform-native fonts with CJK fallback, cursor shape & blink, wallpaper with frosted glass blur and opacity.
 - **⚡ Local Shell** — PTY-backed with TrueColor, OSC 7-integrated shell discovery (zsh, bash, fish, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
 - **🖥️ Cross-Platform** — macOS (primary), Windows, Linux. Mobile (iOS/Android) for SSH & SFTP.
 
@@ -91,7 +91,7 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 ## 🎨 Customization
 
 - **Themes** — 9 presets from VS Code, Windows Terminal, macOS Terminal, iTerm2, and GNOME Terminal, plus full custom color picker.
-- **Fonts** — JetBrains Mono, SF Mono Powerline, Monaco, plus system fonts. CJK fallback (Simplified/Traditional Chinese, Japanese).
+- **Fonts** — Bundled JetBrains Mono plus platform-native fonts. CJK fallback (Simplified/Traditional Chinese, Japanese).
 - **Cursor** — Block, underline, or vertical bar; configurable blink speed.
 - **Wallpaper** — Import any image, adjust Gaussian blur (frosted glass), opacity, and background fill.
 - **Commands** — Built-in command panel with one-click insertion. Add, edit, and delete custom commands.

@@ -155,8 +155,6 @@ class TerminalSettings {
       return const [
         'Consolas',          // system — default
         'JetBrainsMono',     // bundled
-        'SFMonoPowerline',   // bundled
-        'MonacoBundled',     // bundled
         'Cascadia Mono',     // system (Win10 1809+/Win11)
         'Cascadia Code',     // system
         'Courier New',       // system
@@ -167,15 +165,12 @@ class TerminalSettings {
         'Monaco',            // system — default
         'Menlo',             // system
         'SF Mono',           // system (recent macOS)
-        'SFMonoPowerline',   // bundled
         'JetBrainsMono',     // bundled
         'Courier New',       // system
       ];
     }
     return const [
       'JetBrainsMono',       // bundled — default
-      'SFMonoPowerline',     // bundled
-      'MonacoBundled',       // bundled
       'DejaVu Sans Mono',    // common Linux system font
       'Liberation Mono',
       'monospace',
@@ -194,12 +189,7 @@ class TerminalSettings {
   /// suffix so users can see which fonts ship with the app vs. depend on the
   /// system having them installed.
   static String fontFamilyLabel(String family) => switch (family) {
-        'SFMonoPowerline' => 'SF Mono Powerline (bundled)',
         'JetBrainsMono' => 'JetBrains Mono (bundled)',
-        // Distinct family name keeps the bundled Monaco from shadowing
-        // macOS's system Monaco — macOS users still see plain 'Monaco' for
-        // the system face, Windows/Linux users see the bundled one here.
-        'MonacoBundled' => 'Monaco (bundled)',
         _ => family,
       };
 
@@ -248,9 +238,6 @@ class TerminalSettings {
 
     if (Platform.isWindows) {
       return [
-        // SF Mono Powerline (primary) already covers ASCII, Powerline, and
-        // common Dingbats like ➜ — these fallbacks only catch outliers and
-        // CJK (SF Mono has no CJK glyphs).
         if (fontFamily != 'Cascadia Mono') 'Cascadia Mono',
         if (fontFamily != 'Cascadia Code') 'Cascadia Code',
         if (fontFamily != 'Consolas') 'Consolas',
