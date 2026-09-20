@@ -45,6 +45,10 @@ class AppTab {
   ValueNotifier<String>? remotePath;
   String? remoteCwdPane0;
   String? remoteCwdPane1;
+
+  /// True after pane 0 has emitted an OSC-7 cwd report. Kept separately from
+  /// [remoteCwdPane0] because `/` is both a valid cwd and the initial fallback.
+  bool remoteCwdPane0Observed = false;
   int activeSshPane = 0;
   ValueNotifier<String>? localPath;
   OutputPipe? pipe;
@@ -239,6 +243,7 @@ class AppTab {
     final storagePane = !isSplit && pane == 1 ? 0 : pane;
     if (storagePane == 0) {
       remoteCwdPane0 = cwd;
+      remoteCwdPane0Observed = true;
     } else {
       remoteCwdPane1 = cwd;
     }

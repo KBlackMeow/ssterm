@@ -26,6 +26,7 @@ typedef int64_t (*RustPtyReadFn)(SstermPtyCore *, uint8_t *, size_t);
 typedef int32_t (*RustPtyWriteFn)(SstermPtyCore *, const uint8_t *, size_t);
 typedef int32_t (*RustPtyResizeFn)(SstermPtyCore *, uint16_t, uint16_t);
 typedef int32_t (*RustPtyKillFn)(SstermPtyCore *);
+typedef int32_t (*RustPtyInterruptFn)(SstermPtyCore *);
 typedef int32_t (*RustPtyWaitFn)(SstermPtyCore *, int32_t *);
 typedef uint32_t (*RustPtyPidFn)(SstermPtyCore *);
 typedef const char *(*RustPtyErrorFn)(void);
@@ -38,6 +39,7 @@ typedef struct RustPtyApi {
     RustPtyWriteFn write;
     RustPtyResizeFn resize;
     RustPtyKillFn kill;
+    RustPtyInterruptFn interrupt;
     RustPtyWaitFn wait;
     RustPtyPidFn pid;
     RustPtyErrorFn error;
@@ -84,12 +86,13 @@ static BOOL CALLBACK load_rust_pty_api(PINIT_ONCE once, PVOID parameter, PVOID *
     rust_pty_api.write = (RustPtyWriteFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_write");
     rust_pty_api.resize = (RustPtyResizeFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_resize");
     rust_pty_api.kill = (RustPtyKillFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_kill");
+    rust_pty_api.interrupt = (RustPtyInterruptFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_interrupt");
     rust_pty_api.wait = (RustPtyWaitFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_wait");
     rust_pty_api.pid = (RustPtyPidFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_pid");
     rust_pty_api.error = (RustPtyErrorFn)GetProcAddress(rust_pty_api.library, "ssterm_pty_error");
     if (rust_pty_api.create == NULL || rust_pty_api.destroy == NULL ||
         rust_pty_api.read == NULL || rust_pty_api.write == NULL || rust_pty_api.resize == NULL ||
-        rust_pty_api.kill == NULL || rust_pty_api.wait == NULL ||
+        rust_pty_api.kill == NULL || rust_pty_api.interrupt == NULL || rust_pty_api.wait == NULL ||
         rust_pty_api.pid == NULL || rust_pty_api.error == NULL)
     {
         FreeLibrary(rust_pty_api.library);
@@ -779,6 +782,11 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
             WakeAllConditionVariable(&handle->rust_ack_condition);
             LeaveCriticalSection(&handle->rust_ack_lock);
             rust_pty_api.kill(rust_pty);
+            rust_pty_api.interrupt(rust_pty);
+            if (handle->rust_read_thread != NULL)
+            {
+                CancelSynchronousIo(handle->rust_read_thread);
+            }
             if (handle->rust_read_thread != NULL)
             {
                 WaitForSingleObject(handle->rust_read_thread, INFINITE);
@@ -1073,6 +1081,13 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         WakeAllConditionVariable(&handle->rust_ack_condition);
         LeaveCriticalSection(&handle->rust_ack_lock);
         rust_pty_api.kill(handle->rust_pty);
+        // Break a read already inside Rust before the cleanup worker joins it.
+        // CancelSynchronousIo covers the inbox ConPTY fallback; Rust's
+        // interrupt also cancels the sidecar's overlapped request and starts
+        // ClosePseudoConsole off-thread so WSL descendants cannot form a
+        // join-before-close cycle.
+        rust_pty_api.interrupt(handle->rust_pty);
+        CancelSynchronousIo(handle->rust_read_thread);
 
         HANDLE thread = CreateThread(NULL, 0, destroy_rust_pty_thread, handle, 0, NULL);
         if (thread != NULL)

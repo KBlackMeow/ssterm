@@ -324,7 +324,7 @@ void main() {
       expect(
         utf8.decode(rust.takeResponse()),
         '\x1b]10;rgb:aaaa/bbbb/cccc\x1b\\'
-        '\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c',
+        '\x1b[?1;2c',
       );
     },
     skip: available ? false : 'run cargo build --release before this ABI test',

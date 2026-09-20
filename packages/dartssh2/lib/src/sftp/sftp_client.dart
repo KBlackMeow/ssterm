@@ -31,8 +31,12 @@ class SftpClient {
   final SSHPrintHandler? printTrace;
 
   SftpClient(this._channel, {this.printDebug, this.printTrace}) {
+    // Closing before VERSION arrives completes the public handshake with an
+    // abort error. Keep an internal error listener so callers that never
+    // requested [handshake] do not receive an uncaught asynchronous error.
+    unawaited(_handshake.future.then<void>((_) {}, onError: (_) {}));
     _startHandshake();
-    _channel.stream.listen(_handleData);
+    _channelSubscription = _channel.stream.listen(_handleData);
   }
 
   final _buffer = ChunkBuffer();
@@ -40,6 +44,10 @@ class SftpClient {
   final _handshake = Completer<SftpHandsake>();
 
   final _done = Completer<void>();
+
+  late final StreamSubscription<SSHChannelData> _channelSubscription;
+
+  var _closed = false;
 
   final _requestId = SftpRequestId();
 
@@ -206,20 +214,35 @@ class SftpClient {
 
   /// Close the sftp session.
   void close() {
+    if (_closed) return;
+    _closed = true;
+    final error = SftpAbortError('Connection closed');
     for (var waiter in _replyWaiters.values) {
-      waiter.completeError(SftpAbortError("Connection closed"));
+      waiter.completeError(error);
     }
     _replyWaiters.clear();
-    _done.complete();
+    if (!_handshake.isCompleted) {
+      _handshake.completeError(error, StackTrace.current);
+    }
+    if (!_done.isCompleted) _done.complete();
+    unawaited(_channelSubscription.cancel());
+    // SFTP has no protocol-level session close. Tear down its SSH channel so
+    // rejected or timed-out handshakes cannot consume one channel forever.
+    _channel.destroy();
   }
 
   void _closeError(Object error, [StackTrace? stackTrace]) {
+    if (_closed) return;
+    _closed = true;
     stackTrace ??= StackTrace.current;
     for (var waiter in _replyWaiters.values) {
       waiter.completeError(error, stackTrace);
     }
     _replyWaiters.clear();
-    _done.completeError(error, stackTrace);
+    if (!_handshake.isCompleted) _handshake.completeError(error, stackTrace);
+    if (!_done.isCompleted) _done.complete();
+    unawaited(_channelSubscription.cancel());
+    _channel.destroy();
   }
 
   void _startHandshake() {

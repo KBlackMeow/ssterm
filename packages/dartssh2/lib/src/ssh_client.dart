@@ -454,6 +454,9 @@ class SSHClient {
     }
 
     if (pty != null) {
+      // A PTY is a prerequisite for this execution request. Do not pipeline
+      // exec behind it: if the server rejects pty-req, sending exec early can
+      // still run a side-effecting command even though this method throws.
       final ptyOk = await channelController.sendPtyReq(
         terminalType: pty.type,
         terminalWidth: pty.width,
@@ -568,13 +571,28 @@ class SSHClient {
     await _authenticated.future;
 
     final channelController = await _openSessionChannel();
-    channelController.sendSubsystem('sftp');
-
-    return SftpClient(
+    // Fire the subsystem request without waiting, then immediately construct
+    // the SftpClient so the INIT packet pipelines behind it. The reply is
+    // consumed afterwards — leaving it unconsumed (the old behavior) let a
+    // server that rejects the subsystem stall the handshake forever while
+    // queueing an orphaned reply.
+    final subsystemOk = channelController.sendSubsystem('sftp');
+    final client = SftpClient(
       channelController.channel,
       printDebug: printDebug,
       printTrace: printTrace,
     );
+    if (!await subsystemOk) {
+      client.close();
+      throw SSHChannelRequestError('Failed to start sftp subsystem');
+    }
+    try {
+      await client.handshake.timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      client.close();
+      throw SSHChannelRequestError('SFTP handshake timed out');
+    }
+    return client;
   }
 
   /// Create a new [SSHHttpClient] that can be used to make HTTP requests

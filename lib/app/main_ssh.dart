@@ -136,7 +136,9 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
   Future<void> _materializeSshTab(_Tab tab, ConnectResult r) async {
     final terminal = _createTerminal(reflowEnabled: false);
     final session = r.session!;
-    final remotePath = ValueNotifier<String>('');
+    // Seeded with '/' until the $HOME probe (now backgrounded) or the first
+    // OSC 7 report from the shell replaces it.
+    final remotePath = ValueNotifier<String>('/');
 
     SessionLogger? logger;
     if (r.profile.sessionLog) {
@@ -171,27 +173,12 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           : null,
     );
 
-    SftpClient? sftp;
-    TransferManager? transferManager;
-    try {
-      sftp = await r.client.sftp();
-      transferManager = TransferManager(sshProfile: r.profile);
-      remotePath.value = await fetchRemoteHome(r.client);
-    } catch (_) {
-      remotePath.value = '/';
-    }
-
-    if (!mounted || tab.manuallyDisconnected) {
-      pipe.dispose();
-      rustTerminalBridge?.close();
-      rustTerminalBridge?.core.close();
-      remotePath.dispose();
-      transferManager?.dispose();
-      session.close();
-      r.client.close();
-      r.jumpClient?.close();
-      return;
-    }
+    // The SFTP subsystem handshake and the $HOME probe used to run here, on
+    // the interactive critical path — several serial round trips during which
+    // the shell's output was held back, a visible blank-terminal stall on
+    // high-latency links. They now run in the background via
+    // _attachSftpToTab, which populates tab.sftp/transferManager/remotePath
+    // once ready.
 
     // Populate tab fields and wire input/resize before [setState] so the new
     // TerminalView sees a fully-configured Terminal when it mounts — matches
@@ -200,11 +187,10 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     tab.sshClient = r.client;
     tab.jumpClient = r.jumpClient;
     tab.sshSession = session;
-    tab.sftp = sftp;
-    tab.transferManager = transferManager;
     tab.remotePath = remotePath;
-    tab.remoteCwdPane0 = remotePath.value;
-    tab.agentCwd = remotePath.value;
+    tab.remoteCwdPane0 = '/';
+    tab.remoteCwdPane0Observed = false;
+    tab.agentCwd = '/';
     tab.sshProfile = r.profile;
     tab.activeSshPane = 0;
     tab.pipe = pipe;
@@ -274,6 +260,51 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
     final idx = _tabs.indexOf(tab);
     if (idx == _active) _activateTab(idx);
+
+    unawaited(_attachSftpToTab(tab, r, remotePath));
+  }
+
+  /// Opens the SFTP subsystem and resolves the remote home directory off the
+  /// interactive critical path (see _materializeSshTab). Attaches the results
+  /// to the tab when they resolve; on failure the shell stays fully usable
+  /// and the SFTP panel simply stays hidden — same end state as the old
+  /// synchronous path.
+  Future<void> _attachSftpToTab(
+    _Tab tab,
+    ConnectResult r,
+    ValueNotifier<String>? remotePath, {
+    void Function(Object error)? onUnavailable,
+  }) async {
+    SftpClient? sftp;
+    try {
+      sftp = await r.client.sftp();
+      final home = await fetchRemoteHome(r.client);
+      // A reconnect while this probe was in flight replaced the transport —
+      // drop this result so it cannot clobber the newer session.
+      if (!mounted ||
+          tab.manuallyDisconnected ||
+          !_tabs.contains(tab) ||
+          tab.sshClient != r.client) {
+        sftp.close();
+        return;
+      }
+      setState(() {
+        tab.sftp = sftp;
+        tab.transferManager = TransferManager(sshProfile: r.profile);
+        // The shell's first prompt usually reports OSC 7 before we get here;
+        // only seed the cwd fields when no shell-side report has landed.
+        if (remotePath != null && !tab.remoteCwdPane0Observed) {
+          tab.remoteCwdPane0 = home;
+          tab.agentCwd = home;
+          remotePath.value = home;
+        }
+      });
+    } catch (e) {
+      sftp?.close();
+      if (onUnavailable != null && tab.sshClient == r.client) {
+        onUnavailable(e);
+      }
+    }
   }
 
   void _retryConnectingTab(_Tab tab) {
@@ -473,25 +504,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         } catch (_) {}
       }
 
-      SftpClient? sftp;
-      TransferManager? transferManager;
-      var remoteHome = tab.remotePath?.value ?? '/';
-      try {
-        sftp = await result.client.sftp();
-        transferManager = TransferManager(sshProfile: result.profile);
-        remoteHome = await fetchRemoteHome(result.client);
-      } catch (e) {
-        _writeTerminalOutput(
-          tab,
-          tab.terminal,
-          '[SFTP unavailable after reconnect: $e]\r\n',
-        );
-      }
-
       if (!mounted || tab.manuallyDisconnected) {
         logger?.close();
-        sftp?.close();
-        transferManager?.dispose();
         result.session?.close();
         result.client.close();
         result.jumpClient?.close();
@@ -530,6 +544,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         pipe.bind(session.stderr);
       });
 
+      // Swap transports immediately: the reconnected shell must not wait for
+      // the SFTP subsystem handshake (several serial round trips — the same
+      // stall _materializeSshTab used to have). The SFTP panel reattaches in
+      // the background once the handshake and $HOME probe complete.
+      final remoteHome = tab.remotePath?.value ?? '/';
       tab.pipe?.dispose();
       tab.rustTerminalBridge?.close();
       tab.rustTerminalCore?.close();
@@ -540,9 +559,10 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.sshSession = session;
       tab.sshClient = result.client;
       tab.jumpClient = result.jumpClient;
-      tab.sftp = sftp;
-      tab.transferManager = transferManager;
+      tab.sftp = null;
+      tab.transferManager = null;
       tab.remoteCwdPane0 = remoteHome;
+      tab.remoteCwdPane0Observed = false;
       tab.remoteCwdPane1 = null;
       tab.remotePath?.value = remoteHome;
 
@@ -594,6 +614,20 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
           },
         );
       }
+
+      // SFTP panel reattaches in the background (see the swap comment above).
+      unawaited(
+        _attachSftpToTab(
+          tab,
+          result,
+          tab.remotePath,
+          onUnavailable: (e) => _writeTerminalOutput(
+            tab,
+            tab.terminal,
+            '[SFTP unavailable after reconnect: $e]\r\n',
+          ),
+        ),
+      );
 
       // Success — clear the backoff counter so the NEXT disconnect starts
       // from the bottom of the ladder again.

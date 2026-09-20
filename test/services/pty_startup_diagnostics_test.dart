@@ -66,7 +66,10 @@ void main() {
     expect(nativeSource, contains('#define PTY_READ_BUFFER_SIZE (128 * 1024)'));
     expect(nativeSource, contains('#define PTY_RUST_READ_WINDOW 32'));
     expect(nativeSource, contains('char buffer[PTY_READ_BUFFER_SIZE]'));
-    expect(nativeSource, contains('handle->rust_read_credits = PTY_RUST_READ_WINDOW'));
+    expect(
+      nativeSource,
+      contains('handle->rust_read_credits = PTY_RUST_READ_WINDOW'),
+    );
     expect(nativeSource, contains('WakeConditionVariable'));
     // The Rust core opens ConPTY without PSEUDOCONSOLE_INHERIT_CURSOR, so the
     // bridge must not inject a synthetic cursor-position reply at startup.
@@ -74,26 +77,57 @@ void main() {
     expect(nativeSource, contains('wsl.exe'));
   });
 
-  test('Windows Rust core answers the sidecar DA1 query and ships the host', () {
-    final rustSource = File('native/pty_core/src/windows.rs').readAsStringSync();
+  test(
+    'Windows Rust core answers the sidecar DA1 query and ships the host',
+    () {
+      final rustSource = File(
+        'native/pty_core/src/windows.rs',
+      ).readAsStringSync();
 
-    // A sidecar OpenConsole opens with CSI c (DA1) and stalls the session
-    // for ~3 s when nothing answers; the core must reply and consume the
-    // query so the Dart terminal never answers it a second time.
-    expect(rustSource, contains('answer_startup_query'));
-    expect(rustSource, contains(r'b"\x1b[c"'));
-    expect(rustSource, contains('copy_within(3..count, 0)'));
+      // A sidecar OpenConsole opens with CSI c (DA1) and stalls the session
+      // for ~3 s when nothing answers; the core must reply and consume the
+      // query so the Dart terminal never answers it a second time.
+      expect(rustSource, contains('answer_startup_query'));
+      expect(rustSource, contains(r'b"\x1b[c"'));
+      expect(rustSource, contains('copy_within(3..count, 0)'));
 
-    final cmakeSource = File('windows/CMakeLists.txt').readAsStringSync();
-    expect(cmakeSource, contains('conpty/x64/conpty.dll'));
-    expect(cmakeSource, contains('conpty/x64/OpenConsole.exe'));
+      final cmakeSource = File('windows/CMakeLists.txt').readAsStringSync();
+      expect(cmakeSource, contains('conpty/x64/conpty.dll'));
+      expect(cmakeSource, contains('conpty/x64/OpenConsole.exe'));
 
-    expect(
-      File('windows/conpty/x64/conpty.dll').existsSync(),
-      isTrue,
-      reason: 'the vendored ConPTY sidecar must stay in the repository',
+      expect(
+        File('windows/conpty/x64/conpty.dll').existsSync(),
+        isTrue,
+        reason: 'the vendored ConPTY sidecar must stay in the repository',
+      );
+      expect(File('windows/conpty/x64/OpenConsole.exe').existsSync(), isTrue);
+    },
+  );
+
+  test('Windows Rust PTY interrupts reads before joining teardown threads', () {
+    final nativeSource = File(
+      'packages/flutter_pty/src/flutter_pty_win.c',
+    ).readAsStringSync();
+    final rustSource = File(
+      'native/pty_core/src/windows.rs',
+    ).readAsStringSync();
+
+    final destroyStart = nativeSource.indexOf(
+      'FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)',
     );
-    expect(File('windows/conpty/x64/OpenConsole.exe').existsSync(), isTrue);
+    final destroyEnd = nativeSource.indexOf(
+      'FFI_PLUGIN_EXPORT void pty_write',
+      destroyStart,
+    );
+    final destroy = nativeSource.substring(destroyStart, destroyEnd);
+    expect(destroy, contains('rust_pty_api.interrupt(handle->rust_pty)'));
+    expect(destroy, contains('CancelSynchronousIo(handle->rust_read_thread)'));
+    expect(destroy, contains('CreateThread(NULL, 0, destroy_rust_pty_thread'));
+    expect(destroy, isNot(contains('WaitForSingleObject(')));
+
+    expect(rustSource, contains('CancelIoEx(read_handle'));
+    expect(rustSource, contains('ssterm-conpty-close'));
+    expect(rustSource, contains('.take()'));
   });
 
   test('Unix Rust PTY teardown never joins bridge threads on the caller', () {

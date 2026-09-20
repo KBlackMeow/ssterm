@@ -148,6 +148,17 @@ void main() {
 
       expect(tab.remotePath!.value, '/srv/project');
       expect(tab.agentCwd, '/srv/project');
+      expect(tab.remoteCwdPane0Observed, isTrue);
+    });
+
+    test('records root as a real OSC-7 report rather than a fallback', () {
+      final tab = AppTab.ssh(title: 'srv')
+        ..remotePath = ValueNotifier<String>('/');
+
+      tab.noteRemoteCwd(pane: 0, cwd: '/');
+
+      expect(tab.remoteCwdPane0, '/');
+      expect(tab.remoteCwdPane0Observed, isTrue);
     });
 
     test('does not replace Agent cwd with an inactive split pane cwd', () {

@@ -515,6 +515,23 @@ pub unsafe extern "C" fn ssterm_pty_kill(pty: *mut SstermPtyCore) -> i32 {
     }
 }
 
+/// Interrupts a blocking Windows bridge read and begins pseudoconsole close.
+/// The operation returns without waiting for ClosePseudoConsole.
+#[cfg(windows)]
+#[no_mangle]
+/// # Safety
+///
+/// `pty` must point to a live PTY and must not be destroyed concurrently.
+pub unsafe extern "C" fn ssterm_pty_interrupt(pty: *mut SstermPtyCore) -> i32 {
+    if pty.is_null() {
+        set_error("PTY must not be null");
+        return -1;
+    }
+    (*pty).session.interrupt_read();
+    (*pty).session.begin_close();
+    0
+}
+
 #[no_mangle]
 /// # Safety
 ///

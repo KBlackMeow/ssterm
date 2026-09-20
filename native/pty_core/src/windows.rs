@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::FromRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -27,9 +27,8 @@ use winapi::um::processthreadsapi::{
 };
 use winapi::um::synchapi::{CreateEventW, ResetEvent, WaitForSingleObject};
 use winapi::um::winbase::{
-    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE,
-    PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, INFINITE, PIPE_ACCESS_DUPLEX,
+    PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 use winapi::um::wincon::COORD;
 use winapi::um::wincontypes::HPCON;
@@ -96,7 +95,9 @@ impl Drop for OwnedHandle {
 }
 
 pub struct PtySession {
-    conpty: HPCON,
+    // Taking the handle starts shutdown exactly once. Keeping it optional
+    // prevents Drop/resize from racing an asynchronous ClosePseudoConsole.
+    conpty: Mutex<Option<HPCON>>,
     io: SessionIo,
     process: Mutex<OwnedHandle>,
     pid: u32,
@@ -108,10 +109,12 @@ pub struct PtySession {
 
 enum SessionIo {
     Overlapped {
+        read_handle: HANDLE,
         reader: Mutex<OverlappedReader>,
         writer: Mutex<OverlappedWriter>,
     },
     Synchronous {
+        read_handle: HANDLE,
         reader: Mutex<File>,
         writer: Mutex<File>,
     },
@@ -165,15 +168,21 @@ impl PtySession {
         let io = match pending_io {
             PendingIo::Overlapped(server) => {
                 let read_handle = duplicate_handle(server.0)?;
+                let raw_read_handle = read_handle.0;
                 SessionIo::Overlapped {
+                    read_handle: raw_read_handle,
                     reader: Mutex::new(OverlappedReader::new(read_handle)?),
                     writer: Mutex::new(OverlappedWriter::new(server)?),
                 }
             }
-            PendingIo::Synchronous { reader, writer } => SessionIo::Synchronous {
-                reader: Mutex::new(reader),
-                writer: Mutex::new(writer),
-            },
+            PendingIo::Synchronous { reader, writer } => {
+                let read_handle = reader.as_raw_handle().cast();
+                SessionIo::Synchronous {
+                    read_handle,
+                    reader: Mutex::new(reader),
+                    writer: Mutex::new(writer),
+                }
+            }
         };
         let (process, pid) = spawn_attached(
             conpty,
@@ -184,7 +193,7 @@ impl PtySession {
         )?;
         mem::forget(guard);
         Ok(Self {
-            conpty,
+            conpty: Mutex::new(Some(conpty)),
             io,
             process: Mutex::new(process),
             pid,
@@ -224,13 +233,13 @@ impl PtySession {
     /// A sidecar OpenConsole sends `CSI c` (DA1) as the very first output and
     /// blocks the child's output for roughly three seconds when no reply
     /// arrives. Windows Terminal answers immediately, so it never sees the
-    /// stall. The reply mirrors what Windows Terminal and xterm.js send:
-    /// a level-5 VT500-class device with the common feature set. Replying
+    /// stall. The reply uses the same conservative identity as the terminal
+    /// core instead of advertising unsupported graphics features. Replying
     /// only when the query was observed keeps sessions without the query
     /// (for example the inbox kernel32 pseudoconsole, which never asks)
     /// free of stray input that would otherwise leak to the child.
     fn answer_startup_query_if_asked(&self) {
-        let _ = self.write_all(b"\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c");
+        let _ = self.write_all(b"\x1b[?1;2c");
     }
 
     pub fn write_all(&self, input: &[u8]) -> io::Result<()> {
@@ -248,9 +257,12 @@ impl PtySession {
     }
 
     pub fn resize(&self, columns: u16, rows: u16) -> io::Result<()> {
+        let conpty = self.conpty.lock().expect("ConPTY mutex poisoned");
+        let conpty =
+            conpty.ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "ConPTY is closing"))?;
         let result = unsafe {
             (conpty_api().resize)(
-                self.conpty,
+                conpty,
                 COORD {
                     X: columns.max(1) as i16,
                     Y: rows.max(1) as i16,
@@ -306,11 +318,48 @@ impl PtySession {
             Ok(())
         }
     }
+
+    /// Cancels a bridge read that may currently be blocked in the Windows I/O
+    /// APIs. The C bridge also calls CancelSynchronousIo on its reader thread;
+    /// together the two cover both the sidecar's overlapped pipe and the inbox
+    /// ConPTY synchronous fallback.
+    pub fn interrupt_read(&self) {
+        let read_handle = match &self.io {
+            SessionIo::Overlapped { read_handle, .. }
+            | SessionIo::Synchronous { read_handle, .. } => *read_handle,
+        };
+        unsafe {
+            CancelIoEx(read_handle, ptr::null_mut());
+        }
+    }
+
+    /// Starts closing the pseudoconsole without waiting on the caller. Closing
+    /// it before joining the reader breaks the pipe even when a WSL relay or a
+    /// descendant outlives the launcher process. Some ConPTY implementations
+    /// may themselves wait for attached descendants, so the close runs on its
+    /// own native thread and never blocks Flutter or the bridge cleanup thread.
+    pub fn begin_close(&self) {
+        let conpty = self.conpty.lock().expect("ConPTY mutex poisoned").take();
+        let Some(conpty) = conpty else { return };
+        let conpty_value = conpty as usize;
+        let close = conpty_api().close;
+        if std::thread::Builder::new()
+            .name("ssterm-conpty-close".to_owned())
+            .spawn(move || unsafe { close(conpty_value as HPCON) })
+            .is_err()
+        {
+            // Thread creation failure is exceptional. Closing here still
+            // preserves correctness, at the cost of blocking this background
+            // cleanup caller rather than leaking the pseudoconsole handle.
+            unsafe { close(conpty) };
+        }
+    }
 }
 
 impl Drop for PtySession {
     fn drop(&mut self) {
-        unsafe { (conpty_api().close)(self.conpty) };
+        self.interrupt_read();
+        self.begin_close();
     }
 }
 

@@ -787,13 +787,11 @@ impl TerminalCore {
             }
             b'p' if self.csi_intermediate == b'!' && self.csi_prefix == 0 => self.soft_reset(),
             b'c' if self.csi_prefix == 0 && self.parameter(0, 0) == 0 => {
-                // VT500-class answer identical to what Windows Terminal and
-                // xterm.js send, and to the reply the pty_core ConPTY sidecar
-                // handshakes with. Tools probe these feature bits to decide
-                // between full and degraded behavior; a VT100-level answer
-                // needlessly pushes children onto legacy paths.
-                self.response
-                    .extend_from_slice(b"\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c");
+                // Keep this conservative and aligned with the Dart terminal.
+                // Advertising graphics, printer, locator, or rectangular-edit
+                // features that are not implemented makes applications select
+                // output modes this terminal cannot render.
+                self.response.extend_from_slice(b"\x1b[?1;2c");
             }
             b'n' if self.csi_prefix == 0 => match self.parameter(0, 0) {
                 5 => self.response.extend_from_slice(b"\x1b[0n"),
@@ -2482,7 +2480,7 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
         assert_ne!(snapshot.mode_flags & MODE_BRACKETED_PASTE, 0);
         assert_eq!(snapshot.mouse_mode, 4);
         assert_eq!(snapshot.mouse_report_mode, 2);
-        assert_eq!(terminal.response, b"\x1b[?0u\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c");
+        assert_eq!(terminal.response, b"\x1b[?0u\x1b[?1;2c");
     }
 
     #[test]
@@ -2599,16 +2597,10 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
     }
 
     #[test]
-    fn answers_da1_as_a_vt500_class_device() {
+    fn answers_da1_with_only_supported_baseline_capabilities() {
         let mut terminal = TerminalCore::new(10, 2);
         terminal.feed(b"\x1b[c");
-        // Same answer Windows Terminal and xterm.js send, and the one the
-        // pty_core ConPTY sidecar handshake relies on; keep them identical so
-        // children see one terminal identity on every platform.
-        assert_eq!(
-            terminal.response,
-            b"\x1b[?65;1;2;3;4;6;9;15;16;17;18;21;22;28c"
-        );
+        assert_eq!(terminal.response, b"\x1b[?1;2c");
     }
 
     #[test]
