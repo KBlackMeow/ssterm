@@ -108,9 +108,21 @@ class Buffer {
   ///
   /// See also: [Terminal.writeChar]
   void writeChar(int codePoint) {
+    // U+FE0F (VS16) / U+FE0E (VS15) select emoji vs text presentation for the
+    // character they follow. Per UTS#51 terminal practice (iTerm2 parity) the
+    // selector retro-adjusts the width of the base cell: emoji presentation
+    // takes two cells, text presentation takes one. They never occupy a cell
+    // themselves.
+    if (codePoint == 0xFE0F || codePoint == 0xFE0E) {
+      if (terminal.widthPolicy.honorsVariationSelectors) {
+        _applyVariationSelector(codePoint);
+      }
+      return;
+    }
+
     codePoint = charset.translate(codePoint);
 
-    final cellWidth = unicodeV11.wcwidth(codePoint);
+    final cellWidth = terminal.widthPolicy.widthOf(codePoint);
     if (cellWidth == 0) return;
 
     if (_cursorX >= terminal.viewWidth) {
@@ -126,6 +138,22 @@ class Buffer {
     // resize completes; grow the line instead of indexing past its end.
     if (_cursorX >= line.length) {
       line.resize(terminal.viewWidth);
+    }
+
+    // A cursor-addressed TUI may update the trailing cell of a previously
+    // written wide glyph (for example, replace the second cell of an emoji
+    // with an ASCII character).  A terminal cell grid must then remove the
+    // leading cell as well; otherwise that old glyph remains visible even
+    // though the application has redrawn the logical position.
+    if (_cursorX > 0 && line.getWidth(_cursorX - 1) == 2) {
+      line.eraseCell(_cursorX - 1, _cellStyleForMutation());
+    }
+    // Conversely, replacing the leading cell of a wide glyph with a narrow
+    // character must clear its trailing placeholder and attributes.
+    if (cellWidth != 2 &&
+        line.getWidth(_cursorX) == 2 &&
+        _cursorX + 1 < line.length) {
+      line.eraseCell(_cursorX + 1, _cellStyleForMutation());
     }
     line.setCell(_cursorX, codePoint, cellWidth, _cellStyleForMutation());
     terminal.markDirtyRow(_cursorY);
@@ -151,6 +179,58 @@ class Buffer {
   /// The line at the current cursor position.
   BufferLine get currentLine {
     return lines[absoluteCursorY];
+  }
+
+  /// Applies a VS16 (emoji) / VS15 (text) presentation selector to the cell
+  /// the cursor just passed, retro-adjusting its width. Anything that is not
+  /// an Extended_Pictographic base with the selector-applicable width is
+  /// ignored — the selector never occupies a cell itself.
+  void _applyVariationSelector(int selector) {
+    final line = currentLine;
+
+    if (selector == 0xFE0F) {
+      if (_cursorX == 0 || _cursorX >= viewWidth) return;
+      final baseX = _cursorX - 1;
+      if (baseX >= line.length) return;
+      final base = line.getCodePoint(baseX);
+      if (base == 0 ||
+          line.getWidth(baseX) != 1 ||
+          !isExtendedPictographic(base)) {
+        return;
+      }
+      // Widen the base and write the trailing placeholder under the current
+      // style, mirroring how writeChar lays out a wide character.
+      line.setContent(baseX, base | (2 << CellContent.widthShift));
+      if (_cursorX >= line.length) {
+        line.resize(terminal.viewWidth);
+      }
+      line.setCell(_cursorX, 0, 0, _cellStyleForMutation());
+      _cursorX++;
+      terminal.markDirtyRow(_cursorY);
+      return;
+    }
+
+    // VS15: narrow the wide base the cursor just passed. Normally the cursor
+    // sits two cells past the base (its placeholder in between); a wide char
+    // written at the last column leaves the cursor one cell past with no
+    // placeholder.
+    var baseX = _cursorX - 2;
+    if (baseX < 0 || baseX >= line.length || line.getWidth(baseX) != 2) {
+      if (_cursorX != viewWidth) return;
+      baseX = _cursorX - 1;
+      if (baseX < 0 || baseX >= line.length || line.getWidth(baseX) != 2) {
+        return;
+      }
+    }
+    final base = line.getCodePoint(baseX);
+    if (base == 0 || !isExtendedPictographic(base)) return;
+
+    line.setContent(baseX, base | (1 << CellContent.widthShift));
+    if (baseX + 1 < viewWidth && baseX + 1 < line.length) {
+      line.eraseCell(baseX + 1, _cellStyleForMutation());
+    }
+    _cursorX = baseX + 1;
+    terminal.markDirtyRow(_cursorY);
   }
 
   void backspace() {

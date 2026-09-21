@@ -425,6 +425,42 @@ class _SettingsPageState extends State<SettingsPage>
         const SizedBox(height: 12),
         _sectionTitle('Weight'),
         _fontWeightChips(),
+        const SizedBox(height: 12),
+        _sectionTitle('Width & Compatibility'),
+        const SizedBox(height: 6),
+        _controlLabel(
+          'Cell-width model',
+          hint:
+              'Modern matches iTerm2: emoji occupy two cells and VS16/VS15 '
+              'presentation selectors are honored. Legacy uses the old '
+              'Unicode 11 table for full-screen apps laid out against it. '
+              'Applies to new output.',
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Modern widths (Unicode 16 + emoji)',
+            style: TextStyle(color: _kFg, fontSize: 13),
+          ),
+          value: _s.widthProfile != 'legacy',
+          activeTrackColor: _kAccent,
+          onChanged: (v) =>
+              _apply(_s.copyWith(widthProfile: v ? 'modern' : 'legacy')),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Ambiguous characters are double-width',
+            style: TextStyle(color: _kFg, fontSize: 13),
+          ),
+          subtitle: const Text(
+            '±, ※, some box glyphs take two cells (CJK-locale convention)',
+            style: TextStyle(color: _kFgMuted, fontSize: 11),
+          ),
+          value: _s.ambiguousDoubleWidth,
+          activeTrackColor: _kAccent,
+          onChanged: (v) => _apply(_s.copyWith(ambiguousDoubleWidth: v)),
+        ),
       ],
     );
   }

@@ -84,6 +84,30 @@ void main() {
     });
   });
 
+  group('wide cell replacement', () {
+    test('clears a wide glyph when its trailing cell is overwritten', () {
+      final terminal = Terminal()..resize(10, 1);
+      terminal.write('😀');
+      terminal.write('\r\x1b[1CX');
+
+      final line = terminal.buffer.lines[0];
+      expect(line.getCodePoint(0), equals(0));
+      expect(line.getCodePoint(1), equals('X'.codeUnitAt(0)));
+    });
+
+    test(
+        'clears a wide glyph trailing cell when its leading cell is overwritten',
+        () {
+      final terminal = Terminal()..resize(10, 1);
+      terminal.write('😀');
+      terminal.write('\rX');
+
+      final line = terminal.buffer.lines[0];
+      expect(line.getCodePoint(0), equals('X'.codeUnitAt(0)));
+      expect(line.getCodePoint(1), equals(0));
+    });
+  });
+
   group('Buffer.resize()', () {
     test('should resize the buffer', () {
       final terminal = Terminal();

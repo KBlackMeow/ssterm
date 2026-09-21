@@ -3,7 +3,6 @@ import 'package:flutter/painting.dart';
 import 'package:xterm/src/ui/char_metrics.dart';
 import 'package:xterm/src/ui/palette_builder.dart';
 import 'package:xterm/src/ui/paragraph_cache.dart';
-import 'package:xterm/src/utils/hash_values.dart';
 import 'package:xterm/xterm.dart';
 
 /// Encapsulates the logic for painting various terminal elements.
@@ -182,13 +181,18 @@ class TerminalPainter {
     }
 
     // Glyph cache ignores underline; underline is drawn in [paintCellUnderline].
-    final cacheKey = hashValues(
-          cellData.foreground,
-          cellData.background,
-          cellData.flags & ~CellFlags.underline,
-          cellData.content,
-        ) ^
-        _textScaler.hashCode;
+    // Keep the complete style/content tuple as the map key. A bare combined
+    // hash is not unique: animated, colour-shifting terminal UIs create enough
+    // glyph variants to collide, after which the cached paragraph for a
+    // different character can be painted (for example an `i` in place of a
+    // spinner symbol) until the font cache is cleared.
+    final cacheKey = (
+      foreground: cellData.foreground,
+      background: cellData.background,
+      flags: cellData.flags & ~CellFlags.underline,
+      content: cellData.content,
+      textScaler: _textScaler,
+    );
     var paragraph = _paragraphCache.getLayoutFromCache(cacheKey);
 
     if (paragraph == null) {
@@ -213,7 +217,8 @@ class TerminalPainter {
 
       paragraph = _paragraphCache.performAndCacheLayout(
         String.fromCharCode(charCode),
-        style.copyWith(leadingDistribution: TextLeadingDistribution.proportional),
+        style.copyWith(
+            leadingDistribution: TextLeadingDistribution.proportional),
         _textScaler,
         cacheKey,
       );
@@ -256,7 +261,8 @@ class TerminalPainter {
   /// Renders a Unicode Block Element (U+2580–U+259F) as filled canvas
   /// rectangles. This guarantees pixel-perfect cell coverage with no font
   /// metric or line-height artifacts.
-  void _paintBlockElement(Canvas canvas, Offset offset, int charCode, Color color) {
+  void _paintBlockElement(
+      Canvas canvas, Offset offset, int charCode, Color color) {
     final w = _cellSize.width;
     final h = _cellSize.height;
     final x = offset.dx;
@@ -285,23 +291,40 @@ class TerminalPainter {
     }
 
     switch (charCode) {
-      case 0x2580: fill(0, 0, w, hh); // ▀ upper half
-      case 0x2581: fill(0, h * 7 / 8, w, h); // ▁ lower 1/8
-      case 0x2582: fill(0, h * 3 / 4, w, h); // ▂ lower 1/4
-      case 0x2583: fill(0, h * 5 / 8, w, h); // ▃ lower 3/8
-      case 0x2584: fill(0, hh, w, h); // ▄ lower half
-      case 0x2585: fill(0, h * 3 / 8, w, h); // ▅ lower 5/8
-      case 0x2586: fill(0, h / 4, w, h); // ▆ lower 3/4
-      case 0x2587: fill(0, h / 8, w, h); // ▇ lower 7/8
-      case 0x2588: fill(0, 0, w, h); // █ full
-      case 0x2589: fill(0, 0, w * 7 / 8, h); // ▉ left 7/8
-      case 0x258A: fill(0, 0, w * 3 / 4, h); // ▊ left 3/4
-      case 0x258B: fill(0, 0, w * 5 / 8, h); // ▋ left 5/8
-      case 0x258C: fill(0, 0, hw, h); // ▌ left half
-      case 0x258D: fill(0, 0, w * 3 / 8, h); // ▍ left 3/8
-      case 0x258E: fill(0, 0, w / 4, h); // ▎ left 1/4
-      case 0x258F: fill(0, 0, w / 8, h); // ▏ left 1/8
-      case 0x2590: fill(hw, 0, w, h); // ▐ right half
+      case 0x2580:
+        fill(0, 0, w, hh); // ▀ upper half
+      case 0x2581:
+        fill(0, h * 7 / 8, w, h); // ▁ lower 1/8
+      case 0x2582:
+        fill(0, h * 3 / 4, w, h); // ▂ lower 1/4
+      case 0x2583:
+        fill(0, h * 5 / 8, w, h); // ▃ lower 3/8
+      case 0x2584:
+        fill(0, hh, w, h); // ▄ lower half
+      case 0x2585:
+        fill(0, h * 3 / 8, w, h); // ▅ lower 5/8
+      case 0x2586:
+        fill(0, h / 4, w, h); // ▆ lower 3/4
+      case 0x2587:
+        fill(0, h / 8, w, h); // ▇ lower 7/8
+      case 0x2588:
+        fill(0, 0, w, h); // █ full
+      case 0x2589:
+        fill(0, 0, w * 7 / 8, h); // ▉ left 7/8
+      case 0x258A:
+        fill(0, 0, w * 3 / 4, h); // ▊ left 3/4
+      case 0x258B:
+        fill(0, 0, w * 5 / 8, h); // ▋ left 5/8
+      case 0x258C:
+        fill(0, 0, hw, h); // ▌ left half
+      case 0x258D:
+        fill(0, 0, w * 3 / 8, h); // ▍ left 3/8
+      case 0x258E:
+        fill(0, 0, w / 4, h); // ▎ left 1/4
+      case 0x258F:
+        fill(0, 0, w / 8, h); // ▏ left 1/8
+      case 0x2590:
+        fill(hw, 0, w, h); // ▐ right half
       // Shade chars: approximate as semi-transparent full-cell fill
       case 0x2591:
         paint.color = color.withValues(alpha: color.a * 0.25);
@@ -312,12 +335,17 @@ class TerminalPainter {
       case 0x2593:
         paint.color = color.withValues(alpha: color.a * 0.75);
         fill(0, 0, w, h);
-      case 0x2594: fill(0, 0, w, h / 8); // ▔ upper 1/8
-      case 0x2595: fill(w * 7 / 8, 0, w, h); // ▕ right 1/8
+      case 0x2594:
+        fill(0, 0, w, h / 8); // ▔ upper 1/8
+      case 0x2595:
+        fill(w * 7 / 8, 0, w, h); // ▕ right 1/8
       // Quadrant blocks
-      case 0x2596: fill(0, hh, hw, h); // ▖ lower-left
-      case 0x2597: fill(hw, hh, w, h); // ▗ lower-right
-      case 0x2598: fill(0, 0, hw, hh); // ▘ upper-left
+      case 0x2596:
+        fill(0, hh, hw, h); // ▖ lower-left
+      case 0x2597:
+        fill(hw, hh, w, h); // ▗ lower-right
+      case 0x2598:
+        fill(0, 0, hw, hh); // ▘ upper-left
       case 0x2599: // ▙ upper-left + lower half
         fill(0, 0, hw, hh);
         fill(0, hh, w, h);
@@ -330,7 +358,8 @@ class TerminalPainter {
       case 0x259C: // ▜ upper half + lower-right
         fill(0, 0, w, hh);
         fill(hw, hh, w, h);
-      case 0x259D: fill(hw, 0, w, hh); // ▝ upper-right
+      case 0x259D:
+        fill(hw, 0, w, hh); // ▝ upper-right
       case 0x259E: // ▞ upper-right + lower-left
         fill(hw, 0, w, hh);
         fill(0, hh, hw, h);
@@ -372,8 +401,8 @@ class TerminalPainter {
     }
 
     if (hasUnderline) {
-      final ulStyle =
-          (cellFlags & CellFlags.underlineStyleMask) >> CellFlags.underlineStyleShift;
+      final ulStyle = (cellFlags & CellFlags.underlineStyleMask) >>
+          CellFlags.underlineStyleShift;
       final y = offset.dy + _cellSize.height - 1;
       switch (ulStyle) {
         case 2: // double underline

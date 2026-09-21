@@ -1,3 +1,12 @@
+## [Unreleased] (ssterm fork)
+* Align cell widths with iTerm2/Terminal.app: Unicode 12–16 deltas,
+  emoji-presentation double width, and wide-cell replacement hygiene in
+  `Buffer.writeChar` — fixes one-column desync against cursor-addressed
+  TUIs (ChatCode/Claude Code) that left stale glyphs behind.
+* Add `TerminalWidthPolicy` (modern/legacy profile, ambiguous
+  double-width switch) and VS16/VS15 presentation rules that retro-adjust
+  the width of the preceding Extended_Pictographic cell.
+
 ## [4.0.0] - 2024-02-27
 * Update for Flutter 3.19 [#190]. Thanks [@domesticmouse].
 * Fix designate charset logic [#186]. Thanks [@djnalluri].

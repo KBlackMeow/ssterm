@@ -47,10 +47,8 @@ class RustTerminalBridge implements TerminalByteSink {
   int _rows;
   int? _historyEpoch;
   var _scrollbackSequence = 0;
-  var _previousCursorRow = 0;
   Timer? _historyRebuildTimer;
   Timer? _synchronizedOutputFlushTimer;
-  var _synchronizedOutputPending = false;
   var _resizePublishScheduled = false;
 
   static const _maxImmediateHistoryRows = 256;
@@ -101,7 +99,6 @@ class RustTerminalBridge implements TerminalByteSink {
     final synchronizedOutput =
         _renderBuffer.modeFlags & _modeSynchronizedOutput != 0;
     if (synchronizedOutput && !forceSynchronizedOutput) {
-      _synchronizedOutputPending = true;
       _synchronizedOutputFlushTimer ??= Timer(
         const Duration(milliseconds: 120),
         () {
@@ -113,28 +110,23 @@ class RustTerminalBridge implements TerminalByteSink {
       );
       return;
     }
-    final repaintSynchronizedFrame =
-        forceSynchronizedOutput || _synchronizedOutputPending;
-    _synchronizedOutputPending = false;
     _synchronizedOutputFlushTimer?.cancel();
     _synchronizedOutputFlushTimer = null;
-    final historyRebuilt = _syncHistory(forceRebuild: forceHistoryRebuild);
+    _syncHistory(forceRebuild: forceHistoryRebuild);
     _syncModes();
-    final cursorRow = _renderBuffer.cursorRow;
-    final dirtyStart = repaintSynchronizedFrame
-        ? 0
-        : historyRebuilt
-        ? 0
-        : update?.hasDirtyRows == true
-        ? update!.dirtyRowStart
-        : (_previousCursorRow < cursorRow ? _previousCursorRow : cursorRow);
-    final dirtyEnd = repaintSynchronizedFrame
-        ? _renderBuffer.rows - 1
-        : historyRebuilt
-        ? _renderBuffer.rows - 1
-        : update?.hasDirtyRows == true
-        ? update!.dirtyRowEnd
-        : (_previousCursorRow > cursorRow ? _previousCursorRow : cursorRow);
+
+    // `renderSnapshotInto` above already materializes the complete native
+    // screen for every PTY write.  Import that same complete frame here.
+    //
+    // Partial imports rely on one dirty-row interval from a single native
+    // feed.  Full-screen TUIs (Claude included) often split one visual update
+    // across several PTY chunks: a cursor move/erase may arrive in a different
+    // chunk from the replacement text.  Importing only the final dirty range
+    // then leaves obsolete cells in xterm's buffer, which looks like text
+    // permanently stuck on screen.  The typed-data row copies are cheap next
+    // to snapshot creation and make the Flutter buffer an exact screen mirror.
+    final dirtyStart = 0;
+    final dirtyEnd = _renderBuffer.rows - 1;
     terminal.applyPackedScreen(
       packedCells: _renderBuffer.words,
       columns: _renderBuffer.columns,
@@ -145,7 +137,6 @@ class RustTerminalBridge implements TerminalByteSink {
       dirtyRowStart: dirtyStart,
       dirtyRowEnd: dirtyEnd,
     );
-    _previousCursorRow = cursorRow;
   }
 
   bool _syncHistory({bool forceRebuild = false}) {

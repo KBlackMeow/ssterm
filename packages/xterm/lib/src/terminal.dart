@@ -21,6 +21,7 @@ import 'package:xterm/src/core/state.dart';
 import 'package:xterm/src/core/terminal_compat.dart';
 import 'package:xterm/src/core/terminal_capabilities.dart';
 import 'package:xterm/src/core/tabs.dart';
+import 'package:xterm/src/core/width_policy.dart';
 import 'package:xterm/src/utils/ascii.dart';
 import 'package:xterm/src/utils/circular_buffer.dart';
 
@@ -86,6 +87,11 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
   @override
   final TerminalCompat compat;
 
+  /// Cell-width semantics for newly written characters. The object itself is
+  /// mutable so hosts can change width settings on live terminals.
+  @override
+  final TerminalWidthPolicy widthPolicy;
+
   /// Facts used when responding to terminal queries.
   TerminalCapabilities capabilities;
 
@@ -102,13 +108,14 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     this.onResize,
     this.platform = TerminalTargetPlatform.unknown,
     this.compat = TerminalCompat.vim,
+    TerminalWidthPolicy? widthPolicy,
     this.capabilities = const TerminalCapabilities(),
     this.inputHandler = defaultInputHandler,
     this.mouseHandler = defaultMouseHandler,
     this.onPrivateOSC,
     this.reflowEnabled = true,
     this.wordSeparators,
-  });
+  }) : widthPolicy = widthPolicy ?? TerminalWidthPolicy();
 
   late final _parser = EscapeParser(this);
 

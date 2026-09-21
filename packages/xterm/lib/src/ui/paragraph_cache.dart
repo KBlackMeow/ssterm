@@ -8,13 +8,13 @@ import 'package:xterm/src/ui/terminal_text_style.dart';
 /// text multiple times, which is expensive.
 class ParagraphCache {
   ParagraphCache(int maximumSize)
-      : _cache = LruMap<int, Paragraph>(maximumSize: maximumSize);
+      : _cache = LruMap<Object, Paragraph>(maximumSize: maximumSize);
 
-  final LruMap<int, Paragraph> _cache;
+  final LruMap<Object, Paragraph> _cache;
 
   /// Returns a [Paragraph] for the given [key]. [key] is the same as the
   /// key argument to [performAndCacheLayout].
-  Paragraph? getLayoutFromCache(int key) {
+  Paragraph? getLayoutFromCache(Object key) {
     return _cache[key];
   }
 
@@ -25,7 +25,7 @@ class ParagraphCache {
     String text,
     TextStyle style,
     TextScaler textScaler,
-    int key,
+    Object key,
   ) {
     final builder = ParagraphBuilder(
       style.getParagraphStyle(textHeightBehavior: kTerminalTextHeightBehavior),

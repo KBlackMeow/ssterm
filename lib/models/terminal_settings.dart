@@ -66,15 +66,18 @@ class TerminalSettings {
     this.wallpaperOpacity = 1.0,
     this.wallpaperBlur = 12.0,
     this.backgroundOpacity = 0.88,
-  })  : themePresetId = TerminalThemePresets.all.containsKey(themePresetId) ||
-                themePresetId == 'custom'
-            ? themePresetId!
-            : TerminalThemePresets.defaultId,
-        fontFamily = fontFamily ?? defaultFontFamily,
-        cjkFontFamily = cjkFontFamily ?? defaultCjkFontFamily,
-        fontSize = fontSize ?? defaultFontSize,
-        fontWeight = fontWeight ?? defaultFontWeight,
-        customTheme = customTheme ?? TerminalThemePresets.defaultTheme;
+    this.widthProfile = 'modern',
+    this.ambiguousDoubleWidth = false,
+  }) : themePresetId =
+           TerminalThemePresets.all.containsKey(themePresetId) ||
+               themePresetId == 'custom'
+           ? themePresetId!
+           : TerminalThemePresets.defaultId,
+       fontFamily = fontFamily ?? defaultFontFamily,
+       cjkFontFamily = cjkFontFamily ?? defaultCjkFontFamily,
+       fontSize = fontSize ?? defaultFontSize,
+       fontWeight = fontWeight ?? defaultFontWeight,
+       customTheme = customTheme ?? TerminalThemePresets.defaultTheme;
 
   String themePresetId;
   TerminalTheme customTheme;
@@ -92,13 +95,25 @@ class TerminalSettings {
 
   /// Filename under `~/.ssterm/wallpapers/`, or null when none chosen.
   String? wallpaperId;
+
   /// When false, [wallpaperId] is kept but wallpaper is not shown.
   bool wallpaperEnabled;
   double wallpaperOpacity;
+
   /// Gaussian blur radius (sigma) for the wallpaper, 0 = none.
   double wallpaperBlur;
+
   /// Terminal cell background opacity when a wallpaper is set (0 = transparent).
   double backgroundOpacity;
+
+  /// Cell-width semantics for new output: 'modern' (Unicode 16 deltas +
+  /// emoji double width + VS16/VS15 rules, iTerm2 parity) or 'legacy'
+  /// (historical Unicode 11 table, for old full-screen apps).
+  String widthProfile;
+
+  /// iTerm2's "Ambiguous Double Width": treat East_Asian_Width=A characters
+  /// (±, ※, some box glyphs) as two cells. Off by default like iTerm2.
+  bool ambiguousDoubleWidth;
 
   bool get hasWallpaper =>
       wallpaperEnabled && wallpaperId != null && wallpaperId!.isNotEmpty;
@@ -153,25 +168,25 @@ class TerminalSettings {
   static List<String> get fontOptions {
     if (Platform.isWindows) {
       return const [
-        'Consolas',          // system — default
-        'JetBrainsMono',     // bundled
-        'Cascadia Mono',     // system (Win10 1809+/Win11)
-        'Cascadia Code',     // system
-        'Courier New',       // system
+        'Consolas', // system — default
+        'JetBrainsMono', // bundled
+        'Cascadia Mono', // system (Win10 1809+/Win11)
+        'Cascadia Code', // system
+        'Courier New', // system
       ];
     }
     if (Platform.isMacOS) {
       return const [
-        'Monaco',            // system — default
-        'Menlo',             // system
-        'SF Mono',           // system (recent macOS)
-        'JetBrainsMono',     // bundled
-        'Courier New',       // system
+        'Monaco', // system — default
+        'Menlo', // system
+        'SF Mono', // system (recent macOS)
+        'JetBrainsMono', // bundled
+        'Courier New', // system
       ];
     }
     return const [
-      'JetBrainsMono',       // bundled — default
-      'DejaVu Sans Mono',    // common Linux system font
+      'JetBrainsMono', // bundled — default
+      'DejaVu Sans Mono', // common Linux system font
       'Liberation Mono',
       'monospace',
     ];
@@ -189,9 +204,9 @@ class TerminalSettings {
   /// suffix so users can see which fonts ship with the app vs. depend on the
   /// system having them installed.
   static String fontFamilyLabel(String family) => switch (family) {
-        'JetBrainsMono' => 'JetBrains Mono (bundled)',
-        _ => family,
-      };
+    'JetBrainsMono' => 'JetBrains Mono (bundled)',
+    _ => family,
+  };
 
   static List<String> get cjkFontOptions {
     if (Platform.isWindows) {
@@ -203,11 +218,7 @@ class TerminalSettings {
       ];
     }
     if (Platform.isMacOS) {
-      return const [
-        'PingFang SC',
-        'STHeiti',
-        'Noto Sans Mono CJK SC',
-      ];
+      return const ['PingFang SC', 'STHeiti', 'Noto Sans Mono CJK SC'];
     }
     return const [
       'Noto Sans Mono CJK SC',
@@ -282,7 +293,7 @@ class TerminalSettings {
     final base = themePresetId == 'custom'
         ? customTheme
         : TerminalThemePresets.all[themePresetId] ??
-            TerminalThemePresets.defaultTheme;
+              TerminalThemePresets.defaultTheme;
     return _brightenText(base);
   }
 
@@ -326,20 +337,20 @@ class TerminalSettings {
   }
 
   TerminalStyle toTerminalStyle() => TerminalStyle(
-        fontSize: fontSize,
-        height: lineHeight,
-        fontFamily: fontFamily,
-        fontFamilyFallback: buildFontFamilyFallback(),
-        fontWeight: fontWeight,
-        // Windows: Consolas and most system monospaces lack a real bold cut,
-        // so Skia synthesizes bold by thickening strokes. Combined with
-        // prompt SGR-1 residue from plugin-heavy zsh setups under WSL, plain
-        // command output (e.g. `ifconfig`) ends up rendered noticeably
-        // heavier than on macOS. Match the bold weight to the regular weight
-        // on Windows so the ANSI bold flag stops triggering synthesized bold.
-        boldFontWeight: Platform.isWindows ? fontWeight : FontWeight.bold,
-        letterSpacing: defaultLetterSpacing,
-      );
+    fontSize: fontSize,
+    height: lineHeight,
+    fontFamily: fontFamily,
+    fontFamilyFallback: buildFontFamilyFallback(),
+    fontWeight: fontWeight,
+    // Windows: Consolas and most system monospaces lack a real bold cut,
+    // so Skia synthesizes bold by thickening strokes. Combined with
+    // prompt SGR-1 residue from plugin-heavy zsh setups under WSL, plain
+    // command output (e.g. `ifconfig`) ends up rendered noticeably
+    // heavier than on macOS. Match the bold weight to the regular weight
+    // on Windows so the ANSI bold flag stops triggering synthesized bold.
+    boldFontWeight: Platform.isWindows ? fontWeight : FontWeight.bold,
+    letterSpacing: defaultLetterSpacing,
+  );
 
   TerminalSettings copyWith({
     String? themePresetId,
@@ -359,6 +370,8 @@ class TerminalSettings {
     double? wallpaperOpacity,
     double? wallpaperBlur,
     double? backgroundOpacity,
+    String? widthProfile,
+    bool? ambiguousDoubleWidth,
   }) {
     return TerminalSettings(
       themePresetId: themePresetId ?? this.themePresetId,
@@ -379,14 +392,16 @@ class TerminalSettings {
       wallpaperOpacity: wallpaperOpacity ?? this.wallpaperOpacity,
       wallpaperBlur: wallpaperBlur ?? this.wallpaperBlur,
       backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
+      widthProfile: widthProfile ?? this.widthProfile,
+      ambiguousDoubleWidth: ambiguousDoubleWidth ?? this.ambiguousDoubleWidth,
     );
   }
 
   void applyPreset(String id) {
     themePresetId = id;
     if (id != 'custom') {
-      customTheme = TerminalThemePresets.all[id] ??
-          TerminalThemePresets.defaultTheme;
+      customTheme =
+          TerminalThemePresets.all[id] ?? TerminalThemePresets.defaultTheme;
     }
   }
 
@@ -399,15 +414,16 @@ class TerminalSettings {
 
   static TerminalSettings fromJson(Map<String, dynamic>? json) {
     if (json == null) return TerminalSettings();
-    final preset = json['themePreset'] as String? ?? TerminalThemePresets.defaultId;
+    final preset =
+        json['themePreset'] as String? ?? TerminalThemePresets.defaultId;
     TerminalTheme custom = TerminalThemePresets.defaultTheme;
     if (json['customTheme'] is Map<String, dynamic>) {
       custom = TerminalThemeCodec.themeFromJson(
         json['customTheme'] as Map<String, dynamic>,
       );
     } else if (preset != 'custom') {
-      custom = TerminalThemePresets.all[preset] ??
-          TerminalThemePresets.defaultTheme;
+      custom =
+          TerminalThemePresets.all[preset] ?? TerminalThemePresets.defaultTheme;
     }
 
     final savedFont = json['fontFamily'] as String?;
@@ -426,42 +442,50 @@ class TerminalSettings {
       cursorBlinkPeriodMs: json['cursorBlinkPeriodMs'] as int? ?? 530,
       textScale: (json['textScale'] as num?)?.toDouble() ?? 1.0,
       wallpaperId: json['wallpaperId'] as String?,
-      wallpaperEnabled: json['wallpaperEnabled'] as bool? ??
+      wallpaperEnabled:
+          json['wallpaperEnabled'] as bool? ??
           (json['wallpaperId'] != null &&
               (json['wallpaperId'] as String).isNotEmpty),
       wallpaperOpacity: (json['wallpaperOpacity'] as num?)?.toDouble() ?? 1.0,
       wallpaperBlur: (json['wallpaperBlur'] as num?)?.toDouble() ?? 12.0,
-      backgroundOpacity: (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.88,
+      backgroundOpacity:
+          (json['backgroundOpacity'] as num?)?.toDouble() ?? 0.88,
+      widthProfile: json['widthProfile'] == 'legacy' ? 'legacy' : 'modern',
+      ambiguousDoubleWidth: json['ambiguousDoubleWidth'] is bool
+          ? json['ambiguousDoubleWidth'] as bool
+          : false,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'themePreset': themePresetId,
-        if (themePresetId == 'custom')
-          'customTheme': TerminalThemeCodec.themeToJson(customTheme),
-        'fontFamily': fontFamily,
-        'cjkFontFamily': cjkFontFamily,
-        'fontSize': fontSize,
-        'lineHeight': lineHeight,
-        'fontWeight': _fontWeightToString(fontWeight),
-        'cursorType': _cursorTypeToString(cursorType),
-        'cursorBlink': cursorBlink,
-        'cursorBlinkPeriodMs': cursorBlinkPeriodMs,
-        'textScale': textScale,
-        if (wallpaperId != null) 'wallpaperId': wallpaperId,
-        'wallpaperEnabled': wallpaperEnabled,
-        'wallpaperOpacity': wallpaperOpacity,
-        'wallpaperBlur': wallpaperBlur,
-        'backgroundOpacity': backgroundOpacity,
-      };
+    'themePreset': themePresetId,
+    if (themePresetId == 'custom')
+      'customTheme': TerminalThemeCodec.themeToJson(customTheme),
+    'fontFamily': fontFamily,
+    'cjkFontFamily': cjkFontFamily,
+    'fontSize': fontSize,
+    'lineHeight': lineHeight,
+    'fontWeight': _fontWeightToString(fontWeight),
+    'cursorType': _cursorTypeToString(cursorType),
+    'cursorBlink': cursorBlink,
+    'cursorBlinkPeriodMs': cursorBlinkPeriodMs,
+    'textScale': textScale,
+    if (wallpaperId != null) 'wallpaperId': wallpaperId,
+    'wallpaperEnabled': wallpaperEnabled,
+    'wallpaperOpacity': wallpaperOpacity,
+    'wallpaperBlur': wallpaperBlur,
+    'backgroundOpacity': backgroundOpacity,
+    'widthProfile': widthProfile,
+    'ambiguousDoubleWidth': ambiguousDoubleWidth,
+  };
 
   static FontWeight _fontWeightFromString(String? s) => switch (s) {
-        'light' => FontWeight.w300,
-        'medium' => FontWeight.w500,
-        'semibold' => FontWeight.w600,
-        'bold' => FontWeight.bold,
-        _ => FontWeight.w400,
-      };
+    'light' => FontWeight.w300,
+    'medium' => FontWeight.w500,
+    'semibold' => FontWeight.w600,
+    'bold' => FontWeight.bold,
+    _ => FontWeight.w400,
+  };
 
   static String _fontWeightToString(FontWeight w) {
     if (w == FontWeight.bold) return 'bold';
@@ -471,16 +495,30 @@ class TerminalSettings {
     return 'light';
   }
 
-  static TerminalCursorType _cursorTypeFromString(String? s) =>
-      switch (s) {
-        'underline' => TerminalCursorType.underline,
-        'verticalBar' => TerminalCursorType.verticalBar,
-        _ => TerminalCursorType.block,
-      };
+  static TerminalCursorType _cursorTypeFromString(String? s) => switch (s) {
+    'underline' => TerminalCursorType.underline,
+    'verticalBar' => TerminalCursorType.verticalBar,
+    _ => TerminalCursorType.block,
+  };
 
   static String _cursorTypeToString(TerminalCursorType t) => switch (t) {
-        TerminalCursorType.underline => 'underline',
-        TerminalCursorType.verticalBar => 'verticalBar',
-        TerminalCursorType.block => 'block',
-      };
+    TerminalCursorType.underline => 'underline',
+    TerminalCursorType.verticalBar => 'verticalBar',
+    TerminalCursorType.block => 'block',
+  };
+}
+
+/// Process-wide cell-width policy shared by every [Terminal] this app
+/// creates, so width-setting changes apply to live sessions for new output
+/// without recreating terminals (mirrors iTerm2, which applies width
+/// changes to new output only).
+final TerminalWidthPolicy terminalWidthPolicy = TerminalWidthPolicy();
+
+/// Pushes persisted width preferences into [terminalWidthPolicy]. Called at
+/// startup, when a terminal is created, and whenever settings change.
+void applyTerminalWidthSettings(TerminalSettings settings) {
+  terminalWidthPolicy.profile = settings.widthProfile == 'legacy'
+      ? WidthProfile.legacy
+      : WidthProfile.modern;
+  terminalWidthPolicy.ambiguousDoubleWidth = settings.ambiguousDoubleWidth;
 }

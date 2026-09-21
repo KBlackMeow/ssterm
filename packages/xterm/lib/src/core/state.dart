@@ -1,9 +1,15 @@
 import 'package:xterm/src/core/cursor.dart';
 import 'package:xterm/src/core/mouse/mode.dart';
 import 'package:xterm/src/core/terminal_compat.dart';
+import 'package:xterm/src/core/width_policy.dart';
 
 abstract class TerminalState {
   TerminalCompat get compat;
+
+  /// Cell-width semantics (emoji double width, VS16/VS15, ambiguous width)
+  /// applied to newly written characters.
+  TerminalWidthPolicy get widthPolicy;
+
   int get viewWidth;
 
   int get viewHeight;

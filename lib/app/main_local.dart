@@ -41,26 +41,37 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
 
   // ── Local terminal ─────────────────────────────────────────────────────────
 
-  Terminal _createTerminal({bool reflowEnabled = true}) => Terminal(
-    maxLines: 5000,
-    platform: detectTerminalHostPlatform(),
-    reflowEnabled: reflowEnabled,
-    capabilities: TerminalCapabilities(
-      backgroundRgb:
-          _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
-    ),
-  );
+  Terminal _createTerminal({bool reflowEnabled = true}) {
+    // Every terminal shares the process-wide policy instance so width
+    // settings apply to live sessions without recreating them.
+    applyTerminalWidthSettings(_config.terminal);
+    return Terminal(
+      maxLines: 5000,
+      platform: detectTerminalHostPlatform(),
+      reflowEnabled: reflowEnabled,
+      widthPolicy: terminalWidthPolicy,
+      capabilities: TerminalCapabilities(
+        backgroundRgb:
+            _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
+      ),
+    );
+  }
 
   RustTerminalCore? _openRustTerminalCore({
     required int columns,
     required int rows,
   }) {
-    // Rust is the production parser and screen authority. xterm is retained
-    // only as the Flutter painting/input surface and receives packed native
-    // screen snapshots through RustTerminalBridge. Keep one explicit rollback
-    // switch for diagnosing platform-specific native-loader problems.
+    // ChatCode and similar full-screen CLIs make extensive use of alternate
+    // buffers and synchronized, cursor-addressed output. Until the native
+    // core has feature parity for those sequences, use xterm's battle-tested
+    // parser on macOS, where this is the shipped desktop target. The native
+    // parser remains available for performance testing with
+    // SSTERM_RUST_TERMINAL_CORE=1.
+    final forceRustTerminalCore =
+        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '1';
     if (Platform.environment['SSTERM_DART_TERMINAL_CORE'] == '1' ||
-        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '0') {
+        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '0' ||
+        (Platform.isMacOS && !forceRustTerminalCore)) {
       return null;
     }
     try {

@@ -16,6 +16,41 @@ void main() {
       expect(terminal.buffer.lines[0].getText(), equals(text));
     });
 
+    test('uses ChatCode-compatible widths for status symbols and emoji', () {
+      final terminal = Terminal();
+      terminal.write('✉⏺${String.fromCharCode(0x1fae8)}X');
+
+      final line = terminal.buffer.lines[0];
+      expect(line.getWidth(0), equals(2));
+      expect(line.getCodePoint(1), equals(0));
+      expect(line.getWidth(2), equals(1));
+      expect(line.getWidth(3), equals(2));
+      expect(line.getCodePoint(4), equals(0));
+      expect(line.getCodePoint(5), equals('X'.codeUnitAt(0)));
+    });
+
+    test('does not retain spinner text beside the ChatCode tool marker', () {
+      final terminal = Terminal();
+      terminal.write('✢ Burrowing...');
+      terminal.write('\r⏺\x1b[1C当前');
+
+      final line = terminal.buffer.lines[0];
+      expect(line.getWidth(0), equals(1));
+      expect(line.getCodePoint(1), equals(' '.codeUnitAt(0)));
+      expect(line.getCodePoint(2), equals('当'.runes.single));
+      expect(line.getCodePoint(3), equals(0));
+      expect(line.getCodePoint(4), equals('前'.runes.single));
+    });
+
+    test('keeps ornamental stars such as U+2722 single-width', () {
+      final terminal = Terminal();
+      terminal.write('✢X');
+
+      final line = terminal.buffer.lines[0];
+      expect(line.getWidth(0), equals(1));
+      expect(line.getCodePoint(1), equals('X'.codeUnitAt(0)));
+    });
+
     test('can specify a range', () {
       final terminal = Terminal();
       terminal.write('Hello World');

@@ -22,4 +22,5 @@ export 'src/core/platform_detect.dart';
 export 'src/core/state.dart';
 export 'src/core/terminal_compat.dart';
 export 'src/core/terminal_capabilities.dart';
+export 'src/core/width_policy.dart';
 export 'src/terminal.dart';
