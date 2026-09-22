@@ -5,16 +5,13 @@ import 'package:ssterm/models/mcp_server_config.dart';
 
 void main() {
   group('AgentToolRegistry', () {
-    test('focused registry retains core tools and filters optional tools', () {
+    test('focused registry exposes only requested and safety tools', () {
       final registry = AgentToolRegistry.build(
         webSearchEnabled: true,
         fileWriteEnabled: true,
       ).limitedTo({'bash'});
 
-      expect(
-        registry.names,
-        containsAll(['bash', 'ask_user_question', 'read_image']),
-      );
+      expect(registry.names, ['bash', 'ask_user_question']);
       expect(registry.names, isNot(contains('web_search')));
       expect(registry.names, isNot(contains('write_file')));
       expect(registry.names, isNot(contains('edit_file')));
@@ -71,6 +68,7 @@ void main() {
 
     expect(tool.toJsonSchema()['required'], ['path']);
     expect(tool.description, contains('workspace'));
+    expect(tool.description, contains('Never use it for text'));
   });
 
   test('exposes each connected MCP tool with its discovered schema', () {

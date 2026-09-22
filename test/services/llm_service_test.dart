@@ -1285,6 +1285,7 @@ Done.
 
       expect(prompt, contains('<read_image_tool>'));
       expect(prompt, contains('"name":"read_image"'));
+      expect(prompt, contains('Never use it for source code, SQL'));
     });
     // The system prompt is the heaviest reusable thing on every turn.
     // These tests pin the cache-key shape so we can't accidentally

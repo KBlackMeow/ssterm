@@ -99,6 +99,7 @@ Example INVESTIGATE-then-ASK turn:
 String _buildReadImageBlock() => '''
 <read_image_tool>
 Use this tool when the task requires seeing a local image. It accepts an absolute path or a path relative to the current workspace; paths outside that workspace are rejected.
+Supported image types are PNG, JPEG, GIF, WebP, and BMP. Never use it for source code, SQL, configuration, logs, or any other text file; inspect those with `bash` instead.
 
 ```tool_call
 {"id":"call_<short_unique_id>","name":"read_image","arguments":{"path":"<image path>"}}
