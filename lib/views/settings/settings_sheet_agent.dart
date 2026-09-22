@@ -169,7 +169,8 @@ extension _AgentSettingsExt on _SettingsPageState {
   // ── Skills section ─────────────────────────────────────────────────────
   //
   // Lists every skill discovered by [SkillService.init] (asset-bundled,
-  // dynamic, AND `~/.ssterm/skills/<id>/SKILL.md`).  Each row toggles
+  // dynamic, `~/.ssterm/skills/<id>/SKILL.md`, AND
+  // `~/.agents/skills/<id>/SKILL.md`). Each row toggles
   // whether the LLM is allowed to use the skill this session.
   //
   // The persisted shape is [AgentConfig.enabledSkills] — a whitelist
@@ -288,7 +289,8 @@ extension _AgentSettingsExt on _SettingsPageState {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
                 child: Text(
-                  'ZIP must contain <id>/SKILL.md. You can also drop a ZIP here.',
+                  'ZIP must contain <id>/SKILL.md. You can also drop a ZIP '
+                  'here. Shared skills: ~/.agents/skills.',
                   style: const TextStyle(
                     color: _kFgMuted,
                     fontSize: 10.5,
@@ -343,6 +345,7 @@ extension _AgentSettingsExt on _SettingsPageState {
       SkillSource.asset => 'built-in',
       SkillSource.bundled => 'dynamic',
       SkillSource.user => 'user',
+      SkillSource.shared => 'shared',
     };
     return SwitchListTile(
       contentPadding: const EdgeInsets.fromLTRB(12, 0, 12, 0),

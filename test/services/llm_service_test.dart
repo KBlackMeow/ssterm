@@ -1561,9 +1561,15 @@ Done.
   });
 
   group('SkillService.buildPromptCatalogue Cursor-style format', () {
+    late Directory tempRoot;
+
     setUp(() async {
       BundledSkillRegistry.debugReset();
-      SkillService.debugUserSkillsDirOverride = null;
+      tempRoot = await Directory.systemTemp.createTemp(
+        'ssterm-llm-skill-test-',
+      );
+      SkillService.debugUserSkillsDirOverride = '${tempRoot.path}/user';
+      SkillService.debugSharedSkillsDirOverride = '${tempRoot.path}/shared';
       BundledSkillRegistry.register(
         BundledSkillDef(
           id: 'alpha',
@@ -1580,6 +1586,12 @@ Done.
       );
       await SkillService.init();
       LlmService.refreshSystemPrompt();
+    });
+
+    tearDown(() async {
+      SkillService.debugUserSkillsDirOverride = null;
+      SkillService.debugSharedSkillsDirOverride = null;
+      if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
     });
 
     test('emits one <agent_skill id=… path=…>desc</agent_skill> per skill', () {
@@ -1678,6 +1690,16 @@ Done.
       SkillService.debugUserSkillsDirOverride = null;
       expect(
         SkillService.userSkillsDirPath.endsWith('/.ssterm/skills'),
+        isTrue,
+      );
+    });
+
+    test('SkillService.sharedSkillsDirPath honours the debug override', () {
+      SkillService.debugSharedSkillsDirOverride = '/tmp/my-shared-skills';
+      expect(SkillService.sharedSkillsDirPath, equals('/tmp/my-shared-skills'));
+      SkillService.debugSharedSkillsDirOverride = null;
+      expect(
+        SkillService.sharedSkillsDirPath.endsWith('/.agents/skills'),
         isTrue,
       );
     });

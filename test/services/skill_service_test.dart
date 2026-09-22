@@ -14,24 +14,38 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('SkillService.filterEnabled', () {
+    late Directory tempRoot;
+
     setUp(() async {
       // Each test gets a clean registry + service state so assertions
       // about catalogue size aren't poisoned by sibling tests.
       BundledSkillRegistry.debugReset();
-      SkillService.debugUserSkillsDirOverride = null;
+      tempRoot = await Directory.systemTemp.createTemp('ssterm-skill-filter-');
+      SkillService.debugUserSkillsDirOverride = '${tempRoot.path}/user';
+      SkillService.debugSharedSkillsDirOverride = '${tempRoot.path}/shared';
       // Stub two synthetic bundled skills so we don't depend on the
       // real asset bundle in a unit-test context.
-      BundledSkillRegistry.register(BundledSkillDef(
-        id: 'alpha',
-        description: 'first synthetic skill',
-        buildBody: () async => 'alpha-body',
-      ));
-      BundledSkillRegistry.register(BundledSkillDef(
-        id: 'beta',
-        description: 'second synthetic skill',
-        buildBody: () async => 'beta-body',
-      ));
+      BundledSkillRegistry.register(
+        BundledSkillDef(
+          id: 'alpha',
+          description: 'first synthetic skill',
+          buildBody: () async => 'alpha-body',
+        ),
+      );
+      BundledSkillRegistry.register(
+        BundledSkillDef(
+          id: 'beta',
+          description: 'second synthetic skill',
+          buildBody: () async => 'beta-body',
+        ),
+      );
       await SkillService.init();
+    });
+
+    tearDown(() async {
+      SkillService.debugUserSkillsDirOverride = null;
+      SkillService.debugSharedSkillsDirOverride = null;
+      if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
     });
 
     test('null whitelist returns every installed skill', () {
@@ -72,19 +86,22 @@ void main() {
     setUp(() async {
       BundledSkillRegistry.debugReset();
       tempRoot = await Directory.systemTemp.createTemp('ssterm-skill-test-');
-      SkillService.debugUserSkillsDirOverride = tempRoot.path;
+      SkillService.debugUserSkillsDirOverride = '${tempRoot.path}/ssterm';
+      SkillService.debugSharedSkillsDirOverride = '${tempRoot.path}/agents';
     });
 
     tearDown(() async {
       SkillService.debugUserSkillsDirOverride = null;
+      SkillService.debugSharedSkillsDirOverride = null;
       if (await tempRoot.exists()) {
         await tempRoot.delete(recursive: true);
       }
     });
 
     test('loads a well-formed user SKILL.md', () async {
-      final dir = Directory('${tempRoot.path}/sample-user-skill')
-        ..createSync(recursive: true);
+      final dir = Directory(
+        '${SkillService.debugUserSkillsDirOverride}/sample-user-skill',
+      )..createSync(recursive: true);
       File('${dir.path}/SKILL.md').writeAsStringSync('''
 ---
 name: sample-user-skill
@@ -103,36 +120,37 @@ This is the body the agent would see when it loads me.
           .toList();
       expect(hit, hasLength(1));
       expect(hit.first.source, equals(SkillSource.user));
-      expect(hit.first.description,
-          equals('A user-installed sample skill for testing.'));
-      expect(hit.first.whenToUse,
-          equals('never in production, this is a fixture.'));
+      expect(
+        hit.first.description,
+        equals('A user-installed sample skill for testing.'),
+      );
+      expect(
+        hit.first.whenToUse,
+        equals('never in production, this is a fixture.'),
+      );
 
       final body = await SkillService.loadBody('sample-user-skill');
       expect(body, contains('Sample user skill body'));
     });
 
     test('skips a user dir with missing SKILL.md', () async {
-      Directory('${tempRoot.path}/empty-skill').createSync(recursive: true);
+      Directory(
+        '${SkillService.debugUserSkillsDirOverride}/empty-skill',
+      ).createSync(recursive: true);
       await SkillService.init();
-      expect(
-        SkillService.skills.where((s) => s.id == 'empty-skill'),
-        isEmpty,
-      );
+      expect(SkillService.skills.where((s) => s.id == 'empty-skill'), isEmpty);
     });
 
     test('skips a user SKILL.md with broken frontmatter', () async {
-      final dir = Directory('${tempRoot.path}/broken-skill')
-        ..createSync(recursive: true);
+      final dir = Directory(
+        '${SkillService.debugUserSkillsDirOverride}/broken-skill',
+      )..createSync(recursive: true);
       File('${dir.path}/SKILL.md').writeAsStringSync(
         'no frontmatter at all, just markdown — should be skipped\n',
       );
 
       await SkillService.init();
-      expect(
-        SkillService.skills.where((s) => s.id == 'broken-skill'),
-        isEmpty,
-      );
+      expect(SkillService.skills.where((s) => s.id == 'broken-skill'), isEmpty);
     });
 
     test('user dir overlay does not crash when the root is absent', () async {
@@ -140,22 +158,28 @@ This is the body the agent would see when it loads me.
       // expose any bundled / asset skills it discovered.
       SkillService.debugUserSkillsDirOverride =
           '${tempRoot.path}/definitely-not-here';
+      SkillService.debugSharedSkillsDirOverride =
+          '${tempRoot.path}/also-definitely-not-here';
       await tempRoot.delete(recursive: true);
       await SkillService.init();
       // No throw === pass.
       expect(SkillService.isInitialized, isTrue);
     });
 
-    test('bundled skill of the same id wins over user dir (shadowing)',
-        () async {
-      BundledSkillRegistry.register(BundledSkillDef(
-        id: 'shadowed',
-        description: 'bundled version',
-        buildBody: () async => 'bundled-body',
-      ));
-      final dir = Directory('${tempRoot.path}/shadowed')
-        ..createSync(recursive: true);
-      File('${dir.path}/SKILL.md').writeAsStringSync('''
+    test(
+      'bundled skill of the same id wins over user dir (shadowing)',
+      () async {
+        BundledSkillRegistry.register(
+          BundledSkillDef(
+            id: 'shadowed',
+            description: 'bundled version',
+            buildBody: () async => 'bundled-body',
+          ),
+        );
+        final dir = Directory(
+          '${SkillService.debugUserSkillsDirOverride}/shadowed',
+        )..createSync(recursive: true);
+        File('${dir.path}/SKILL.md').writeAsStringSync('''
 ---
 name: shadowed
 description: user version that should NOT win.
@@ -163,12 +187,74 @@ description: user version that should NOT win.
 user-body
 ''');
 
+        await SkillService.init();
+
+        final hits = SkillService.skills
+            .where((s) => s.id == 'shadowed')
+            .toList();
+        expect(hits, hasLength(1));
+        expect(hits.first.source, equals(SkillSource.bundled));
+        expect(hits.first.description, equals('bundled version'));
+      },
+    );
+
+    test('loads a well-formed shared .agents skill', () async {
+      final dir = Directory(
+        '${SkillService.debugSharedSkillsDirOverride}/shared-helper',
+      )..createSync(recursive: true);
+      File('${dir.path}/SKILL.md').writeAsStringSync('''
+---
+name: shared-helper
+description: A skill shared across agent products.
+---
+shared-body
+''');
+
       await SkillService.init();
 
-      final hits = SkillService.skills.where((s) => s.id == 'shadowed').toList();
-      expect(hits, hasLength(1));
-      expect(hits.first.source, equals(SkillSource.bundled));
-      expect(hits.first.description, equals('bundled version'));
+      final hit = SkillService.skills.singleWhere(
+        (skill) => skill.id == 'shared-helper',
+      );
+      expect(hit.source, SkillSource.shared);
+      expect(
+        hit.fullPath,
+        '${SkillService.debugSharedSkillsDirOverride}/shared-helper/SKILL.md',
+      );
+      expect(await SkillService.loadBody('shared-helper'), 'shared-body');
+    });
+
+    test('SSTerm user skill wins over shared .agents skill', () async {
+      for (final entry in [
+        (
+          root: SkillService.debugUserSkillsDirOverride!,
+          description: 'SSTerm-specific version',
+          body: 'ssterm-body',
+        ),
+        (
+          root: SkillService.debugSharedSkillsDirOverride!,
+          description: 'shared version',
+          body: 'shared-body',
+        ),
+      ]) {
+        final dir = Directory('${entry.root}/same-id')
+          ..createSync(recursive: true);
+        File('${dir.path}/SKILL.md').writeAsStringSync('''
+---
+name: same-id
+description: ${entry.description}
+---
+${entry.body}
+''');
+      }
+
+      await SkillService.init();
+
+      final hit = SkillService.skills.singleWhere(
+        (skill) => skill.id == 'same-id',
+      );
+      expect(hit.source, SkillSource.user);
+      expect(hit.description, 'SSTerm-specific version');
+      expect(await SkillService.loadBody('same-id'), 'ssterm-body');
     });
   });
 }

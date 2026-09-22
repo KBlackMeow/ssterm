@@ -78,7 +78,7 @@ class Skill {
   ///
   ///   • asset skills  → `assets/skills/<id>/SKILL.md` (the in-bundle path
   ///     from the asset manifest).
-  ///   • user skills   → the real absolute filesystem path the user can
+  ///   • user/shared skills → the real absolute filesystem path the user can
   ///     `cat` / open in their editor (e.g.
   ///     `/Users/foo/.ssterm/skills/my-skill/SKILL.md`).
   ///   • bundled (dynamic) skills → `bundled://<id>` — these have no file
@@ -204,7 +204,8 @@ class SkillParseResult {
 
 /// Where a skill came from.  Mostly diagnostic — surfaced in the Settings
 /// UI so the user can tell a built-in `git-bisect` apart from one they
-/// dropped into `~/.ssterm/skills/git-bisect/`.
+/// dropped into `~/.ssterm/skills/git-bisect/` or shared from
+/// `~/.agents/skills/git-bisect/`.
 enum SkillSource {
   /// Compiled into the app under `assets/skills/<id>/`.
   asset,
@@ -220,4 +221,8 @@ enum SkillSource {
   /// returned by `appBasePath()` — Windows uses `%USERPROFILE%`).  Users
   /// can edit these files without rebuilding the app.
   user,
+
+  /// Found at `~/.agents/skills/<id>/SKILL.md`. This is a cross-agent shared
+  /// source and has lower precedence than SSTerm's own user-skill directory.
+  shared,
 }

@@ -6,9 +6,11 @@ import '../models/skill.dart';
 import '../utils/app_dir.dart';
 import 'bundled_skills.dart';
 
-/// Discovers and serves Skills bundled under `assets/skills/<id>/SKILL.md`
-/// PLUS dynamically-generated bundled skills registered via
-/// [BundledSkillRegistry].
+/// Discovers and serves Skills bundled under `assets/skills/<id>/SKILL.md`,
+/// dynamically-generated bundled skills registered via
+/// [BundledSkillRegistry], SSTerm user skills under
+/// `~/.ssterm/skills/<id>/SKILL.md`, and shared agent skills under
+/// `~/.agents/skills/<id>/SKILL.md`.
 ///
 /// Lifecycle:
 ///   • [init] runs ONCE at app boot from `main.dart`, before runApp.  It
@@ -69,12 +71,20 @@ class SkillService {
   /// thread an extra parameter through every call site.
   static String? debugUserSkillsDirOverride;
 
+  /// Test-only hook for the cross-agent shared skill directory.
+  static String? debugSharedSkillsDirOverride;
+
   /// Path of the directory ssterm scans for user-installed skills.  Each
   /// child directory is expected to contain a `SKILL.md`, mirroring the
   /// asset bundle layout.  We don't auto-create the directory — its
   /// absence is the user's "I don't use this feature" signal.
   static String get userSkillsDirPath =>
       debugUserSkillsDirOverride ?? '${appBasePath()}/.ssterm/skills';
+
+  /// Path of the cross-agent directory SSTerm scans after its own user-skill
+  /// directory. SSTerm-specific skills therefore win when ids collide.
+  static String get sharedSkillsDirPath =>
+      debugSharedSkillsDirOverride ?? '${appBasePath()}/.agents/skills';
 
   /// All discovered skills, in stable id-sorted order so the catalogue
   /// table the model sees doesn't reshuffle between launches.
@@ -85,7 +95,8 @@ class SkillService {
   /// Semantics (matches AgentConfig.enabledSkills):
   ///   • null whitelist → return ALL installed skills (the default — newly
   ///     installed skills are auto-enabled, which is what users expect
-  ///     after dropping a SKILL.md into `~/.ssterm/skills/`).
+  ///     after dropping a SKILL.md into `~/.ssterm/skills/` or
+  ///     `~/.agents/skills/`).
   ///   • non-null whitelist → return only the subset whose id is in the
   ///     set.  An empty set therefore disables ALL skills.
   ///
@@ -205,8 +216,9 @@ class SkillService {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       assetPaths = manifest
           .listAssets()
-          .where((p) =>
-              p.startsWith('assets/skills/') && p.endsWith('/SKILL.md'))
+          .where(
+            (p) => p.startsWith('assets/skills/') && p.endsWith('/SKILL.md'),
+          )
           .toList();
     } catch (e) {
       _log('error scope=manifest msg="$e"');
@@ -224,6 +236,7 @@ class SkillService {
     final assetIds = <String>[];
     final bundledIds = <String>[];
     final userIds = <String>[];
+    final sharedIds = <String>[];
 
     for (final path in assetPaths) {
       try {
@@ -268,6 +281,19 @@ class SkillService {
     // `git-bisect-mine`).
     await _scanUserDir(collected, userIds);
 
+    // ── Shared agent skills (`~/.agents/skills/<id>/SKILL.md`) ─────────
+    //
+    // This source is deliberately scanned last. It lets users share skills
+    // across agent products without allowing a shared skill to silently
+    // replace an SSTerm-specific skill with the same id.
+    await _scanSkillDir(
+      dirPath: sharedSkillsDirPath,
+      source: SkillSource.shared,
+      logScope: 'shared_dir',
+      collected: collected,
+      loadedIds: sharedIds,
+    );
+
     // Stable id-sorted order so prompt cache hits stay warm across boots
     // when the skill set is unchanged.
     collected.sort((a, b) => a.id.compareTo(b.id));
@@ -281,6 +307,7 @@ class SkillService {
     if (assetIds.isNotEmpty) parts.add('asset=${assetIds.join(",")}');
     if (bundledIds.isNotEmpty) parts.add('bundled=${bundledIds.join(",")}');
     if (userIds.isNotEmpty) parts.add('user=${userIds.join(",")}');
+    if (sharedIds.isNotEmpty) parts.add('shared=${sharedIds.join(",")}');
     _log('init done ${parts.join(" ")}');
   }
 
@@ -291,8 +318,21 @@ class SkillService {
   static Future<void> _scanUserDir(
     List<Skill> collected,
     List<String> userIds,
-  ) async {
-    final dirPath = userSkillsDirPath;
+  ) => _scanSkillDir(
+    dirPath: userSkillsDirPath,
+    source: SkillSource.user,
+    logScope: 'user_dir',
+    collected: collected,
+    loadedIds: userIds,
+  );
+
+  static Future<void> _scanSkillDir({
+    required String dirPath,
+    required SkillSource source,
+    required String logScope,
+    required List<Skill> collected,
+    required List<String> loadedIds,
+  }) async {
     final dir = Directory(dirPath);
     // No-op silently when the dir doesn't exist — that's the default for
     // anyone who hasn't customised skills, so logging it as a "skip"
@@ -308,7 +348,7 @@ class SkillService {
           .cast<Directory>()
           .toList();
     } catch (e) {
-      _log('error scope=user_dir path=$dirPath msg="$e"');
+      _log('error scope=$logScope path=$dirPath msg="$e"');
       return;
     }
     // Stable order so logs are reproducible (the OS doesn't guarantee
@@ -316,18 +356,23 @@ class SkillService {
     subdirs.sort((a, b) => a.path.compareTo(b.path));
 
     for (final sub in subdirs) {
-      final id = sub.uri.pathSegments
-          .lastWhere((seg) => seg.isNotEmpty, orElse: () => '');
+      final id = sub.uri.pathSegments.lastWhere(
+        (seg) => seg.isNotEmpty,
+        orElse: () => '',
+      );
       if (id.isEmpty) continue;
 
       if (collected.any((s) => s.id == id)) {
-        _log('skip source=user id=$id reason=shadowed_by_${_skillSourceLabelOf(collected, id)}');
+        _log(
+          'skip source=${source.name} id=$id '
+          'reason=shadowed_by_${_skillSourceLabelOf(collected, id)}',
+        );
         continue;
       }
 
       final mdFile = File('${sub.path}/SKILL.md');
       if (!await mdFile.exists()) {
-        _log('skip source=user id=$id reason=no_skill_md');
+        _log('skip source=${source.name} id=$id reason=no_skill_md');
         continue;
       }
       try {
@@ -336,17 +381,17 @@ class SkillService {
           id: id,
           assetPath: mdFile.path,
           raw: raw,
-          source: SkillSource.user,
+          source: source,
         );
         if (parsed == null) {
-          _log('skip source=user id=$id reason=bad_frontmatter');
+          _log('skip source=${source.name} id=$id reason=bad_frontmatter');
           continue;
         }
         collected.add(parsed.skill);
         _assetBodies[id] = parsed.body;
-        userIds.add(id);
+        loadedIds.add(id);
       } catch (e) {
-        _log('error scope=user_load id=$id msg="$e"');
+        _log('error scope=${source.name}_load id=$id msg="$e"');
       }
     }
   }

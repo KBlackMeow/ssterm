@@ -32,7 +32,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 | **Three-level command risk** | AI classifies commands as normal, warning, or dangerous; host rules can only raise the level, and result cards show the final classification |
 | **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
 | **Web search** | Brave Search integration for current web results (configurable) |
-| **Custom skills** | Add user-defined skills from the Settings page; no built-in playbooks are enabled by default |
+| **Custom skills** | Add user-defined skills from Settings or share them through `~/.agents/skills/<id>/SKILL.md`; no built-in playbooks are enabled by default |
 | **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
 | **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
 | **Adaptive decision quality** | Direct and clear single-path tasks avoid separate deliberation; ambiguous tasks may use a compact router, while complex or high-risk work gets concise planning plus conditional critique and verification; disabled by default |
