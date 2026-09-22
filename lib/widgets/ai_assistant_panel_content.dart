@@ -26,6 +26,8 @@ class _AiPanelContent extends StatelessWidget {
     required this.onAddImage,
     required this.onRemoveImage,
     required this.onStop,
+    required this.enabledSkills,
+    required this.layoutRevision,
     this.queuedCount = 0,
     this.onAutoExecuteChanged,
     required this.markdownEnabled,
@@ -66,6 +68,8 @@ class _AiPanelContent extends StatelessWidget {
   /// [busy] and not awaiting a question answer).  Distinct from [onSend],
   /// which always sends — queueing when the agent is engaged.
   final VoidCallback onStop;
+  final List<Skill> enabledSkills;
+  final ValueListenable<int> layoutRevision;
 
   /// Number of user messages waiting in the queue.  `> 0` shows a compact
   /// "queued" chip in the input bar so the user knows their earlier input
@@ -300,6 +304,7 @@ class _AiPanelContent extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Container(
+                        key: const ValueKey('agent-input-row'),
                         height: 34,
                         decoration: BoxDecoration(
                           color: Colors.transparent,
@@ -326,39 +331,13 @@ class _AiPanelContent extends StatelessWidget {
                               ),
                             ),
                             Expanded(
-                              child: TextField(
+                              child: _SlashCommandTextField(
                                 controller: textController,
                                 focusNode: agentInputFocusNode,
-                                textInputAction: TextInputAction.send,
-                                style: TextStyle(
-                                  color:
-                                      AppColors.maybeOf(context)?.foreground ??
-                                      _kFgActive,
-                                  fontSize: 13,
-                                  height: 1.2,
-                                  fontFamily: _agentBodyFontFamily,
-                                  fontFamilyFallback: _agentBodyFontFallback,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: 'Ask AI anything…',
-                                  hintStyle: TextStyle(
-                                    color: const Color(0xFF8E8E8E),
-                                    fontSize: 13,
-                                    fontFamily: _agentBodyFontFamily,
-                                    fontFamilyFallback: _agentBodyFontFallback,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.fromLTRB(
-                                    12,
-                                    0,
-                                    8,
-                                    0,
-                                  ),
-                                  isDense: true,
-                                ),
-                                onSubmitted: (_) => onSend(),
+                                skills: enabledSkills,
+                                layoutRevision: layoutRevision,
+                                panelSurface: terminalBackground,
+                                onSubmitted: onSend,
                               ),
                             ),
                             // Compact auto-execute chip inside the input field row
@@ -944,6 +923,296 @@ class _AiPanelContent extends StatelessWidget {
   }
 }
 
+/// Compact slash-command completion rendered directly above the input. It is
+/// deliberately a regular widget rather than a modal menu: typing continues
+/// to filter it and a selection leaves the command editable before sending.
+class _SlashCommandMenu extends StatelessWidget {
+  const _SlashCommandMenu({
+    required this.query,
+    required this.skills,
+    required this.onSelected,
+    this.panelSurface,
+  });
+
+  final String query;
+  final List<Skill> skills;
+  final ValueChanged<String> onSelected;
+  final Color? panelSurface;
+
+  static const _commands = <(String command, String description)>[
+    ('/help', 'Show all commands'),
+    ('/?', 'Show all commands'),
+    ('/commands', 'Show available Agent actions'),
+    ('/skills', 'Show enabled Skills'),
+    ('/new', 'Start a new session'),
+    ('/clear', 'Clear this chat'),
+    ('/reset', 'Clear this chat'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = matchesFor(query, skills);
+    if (matches.isEmpty) return const SizedBox.shrink();
+    final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.75);
+    final visibleRows = matches.length < 5 ? matches.length : 5;
+    return PopupSurface(
+      key: const ValueKey('slash-command-menu'),
+      color: panelSurface ?? AppColors.maybeOf(context)?.popup,
+      radius: FrostedGlassStyle.panelRadius,
+      backdropBlur: 0,
+      child: SizedBox(
+        // Exactly five 25 px rows at most. Additional completions scroll,
+        // never creating a partial sixth row.
+        height: visibleRows * 25.0 + 6,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemExtent: 25,
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          itemCount: matches.length,
+          itemBuilder: (context, index) {
+            final item = matches[index];
+            return InkWell(
+              onTap: () => onSelected(item.$1),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 78,
+                      child: Text(
+                        item.$1,
+                        style: TextStyle(
+                          color: fg,
+                          fontSize: 11,
+                          fontFamily: 'JetBrainsMono',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        item.$2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: dim, fontSize: 10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  static List<(String command, String description)> matchesFor(
+    String query,
+    List<Skill> skills,
+  ) => [
+    ..._commands,
+    for (final skill in skills) ('/${skill.id}', skill.description),
+  ].where((item) => item.$1.startsWith(query)).toList(growable: false);
+
+  static double heightFor(String query, List<Skill> skills) {
+    final count = matchesFor(query, skills).length;
+    return (count < 5 ? count : 5) * 25.0 + 6;
+  }
+}
+
+/// Text input plus an overlay-backed slash completion list.  The follower is
+/// outside the input column, so suggestions float over the transcript rather
+/// than pushing it upward.
+class _SlashCommandTextField extends StatefulWidget {
+  const _SlashCommandTextField({
+    required this.controller,
+    required this.focusNode,
+    required this.skills,
+    required this.layoutRevision,
+    this.panelSurface,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final FocusNode? focusNode;
+  final List<Skill> skills;
+  final ValueListenable<int> layoutRevision;
+  final Color? panelSurface;
+  final VoidCallback onSubmitted;
+
+  @override
+  State<_SlashCommandTextField> createState() => _SlashCommandTextFieldState();
+}
+
+class _SlashCommandTextFieldState extends State<_SlashCommandTextField> {
+  OverlayEntry? _overlay;
+  double _inputWidth = 260;
+  Offset _inputOrigin = Offset.zero;
+  bool _suppressOverlay = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_syncOverlay);
+    widget.layoutRevision.addListener(_scheduleOverlayReposition);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SlashCommandTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_syncOverlay);
+      widget.controller.addListener(_syncOverlay);
+    }
+    if (oldWidget.layoutRevision != widget.layoutRevision) {
+      oldWidget.layoutRevision.removeListener(_scheduleOverlayReposition);
+      widget.layoutRevision.addListener(_scheduleOverlayReposition);
+    }
+    if (oldWidget.controller != widget.controller) _syncOverlay();
+  }
+
+  void _scheduleOverlayReposition() {
+    if (_overlay == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _overlay == null) return;
+      _captureInputGeometry();
+      _overlay!.markNeedsBuild();
+    });
+  }
+
+  void _syncOverlay() {
+    if (_suppressOverlay) {
+      _removeOverlay();
+      return;
+    }
+    final query = widget.controller.text.trimLeft().toLowerCase();
+    if (!query.startsWith('/')) {
+      _removeOverlay();
+      return;
+    }
+    if (_SlashCommandMenu.matchesFor(query, widget.skills).isEmpty) {
+      _removeOverlay();
+      return;
+    }
+    if (_overlay == null) {
+      _captureInputGeometry();
+      _overlay = OverlayEntry(builder: _buildOverlay);
+      Overlay.of(context, rootOverlay: true).insert(_overlay!);
+    } else {
+      _overlay!.markNeedsBuild();
+    }
+  }
+
+  /// Overlay entries use full-screen constraints. Cache the input row's
+  /// position and width before creating the entry, then position the menu
+  /// explicitly instead of allowing a follower to expand vertically.
+  void _captureInputGeometry() {
+    final target = context.findRenderObject();
+    if (target is! RenderBox || !target.hasSize) return;
+    _inputWidth = target.size.width;
+    _inputOrigin = target.localToGlobal(Offset.zero);
+
+    // The first wider Flex ancestor is the input row. Align to that row,
+    // rather than only to the editable text area, so the popup follows the
+    // Agent panel's input geometry including its attachment and action space.
+    RenderObject? ancestor = target.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderFlex &&
+          ancestor.hasSize &&
+          ancestor.size.width > target.size.width) {
+        final rowOrigin = ancestor.localToGlobal(Offset.zero);
+        _inputWidth = ancestor.size.width;
+        _inputOrigin = rowOrigin;
+        return;
+      }
+      ancestor = ancestor.parent;
+    }
+  }
+
+  Widget _buildOverlay(BuildContext context) {
+    final query = widget.controller.text.trimLeft().toLowerCase();
+    final height = _SlashCommandMenu.heightFor(query, widget.skills);
+    return Positioned(
+      left: _inputOrigin.dx,
+      top: _inputOrigin.dy - height - 6,
+      width: _inputWidth,
+      height: height,
+      child: Material(
+        color: Colors.transparent,
+        child: _SlashCommandMenu(
+          query: query,
+          skills: widget.skills,
+          panelSurface: widget.panelSurface,
+          onSelected: _selectCommand,
+        ),
+      ),
+    );
+  }
+
+  void _selectCommand(String command) {
+    // TextEditingController notifies synchronously for both text and
+    // selection writes. Suppress those notifications while the overlay is
+    // dismissed so a matching completed command cannot recreate it.
+    _suppressOverlay = true;
+    widget.controller.value = TextEditingValue(
+      text: command,
+      selection: TextSelection.collapsed(offset: command.length),
+    );
+    _removeOverlay();
+    widget.focusNode?.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _suppressOverlay = false;
+    });
+  }
+
+  void _removeOverlay() {
+    _overlay?.remove();
+    _overlay = null;
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncOverlay);
+    widget.layoutRevision.removeListener(_scheduleOverlayReposition);
+    _removeOverlay();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: widget.controller,
+    focusNode: widget.focusNode,
+    textInputAction: TextInputAction.send,
+    style: TextStyle(
+      color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+      fontSize: 13,
+      height: 1.2,
+      fontFamily: _agentBodyFontFamily,
+      fontFamilyFallback: _agentBodyFontFallback,
+      fontWeight: FontWeight.w400,
+    ),
+    decoration: InputDecoration(
+      hintText: 'Ask AI anything…  (/help)',
+      hintStyle: TextStyle(
+        color: const Color(0xFF8E8E8E),
+        fontSize: 13,
+        fontFamily: _agentBodyFontFamily,
+        fontFamilyFallback: _agentBodyFontFallback,
+        fontWeight: FontWeight.w400,
+      ),
+      border: InputBorder.none,
+      contentPadding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
+      isDense: true,
+    ),
+    onSubmitted: (_) => widget.onSubmitted(),
+  );
+}
+
 class _DecisionCard extends StatelessWidget {
   const _DecisionCard({required this.data, this.onCancel});
 
@@ -1014,8 +1283,7 @@ class _DecisionCard extends StatelessWidget {
                       '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
                       style: TextStyle(color: dim, fontSize: 10.5),
                     ),
-                    if (subagent.reasoning.isNotEmpty ||
-                        subagent.text.isNotEmpty)
+                    if (subagent.text.isNotEmpty)
                       Container(
                         width: double.infinity,
                         constraints: const BoxConstraints(maxHeight: 150),
@@ -1026,7 +1294,6 @@ class _DecisionCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: _DecisionSubagentOutput(
-                          reasoning: subagent.reasoning,
                           text: subagent.text,
                           color: dim,
                         ),
@@ -1070,13 +1337,8 @@ class _DecisionCard extends StatelessWidget {
 }
 
 class _DecisionSubagentOutput extends StatefulWidget {
-  const _DecisionSubagentOutput({
-    required this.reasoning,
-    required this.text,
-    required this.color,
-  });
+  const _DecisionSubagentOutput({required this.text, required this.color});
 
-  final String reasoning;
   final String text;
   final Color color;
 
@@ -1097,8 +1359,7 @@ class _DecisionSubagentOutputState extends State<_DecisionSubagentOutput> {
   @override
   void didUpdateWidget(covariant _DecisionSubagentOutput oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.reasoning != widget.reasoning ||
-        oldWidget.text != widget.text) {
+    if (oldWidget.text != widget.text) {
       _followLatestOutput();
     }
   }
@@ -1120,11 +1381,7 @@ class _DecisionSubagentOutputState extends State<_DecisionSubagentOutput> {
   Widget build(BuildContext context) => SingleChildScrollView(
     controller: _scrollController,
     child: SelectableText(
-      [
-        if (widget.reasoning.isNotEmpty) '推理流\n${widget.reasoning}',
-        if (widget.reasoning.isNotEmpty && widget.text.isNotEmpty) '',
-        if (widget.text.isNotEmpty) '输出\n${widget.text}',
-      ].join('\n'),
+      [if (widget.text.isNotEmpty) '输出\n${widget.text}'].join('\n'),
       style: TextStyle(color: widget.color, fontSize: 10.5, height: 1.35),
     ),
   );

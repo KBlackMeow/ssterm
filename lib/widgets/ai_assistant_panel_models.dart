@@ -314,7 +314,6 @@ class _DecisionSubagentData {
   DateTime? lastChunkAt;
   int receivedReasoningCharacters = 0;
   int receivedTextCharacters = 0;
-  String reasoning = '';
   String text = '';
   _DecisionSubagentState state = _DecisionSubagentState.waitingForFirstChunk;
   String? error;
@@ -330,7 +329,6 @@ class _DecisionSubagentData {
     if (!isActive || text.isEmpty) return;
     if (kind == 'reasoning') {
       receivedReasoningCharacters += text.length;
-      reasoning += text;
     } else {
       receivedTextCharacters += text.length;
       this.text += text;

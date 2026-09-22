@@ -161,6 +161,16 @@ void main() {
   });
 
   group('AgentDecisionPlan', () {
+    test('accepts a single-path plan without invented alternatives', () {
+      final plan = AgentDecisionPlan.tryParseJson('''
+{"recommendedId":"safe","candidates":[
+ {"id":"safe","summary":"Incremental change","evidence":"existing tests","risk":"low","validation":"run tests"}]}
+''');
+
+      expect(plan?.recommendedId, 'safe');
+      expect(plan?.candidates, hasLength(1));
+    });
+
     test('accepts two complete candidates with a recommendation', () {
       final plan = AgentDecisionPlan.tryParseJson('''
 {"recommendedId":"safe","candidates":[

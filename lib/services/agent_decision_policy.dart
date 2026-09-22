@@ -175,7 +175,10 @@ class AgentDecisionPlan {
       final recommendedId = value['recommendedId'];
       final rawCandidates = value['candidates'];
       if (recommendedId is! String || rawCandidates is! List) return null;
-      if (rawCandidates.length != 2) return null;
+      // Alternatives are meaningful only for a material choice.  A bounded
+      // implementation task has one recommended sequence, while a genuine
+      // choice may show up to three options.
+      if (rawCandidates.isEmpty || rawCandidates.length > 3) return null;
       final candidates = rawCandidates
           .map(AgentDecisionCandidate.tryFromJson)
           .toList(growable: false);

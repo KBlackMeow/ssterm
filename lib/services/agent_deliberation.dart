@@ -99,7 +99,8 @@ missing requirements.''';
   static const _plannerPrompt =
       '''You are a concise planning reviewer. You cannot use
 tools or authorize changes. Return one JSON object only with `recommendedId`
-and exactly 2 `candidates`. Every candidate needs only `id`, `summary`,
+and 1 to 3 `candidates`. Use one candidate for a single clear implementation
+path; include alternatives only for a material choice. Every candidate needs only `id`, `summary`,
 `evidence`, `risk`, and `validation`.
 Recommend the candidate that best balances outcome, evidence, reversibility,
 cost, and maintenance. Keep every string brief.''';

@@ -4,7 +4,9 @@ import 'dart:io'
     show stdout, Directory, HttpException, Platform, SocketException;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/rendering.dart'
+    show RenderFlex, RenderObject, ScrollDirection;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:gpt_markdown/gpt_markdown.dart';
 
@@ -202,6 +204,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // host via `widget.onLayoutChanged` so the new value rides into config.
   late AiPanelPosition _position;
   double? _customPanelSize;
+  final ValueNotifier<int> _slashMenuLayoutRevision = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -302,6 +305,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _agentController.dispose();
     _scrollController.dispose();
     _agentInputFocusNode.dispose();
+    _slashMenuLayoutRevision.dispose();
     _sessionLease?.release();
     super.dispose();
   }
@@ -462,7 +466,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingDangerProposal = null;
   }
 
-  void _send() {
+  Future<void> _send() async {
     final text = _textController.text.trim();
     if (text.isEmpty && _pendingImages.isEmpty) return;
     final images = List<AgentImageAttachment>.unmodifiable(_pendingImages);
@@ -485,7 +489,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
     // Intercept slash-commands BEFORE the LLM / shell receives anything.
     // Returning true means "fully handled — do not fall through to send".
-    if (_handleSlashCommand(text)) return;
+    if (await _handleSlashCommand(text)) return;
 
     // While the agent is engaged (streaming, executing a tool, or paused on a
     // write/edit proposal), queue the input for the next round instead of
@@ -573,13 +577,20 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   ///   /clear, /reset — wipe the current chat (see `_clearChat`).
   ///   /new           — create a new Agent session.
   ///   /help, /?              — show the command list (see `_showHelp`).
+  ///   /commands      — show actions currently available to this Agent.
+  ///   /skills        — show enabled Skill playbooks.
+  ///   `/<skill-id> <task>` — load an enabled Skill for one task.
   ///
   /// Slash-commands are matched case-insensitively on the WHOLE trimmed
   /// input — `/clear`, `/CLEAR`, `/clear   ` all match, but
   /// `/clear something` does NOT (we treat that as a real prompt the
   /// user typed, in case they're talking ABOUT the command).
-  bool _handleSlashCommand(String text) {
+  Future<bool> _handleSlashCommand(String text) async {
     final cmd = text.toLowerCase();
+    final skillMatch = RegExp(
+      r'^/([a-z0-9_-]+)(?:\s+(.*))?$',
+      caseSensitive: false,
+    ).firstMatch(text);
     switch (cmd) {
       case '/clear':
       case '/reset':
@@ -592,9 +603,69 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
       case '/?':
         _showHelp();
         return true;
+      case '/commands':
+        _showCapabilities(showSkills: false);
+        return true;
+      case '/skills':
+        _showCapabilities(showSkills: true);
+        return true;
       default:
-        return false;
+        if (skillMatch == null) return false;
+        final id = skillMatch.group(1)!;
+        final enabled = SkillService.filterEnabled(
+          widget.agentConfig?.enabledSkills,
+        );
+        if (!enabled.any((skill) => skill.id == id)) return false;
+        await _runSelectedSkill(id, skillMatch.group(2)?.trim() ?? '');
+        return true;
     }
+  }
+
+  Future<void> _runSelectedSkill(String id, String task) async {
+    final config = widget.agentConfig;
+    final enabled = SkillService.filterEnabled(config?.enabledSkills);
+    final skill = enabled.where((skill) => skill.id == id).firstOrNull;
+    if (skill == null) {
+      setState(
+        () =>
+            _messages.add(_ChatMessage.notice('**Skill unavailable**: `$id`')),
+      );
+      return;
+    }
+    if (task.isEmpty) {
+      setState(() {
+        _messages.add(
+          _ChatMessage.notice('Add a task after `/$id`, then send it.'),
+        );
+      });
+      return;
+    }
+    final body = await SkillService.loadBody(id);
+    if (!mounted) return;
+    if (body == null) {
+      setState(
+        () =>
+            _messages.add(_ChatMessage.notice('**Skill unavailable**: `$id`')),
+      );
+      return;
+    }
+    final userText = '/$id $task';
+    setState(() {
+      _messages.add(_ChatMessage.user(userText));
+      _messages.add(
+        _ChatMessage.notice('**Loaded skill**: `$id` — ${skill.description}'),
+      );
+      _textController.clear();
+    });
+    _nameSessionFrom(task);
+    _conversationHistory.add(
+      AgentConversationItem.text(
+        role: 'user',
+        content: '[Skill loaded: $id]\n\n$body',
+      ),
+    );
+    _agentRespond(task);
+    _scrollToBottom();
   }
 
   /// Wipe the current mode's transcript, conversation history, and
@@ -722,6 +793,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
 - `/clear`, `/reset`, `/new` — wipe the chat and the AI's memory of this conversation.
 - `/help`, `/?` — show this list.
+- `/commands` — show the Agent actions available in this tab.
+- `/skills` — show enabled Skill playbooks.
+- `/<skill-id> <task>` — load an enabled Skill, then run the task with it.
 
 **Tips**
 
@@ -730,6 +804,55 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 ''';
     setState(() {
       _messages.add(_ChatMessage.notice(helpText));
+      _textController.clear();
+    });
+    _scrollToBottom();
+  }
+
+  /// List only capabilities available to this panel right now.  Unlike the
+  /// system prompt's catalogue, this is a user-facing, bounded explanation;
+  /// it never exposes full Skill bodies or asks the model to infer settings.
+  void _showCapabilities({required bool showSkills}) {
+    final config = widget.agentConfig;
+    final enabledSkills = SkillService.filterEnabled(config?.enabledSkills);
+    final lines = <String>[];
+    if (showSkills) {
+      lines.add('**Enabled Skills (${enabledSkills.length})**');
+      if (enabledSkills.isEmpty) {
+        lines.add(
+          'No Skills are enabled. Enable or install them in Agent settings.',
+        );
+      } else {
+        for (final skill in enabledSkills) {
+          lines.add('- `${skill.id}` — ${skill.description}');
+        }
+      }
+      lines.add(
+        '\nUse a real task prompt; the Agent loads a matching Skill automatically.',
+      );
+    } else {
+      lines.add('**Available Agent actions**');
+      lines.add(
+        '- Shell commands${widget.onExecuteAsync == null ? ' — unavailable in this tab' : ''}',
+      );
+      lines.add('- Attach an image');
+      if (config?.fileWriteEnabled != false &&
+          widget.fileSystemAdapter != null) {
+        lines.add(
+          '- Read, create, and edit files (changes require your approval)',
+        );
+      }
+      if (config?.webSearchEnabled == true) lines.add('- Web search');
+      if (config?.mcpEnabled == true) lines.add('- Enabled MCP tools');
+      lines.add(
+        '- Skill playbooks — ${enabledSkills.length} enabled; type `/skills` for details',
+      );
+      lines.add(
+        '\nShell commands are discovered from the active environment, so ask for the command you need rather than relying on a fixed list.',
+      );
+    }
+    setState(() {
+      _messages.add(_ChatMessage.notice(lines.join('\n')));
       _textController.clear();
     });
     _scrollToBottom();
@@ -878,6 +1001,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onRemoveImage: (image) =>
                 setState(() => _pendingImages.remove(image)),
             onStop: _cancelAgent,
+            enabledSkills: SkillService.filterEnabled(
+              widget.agentConfig?.enabledSkills,
+            ),
+            layoutRevision: _slashMenuLayoutRevision,
             queuedCount: _pendingUserInput.length,
             onAutoExecuteChanged: (v) => setState(() => _autoExecute = v),
             // Mirror `AgentConfig.markdownEnabled`'s true default so the
@@ -920,6 +1047,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
               final current = _customPanelSize ?? panelExtent;
               _customPanelSize = (current - d).clamp(_kPanelMinExtent, maxSide);
             });
+            _slashMenuLayoutRevision.value++;
             widget.onLayoutChanged?.call(_position, _customPanelSize);
           },
         );

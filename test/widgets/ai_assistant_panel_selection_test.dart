@@ -29,6 +29,38 @@ void main() {
     expect(loop, isNot(contains('decision.confidence')));
   });
 
+  test('slash help exposes the current commands and Skill catalogue', () {
+    final panel = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
+
+    expect(panel, contains("case '/commands':"));
+    expect(panel, contains("case '/skills':"));
+    expect(panel, contains('SkillService.filterEnabled'));
+    expect(panel, contains('Available Agent actions'));
+    expect(panel, contains('_runSelectedSkill'));
+  });
+
+  test('typing slash opens a compact command completion menu above input', () {
+    final content = File(
+      'lib/widgets/ai_assistant_panel_content.dart',
+    ).readAsStringSync();
+
+    expect(content, contains('Positioned('));
+    expect(content, contains('OverlayEntry'));
+    expect(content, contains('itemExtent: 25'));
+    expect(content, contains('visibleRows * 25.0 + 6'));
+    expect(content, contains('_captureInputGeometry'));
+    expect(content, contains('PopupSurface('));
+    expect(content, contains('_scheduleOverlayReposition'));
+    expect(content, isNot(contains('this.context.size')));
+    expect(content, contains("query.startsWith('/')"));
+    expect(content, contains('class _SlashCommandMenu'));
+    expect(content, contains("('/commands', 'Show available Agent actions')"));
+    expect(content, contains("('/skills', 'Show enabled Skills')"));
+    expect(content, contains("'/\${skill.id}'"));
+  });
+
   test(
     'deep decision run records planning, recommendation, and fallback in its card',
     () {
@@ -119,7 +151,6 @@ void main() {
     expect(content, contains('SelectableText'));
     expect(content, contains('class _DecisionSubagentOutput'));
     expect(content, contains('_scrollController.jumpTo'));
-    expect(content, contains('subagent.reasoning'));
     expect(content, contains('subagent.text'));
     expect(loop, contains("startSubagent('规划子 Agent')"));
     expect(loop, contains("startSubagent('审查子 Agent')"));
@@ -316,6 +347,42 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('slash completion floats at input width and shows five rows', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            child: SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), '/');
+    await tester.pump();
+
+    final menu = find.byKey(const ValueKey('slash-command-menu'));
+    expect(menu, findsOneWidget);
+    expect(tester.getSize(menu).height, lessThanOrEqualTo(132));
+    expect(
+      tester.getSize(menu).width,
+      closeTo(
+        tester.getSize(find.byKey(const ValueKey('agent-input-row'))).width,
+        3,
+      ),
+    );
+
+    await tester.tap(find.text('/help'));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('slash-command-menu')), findsNothing);
   });
 
   testWidgets('agent header has New and Continue session controls', (
