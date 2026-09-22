@@ -93,10 +93,12 @@ void main() {
 
       final lease = await registry.createAndAcquire(
         sessionId: 'session-test-id',
+        title: 'First question',
       );
 
       expect(lease.session.id, 'session-test-id');
       await lease.release();
+      expect((await registry.listAvailable()).single.title, 'First question');
     });
   });
 }

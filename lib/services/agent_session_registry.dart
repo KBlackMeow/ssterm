@@ -92,12 +92,15 @@ class AgentSessionRegistry {
   /// buffering a first user turn before registry I/O completes.
   String newSessionId() => _newId();
 
-  Future<AgentSessionLease> createAndAcquire({String? sessionId}) async {
+  Future<AgentSessionLease> createAndAcquire({
+    String? sessionId,
+    String title = 'New session',
+  }) async {
     final sessions = await _read();
     final now = DateTime.now().toUtc();
     final session = AgentSessionDescriptor(
       id: sessionId ?? _newId(),
-      title: 'New session',
+      title: title,
       createdAt: now,
       updatedAt: now,
     );

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/services/agent_session_registry.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 void main() {
@@ -337,6 +339,47 @@ void main() {
     expect(find.byTooltip('Continue session'), findsOneWidget);
   });
 
+  testWidgets('does not persist a session before the first conversation', (
+    tester,
+  ) async {
+    final registry = _RecordingSessionRegistry();
+
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            sessionRegistry: registry,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(registry.createCalls, 0);
+
+    await tester.enterText(find.byType(TextField), '/help');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    await tester.pump();
+
+    expect(registry.createCalls, 0);
+
+    await tester.tap(find.byTooltip('New session'));
+    await tester.pump();
+
+    expect(registry.createCalls, 0);
+
+    await tester.enterText(find.byType(TextField), 'start a conversation');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    await tester.pump();
+
+    expect(registry.createCalls, 1);
+  });
+
   testWidgets(
     'follows new agent content after the user returns to the bottom',
     (tester) async {
@@ -456,4 +499,17 @@ void main() {
       expect(position.pixels, readPosition);
     },
   );
+}
+
+class _RecordingSessionRegistry extends AgentSessionRegistry {
+  int createCalls = 0;
+
+  @override
+  Future<AgentSessionLease> createAndAcquire({
+    String? sessionId,
+    String title = 'New session',
+  }) {
+    createCalls++;
+    return Completer<AgentSessionLease>().future;
+  }
 }

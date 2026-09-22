@@ -121,6 +121,7 @@ class AiAssistantOverlay extends StatefulWidget {
     this.initialPosition = AiPanelPosition.right,
     this.initialSize,
     this.onLayoutChanged,
+    this.sessionRegistry,
   });
 
   final Widget child;
@@ -187,6 +188,10 @@ class AiAssistantOverlay extends StatefulWidget {
   /// [AppConfig.agentPosition] / [AppConfig.agentSize] + `save()` so the
   /// layout sticks across launches.
   final void Function(AiPanelPosition position, double? size)? onLayoutChanged;
+
+  /// Overrides session persistence for isolated widget tests.
+  final AgentSessionRegistry? sessionRegistry;
+
   @override
   State<AiAssistantOverlay> createState() => _AiAssistantOverlayState();
 }
@@ -203,10 +208,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.initState();
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
+    _sessionRegistry = widget.sessionRegistry ?? AgentSessionRegistry();
     final sessionId = _sessionRegistry.newSessionId();
     _sessionStore = AgentSessionStore(sessionId: sessionId);
     _outputStore = AgentOutputStore(sessionId: _sessionStore.sessionId);
-    _createInitialSession(sessionId);
   }
 
   final _agentController = TextEditingController();
@@ -275,7 +280,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   AgentDecisionPlan? _activeDecisionPlan;
   _DecisionCardData? _activeDecisionCard;
   Timer? _decisionCardTimer;
-  final _sessionRegistry = AgentSessionRegistry();
+  late final AgentSessionRegistry _sessionRegistry;
   AgentSessionLease? _sessionLease;
   var _sessionNeedsTitle = true;
   late AgentSessionStore _sessionStore;
@@ -301,28 +306,11 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     super.dispose();
   }
 
-  Future<void> _createInitialSession(String sessionId) async {
-    final lease = await _sessionRegistry.createAndAcquire(sessionId: sessionId);
-    if (!mounted || _sessionStore.sessionId != sessionId) {
-      await lease.release();
-      return;
-    }
-    _sessionLease = lease;
-    for (final message in _messages) {
-      if (message.isUser) {
-        _nameSessionFrom(message.text);
-        break;
-      }
-    }
-  }
-
   Future<void> _createNewSession() async {
-    final lease = await _sessionRegistry.createAndAcquire();
-    if (!mounted) {
-      await lease.release();
-      return;
-    }
-    await _activateSession(lease, restore: false);
+    await _activateSessionState(
+      sessionId: _sessionRegistry.newSessionId(),
+      restore: false,
+    );
   }
 
   Future<void> _continueSession() async {
@@ -374,6 +362,16 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   Future<void> _activateSession(
     AgentSessionLease lease, {
     required bool restore,
+  }) => _activateSessionState(
+    sessionId: lease.session.id,
+    lease: lease,
+    restore: restore,
+  );
+
+  Future<void> _activateSessionState({
+    required String sessionId,
+    AgentSessionLease? lease,
+    required bool restore,
   }) async {
     final previous = _sessionLease;
     _pendingUserInput.clear();
@@ -382,9 +380,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingEditProposal = null;
     if (_agentBusy) _cancelAgent();
     _sessionLease = lease;
-    _sessionStore = AgentSessionStore(sessionId: lease.session.id);
-    _outputStore = AgentOutputStore(sessionId: lease.session.id);
-    _sessionNeedsTitle = lease.session.title == 'New session';
+    _sessionStore = AgentSessionStore(sessionId: sessionId);
+    _outputStore = AgentOutputStore(sessionId: sessionId);
+    _sessionNeedsTitle = lease == null || lease.session.title == 'New session';
     setState(() {
       _messages.clear();
       _textController.clear();
@@ -530,14 +528,41 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   }
 
   void _nameSessionFrom(String text) {
-    final lease = _sessionLease;
-    if (!_sessionNeedsTitle || lease == null) return;
+    if (!_sessionNeedsTitle) return;
     _sessionNeedsTitle = false;
     final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    final title = normalized.length <= 56
+    final title = normalized.isEmpty
+        ? 'New session'
+        : normalized.length <= 56
         ? normalized
         : '${normalized.substring(0, 56)}…';
-    unawaited(_sessionRegistry.touch(lease.session.id, title: title));
+    final lease = _sessionLease;
+    if (lease != null) {
+      unawaited(_sessionRegistry.touch(lease.session.id, title: title));
+      return;
+    }
+    final sessionId = _sessionStore.sessionId;
+    unawaited(_persistDraftSession(sessionId, title));
+  }
+
+  Future<void> _persistDraftSession(String sessionId, String title) async {
+    try {
+      final lease = await _sessionRegistry.createAndAcquire(
+        sessionId: sessionId,
+        title: title,
+      );
+      if (!mounted || _sessionStore.sessionId != sessionId) {
+        await lease.release();
+        return;
+      }
+      _sessionLease = lease;
+    } catch (_) {
+      // Keep the current draft retryable on the next user message if the
+      // registry cannot be written (for example, a transient I/O failure).
+      if (mounted && _sessionStore.sessionId == sessionId) {
+        _sessionNeedsTitle = true;
+      }
+    }
   }
 
   /// Slash-command dispatcher.  Returns `true` when the input was a
