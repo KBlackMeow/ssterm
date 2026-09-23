@@ -13,26 +13,26 @@ void main() {
       expect(diff[2].text, equals('c'));
     });
 
-    test('pure insertion — new lines appear as added, old lines stay equal',
-        () {
-      final diff = computeLineDiff('a\nc', 'a\nb\nc');
-      expect(diff.map((l) => l.kind), equals([
-        DiffLineKind.equal,
-        DiffLineKind.added,
-        DiffLineKind.equal,
-      ]));
-      expect(diff[1].text, equals('b'));
-      expect(diff[1].oldLineNo, isNull);
-      expect(diff[1].newLineNo, equals(2));
-    });
+    test(
+      'pure insertion — new lines appear as added, old lines stay equal',
+      () {
+        final diff = computeLineDiff('a\nc', 'a\nb\nc');
+        expect(
+          diff.map((l) => l.kind),
+          equals([DiffLineKind.equal, DiffLineKind.added, DiffLineKind.equal]),
+        );
+        expect(diff[1].text, equals('b'));
+        expect(diff[1].oldLineNo, isNull);
+        expect(diff[1].newLineNo, equals(2));
+      },
+    );
 
     test('pure deletion — removed line has no newLineNo', () {
       final diff = computeLineDiff('a\nb\nc', 'a\nc');
-      expect(diff.map((l) => l.kind), equals([
-        DiffLineKind.equal,
-        DiffLineKind.removed,
-        DiffLineKind.equal,
-      ]));
+      expect(
+        diff.map((l) => l.kind),
+        equals([DiffLineKind.equal, DiffLineKind.removed, DiffLineKind.equal]),
+      );
       expect(diff[1].text, equals('b'));
       expect(diff[1].oldLineNo, equals(2));
       expect(diff[1].newLineNo, isNull);
@@ -50,17 +50,19 @@ void main() {
 
     test('change at the very first and very last line', () {
       final diff = computeLineDiff('old1\nmid\nold3', 'new1\nmid\nnew3');
-      expect(diff.map((l) => l.kind), equals([
-        DiffLineKind.removed,
-        DiffLineKind.added,
-        DiffLineKind.equal,
-        DiffLineKind.removed,
-        DiffLineKind.added,
-      ]));
+      expect(
+        diff.map((l) => l.kind),
+        equals([
+          DiffLineKind.removed,
+          DiffLineKind.added,
+          DiffLineKind.equal,
+          DiffLineKind.removed,
+          DiffLineKind.added,
+        ]),
+      );
     });
 
-    test('a single trailing newline does not create a phantom empty line',
-        () {
+    test('a single trailing newline does not create a phantom empty line', () {
       final diff = computeLineDiff('a\nb\n', 'a\nb\n');
       expect(diff, hasLength(2));
     });
@@ -83,13 +85,16 @@ void main() {
       // production default (4,000,000) only triggers on genuinely huge
       // files, which we don't want to allocate in a unit test.
       final diff = computeLineDiff('a\nb\nc', 'x\ny', maxCells: 2);
-      expect(diff.map((l) => l.kind), equals([
-        DiffLineKind.removed,
-        DiffLineKind.removed,
-        DiffLineKind.removed,
-        DiffLineKind.added,
-        DiffLineKind.added,
-      ]));
+      expect(
+        diff.map((l) => l.kind),
+        equals([
+          DiffLineKind.removed,
+          DiffLineKind.removed,
+          DiffLineKind.removed,
+          DiffLineKind.added,
+          DiffLineKind.added,
+        ]),
+      );
       expect(diff[0].text, equals('a'));
       expect(diff[3].text, equals('x'));
     });

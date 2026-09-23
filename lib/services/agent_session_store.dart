@@ -12,6 +12,7 @@ class AgentSessionSnapshot {
     required this.sessionId,
     required this.savedAt,
     required this.items,
+    this.runState,
   });
 
   static const schemaVersion = 1;
@@ -22,9 +23,14 @@ class AgentSessionSnapshot {
   final DateTime savedAt;
   final List<AgentSessionTranscriptItem> items;
 
+  /// Structured evidence-run state, inert on restore until a controller
+  /// explicitly elects to resume it. Provider tool records stay excluded.
+  final Map<String, Object?>? runState;
+
   factory AgentSessionSnapshot.fromHistory({
     required String sessionId,
     required Iterable<AgentConversationItem> history,
+    Map<String, Object?>? runState,
     DateTime? savedAt,
   }) {
     final items = <AgentSessionTranscriptItem>[];
@@ -45,6 +51,7 @@ class AgentSessionSnapshot {
       sessionId: sessionId,
       savedAt: (savedAt ?? DateTime.now()).toUtc(),
       items: List.unmodifiable(items.sublist(start)),
+      runState: runState == null ? null : Map.unmodifiable(runState),
     );
   }
 
@@ -56,12 +63,16 @@ class AgentSessionSnapshot {
     final sessionId = raw['sessionId'];
     final savedAt = raw['savedAt'];
     final rawItems = raw['items'];
+    final rawRunState = raw['runState'];
     if (sessionId is! String ||
         sessionId.isEmpty ||
         savedAt is! String ||
         rawItems is! List ||
         rawItems.length > maxItems) {
       throw const FormatException('Invalid agent session snapshot');
+    }
+    if (rawRunState != null && rawRunState is! Map) {
+      throw const FormatException('Invalid structured run state');
     }
     final parsedSavedAt = DateTime.tryParse(savedAt);
     if (parsedSavedAt == null) throw const FormatException('Invalid save time');
@@ -71,15 +82,23 @@ class AgentSessionSnapshot {
       items: List.unmodifiable([
         for (final item in rawItems) AgentSessionTranscriptItem.fromJson(item),
       ]),
+      runState: rawRunState == null
+          ? null
+          : Map<String, Object?>.from(rawRunState),
     );
   }
 
-  Map<String, Object> toJson() => {
-    'version': schemaVersion,
-    'sessionId': sessionId,
-    'savedAt': savedAt.toUtc().toIso8601String(),
-    'items': items.map((item) => item.toJson()).toList(growable: false),
-  };
+  Map<String, Object?> toJson() {
+    final encoded = <String, Object?>{
+      'version': schemaVersion,
+      'sessionId': sessionId,
+      'savedAt': savedAt.toUtc().toIso8601String(),
+      'items': items.map((item) => item.toJson()).toList(growable: false),
+    };
+    final state = runState;
+    if (state != null) encoded['runState'] = state;
+    return encoded;
+  }
 
   static bool _isSafeRole(String role) => role == 'user' || role == 'assistant';
 

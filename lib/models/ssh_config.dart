@@ -37,14 +37,17 @@ Future<void> _parseFile(
     if (a == null || a.isEmpty) return;
     for (final name in a.split(RegExp(r'\s+'))) {
       if (name.isEmpty || name.contains('*') || name.contains('?')) continue;
-      hosts.add(SshHost(
-        alias: name,
-        hostname: hostname ?? name,
-        port: port,
-        user: user,
-        identityFile:
-            identityFile != null ? expandHomePath(identityFile) : null,
-      ));
+      hosts.add(
+        SshHost(
+          alias: name,
+          hostname: hostname ?? name,
+          port: port,
+          user: user,
+          identityFile: identityFile != null
+              ? expandHomePath(identityFile)
+              : null,
+        ),
+      );
     }
   }
 

@@ -38,7 +38,6 @@ class _AiPanelContent extends StatelessWidget {
     this.onDangerProposalDecision,
     this.onQuestionProposalDecision,
     this.onQuestionProposalOther,
-    this.onCancelDecision,
     this.hasPendingQuestion = false,
     required this.position,
     required this.onClear,
@@ -133,7 +132,6 @@ class _AiPanelContent extends StatelessWidget {
   /// "Other" — does NOT resolve the proposal, just hands focus to the
   /// main input.  See [_AiAssistantOverlayState._beginCustomQuestionAnswer].
   final void Function(_QuestionProposal proposal)? onQuestionProposalOther;
-  final VoidCallback? onCancelDecision;
 
   /// `true` while a [_QuestionProposal] is pending/awaiting a custom
   /// answer — i.e. `_pendingQuestionProposal != null` in the state above.
@@ -651,14 +649,6 @@ class _AiPanelContent extends StatelessWidget {
           running: msg.commandRunning == true,
           risk: msg.commandRisk,
         ),
-      );
-    }
-
-    final decisionCard = msg.decisionCardData;
-    if (decisionCard != null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: _DecisionCard(data: decisionCard, onCancel: onCancelDecision),
       );
     }
 
@@ -1213,181 +1203,6 @@ class _SlashCommandTextFieldState extends State<_SlashCommandTextField> {
   );
 }
 
-class _DecisionCard extends StatelessWidget {
-  const _DecisionCard({required this.data, this.onCancel});
-
-  final _DecisionCardData data;
-  final VoidCallback? onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
-    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
-        .withValues(alpha: 0.8);
-    final accent = _kAccent.withValues(alpha: 0.9);
-    final surface =
-        AppColors.maybeOf(context)?.popup ?? const Color(0xAA1A1A1A);
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: surface.withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.account_tree_outlined, size: 15, color: accent),
-              const SizedBox(width: 6),
-              Text(
-                'Adaptive decision',
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  data.stage,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(color: accent, fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          if (data.summary != null) ...[
-            const SizedBox(height: 7),
-            Text(data.summary!, style: TextStyle(color: fg, fontSize: 12)),
-          ],
-          if (data.detail != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              data.detail!,
-              style: TextStyle(color: dim, fontSize: 11, height: 1.35),
-            ),
-          ],
-          if (data.subagents.isNotEmpty) ...[
-            const SizedBox(height: 7),
-            for (final subagent in data.subagents)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${subagent.name} · ${subagent.statusAt(DateTime.now())}',
-                      style: TextStyle(color: dim, fontSize: 10.5),
-                    ),
-                    if (subagent.text.isNotEmpty)
-                      Container(
-                        width: double.infinity,
-                        constraints: const BoxConstraints(maxHeight: 150),
-                        margin: const EdgeInsets.only(top: 3),
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: dim.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: _DecisionSubagentOutput(
-                          text: subagent.text,
-                          color: dim,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-          const SizedBox(height: 7),
-          Row(
-            children: [
-              Text(
-                '${data.elapsedSeconds}s · ${data.modelRequests} calls '
-                '(decision ${data.decisionRequests}, execution ${data.executionRequests})',
-                style: TextStyle(color: dim, fontSize: 10.5),
-              ),
-              const Spacer(),
-              if (data.isRunning)
-                TextButton(onPressed: onCancel, child: const Text('Cancel')),
-            ],
-          ),
-          Text(
-            data.promptTokenCount == null && data.completionTokenCount == null
-                ? 'Token data unavailable'
-                : 'Tokens: in ${data.promptTokenCount ?? 0} · out ${data.completionTokenCount ?? 0}'
-                      '${data.reasoningTokenCount == null ? '' : ' · reasoning ${data.reasoningTokenCount}'}',
-            style: TextStyle(color: dim, fontSize: 10.5),
-          ),
-          if (data.isStalled)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Still waiting for the model',
-                style: TextStyle(color: Colors.orange.shade300, fontSize: 10.5),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DecisionSubagentOutput extends StatefulWidget {
-  const _DecisionSubagentOutput({required this.text, required this.color});
-
-  final String text;
-  final Color color;
-
-  @override
-  State<_DecisionSubagentOutput> createState() =>
-      _DecisionSubagentOutputState();
-}
-
-class _DecisionSubagentOutputState extends State<_DecisionSubagentOutput> {
-  final ScrollController _scrollController = ScrollController();
-
-  @override
-  void initState() {
-    super.initState();
-    _followLatestOutput();
-  }
-
-  @override
-  void didUpdateWidget(covariant _DecisionSubagentOutput oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.text != widget.text) {
-      _followLatestOutput();
-    }
-  }
-
-  void _followLatestOutput() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    controller: _scrollController,
-    child: SelectableText(
-      [if (widget.text.isNotEmpty) '输出\n${widget.text}'].join('\n'),
-      style: TextStyle(color: widget.color, fontSize: 10.5, height: 1.35),
-    ),
-  );
-}
-
-/// Expandable card showing the model's requested tool calls before dispatch.
 class _ToolCallCard extends StatelessWidget {
   final _ToolCallData data;
   const _ToolCallCard({required this.data});

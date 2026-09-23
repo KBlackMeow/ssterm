@@ -16,7 +16,9 @@ class WallpaperStorage {
 
   static File? resolveFile(String? wallpaperId) {
     if (wallpaperId == null || wallpaperId.isEmpty) return null;
-    final file = File(p.join(appBasePath(), '.ssterm', 'wallpapers', wallpaperId));
+    final file = File(
+      p.join(appBasePath(), '.ssterm', 'wallpapers', wallpaperId),
+    );
     return file.existsSync() ? file : null;
   }
 

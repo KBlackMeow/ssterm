@@ -54,6 +54,27 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('round-trips inert structured evidence-run state', () {
+      final snapshot = AgentSessionSnapshot.fromHistory(
+        sessionId: 'local-default',
+        history: const [
+          AgentConversationItem.text(role: 'user', content: 'inspect'),
+        ],
+        runState: {
+          'phase': 'executing',
+          'criteria': [
+            {'id': 'tests', 'status': 'pending'},
+          ],
+        },
+        savedAt: DateTime.utc(2026),
+      );
+
+      final restored = AgentSessionSnapshot.fromJson(snapshot.toJson());
+
+      expect(restored.runState?['phase'], 'executing');
+      expect(restored.runState?['criteria'], isA<List>());
+    });
   });
 
   group('AgentSessionStore', () {

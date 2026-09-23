@@ -6,10 +6,8 @@ import '../dialogs/host_key_dialog.dart';
 import '../utils/ssh_fingerprint.dart';
 import 'trusted_host_keys.dart';
 
-typedef SshHostKeyVerifier = Future<bool> Function(
-  String keyType,
-  Uint8List fingerprint,
-);
+typedef SshHostKeyVerifier =
+    Future<bool> Function(String keyType, Uint8List fingerprint);
 
 SshHostKeyVerifier createHostKeyVerifier(
   BuildContext context, {

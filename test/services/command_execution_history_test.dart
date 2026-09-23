@@ -101,5 +101,4 @@ void main() {
 
     expect(reported, isNotNull);
   });
-
 }

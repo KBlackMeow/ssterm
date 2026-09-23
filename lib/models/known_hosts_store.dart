@@ -20,18 +20,18 @@ class KnownHostEntry {
   String get hostKey => port == 22 ? hostname : '[$hostname]:$port';
 
   Map<String, dynamic> toJson() => {
-        'hostname': hostname,
-        'port': port,
-        'keyType': keyType,
-        'fingerprint': fingerprint,
-      };
+    'hostname': hostname,
+    'port': port,
+    'keyType': keyType,
+    'fingerprint': fingerprint,
+  };
 
   factory KnownHostEntry.fromJson(Map<String, dynamic> json) => KnownHostEntry(
-        hostname: json['hostname'] as String,
-        port: json['port'] as int? ?? 22,
-        keyType: json['keyType'] as String,
-        fingerprint: json['fingerprint'] as String,
-      );
+    hostname: json['hostname'] as String,
+    port: json['port'] as int? ?? 22,
+    keyType: json['keyType'] as String,
+    fingerprint: json['fingerprint'] as String,
+  );
 }
 
 /// Trusted SSH server host keys (~/.ssterm/known_hosts.json).
@@ -81,12 +81,14 @@ class KnownHostsStore {
   ) async {
     final entries = await load();
     entries.removeWhere((e) => e.hostname == hostname && e.port == port);
-    entries.add(KnownHostEntry(
-      hostname: hostname,
-      port: port,
-      keyType: keyType,
-      fingerprint: normalizeFingerprint(fingerprint),
-    ));
+    entries.add(
+      KnownHostEntry(
+        hostname: hostname,
+        port: port,
+        keyType: keyType,
+        fingerprint: normalizeFingerprint(fingerprint),
+      ),
+    );
     await save(entries);
   }
 }

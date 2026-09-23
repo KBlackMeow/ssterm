@@ -24,65 +24,69 @@ Future<bool> showHostKeyConfirmDialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: PopupSurface(color: FrostedGlassStyle.dialogFill,          child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Verify Host Key',
-                style: TextStyle(
-                  color: Color(0xFFD4D4D4),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'The authenticity of $host cannot be verified.\n'
-                'This host was not found in ~/.ssh/known_hosts or '
-                '~/.ssterm/known_hosts.json. Confirm the fingerprint before connecting.',
-                style: const TextStyle(
-                  color: Color(0xFF8E8E8E),
-                  fontSize: 12,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _FingerprintBlock(keyType: keyType, fingerprint: displayFp),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: Color(0xFF8E8E8E))),
+        child: PopupSurface(
+          color: FrostedGlassStyle.dialogFill,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Verify Host Key',
+                  style: TextStyle(
+                    color: Color(0xFFD4D4D4),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2472C8),
-                      foregroundColor: Colors.white,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'The authenticity of $host cannot be verified.\n'
+                  'This host was not found in ~/.ssh/known_hosts or '
+                  '~/.ssterm/known_hosts.json. Confirm the fingerprint before connecting.',
+                  style: const TextStyle(
+                    color: Color(0xFF8E8E8E),
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _FingerprintBlock(keyType: keyType, fingerprint: displayFp),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: Color(0xFF8E8E8E)),
+                      ),
                     ),
-                    child: const Text('Trust and Connect'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Fingerprint will be saved to ~/.ssterm/known_hosts.json',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
-              ),
-            ],
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2472C8),
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Trust and Connect'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Fingerprint will be saved to ~/.ssterm/known_hosts.json',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
+                ),
+              ],
+            ),
           ),
-        ),
-        ),   // PopupSurface
-      ),     // SizedBox
-    ),       // Dialog
+        ), // PopupSurface
+      ), // SizedBox
+    ), // Dialog
   ).then((v) => v ?? false);
 }
 
@@ -106,81 +110,90 @@ Future<bool> showHostKeyChangedDialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
         width: 420,
-        child: PopupSurface(color: FrostedGlassStyle.dialogFill, child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Host Key Changed',
-                style: TextStyle(
-                  color: Color(0xFFFF6E67),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'WARNING: The remote host key for $host has changed. '
-                'This may indicate a man-in-the-middle attack.\n'
-                'Only continue if you have verified through another channel '
-                'that this change is expected (e.g. the server was '
-                'reinstalled or its key was rotated).',
-                style: const TextStyle(
-                  color: Color(0xFF8E8E8E),
-                  fontSize: 12,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text('Known fingerprint',
-                  style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11)),
-              const SizedBox(height: 6),
-              _FingerprintBlock(
-                keyType: existing.keyType,
-                fingerprint: oldFp,
-              ),
-              const SizedBox(height: 12),
-              const Text('Received fingerprint',
-                  style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11)),
-              const SizedBox(height: 6),
-              _FingerprintBlock(keyType: keyType, fingerprint: newFp),
-              const SizedBox(height: 20),
-              Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: Color(0xFF8E8E8E))),
+        child: PopupSurface(
+          color: FrostedGlassStyle.dialogFill,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Host Key Changed',
+                  style: TextStyle(
+                    color: Color(0xFFFF6E67),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
-                  ElevatedButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6E67),
-                      foregroundColor: Colors.black,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'WARNING: The remote host key for $host has changed. '
+                  'This may indicate a man-in-the-middle attack.\n'
+                  'Only continue if you have verified through another channel '
+                  'that this change is expected (e.g. the server was '
+                  'reinstalled or its key was rotated).',
+                  style: const TextStyle(
+                    color: Color(0xFF8E8E8E),
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Known fingerprint',
+                  style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11),
+                ),
+                const SizedBox(height: 6),
+                _FingerprintBlock(
+                  keyType: existing.keyType,
+                  fingerprint: oldFp,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Received fingerprint',
+                  style: TextStyle(color: Color(0xFF8E8E8E), fontSize: 11),
+                ),
+                const SizedBox(height: 6),
+                _FingerprintBlock(keyType: keyType, fingerprint: newFp),
+                const SizedBox(height: 20),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: Color(0xFF8E8E8E)),
+                      ),
                     ),
-                    child: const Text('Update Key and Connect'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Confirming replaces the fingerprint in '
-                '~/.ssterm/known_hosts.json only. ~/.ssh/known_hosts is '
-                'not modified.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
-              ),
-            ],
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF6E67),
+                        foregroundColor: Colors.black,
+                      ),
+                      child: const Text('Update Key and Connect'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Confirming replaces the fingerprint in '
+                  '~/.ssterm/known_hosts.json only. ~/.ssh/known_hosts is '
+                  'not modified.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF4A4A4A), fontSize: 10),
+                ),
+              ],
+            ),
           ),
-        )),    // PopupSurface + SingleChildScrollView
-      ),       // SizedBox
-    ),         // Dialog
+        ), // PopupSurface + SingleChildScrollView
+      ), // SizedBox
+    ), // Dialog
   ).then((v) => v ?? false);
 }
 
@@ -195,10 +208,7 @@ String formatMd5FingerprintFromStored(String stored) {
 }
 
 class _FingerprintBlock extends StatelessWidget {
-  const _FingerprintBlock({
-    required this.keyType,
-    required this.fingerprint,
-  });
+  const _FingerprintBlock({required this.keyType, required this.fingerprint});
 
   final String keyType;
   final String fingerprint;

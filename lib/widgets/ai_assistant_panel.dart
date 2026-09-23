@@ -19,9 +19,6 @@ import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
 import '../services/agent_execution_budget.dart';
-import '../services/agent_decision_policy.dart';
-import '../services/agent_decision_transcript.dart';
-import '../services/agent_deliberation.dart';
 import '../services/agent_session_store.dart';
 import '../services/agent_session_registry.dart';
 import '../services/agent_output_store.dart';
@@ -279,10 +276,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   // Conversation history for agent mode (preserved across messages).
   final _conversationHistory = AgentConversationHistory();
   int? _lastAgentPromptTokenCount;
-  AgentDecisionRun? _activeDecisionRun;
-  AgentDecisionPlan? _activeDecisionPlan;
-  _DecisionCardData? _activeDecisionCard;
-  Timer? _decisionCardTimer;
   late final AgentSessionRegistry _sessionRegistry;
   AgentSessionLease? _sessionLease;
   var _sessionNeedsTitle = true;
@@ -296,10 +289,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   @override
   void dispose() {
-    _decisionCardTimer?.cancel();
     _generation++;
     _cancelStream?.call();
-    _cancelPendingAgentDecisions();
+    _cancelPendingAgentPrompts();
     _streamSession?.close(force: true);
     _streamSession = null;
     _agentController.dispose();
@@ -402,7 +394,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _generation++;
     _cancelStream?.call();
     _cancelStream = null;
-    _cancelPendingAgentDecisions();
+    _cancelPendingAgentPrompts();
     // If the turn was interrupted between the model emitting a native tool
     // call and the loop recording its result, the conversation history ends
     // on a dangling `assistantToolCalls` item.  Backfill a synthetic tool
@@ -417,8 +409,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
     setState(() {
-      _activeDecisionCard?.cancelActiveSubagents();
-      _activeDecisionCard?.isRunning = false;
       _agentBusy = false;
       _agentLoopStatus = null;
       // A pending ask_user_question card's `await` would otherwise
@@ -450,7 +440,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _drainQueuedUserInput();
   }
 
-  void _cancelPendingAgentDecisions() {
+  void _cancelPendingAgentPrompts() {
     final pendingQuestion = _pendingQuestionProposal;
     if (pendingQuestion != null && !pendingQuestion.decision.isCompleted) {
       pendingQuestion.state = _QuestionProposalState.stale;
@@ -1019,7 +1009,6 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
             onDangerProposalDecision: _decideDangerProposal,
             onQuestionProposalDecision: _decideQuestionProposal,
             onQuestionProposalOther: _beginCustomQuestionAnswer,
-            onCancelDecision: _cancelAgent,
             hasPendingQuestion: _pendingQuestionProposal != null,
             position: _position,
             onClear: _clearChat,

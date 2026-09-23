@@ -7,14 +7,14 @@ import 'package:flutter/material.dart';
 /// blue-ambient shadows. All effects are static GPU paint; zero CPU overhead.
 abstract final class FrostedGlassStyle {
   static const panelRadius = 12.0;
-  static const menuRadius  = 10.0;
-  static const blurSigma   = 26.0;
+  static const menuRadius = 10.0;
+  static const blurSigma = 26.0;
 
   // Neutral-dark fills — R=G=B so no colour tint on any dark terminal background.
   static const panelFillFrosted = Color(0xA0141414);
-  static const panelFillSolid   = Color(0xEE161616);
-  static const menuFillFrosted  = Color(0xAA1A1A1A);
-  static const menuFillSolid    = Color(0xF81A1A1A);
+  static const panelFillSolid = Color(0xEE161616);
+  static const menuFillFrosted = Color(0xAA1A1A1A);
+  static const menuFillSolid = Color(0xF81A1A1A);
 
   /// Modal dialog fill — pure neutral grey, semi-transparent.
   /// Never derives from terminal theme so dialogs stay consistent across themes.
@@ -25,7 +25,7 @@ abstract final class FrostedGlassStyle {
 
   // Gradient border: bright top-left → dim bottom-right (simulates glass edge)
   static const _borderBright = Color(0x50FFFFFF);
-  static const _borderDim    = Color(0x0CFFFFFF);
+  static const _borderDim = Color(0x0CFFFFFF);
 
   // Shadows: depth black
   static const _shadowDepth = BoxShadow(
@@ -76,8 +76,10 @@ class AppColors extends ThemeExtension<AppColors> {
     final isLight = bg.computeLuminance() > 0.5;
     return AppColors(
       popup: bg,
-      foreground:    isLight ? const Color(0xFF1A1A1A) : const Color(0xFFD4D4D4),
-      foregroundDim: isLight ? const Color(0xFF5A5A5A) : const Color(0xFF8E8E8E),
+      foreground: isLight ? const Color(0xFF1A1A1A) : const Color(0xFFD4D4D4),
+      foregroundDim: isLight
+          ? const Color(0xFF5A5A5A)
+          : const Color(0xFF8E8E8E),
     );
   }
 
@@ -87,18 +89,18 @@ class AppColors extends ThemeExtension<AppColors> {
   @override
   AppColors copyWith({Color? popup, Color? foreground, Color? foregroundDim}) =>
       AppColors(
-        popup:        popup        ?? this.popup,
-        foreground:    foreground    ?? this.foreground,
+        popup: popup ?? this.popup,
+        foreground: foreground ?? this.foreground,
         foregroundDim: foregroundDim ?? this.foregroundDim,
       );
 
   @override
-  AppColors lerp(AppColors? other, double t) =>
-      AppColors(
-        popup:        Color.lerp(popup,        other?.popup,        t) ?? popup,
-        foreground:    Color.lerp(foreground,    other?.foreground,    t) ?? foreground,
-        foregroundDim: Color.lerp(foregroundDim, other?.foregroundDim, t) ?? foregroundDim,
-      );
+  AppColors lerp(AppColors? other, double t) => AppColors(
+    popup: Color.lerp(popup, other?.popup, t) ?? popup,
+    foreground: Color.lerp(foreground, other?.foreground, t) ?? foreground,
+    foregroundDim:
+        Color.lerp(foregroundDim, other?.foregroundDim, t) ?? foregroundDim,
+  );
 }
 
 /// Standard popup/dialog surface: solid fill, white border, depth shadow.
@@ -113,10 +115,12 @@ class PopupSurface extends StatelessWidget {
   });
 
   final Widget child;
+
   /// Explicit fill override. If null, uses [AppColors.popup] from context,
   /// falling back to [FrostedGlassStyle.menuFillSolid].
   final Color? color;
   final double radius;
+
   /// Gaussian blur sigma applied behind the surface via [BackdropFilter].
   /// `0` disables the effect (default). GPU-only — add a single paint layer.
   final double backdropBlur;
@@ -130,7 +134,8 @@ class PopupSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = color ??
+    final fill =
+        color ??
         AppColors.maybeOf(context)?.popup ??
         FrostedGlassStyle.menuFillSolid;
     final br = BorderRadius.circular(radius);
@@ -147,7 +152,10 @@ class PopupSurface extends StatelessWidget {
           borderRadius: br,
           clipBehavior: Clip.antiAlias,
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: backdropBlur, sigmaY: backdropBlur),
+            filter: ImageFilter.blur(
+              sigmaX: backdropBlur,
+              sigmaY: backdropBlur,
+            ),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: fill,
@@ -199,7 +207,8 @@ class FrostedGlassSurface extends StatelessWidget {
     final innerR = (borderRadius - 1.0).clamp(0.0, double.infinity);
     final innerRadius = BorderRadius.circular(innerR);
 
-    final fill = fillColor ??
+    final fill =
+        fillColor ??
         (frosted
             ? FrostedGlassStyle.menuFillFrosted
             : FrostedGlassStyle.menuFillSolid);
@@ -214,9 +223,9 @@ class FrostedGlassSurface extends StatelessWidget {
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
-          end:   Alignment.bottomCenter,
+          end: Alignment.bottomCenter,
           colors: [Color(0x1AFFFFFF), Color(0x00FFFFFF)],
-          stops:  [0.0, 0.30],
+          stops: [0.0, 0.30],
         ),
       ),
       child: DecoratedBox(
@@ -224,9 +233,9 @@ class FrostedGlassSurface extends StatelessWidget {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
-            end:   Alignment.topCenter,
+            end: Alignment.topCenter,
             colors: [Color(0x14000000), Color(0x00000000)],
-            stops:  [0.0, 0.20],
+            stops: [0.0, 0.20],
           ),
         ),
         child: DecoratedBox(
@@ -284,12 +293,13 @@ Future<T?> showFrostedMenu<T>({
   _activeFrostedMenuDismiss?.call();
 
   final overlayState = Overlay.of(context, rootOverlay: true);
-  final screen      = MediaQuery.sizeOf(context);
+  final screen = MediaQuery.sizeOf(context);
 
   // Capture theme colors before entering the OverlayEntry builder,
   // which may not inherit the local Theme.
-  final popupColor  = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
-  final menuColors  = AppColors.fromBackground(popupColor);
+  final popupColor =
+      AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+  final menuColors = AppColors.fromBackground(popupColor);
   final parentTheme = Theme.of(context);
 
   final completer = Completer<T?>();
@@ -306,15 +316,21 @@ Future<T?> showFrostedMenu<T>({
       completer.complete(value);
     }
   }
+
   selfDismiss = () => dismiss(null);
   _activeFrostedMenuDismiss = selfDismiss;
 
   // Only use bounded constraint values; BoxConstraints defaults maxWidth to
   // double.infinity when not set, so guard with isFinite before consuming.
-  final minW = (constraints?.minWidth.isFinite  == true) ? constraints!.minWidth  : 200.0;
-  final maxW = ((constraints?.maxWidth.isFinite  == true) ? constraints!.maxWidth  : 320.0)
-      .clamp(minW, screen.width - 16);
-  final maxH = ((constraints?.maxHeight.isFinite == true) ? constraints!.maxHeight : screen.height * 0.75);
+  final minW = (constraints?.minWidth.isFinite == true)
+      ? constraints!.minWidth
+      : 200.0;
+  final maxW =
+      ((constraints?.maxWidth.isFinite == true) ? constraints!.maxWidth : 320.0)
+          .clamp(minW, screen.width - 16);
+  final maxH = ((constraints?.maxHeight.isFinite == true)
+      ? constraints!.maxHeight
+      : screen.height * 0.75);
 
   // Callers use a non-standard RelativeRect convention (matching the original
   // showMenu callers in this codebase):
@@ -332,26 +348,29 @@ Future<T?> showFrostedMenu<T>({
   // full menu wouldn't fit (e.g. right-clicking the last row near the screen
   // bottom). PopupSurface adds a 1px border on each side, so add ~2px to the
   // entries' raw height for a sufficient fit estimate.
-  final contentH   = (_entriesTotalHeight(items) + 2).clamp(0.0, maxH).toDouble();
-  final spaceBelow = (screen.height - position.top - 8).clamp(0.0, double.infinity);
+  final contentH = (_entriesTotalHeight(items) + 2).clamp(0.0, maxH).toDouble();
+  final spaceBelow = (screen.height - position.top - 8).clamp(
+    0.0,
+    double.infinity,
+  );
   final spaceAbove = (position.top - 8).clamp(0.0, double.infinity);
 
   final double menuTop;
   final double availH;
   if (contentH <= spaceBelow) {
     menuTop = position.top.clamp(8.0, screen.height - 8.0);
-    availH  = spaceBelow.clamp(0.0, maxH);
+    availH = spaceBelow.clamp(0.0, maxH);
   } else if (contentH <= spaceAbove) {
     // Flip above: anchor the menu's bottom edge at the click point.
     menuTop = (position.top - contentH).clamp(8.0, screen.height - 8.0);
-    availH  = spaceAbove.clamp(0.0, maxH);
+    availH = spaceAbove.clamp(0.0, maxH);
   } else if (spaceAbove > spaceBelow) {
     // Neither side fits the full menu; use the larger half and let it scroll.
     menuTop = 8.0;
-    availH  = spaceAbove.clamp(0.0, maxH);
+    availH = spaceAbove.clamp(0.0, maxH);
   } else {
     menuTop = position.top.clamp(8.0, screen.height - 8.0);
-    availH  = spaceBelow.clamp(0.0, maxH);
+    availH = spaceBelow.clamp(0.0, maxH);
   }
 
   entry = OverlayEntry(
@@ -374,8 +393,8 @@ Future<T?> showFrostedMenu<T>({
           top: menuTop,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minWidth:  minW,
-              maxWidth:  maxW.clamp(0, screen.width - menuLeft - 8),
+              minWidth: minW,
+              maxWidth: maxW.clamp(0, screen.width - menuLeft - 8),
               maxHeight: availH,
             ),
             child: Theme(
@@ -433,23 +452,26 @@ class _FrostedMenuList<T> extends StatelessWidget {
 
     for (final entry in entries) {
       if (entry is PopupMenuDivider) {
-        rows.add(Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Divider(
-            height: entry.height,
-            thickness: 0.5,
-            color: FrostedGlassStyle.divider,
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Divider(
+              height: entry.height,
+              thickness: 0.5,
+              color: FrostedGlassStyle.divider,
+            ),
           ),
-        ));
+        );
         continue;
       }
 
       if (entry is! PopupMenuItem<T>) continue;
-      final item   = entry;
+      final item = entry;
       final height = item.height;
       final padding =
-          (item.padding ?? const EdgeInsets.symmetric(horizontal: 14))
-              .resolve(Directionality.of(context));
+          (item.padding ?? const EdgeInsets.symmetric(horizontal: 14)).resolve(
+            Directionality.of(context),
+          );
 
       if (!item.enabled) {
         rows.add(
@@ -504,7 +526,9 @@ class _FrostedMenuList<T> extends StatelessWidget {
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxH),
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: SingleChildScrollView(child: list),
           ),
         );

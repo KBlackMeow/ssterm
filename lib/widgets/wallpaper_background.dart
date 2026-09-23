@@ -38,10 +38,7 @@ class WallpaperBackground extends StatelessWidget {
     }
 
     return ClipRect(
-      child: Opacity(
-        opacity: opacity.clamp(0.0, 1.0),
-        child: image,
-      ),
+      child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: image),
     );
   }
 }

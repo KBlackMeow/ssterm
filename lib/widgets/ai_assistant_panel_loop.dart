@@ -75,9 +75,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     }
 
     _markAgentBusy();
-    _activeDecisionRun = null;
-    _activeDecisionPlan = null;
-    _activeDecisionCard = null;
 
     // The agent loop receives direct stdout/stderr from the independent
     // background executor. Visible-terminal scrollback is never included.
@@ -108,256 +105,16 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           ? userText
           : '<command_environment>$environment</command_environment>\n\n$userText';
     }
-    final providerId = config.current?.id;
-    final model = config.resolvedModel;
-    final decisionSettings = providerId == null || model == null
-        ? const AgentDecisionSettings(enabled: false)
-        : config.decisionSettingsFor(providerId, model);
-    var route = AgentDecisionPolicy.classify(userText, decisionSettings);
-    ProviderTokenUsage? routingUsage;
-    if (route == AgentDecisionRoute.uncertain) {
-      // Broad task semantics do not decide this path. A constrained, tool-free
-      // router chooses direct execution or a solution workflow.
-      final routed = await AgentDeliberation.route(
-        config: config,
-        // Route only the user's request. Session paths and environment labels
-        // are execution context and must not accidentally become risk signals.
-        taskContext: userText,
-      );
-      if (!mounted || gen != _generation) return;
-      final decision = routed.value;
-      routingUsage = routed.usage;
-      route = decision?.route ?? AgentDecisionRoute.standard;
-      setState(() {
-        if (decision == null) {
-          _messages.add(
-            _ChatMessage.notice(
-              'Task routing: **fallback to standard execution** — ${routed.error ?? 'no usable routing decision'}.',
-            ),
-          );
-        } else {
-          final mode = switch (route) {
-            AgentDecisionRoute.deep => 'solution workflow',
-            AgentDecisionRoute.direct => 'direct execution',
-            AgentDecisionRoute.uncertain => 'evidence-first execution',
-            AgentDecisionRoute.standard => 'standard execution',
-          };
-          _messages.add(
-            _ChatMessage.notice('Task routing: **$mode** · source model'),
-          );
-        }
-      });
-      _scrollToBottom();
-    }
-    // Keep the disabled baseline byte-for-byte unchanged. When adaptive
-    // routing is enabled, every route (including direct) receives its bounded
-    // execution anchor.
-    final routedBody = !decisionSettings.enabled
-        ? body
-        : '$body\n\n<agent_route>${AgentDecisionPolicy.guideFor(route)}</agent_route>';
-    var executionBody = routedBody;
-
-    if (route == AgentDecisionRoute.deep) {
-      _activeDecisionRun = AgentDecisionRun.deep(
-        decisionSettings,
-        highRisk: AgentDecisionPolicy.isHighRisk(userText),
-      );
-      final decisionCard = _DecisionCardData(
-        stage: 'Planning options',
-        detail:
-            'Solution workflow selected; evaluating alternatives before execution.',
-      );
-      _activeDecisionCard = decisionCard;
-      if (routingUsage != null) {
-        decisionCard.modelRequests++;
-        decisionCard.decisionRequests++;
-        decisionCard.recordUsage(routingUsage);
-      }
-      setState(() {
-        _messages.add(_ChatMessage.decisionCard(decisionCard));
-        _agentLoopStatus = 'Planning concise options…';
-      });
-      final startedAt = DateTime.now();
-      _decisionCardTimer?.cancel();
-      _decisionCardTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (!mounted || gen != _generation || !decisionCard.isRunning) {
-          timer.cancel();
-          return;
-        }
-        setState(() {
-          decisionCard.elapsedSeconds = DateTime.now()
-              .difference(startedAt)
-              .inSeconds;
-          decisionCard.isStalled =
-              DateTime.now()
-                  .difference(decisionCard.lastProgressAt)
-                  .inSeconds >=
-              15;
-        });
-      });
-      _scrollToBottom();
-      decisionCard.modelRequests++;
-      decisionCard.decisionRequests++;
-      final planningSubagent = decisionCard.startSubagent('规划子 Agent');
-      AgentDeliberationResult<AgentDecisionPlan>? plannedResult;
-      final planningSession = AgentStreamClientSession();
-      final cancelPlanning = planningSession.reset;
-      _cancelStream = cancelPlanning;
-      try {
-        plannedResult = _activeDecisionRun!.consumeDecisionRequest()
-            ? await AgentDeliberation.streamPlan(
-                config: config,
-                taskContext: routedBody,
-                session: planningSession,
-                onText: (_) {},
-                onUpdate: (update) {
-                  if (!mounted || gen != _generation) return;
-                  setState(() {
-                    planningSubagent.recordChunk(
-                      kind: update.kind,
-                      text: update.content,
-                    );
-                    decisionCard.markProgress();
-                  });
-                  _scrollToBottom();
-                },
-              )
-            : null;
-      } finally {
-        planningSession.close(force: true);
-        if (identical(_cancelStream, cancelPlanning)) _cancelStream = null;
-      }
-      final planned = plannedResult?.value;
-      final shouldCritique =
-          planned != null &&
-          AgentDecisionPolicy.shouldCritique(userText, planned);
-      if (!mounted || gen != _generation) return;
-      setState(() {
-        planningSubagent.finish(error: plannedResult?.error);
-        if (plannedResult != null) {
-          decisionCard.recordUsage(plannedResult.usage);
-        }
-        if (planned != null) {
-          planningSubagent.replaceText(
-            AgentDecisionTranscript.planning(planned),
-          );
-        } else {
-          planningSubagent.replaceText('规划请求未返回可用方案，已切换为标准执行流程。');
-        }
-        decisionCard.markProgress();
-        decisionCard.stage = shouldCritique
-            ? 'Reviewing high-risk plan'
-            : 'Plan selected';
-        decisionCard.detail = planned == null
-            ? 'Planning response was unavailable; checking whether execution can continue.'
-            : shouldCritique
-            ? 'A targeted review is checking material risk.'
-            : 'The concise recommendation is ready for execution.';
-      });
-      _scrollToBottom();
-      AgentDeliberationResult<AgentCritiqueVerdict>? reviewedResult;
-      if (shouldCritique) _activeDecisionRun!.elevateRisk();
-      if (shouldCritique && _activeDecisionRun!.consumeDecisionRequest()) {
-        decisionCard.modelRequests++;
-        decisionCard.decisionRequests++;
-        final reviewSubagent = decisionCard.startSubagent('审查子 Agent');
-        setState(decisionCard.markProgress);
-        _scrollToBottom();
-        final reviewSession = AgentStreamClientSession();
-        final cancelReview = reviewSession.reset;
-        _cancelStream = cancelReview;
-        try {
-          reviewedResult = await AgentDeliberation.streamCritique(
-            config: config,
-            taskContext: routedBody,
-            plan: planned,
-            session: reviewSession,
-            onText: (_) {},
-            onUpdate: (update) {
-              if (!mounted || gen != _generation) return;
-              setState(() {
-                reviewSubagent.recordChunk(
-                  kind: update.kind,
-                  text: update.content,
-                );
-                decisionCard.markProgress();
-              });
-              _scrollToBottom();
-            },
-          );
-        } finally {
-          reviewSession.close(force: true);
-          if (identical(_cancelStream, cancelReview)) _cancelStream = null;
-        }
-      }
-      final critique = reviewedResult?.value;
-      if (!mounted || gen != _generation) return;
-      if (reviewedResult != null) {
-        setState(() {
-          final reviewSubagent = decisionCard.subagents.lastWhere(
-            (subagent) => subagent.name == '审查子 Agent',
-          );
-          reviewSubagent.finish(error: reviewedResult!.error);
-          reviewSubagent.replaceText(
-            critique == null
-                ? '审查未返回可用结论，将采用初步方案继续执行。'
-                : critique.accept
-                ? '审查通过：未发现需要改变方案的重大风险。'
-                : '审查发现：${critique.issue ?? '存在未解决的重大风险。'}'
-                      '${critique.replacementId == null ? '' : '\n建议改用方案：${critique.replacementId}'}',
-          );
-          decisionCard.recordUsage(reviewedResult.usage);
-          decisionCard.markProgress();
-        });
-        _scrollToBottom();
-      }
-      final plan = planned == null
-          ? null
-          : AgentDeliberation.applyCritique(planned, critique);
-      final critiqueRejectedWithoutReplacement =
-          planned != null && critique?.accept == false && plan == null;
-      if (plan == null) {
-        _activeDecisionRun = null;
-        setState(() {
-          decisionCard.stage = 'Standard execution';
-          decisionCard.summary = critiqueRejectedWithoutReplacement
-              ? 'Recommendation rejected by review'
-              : 'Planning unavailable';
-          decisionCard.detail =
-              'Continued with the standard Agent loop; no recommendation was accepted.';
-        });
-        final fallbackReason = critiqueRejectedWithoutReplacement
-            ? 'Independent review rejected the recommendation without a valid replacement.'
-            : 'Planning was unavailable.';
-        executionBody =
-            '$routedBody\n\n<decision_fallback>$fallbackReason Continue with the standard Agent loop; do not claim an optimal recommendation without evidence.</decision_fallback>';
-      } else {
-        _activeDecisionPlan = plan;
-        final recommended = plan.candidates.firstWhere(
-          (candidate) => candidate.id == plan.recommendedId,
-        );
-        setState(() {
-          decisionCard.stage = 'Executing recommendation';
-          decisionCard.summary = 'Recommended: ${recommended.summary}';
-          decisionCard.detail =
-              'Selected after planning and independent review. Validation: ${recommended.validation}';
-        });
-        executionBody =
-            '$routedBody\n\n<decision_plan>Recommended candidate: ${plan.recommendedId}. Candidates: ${plan.toJson()}. Execute only with real evidence and report remaining risks.</decision_plan>';
-      }
-      _scrollToBottom();
-    }
     _conversationHistory.add(
-      AgentConversationItem.text(
-        role: 'user',
-        content: executionBody,
-        images: images,
-      ),
+      AgentConversationItem.text(role: 'user', content: body, images: images),
     );
 
     await _continueAgentLoop(gen, config);
   }
 
+  // Kept temporarily as a migration reader for old persisted run-state
+  // shapes. There is no UI or request path that can start this controller.
+  // ignore: unused_element
   /// Build a small `<session_context>` block describing the active
   /// tab's environment so the LLM can emit absolute file-write paths
   /// AND reason about relative dates from turn 1.
@@ -429,8 +186,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
       if (mounted && gen == _generation) {
         setState(() {
-          _decisionCardTimer?.cancel();
-          _activeDecisionCard?.isRunning = false;
           _agentBusy = false;
           _agentLoopStatus = null;
         });
@@ -459,11 +214,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     void stopIter(int iter, String reason) =>
         _logAgentStop(iter, reason, turnId: turnId);
 
-    final remainingDeepRequests = _activeDecisionRun?.remainingExecutionRequests
-        .clamp(1, 100);
-    final budget = AgentExecutionBudget(
-      maxModelRequests: remainingDeepRequests,
-    );
+    final budget = AgentExecutionBudget();
     var loopIterations = 0;
     agentLoop:
     while (gen == _generation) {
@@ -493,25 +244,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         stopIter(loopIterations, 'context_hard_limit');
         break;
       }
-      if (_activeDecisionRun?.remainingExecutionRequests == 0) {
-        stopIter(loopIterations, 'budget_deep_model_requests');
-        break;
-      }
       final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
       if (modelBudgetStop != null) {
         _recordAgentRunStopped(modelBudgetStop);
         stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
         break;
       }
-      _activeDecisionRun?.consumeExecutionRequest();
       final aiMsg = _ChatMessage.ai(text: '');
       setState(() {
         _messages.add(aiMsg);
-        // Deep routing also executes the normal streamed Agent turn. Count
-        // it with the planning/review calls shown on the decision card.
-        _activeDecisionCard?.modelRequests++;
-        _activeDecisionCard?.executionRequests++;
-        _activeDecisionCard?.markProgress();
       });
 
       // --- AI call ---
@@ -524,22 +265,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // one line of pure heartbeat noise from every iteration on the
       // happy path.
       final historyLenAtCall = _conversationHistory.length;
-      final activeRun = _activeDecisionRun;
-      final shouldFocusFirstTools =
-          activeRun?.settings.firstTurnToolFocus == true &&
-          activeRun!.firstToolFocusPending &&
-          config.current?.protocol != ProviderProtocol.ollamaNative;
       final streamResult = await _streamAiResponse(
         gen,
         historyLenBefore,
         aiMsg,
         config,
         streamSession: streamSession,
-        profile: shouldFocusFirstTools
-            ? const AgentRequestProfile(
-                allowedNativeToolNames: {'bash', 'ask_user_question'},
-              )
-            : null,
       );
       if (streamResult == null) {
         stopIter(loopIterations, 'stream_error_or_cancelled');
@@ -548,16 +279,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       final resolvedStreamResult = streamResult;
       _lastAgentPromptTokenCount = resolvedStreamResult.promptTokenCount;
-      setState(() {
-        _activeDecisionCard?.recordUsage(
-          ProviderTokenUsage(
-            promptTokenCount: resolvedStreamResult.promptTokenCount,
-            completionTokenCount: resolvedStreamResult.completionTokenCount,
-            reasoningTokenCount: resolvedStreamResult.reasoningTokenCount,
-          ),
-        );
-        _activeDecisionCard?.markProgress();
-      });
       final fullText = resolvedStreamResult.text;
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
       final nativeToolCalls = resolvedStreamResult.toolCalls
@@ -591,6 +312,30 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         });
         _scrollToBottom();
         break;
+      }
+      if (toolCalls.isEmpty &&
+          LlmService.isRawWebSearchEnvelope(protocolText)) {
+        // Search envelopes are host-to-model context, not an answer. Some
+        // providers occasionally echo the entire envelope verbatim; hide it
+        // and give the model one constrained chance to synthesize a reply.
+        logIter('iter=$loopIterations web_search_envelope_echoed');
+        _conversationHistory.add({
+          'role': 'assistant',
+          'content': protocolText,
+        });
+        _conversationHistory.add({
+          'role': 'user',
+          'content':
+              'You echoed the raw web-search results instead of answering. '
+              'Use the search results already provided to answer the user directly now. '
+              'Do not repeat the envelope or call web_search again.',
+        });
+        setState(() {
+          _messages.remove(aiMsg);
+          _agentLoopStatus = 'Search results received; preparing answer…';
+        });
+        _scrollToBottom();
+        continue;
       }
       final shellToolCalls = toolCalls.where((call) => call.isShell).toList();
       final commands = shellToolCalls
@@ -1068,91 +813,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // an environment fact the user needs in the log to make sense of
       // why the loop halted with runnable commands sitting on the chat
       // card.
-      if (taskComplete &&
-          _activeDecisionRun != null &&
-          _activeDecisionPlan != null) {
-        setState(() {
-          _agentLoopStatus = 'Verifying decision evidence…';
-          _activeDecisionCard?.stage = 'Verifying evidence';
-          _activeDecisionCard?.detail =
-              'Checking the completed work against the recommendation.';
-        });
-        final decisionStart = _conversationHistory.lastIndexWhere(
-          (item) => item.content?.contains('<decision_plan>') == true,
-        );
-        final evidenceItems = decisionStart < 0
-            ? _conversationHistory
-            : _conversationHistory.skip(decisionStart + 1);
-        final evidenceContents = evidenceItems.expand(
-          (item) => [
-            if (item.content != null) item.content!,
-            ...item.toolResults.map((result) => result.content),
-          ],
-        );
-        final evidence = AgentDecisionPolicy.compactVerificationEvidence(
-          evidenceContents,
-        );
-        final deterministicPass =
-            AgentDecisionPolicy.hasDeterministicValidationEvidence(
-              _activeDecisionPlan!,
-              evidence,
-            );
-        AgentDeliberationResult<AgentVerificationVerdict>? verdictResult;
-        if (!deterministicPass &&
-            _activeDecisionRun!.consumeDecisionRequest()) {
-          _activeDecisionCard?.modelRequests++;
-          _activeDecisionCard?.decisionRequests++;
-          verdictResult = await AgentDeliberation.verify(
-            config: config,
-            plan: _activeDecisionPlan!,
-            finalAnswer: displayText,
-            evidence: evidence,
-          );
-        }
-        final verdict = deterministicPass
-            ? const AgentVerificationVerdict(
-                complete: true,
-                evidence: 'Validation commands completed successfully.',
-              )
-            : verdictResult?.value;
-        if (!mounted || gen != _generation) return;
-        if (verdictResult != null) {
-          _activeDecisionCard?.recordUsage(verdictResult.usage);
-          _activeDecisionCard?.markProgress();
-        }
-        if (verdict != null &&
-            !verdict.complete &&
-            verdict.recovery != null &&
-            _activeDecisionRun!.remainingExecutionRequests > 0 &&
-            _activeDecisionRun!.requestRecovery(evidence: verdict.evidence)) {
-          _conversationHistory.add({
-            'role': 'user',
-            'content':
-                '<verification_recovery>${verdict.recovery}</verification_recovery>',
-          });
-          setState(() {
-            _agentLoopStatus = 'Verification found remaining work…';
-            _activeDecisionCard?.stage = 'Recovery requested';
-            _activeDecisionCard?.detail = verdict.evidence;
-          });
-          continue;
-        }
-        if (verdict == null || !verdict.complete) {
-          final reason =
-              verdict?.evidence ??
-              'The verification pass was unavailable; the result is not independently confirmed.';
-          aiMsg.text = '$displayText\n\n> **Verification pending:** $reason';
-          setState(() {
-            _activeDecisionCard?.stage = 'Verification pending';
-            _activeDecisionCard?.detail = reason;
-          });
-        } else {
-          setState(() {
-            _activeDecisionCard?.stage = 'Evidence verified';
-            _activeDecisionCard?.detail = verdict.evidence;
-          });
-        }
-      }
       if (taskComplete) break;
       if (askUser) break;
       if (commands.isEmpty) break;
@@ -1386,9 +1046,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
               )
             : AgentConversationItem.toolResults(nativeResults),
       );
-      if (toolCalls.isNotEmpty || feedbacks.isNotEmpty) {
-        _activeDecisionRun?.markFirstToolResult();
-      }
       logIter(
         'iter=$loopIterations feedback +${feedbacks.length} '
         'history=${_conversationHistory.length}',

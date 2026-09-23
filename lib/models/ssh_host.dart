@@ -43,11 +43,9 @@ class SshHost {
     return '$u@$hostname${port != 22 ? ':$port' : ''}';
   }
 
-  static String get defaultUsername =>
-      Platform.environment['USER'] ?? 'root';
+  static String get defaultUsername => Platform.environment['USER'] ?? 'root';
 
-  String get profileKey =>
-      '$hostname:$port:${user ?? defaultUsername}';
+  String get profileKey => '$hostname:$port:${user ?? defaultUsername}';
 
   String get connectionKey {
     final auth = usesPassword ? 'password' : 'key';
@@ -56,8 +54,7 @@ class SshHost {
 
   bool get usesPassword => password != null && password!.isNotEmpty;
 
-  bool get usesIdentityFile =>
-      identityFile != null && identityFile!.isNotEmpty;
+  bool get usesIdentityFile => identityFile != null && identityFile!.isNotEmpty;
 
   SshHost copyWith({
     String? alias,
@@ -72,20 +69,19 @@ class SshHost {
     int? keepaliveInterval,
     bool? autoReconnect,
     bool? sessionLog,
-  }) =>
-      SshHost(
-        alias: alias ?? this.alias,
-        hostname: hostname ?? this.hostname,
-        port: port ?? this.port,
-        user: user ?? this.user,
-        identityFile: identityFile ?? this.identityFile,
-        password: password ?? this.password,
-        forwardRules: forwardRules ?? this.forwardRules,
-        jumpHost: clearJumpHost ? null : (jumpHost ?? this.jumpHost),
-        keepaliveInterval: keepaliveInterval ?? this.keepaliveInterval,
-        autoReconnect: autoReconnect ?? this.autoReconnect,
-        sessionLog: sessionLog ?? this.sessionLog,
-      );
+  }) => SshHost(
+    alias: alias ?? this.alias,
+    hostname: hostname ?? this.hostname,
+    port: port ?? this.port,
+    user: user ?? this.user,
+    identityFile: identityFile ?? this.identityFile,
+    password: password ?? this.password,
+    forwardRules: forwardRules ?? this.forwardRules,
+    jumpHost: clearJumpHost ? null : (jumpHost ?? this.jumpHost),
+    keepaliveInterval: keepaliveInterval ?? this.keepaliveInterval,
+    autoReconnect: autoReconnect ?? this.autoReconnect,
+    sessionLog: sessionLog ?? this.sessionLog,
+  );
 }
 
 bool looksLikeKeyPath(String value) {

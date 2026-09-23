@@ -99,11 +99,7 @@ Future<void> sftpDownloadMain(SftpDownloadArgs args) async {
 
 Future<List<SSHKeyPair>?> _loadDefaultIdentities() async {
   final ssh = userSshDir();
-  for (final path in [
-    '$ssh/id_ed25519',
-    '$ssh/id_rsa',
-    '$ssh/id_ecdsa',
-  ]) {
+  for (final path in ['$ssh/id_ed25519', '$ssh/id_rsa', '$ssh/id_ecdsa']) {
     try {
       final f = File(path);
       if (await f.exists()) {

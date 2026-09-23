@@ -28,15 +28,18 @@ class _ToolBtnState extends State<_ToolBtn> {
   Widget build(BuildContext context) {
     final disabled = widget.onTap == null;
     final fgNormal = AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted;
-    final fgHover  = AppColors.maybeOf(context)?.foreground    ?? const Color(0xFFC7C7C7);
-    final fgDisabled = AppColors.maybeOf(context)?.foreground.withValues(alpha: 0.2) ?? _kFgDisabled;
+    final fgHover =
+        AppColors.maybeOf(context)?.foreground ?? const Color(0xFFC7C7C7);
+    final fgDisabled =
+        AppColors.maybeOf(context)?.foreground.withValues(alpha: 0.2) ??
+        _kFgDisabled;
     final color = disabled
         ? fgDisabled
         : widget.danger
-            ? const Color(0xFFFF6E67)
-            : _hover
-                ? fgHover
-                : fgNormal;
+        ? const Color(0xFFFF6E67)
+        : _hover
+        ? fgHover
+        : fgNormal;
 
     return Tooltip(
       message: widget.tooltip,
@@ -77,10 +80,10 @@ class _ConfirmDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors   = AppColors.maybeOf(context);
-    final fill     = colors?.popup  ?? FrostedGlassStyle.menuFillFrosted;
-    final fg       = colors?.foreground    ?? const Color(0xFFC7C7C7);
-    final fgDim    = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
+    final colors = AppColors.maybeOf(context);
+    final fill = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final fg = colors?.foreground ?? const Color(0xFFC7C7C7);
+    final fgDim = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
     return Dialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
@@ -94,10 +97,19 @@ class _ConfirmDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(title,
-                    style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 10),
-                Text(body, style: TextStyle(color: fgDim, fontSize: 13, height: 1.4)),
+                Text(
+                  body,
+                  style: TextStyle(color: fgDim, fontSize: 13, height: 1.4),
+                ),
                 const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -109,8 +121,12 @@ class _ConfirmDialog extends StatelessWidget {
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: Text(confirm,
-                          style: TextStyle(color: danger ? const Color(0xFFFF6E67) : _kAccent)),
+                      child: Text(
+                        confirm,
+                        style: TextStyle(
+                          color: danger ? const Color(0xFFFF6E67) : _kAccent,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -136,10 +152,10 @@ class _InputDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors  = AppColors.maybeOf(context);
-    final fill    = colors?.popup          ?? FrostedGlassStyle.menuFillFrosted;
-    final fg      = colors?.foreground     ?? const Color(0xFFC7C7C7);
-    final fgDim   = colors?.foregroundDim  ?? const Color(0xFF8E8E8E);
+    final colors = AppColors.maybeOf(context);
+    final fill = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final fg = colors?.foreground ?? const Color(0xFFC7C7C7);
+    final fgDim = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
     final fieldBg = fg.withValues(alpha: 0.07);
     final fieldBd = fg.withValues(alpha: 0.15);
     return Dialog(
@@ -155,8 +171,14 @@ class _InputDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(title,
-                    style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: ctrl,
@@ -166,12 +188,16 @@ class _InputDialog extends StatelessWidget {
                     filled: true,
                     fillColor: fieldBg,
                     enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: fieldBd)),
+                      borderSide: BorderSide(color: fieldBd),
+                    ),
                     focusedBorder: const OutlineInputBorder(
-                        borderSide: BorderSide(color: _kAccent)),
+                      borderSide: BorderSide(color: _kAccent),
+                    ),
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
+                    ),
                   ),
                   onSubmitted: (v) => Navigator.pop(context, v),
                 ),
@@ -186,7 +212,10 @@ class _InputDialog extends StatelessWidget {
                     const SizedBox(width: 8),
                     TextButton(
                       onPressed: () => Navigator.pop(context, ctrl.text),
-                      child: Text(confirm, style: const TextStyle(color: _kAccent)),
+                      child: Text(
+                        confirm,
+                        style: const TextStyle(color: _kAccent),
+                      ),
                     ),
                   ],
                 ),

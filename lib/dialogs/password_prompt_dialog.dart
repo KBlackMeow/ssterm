@@ -16,14 +16,14 @@ Future<PasswordPromptResult?> showPasswordPromptDialog(
   );
 }
 
-const _kBg     = Color(0xFF252525);
-const _kField  = Color(0xFF141416);
+const _kBg = Color(0xFF252525);
+const _kField = Color(0xFF141416);
 const _kBorder = Color(0xFF282828);
-const _kFocus  = Color(0xFF2472C8);
-const _kFg     = Color(0xFFC7C7C7);
-const _kLabel  = Color(0xFF8E8E8E);
+const _kFocus = Color(0xFF2472C8);
+const _kFg = Color(0xFFC7C7C7);
+const _kLabel = Color(0xFF8E8E8E);
 const _kAccent = Color(0xFF2472C8);
-const _kTitle  = Color(0xFFD4D4D4);
+const _kTitle = Color(0xFFD4D4D4);
 
 class _PasswordPromptDialog extends StatefulWidget {
   const _PasswordPromptDialog({required this.host});
@@ -50,7 +50,8 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = '${widget.host.user ?? ''}@${widget.host.hostname}'
+    final subtitle =
+        '${widget.host.user ?? ''}@${widget.host.hostname}'
         '${widget.host.port != 22 ? ':${widget.host.port}' : ''}';
 
     return Dialog(

@@ -70,8 +70,7 @@ void main() {
         watch.stop();
 
         final visible = <String>[
-          for (var row = 0; row < terminal.viewHeight; row++)
-            core.rowText(row),
+          for (var row = 0; row < terminal.viewHeight; row++) core.rowText(row),
         ].join('\n');
         expect(visible, contains('2000000'));
 

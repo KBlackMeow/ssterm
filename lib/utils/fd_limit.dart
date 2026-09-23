@@ -42,10 +42,12 @@ void raiseFileDescriptorLimit({int target = 65535}) {
 
   try {
     final libc = DynamicLibrary.process();
-    final getrlimit =
-        libc.lookupFunction<_GetrlimitNative, _GetrlimitDart>('getrlimit');
-    final setrlimit =
-        libc.lookupFunction<_SetrlimitNative, _SetrlimitDart>('setrlimit');
+    final getrlimit = libc.lookupFunction<_GetrlimitNative, _GetrlimitDart>(
+      'getrlimit',
+    );
+    final setrlimit = libc.lookupFunction<_SetrlimitNative, _SetrlimitDart>(
+      'setrlimit',
+    );
 
     final rlim = calloc<_Rlimit>();
     try {
@@ -59,10 +61,15 @@ void raiseFileDescriptorLimit({int target = 65535}) {
       // hard limit reports RLIM_INFINITY. Try the requested target first,
       // then progressively smaller fallbacks so the largest accepted value
       // wins.
-      final candidates = <int>{target, 32768, 16384, 10240, 4096}
-          .where((c) => c > originalSoft && c <= target)
-          .toList()
-        ..sort((a, b) => b.compareTo(a));
+      final candidates =
+          <int>{
+              target,
+              32768,
+              16384,
+              10240,
+              4096,
+            }.where((c) => c > originalSoft && c <= target).toList()
+            ..sort((a, b) => b.compareTo(a));
       for (final c in candidates) {
         rlim.ref.softLimit = c;
         if (setrlimit(resource, rlim) == 0) return;

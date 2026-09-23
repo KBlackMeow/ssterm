@@ -52,12 +52,14 @@ class OpenSshKnownHosts {
         (p) => _hostPatternMatches(p, hostname, port),
       );
       if (!matches) continue;
-      entries.add(KnownHostEntry(
-        hostname: hostname,
-        port: port,
-        keyType: keyType,
-        fingerprint: line.fingerprint,
-      ));
+      entries.add(
+        KnownHostEntry(
+          hostname: hostname,
+          port: port,
+          keyType: keyType,
+          fingerprint: line.fingerprint,
+        ),
+      );
     }
     return entries;
   }
@@ -85,8 +87,7 @@ class OpenSshKnownHosts {
       formatMd5Fingerprint(Uint8List.fromList(md5.convert(keyBytes).bytes)),
     );
 
-    final patterns =
-        hostsField.split(',').where((p) => p.isNotEmpty).toList();
+    final patterns = hostsField.split(',').where((p) => p.isNotEmpty).toList();
     if (patterns.isEmpty) return null;
 
     return _OpenSshKeyLine(
@@ -96,11 +97,7 @@ class OpenSshKnownHosts {
     );
   }
 
-  static bool _hostPatternMatches(
-    String pattern,
-    String hostname,
-    int port,
-  ) {
+  static bool _hostPatternMatches(String pattern, String hostname, int port) {
     if (pattern.startsWith('|')) {
       return _hashedHostMatches(pattern, hostname, port);
     }
@@ -135,10 +132,7 @@ class OpenSshKnownHosts {
     }
     final expectedHash = segments[3].replaceAll('=', '');
 
-    final candidates = <String>[
-      hostname,
-      if (port != 22) '[$hostname]:$port',
-    ];
+    final candidates = <String>[hostname, if (port != 22) '[$hostname]:$port'];
 
     for (final host in candidates) {
       final hmac = Hmac(sha1, salt);

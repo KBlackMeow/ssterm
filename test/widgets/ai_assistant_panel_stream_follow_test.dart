@@ -18,24 +18,22 @@ import 'package:ssterm/widgets/ai_assistant_panel.dart';
 /// must instead be paused ONLY by a genuine user scroll.
 void main() {
   testWidgets(
-    'streamed agent replies keep the transcript pinned to the bottom',
+    'raw web-search envelopes are retried instead of shown as answers',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1000, 700));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final rawSearch = '''Here are the results you requested:
 
-      final sse = <String>[];
-      for (var i = 0; i < 40; i++) {
-        sse.add(
-          'data: {"choices":[{"delta":{"content":'
-          '"line $i of a long agent reply that wraps and grows the transcript. "}}]}',
-        );
-      }
-      sse.add('data: {"choices":[{"delta":{"content":"[TASK_COMPLETE]"}}]}');
-      sse.add('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}');
-      sse.add('data: [DONE]');
+```text
+[Web search results]
+query: "Beijing current weather"
+(2 results)
 
-      final overrides = _MockHttpOverrides(sse);
-      HttpOverrides.global = overrides;
+1. Beijing weather
+   Current conditions.
+```''';
+      HttpOverrides.global = _QueuedHttpOverrides([
+        _sseForText(rawSearch),
+        _sseForText('北京当前多云，约 26°C。\n[TASK_COMPLETE]'),
+      ]);
       addTearDown(() => HttpOverrides.global = null);
 
       await tester.pumpWidget(
@@ -51,36 +49,93 @@ void main() {
         ),
       );
 
-      await tester.enterText(find.byType(TextField), 'hi');
+      await tester.enterText(find.byType(TextField), '北京天气如何');
       await tester.tap(find.byIcon(Icons.send_rounded));
-
-      // Let the whole streamed reply drain.  The stream emits one chunk per
-      // 5ms of fake time; 120 × 10ms is more than enough to cover the stream,
-      // the empty-card layout, and every auto-scroll animation.
-      for (var i = 0; i < 120; i++) {
+      for (var i = 0; i < 80; i++) {
         await tester.pump(const Duration(milliseconds: 10));
       }
-      // The reply has no tool calls, so no status spinner is ever shown and
-      // the turn ends cleanly — pumpAndSettle can finish.
       await tester.pumpAndSettle();
 
-      final position = tester
-          .widget<ListView>(find.byType(ListView))
-          .controller!
-          .position;
-      expect(
-        position.maxScrollExtent,
-        greaterThan(0),
-        reason: 'the long reply should overflow the panel',
-      );
-      expect(
-        position.maxScrollExtent - position.pixels,
-        lessThan(1.0),
-        reason: 'the transcript must stay pinned to the latest content',
-      );
+      expect(find.textContaining('北京当前多云'), findsOneWidget);
+      expect(find.textContaining('[Web search results]'), findsNothing);
     },
   );
+
+  testWidgets('streamed agent replies keep the transcript pinned to the bottom', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final sse = <String>[];
+    for (var i = 0; i < 40; i++) {
+      sse.add(
+        'data: {"choices":[{"delta":{"content":'
+        '"line $i of a long agent reply that wraps and grows the transcript. "}}]}',
+      );
+    }
+    sse.add('data: {"choices":[{"delta":{"content":"[TASK_COMPLETE]"}}]}');
+    sse.add('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}');
+    sse.add('data: [DONE]');
+
+    final overrides = _MockHttpOverrides(sse);
+    HttpOverrides.global = overrides;
+    addTearDown(() => HttpOverrides.global = null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            agentConfig: _fakeAgentConfig(),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'hi');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+
+    // Let the whole streamed reply drain.  The stream emits one chunk per
+    // 5ms of fake time; 120 × 10ms is more than enough to cover the stream,
+    // the empty-card layout, and every auto-scroll animation.
+    for (var i = 0; i < 120; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    // The reply has no tool calls, so no status spinner is ever shown and
+    // the turn ends cleanly — pumpAndSettle can finish.
+    await tester.pumpAndSettle();
+
+    final position = tester
+        .widget<ListView>(find.byType(ListView))
+        .controller!
+        .position;
+    expect(
+      position.maxScrollExtent,
+      greaterThan(0),
+      reason: 'the long reply should overflow the panel',
+    );
+    expect(
+      position.maxScrollExtent - position.pixels,
+      lessThan(1.0),
+      reason: 'the transcript must stay pinned to the latest content',
+    );
+  });
 }
+
+List<String> _sseForText(String text) => [
+  'data: ${jsonEncode({
+    'choices': [
+      {
+        'delta': {'content': text},
+      },
+    ],
+  })}',
+  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+  'data: [DONE]',
+];
 
 AgentConfig _fakeAgentConfig() {
   final provider = ProviderConfig(
@@ -121,6 +176,56 @@ class _MockHttpClient implements HttpClient {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('HttpClient.${invocation.memberName}');
+}
+
+class _QueuedHttpOverrides extends HttpOverrides {
+  _QueuedHttpOverrides(this.responses);
+  final List<List<String>> responses;
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) =>
+      _QueuedHttpClient(responses);
+}
+
+class _QueuedHttpClient implements HttpClient {
+  _QueuedHttpClient(this.responses);
+  final List<List<String>> responses;
+
+  @override
+  Future<HttpClientRequest> postUrl(Uri url) async => _QueuedRequest(responses);
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('HttpClient.${invocation.memberName}');
+}
+
+class _QueuedRequest implements HttpClientRequest {
+  _QueuedRequest(this.responses);
+  final List<List<String>> responses;
+
+  @override
+  HttpHeaders get headers => _MockHeaders();
+
+  @override
+  void add(List<int> data) {}
+
+  @override
+  Future<HttpClientResponse> close() async =>
+      _MockResponse(_sseStream(responses.removeAt(0)));
+
+  Stream<List<int>> _sseStream(List<String> events) async* {
+    for (final event in events) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      yield utf8.encode('$event\n\n');
+    }
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('HttpClientRequest.${invocation.memberName}');
 }
 
 class _MockRequest implements HttpClientRequest {

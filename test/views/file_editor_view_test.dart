@@ -238,39 +238,37 @@ void main() {
       },
     );
 
-    testWidgets(
-      'the editor scrollables use clamping physics — no rubber-band '
-      'overscroll',
-      (tester) async {
-        // macOS is where the bounce actually shows: Material's scroll
-        // behavior defaults every scrollable on that platform to
-        // BouncingScrollPhysics. Force the theme platform so the test
-        // guards the real platform behavior (widget tests otherwise run as
-        // android, which already clamps).
-        await _pumpEditor(
-          tester,
-          content: 'line one\nline two\n',
-          platform: TargetPlatform.macOS,
-        );
+    testWidgets('the editor scrollables use clamping physics — no rubber-band '
+        'overscroll', (tester) async {
+      // macOS is where the bounce actually shows: Material's scroll
+      // behavior defaults every scrollable on that platform to
+      // BouncingScrollPhysics. Force the theme platform so the test
+      // guards the real platform behavior (widget tests otherwise run as
+      // android, which already clamps).
+      await _pumpEditor(
+        tester,
+        content: 'line one\nline two\n',
+        platform: TargetPlatform.macOS,
+      );
 
-        // Both the outer horizontal axis and the field's own vertical axis
-        // are Scrollables under the CodeField — neither may rubber-band.
-        final scrollables = tester.widgetList<Scrollable>(
-          find.descendant(
-            of: find.byType(CodeField),
-            matching: find.byType(Scrollable),
-          ),
+      // Both the outer horizontal axis and the field's own vertical axis
+      // are Scrollables under the CodeField — neither may rubber-band.
+      final scrollables = tester.widgetList<Scrollable>(
+        find.descendant(
+          of: find.byType(CodeField),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(scrollables, isNotEmpty);
+      for (final scrollable in scrollables) {
+        expect(
+          _containsBouncing(scrollable.controller!.position.physics),
+          isFalse,
+          reason:
+              'editor scrollables must clamp, not rubber-band, '
+              'even on macOS',
         );
-        expect(scrollables, isNotEmpty);
-        for (final scrollable in scrollables) {
-          expect(
-            _containsBouncing(scrollable.controller!.position.physics),
-            isFalse,
-            reason: 'editor scrollables must clamp, not rubber-band, '
-                'even on macOS',
-          );
-        }
-      },
-    );
+      }
+    });
   });
 }

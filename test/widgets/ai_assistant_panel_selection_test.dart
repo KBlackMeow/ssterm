@@ -7,28 +7,6 @@ import 'package:ssterm/services/agent_session_registry.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 void main() {
-  test('adaptive decision card is a dedicated transcript message', () {
-    final models = File(
-      'lib/widgets/ai_assistant_panel_models.dart',
-    ).readAsStringSync();
-    final content = File(
-      'lib/widgets/ai_assistant_panel_content.dart',
-    ).readAsStringSync();
-
-    expect(models, contains('class _DecisionCardData'));
-    expect(models, contains('factory _ChatMessage.decisionCard'));
-    expect(content, contains('class _DecisionCard'));
-  });
-
-  test('task routing displays its source without fabricated confidence', () {
-    final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
-    ).readAsStringSync();
-
-    expect(loop, contains('source model'));
-    expect(loop, isNot(contains('decision.confidence')));
-  });
-
   test('slash help exposes the current commands and Skill catalogue', () {
     final panel = File(
       'lib/widgets/ai_assistant_panel.dart',
@@ -62,109 +40,13 @@ void main() {
   });
 
   test(
-    'deep decision run records planning, recommendation, and fallback in its card',
-    () {
-      final loop = File(
-        'lib/widgets/ai_assistant_panel_loop.dart',
-      ).readAsStringSync();
-
-      expect(loop, contains('_ChatMessage.decisionCard'));
-      expect(loop, contains('Planning options'));
-      expect(loop, contains('Standard execution'));
-      expect(loop, contains('Recommended:'));
-    },
-  );
-
-  test(
-    'deep decisions keep planning and compact critique inside their card',
-    () {
-      final loop = File(
-        'lib/widgets/ai_assistant_panel_loop.dart',
-      ).readAsStringSync();
-
-      expect(loop, contains('AgentDecisionTranscript.planning(planned)'));
-      expect(loop, contains('critique.accept'));
-      expect(loop, contains('critique.replacementId'));
-      expect(loop, contains('planningSubagent.replaceText'));
-      expect(loop, contains('reviewSubagent.replaceText'));
-    },
-  );
-
-  test('deep planning and review stream into their decision subagents', () {
-    final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
-    ).readAsStringSync();
-
-    expect(loop, contains('AgentDeliberation.streamPlan'));
-    expect(loop, contains('AgentDeliberation.streamCritique'));
-    expect(loop, contains('planningSubagent.recordChunk'));
-    expect(loop, contains('reviewSubagent.recordChunk'));
-  });
-
-  test('adaptive decision card exposes progress, usage, and cancellation', () {
-    final models = File(
-      'lib/widgets/ai_assistant_panel_models.dart',
-    ).readAsStringSync();
-    final content = File(
-      'lib/widgets/ai_assistant_panel_content.dart',
-    ).readAsStringSync();
-    final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
-    ).readAsStringSync();
-    final tooling = File(
-      'lib/widgets/ai_assistant_panel_tooling.dart',
-    ).readAsStringSync();
-
-    expect(models, contains('promptTokenCount'));
-    expect(models, contains('completionTokenCount'));
-    expect(models, contains('elapsedSeconds'));
-    expect(content, contains('Token data unavailable'));
-    expect(content, contains('Still waiting for the model'));
-    expect(content, contains('Cancel'));
-    expect(loop, contains('Timer.periodic'));
-    expect(loop, contains('resolvedStreamResult.promptTokenCount'));
-    expect(loop, contains('resolvedStreamResult.completionTokenCount'));
-    expect(loop, contains('_activeDecisionCard?.recordUsage'));
-    expect(
-      tooling,
-      contains('_activeDecisionCard?.markProgress();'),
-      reason:
-          'streamed model events must keep the decision card out of waiting state',
-    );
-  });
-
-  test('decision card exposes subagent first-chunk and stall state', () {
-    final models = File(
-      'lib/widgets/ai_assistant_panel_models.dart',
-    ).readAsStringSync();
-    final content = File(
-      'lib/widgets/ai_assistant_panel_content.dart',
-    ).readAsStringSync();
-    final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
-    ).readAsStringSync();
-
-    expect(models, contains('waitingForFirstChunk'));
-    expect(models, contains('未收到首包'));
-    expect(models, contains(r'已 ${silentFor}s 未收到数据'));
-    expect(content, contains('subagent.statusAt(DateTime.now())'));
-    expect(content, contains('SelectableText'));
-    expect(content, contains('class _DecisionSubagentOutput'));
-    expect(content, contains('_scrollController.jumpTo'));
-    expect(content, contains('subagent.text'));
-    expect(loop, contains("startSubagent('规划子 Agent')"));
-    expect(loop, contains("startSubagent('审查子 Agent')"));
-    expect(loop, contains('recordChunk('));
-  });
-
-  test(
     'agent loop bounds model and shell work with a visible terminal event',
     () {
       final source = File(
         'lib/widgets/ai_assistant_panel_loop.dart',
       ).readAsStringSync();
 
-      expect(source, contains('maxModelRequests: remainingDeepRequests'));
+      expect(source, contains('final budget = AgentExecutionBudget();'));
       expect(source, contains('budget.consumeModelRequest(DateTime.now())'));
       expect(source, contains('budget.consumeShellCall(DateTime.now())'));
       expect(source, contains('[Agent run stopped]'));
@@ -206,9 +88,13 @@ void main() {
     // signals) BEFORE `_cancelAgent` runs, otherwise the cancel's tail
     // drain would resurrect a queued message on the freshly cleared chat.
     final clearQueue = source.indexOf(
-      '_pendingUserInput.clear();\n    _pendingImages.clear();\n    _pendingWriteProposal = null;',
+      '_pendingUserInput.clear();',
+      source.indexOf('void _clearChat()'),
     );
-    final cancel = source.indexOf('if (_agentBusy) _cancelAgent();');
+    final cancel = source.indexOf(
+      'if (_agentBusy) _cancelAgent();',
+      clearQueue,
+    );
     expect(clearQueue, isNot(-1));
     expect(cancel, isNot(-1));
     expect(clearQueue, lessThan(cancel));

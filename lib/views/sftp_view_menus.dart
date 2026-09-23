@@ -23,13 +23,17 @@ mixin _SftpMenusMixin on State<SftpView> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final colors      = AppColors.maybeOf(context);
-        final sheetBg     = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
-        final fg          = colors?.foreground ?? _kFgActive;
-        final topBorder   = (colors?.foreground ?? Colors.white).withValues(alpha: 0.16);
+        final colors = AppColors.maybeOf(context);
+        final sheetBg = colors?.popup ?? FrostedGlassStyle.menuFillFrosted;
+        final fg = colors?.foreground ?? _kFgActive;
+        final topBorder = (colors?.foreground ?? Colors.white).withValues(
+          alpha: 0.16,
+        );
         const radius = BorderRadius.vertical(top: Radius.circular(16));
         Widget sheet = Theme(
-          data: Theme.of(context).copyWith(extensions: colors != null ? {colors} : null),
+          data: Theme.of(
+            context,
+          ).copyWith(extensions: colors != null ? {colors} : null),
           child: Container(
             decoration: BoxDecoration(
               color: sheetBg,
@@ -44,14 +48,21 @@ mixin _SftpMenusMixin on State<SftpView> {
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   child: Text(
                     'Go to folder',
-                    style: TextStyle(color: fg, fontSize: 15, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 _SheetItem(
                   icon: Icons.folder_rounded,
                   label: '/',
                   iconColor: const Color(0xFFFFD166),
-                  onTap: () { Navigator.pop(ctx); _listDir('/'); },
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _listDir('/');
+                  },
                 ),
                 for (var i = 0; i < segments.length; i++)
                   _SheetItem(
@@ -103,11 +114,15 @@ mixin _SftpMenusMixin on State<SftpView> {
             value: 'download',
             height: 36,
             child: Builder(
-              builder: (ctx) => Text('Download',
-                  style: TextStyle(
-                    color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
-                    fontSize: 13,
-                  )),
+              builder: (ctx) => Text(
+                'Download',
+                style: TextStyle(
+                  color:
+                      AppColors.maybeOf(ctx)?.foreground ??
+                      const Color(0xFFC7C7C7),
+                  fontSize: 13,
+                ),
+              ),
             ),
           ),
         if (!isDir)
@@ -115,29 +130,39 @@ mixin _SftpMenusMixin on State<SftpView> {
             value: 'edit',
             height: 36,
             child: Builder(
-              builder: (ctx) => Text('Edit',
-                  style: TextStyle(
-                    color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
-                    fontSize: 13,
-                  )),
+              builder: (ctx) => Text(
+                'Edit',
+                style: TextStyle(
+                  color:
+                      AppColors.maybeOf(ctx)?.foreground ??
+                      const Color(0xFFC7C7C7),
+                  fontSize: 13,
+                ),
+              ),
             ),
           ),
         PopupMenuItem(
           value: 'rename',
           height: 36,
           child: Builder(
-            builder: (ctx) => Text('Rename',
-                style: TextStyle(
-                  color: AppColors.maybeOf(ctx)?.foreground ?? const Color(0xFFC7C7C7),
-                  fontSize: 13,
-                )),
+            builder: (ctx) => Text(
+              'Rename',
+              style: TextStyle(
+                color:
+                    AppColors.maybeOf(ctx)?.foreground ??
+                    const Color(0xFFC7C7C7),
+                fontSize: 13,
+              ),
+            ),
           ),
         ),
         const PopupMenuItem(
           value: 'delete',
           height: 36,
-          child: Text('Delete',
-              style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13)),
+          child: Text(
+            'Delete',
+            style: TextStyle(color: Color(0xFFFF6E67), fontSize: 13),
+          ),
         ),
       ],
     );

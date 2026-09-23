@@ -61,9 +61,7 @@ class _SectionState extends State<_Section> {
                   ),
                   if (widget.enabled)
                     Icon(
-                      _expanded
-                          ? Icons.expand_less
-                          : Icons.expand_more,
+                      _expanded ? Icons.expand_less : Icons.expand_more,
                       size: 16,
                       color: _kLabel,
                     ),
@@ -84,10 +82,7 @@ class _SectionState extends State<_Section> {
 
 // ─── Port forwarding section ─────────────────────────────────────────────────
 class _ForwardSection extends StatefulWidget {
-  const _ForwardSection({
-    required this.rules,
-    required this.onChanged,
-  });
+  const _ForwardSection({required this.rules, required this.onChanged});
 
   final List<PortForwardRule> rules;
   final VoidCallback onChanged;
@@ -113,15 +108,10 @@ class _ForwardSectionState extends State<_ForwardSection> {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
             onTap: () => setState(() => _expanded = !_expanded),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.swap_horiz,
-                    size: 14,
-                    color: _kLabel,
-                  ),
+                  const Icon(Icons.swap_horiz, size: 14, color: _kLabel),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -186,8 +176,7 @@ class _ForwardSectionState extends State<_ForwardSection> {
           style: OutlinedButton.styleFrom(
             foregroundColor: _kLabel,
             side: const BorderSide(color: _kBorder),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             visualDensity: VisualDensity.compact,
           ),
         ),
@@ -320,114 +309,132 @@ class _AddRuleDialogState extends State<_AddRuleDialog> {
         child: PopupSurface(
           color: FrostedGlassStyle.dialogFill,
           child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Add Forward Rule',
-                style: TextStyle(color: _kTitle, fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<ForwardType>(
-                // ignore: deprecated_member_use
-                value: _type,
-                dropdownColor: FrostedGlassStyle.panelFillSolid,
-                style: const TextStyle(color: _kFg, fontSize: 13),
-                decoration: _inputDecoration('Type'),
-                items: const [
-                  DropdownMenuItem(
-                    value: ForwardType.local,
-                    child: Text('L — Local forward',
-                        overflow: TextOverflow.ellipsis),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Add Forward Rule',
+                  style: TextStyle(
+                    color: _kTitle,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
-                  DropdownMenuItem(
-                    value: ForwardType.remote,
-                    child: Text('R — Remote forward',
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  DropdownMenuItem(
-                    value: ForwardType.dynamic_,
-                    child: Text('D — Dynamic SOCKS5',
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-                onChanged: (v) => setState(() => _type = v!),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4, bottom: 2),
-                child: Text(
-                  switch (_type) {
-                    ForwardType.local =>
-                      'localhost:local-port  →  server  →  remote-host:port',
-                    ForwardType.remote =>
-                      'server:port  →  SSH tunnel  →  localhost:local-port',
-                    ForwardType.dynamic_ =>
-                      'SOCKS5 proxy, all traffic routed via server',
-                  },
-                  style: const TextStyle(
-                      color: Color(0xFF6E6E6E), fontSize: 11),
                 ),
-              ),
-              const SizedBox(height: 6),
-              _Field(
-                label: _type == ForwardType.dynamic_
-                    ? 'Local SOCKS5 port'
-                    : 'Local port',
-                ctrl: _localPortCtrl,
-                inputType: TextInputType.number,
-              ),
-              if (_type == ForwardType.local) ...[
-                const SizedBox(height: 10),
-                _Field(
-                  label: 'Remote host',
-                  ctrl: _remoteHostCtrl,
-                  hint: 'e.g. localhost or db.internal',
-                ),
-                const SizedBox(height: 10),
-                _Field(
-                  label: 'Remote port',
-                  ctrl: _remotePortCtrl,
-                  inputType: TextInputType.number,
-                ),
-              ],
-              if (_type == ForwardType.remote) ...[
-                const SizedBox(height: 10),
-                _Field(
-                  label: 'Server listen port',
-                  ctrl: _remotePortCtrl,
-                  inputType: TextInputType.number,
-                ),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: const TextStyle(color: _kError, fontSize: 12)),
-              ],
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel', style: TextStyle(color: _kLabel)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _confirm,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _kAccent,
-                      foregroundColor: Colors.white,
+                const SizedBox(height: 16),
+                DropdownButtonFormField<ForwardType>(
+                  // ignore: deprecated_member_use
+                  value: _type,
+                  dropdownColor: FrostedGlassStyle.panelFillSolid,
+                  style: const TextStyle(color: _kFg, fontSize: 13),
+                  decoration: _inputDecoration('Type'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: ForwardType.local,
+                      child: Text(
+                        'L — Local forward',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    child: const Text('Confirm'),
+                    DropdownMenuItem(
+                      value: ForwardType.remote,
+                      child: Text(
+                        'R — Remote forward',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: ForwardType.dynamic_,
+                      child: Text(
+                        'D — Dynamic SOCKS5',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _type = v!),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 2),
+                  child: Text(
+                    switch (_type) {
+                      ForwardType.local =>
+                        'localhost:local-port  →  server  →  remote-host:port',
+                      ForwardType.remote =>
+                        'server:port  →  SSH tunnel  →  localhost:local-port',
+                      ForwardType.dynamic_ =>
+                        'SOCKS5 proxy, all traffic routed via server',
+                    },
+                    style: const TextStyle(
+                      color: Color(0xFF6E6E6E),
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _Field(
+                  label: _type == ForwardType.dynamic_
+                      ? 'Local SOCKS5 port'
+                      : 'Local port',
+                  ctrl: _localPortCtrl,
+                  inputType: TextInputType.number,
+                ),
+                if (_type == ForwardType.local) ...[
+                  const SizedBox(height: 10),
+                  _Field(
+                    label: 'Remote host',
+                    ctrl: _remoteHostCtrl,
+                    hint: 'e.g. localhost or db.internal',
+                  ),
+                  const SizedBox(height: 10),
+                  _Field(
+                    label: 'Remote port',
+                    ctrl: _remotePortCtrl,
+                    inputType: TextInputType.number,
                   ),
                 ],
-              ),
-            ],
+                if (_type == ForwardType.remote) ...[
+                  const SizedBox(height: 10),
+                  _Field(
+                    label: 'Server listen port',
+                    ctrl: _remotePortCtrl,
+                    inputType: TextInputType.number,
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _error!,
+                    style: const TextStyle(color: _kError, fontSize: 12),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: _kLabel),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _confirm,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _kAccent,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Confirm'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        ),   // PopupSurface
-      ),     // SizedBox
+        ), // PopupSurface
+      ), // SizedBox
     );
   }
 }
@@ -470,8 +477,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
             borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
             onTap: () => setState(() => _expanded = !_expanded),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
                   const Icon(Icons.tune, size: 14, color: _kLabel),
@@ -532,8 +538,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                         value: widget.autoReconnect,
                         onChanged: widget.onAutoReconnectChanged,
                         activeThumbColor: _kAccent,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ],
                   ),
@@ -549,8 +554,7 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
                         value: widget.sessionLog,
                         onChanged: widget.onSessionLogChanged,
                         activeThumbColor: _kAccent,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ],
                   ),
@@ -577,25 +581,25 @@ class _AdvancedSectionState extends State<_AdvancedSection> {
 
 // ─── Shared input widgets ────────────────────────────────────────────────────
 InputDecoration _inputDecoration(String label) => InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: _kLabel, fontSize: 11),
-      filled: true,
-      fillColor: _kField,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: const BorderSide(color: _kBorder),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: const BorderSide(color: _kBorder),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
-        borderSide: const BorderSide(color: _kFocus),
-      ),
-    );
+  labelText: label,
+  labelStyle: const TextStyle(color: _kLabel, fontSize: 11),
+  filled: true,
+  fillColor: _kField,
+  isDense: true,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+  border: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(4),
+    borderSide: const BorderSide(color: _kBorder),
+  ),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(4),
+    borderSide: const BorderSide(color: _kBorder),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(4),
+    borderSide: const BorderSide(color: _kFocus),
+  ),
+);
 
 class _Field extends StatelessWidget {
   const _Field({
@@ -632,13 +636,17 @@ class _Field extends StatelessWidget {
                 style: const TextStyle(color: _kFg, fontSize: 13),
                 decoration: InputDecoration(
                   hintText: hint,
-                  hintStyle:
-                      const TextStyle(color: Color(0xFF4A4A4A), fontSize: 12),
+                  hintStyle: const TextStyle(
+                    color: Color(0xFF4A4A4A),
+                    fontSize: 12,
+                  ),
                   filled: true,
                   fillColor: _kField,
                   isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(4),
                     borderSide: const BorderSide(color: _kBorder),

@@ -189,14 +189,18 @@ class _EditProposalCardState extends State<_EditProposalCard> {
                 decoration: InputDecoration(
                   hintText: 'Why? (optional, sent to the model)',
                   hintStyle: TextStyle(
-                      color: dim.withValues(alpha: 0.6), fontSize: 12),
+                    color: dim.withValues(alpha: 0.6),
+                    fontSize: 12,
+                  ),
                   isDense: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: dim.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 8),
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
@@ -289,8 +293,7 @@ class _EditProposalCardState extends State<_EditProposalCard> {
       return InkWell(
         onTap: () => setState(() => _expandedFolds.add(index)),
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
           child: Text(
             '⋯ ${item.hidden.length} unchanged line'
             '${item.hidden.length == 1 ? '' : 's'} — click to expand ⋯',
@@ -309,15 +312,15 @@ class _EditProposalCardState extends State<_EditProposalCard> {
   Widget _buildDiffLine(DiffLine line, Color fg, Color dim) {
     final (bg, prefix, textColor) = switch (line.kind) {
       DiffLineKind.removed => (
-          const Color(0x33FF6E67),
-          '-',
-          const Color(0xFFFF8A85),
-        ),
+        const Color(0x33FF6E67),
+        '-',
+        const Color(0xFFFF8A85),
+      ),
       DiffLineKind.added => (
-          const Color(0x3398C379),
-          '+',
-          const Color(0xFFA8D6A0),
-        ),
+        const Color(0x3398C379),
+        '+',
+        const Color(0xFFA8D6A0),
+      ),
       DiffLineKind.equal => (Colors.transparent, ' ', dim),
     };
     final lineNo =

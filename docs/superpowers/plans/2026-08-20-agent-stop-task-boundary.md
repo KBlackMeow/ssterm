@@ -40,7 +40,7 @@ test('stop discards queued input and marks the next prompt as a new task', () {
   final panel = File('lib/widgets/ai_assistant_panel.dart').readAsStringSync();
   final stop = panel.substring(
     panel.indexOf('void _cancelAgent()'),
-    panel.indexOf('void _cancelPendingAgentDecisions()'),
+    panel.indexOf('void _cancelPendingAgentPrompts()'),
   );
 
   expect(stop, contains('_pendingUserInput.clear();'));

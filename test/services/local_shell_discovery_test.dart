@@ -199,9 +199,8 @@ void main() {
         LocalShellDiscovery.isLaunchableExecutable(
           executable: 'wsl.exe',
           fileExists: (_) => false,
-          resolveOnPath: (name) => name == 'wsl.exe'
-              ? r'C:\Windows\System32\wsl.exe'
-              : null,
+          resolveOnPath: (name) =>
+              name == 'wsl.exe' ? r'C:\Windows\System32\wsl.exe' : null,
         ),
         isTrue,
       );
@@ -219,70 +218,63 @@ void main() {
     });
   });
 
-  group(
-    'LocalShellDiscovery.discoverSync on Windows',
-    () {
-      late List<LocalShellOption> shells;
-      setUpAll(() => shells = LocalShellDiscovery.discoverSync());
+  group('LocalShellDiscovery.discoverSync on Windows', () {
+    late List<LocalShellOption> shells;
+    setUpAll(() => shells = LocalShellDiscovery.discoverSync());
 
-      LocalShellOption? byId(String id) {
-        for (final s in shells) {
-          if (s.id == id) return s;
-        }
-        return null;
+    LocalShellOption? byId(String id) {
+      for (final s in shells) {
+        if (s.id == id) return s;
       }
+      return null;
+    }
 
-      test('powershell/pwsh candidates opt into the OSC 7 prelude', () {
-        for (final id in const ['powershell', 'pwsh', 'pwsh-x86']) {
-          final shell = byId(id);
-          if (shell == null) continue; // not installed on this machine
-          expect(
-            shell.usePowerShellCwdWrapper,
-            isTrue,
-            reason: '$id should use the PowerShell OSC 7 wrapper',
-          );
-        }
-      });
+    test('powershell/pwsh candidates opt into the OSC 7 prelude', () {
+      for (final id in const ['powershell', 'pwsh', 'pwsh-x86']) {
+        final shell = byId(id);
+        if (shell == null) continue; // not installed on this machine
+        expect(
+          shell.usePowerShellCwdWrapper,
+          isTrue,
+          reason: '$id should use the PowerShell OSC 7 wrapper',
+        );
+      }
+    });
 
-      test('cmd does not opt into the PowerShell OSC 7 prelude', () {
-        final cmd = byId('cmd');
-        expect(cmd, isNotNull);
-        expect(cmd!.usePowerShellCwdWrapper, isFalse);
-      });
+    test('cmd does not opt into the PowerShell OSC 7 prelude', () {
+      final cmd = byId('cmd');
+      expect(cmd, isNotNull);
+      expect(cmd!.usePowerShellCwdWrapper, isFalse);
+    });
 
-      test('git-bash candidates do not opt into the PowerShell prelude', () {
-        for (final id in const ['git-bash', 'git-bash-x86']) {
-          final shell = byId(id);
-          if (shell == null) continue; // not installed on this machine
-          expect(shell.usePowerShellCwdWrapper, isFalse);
-        }
-      });
+    test('git-bash candidates do not opt into the PowerShell prelude', () {
+      for (final id in const ['git-bash', 'git-bash-x86']) {
+        final shell = byId(id);
+        if (shell == null) continue; // not installed on this machine
+        expect(shell.usePowerShellCwdWrapper, isFalse);
+      }
+    });
 
-      test('absent fixed-path candidates are not validated via PATH', () {
-        // Launched from Git Bash, `where bash.exe` resolves the x64 install;
-        // that must not let the (x86) fixed-path candidate masquerade as an
-        // installed shell when its own path does not exist.
-        if (!File(r'C:\Program Files (x86)\Git\bin\bash.exe').existsSync()) {
-          expect(byId('git-bash-x86'), isNull);
-        }
-        for (final shell in shells.where((s) => !s.isWsl)) {
-          expect(
-            File(shell.executable).existsSync(),
-            isTrue,
-            reason: '${shell.id} -> ${shell.executable}',
-          );
-        }
-      });
+    test('absent fixed-path candidates are not validated via PATH', () {
+      // Launched from Git Bash, `where bash.exe` resolves the x64 install;
+      // that must not let the (x86) fixed-path candidate masquerade as an
+      // installed shell when its own path does not exist.
+      if (!File(r'C:\Program Files (x86)\Git\bin\bash.exe').existsSync()) {
+        expect(byId('git-bash-x86'), isNull);
+      }
+      for (final shell in shells.where((s) => !s.isWsl)) {
+        expect(
+          File(shell.executable).existsSync(),
+          isTrue,
+          reason: '${shell.id} -> ${shell.executable}',
+        );
+      }
+    });
 
-      test(
-        'native shell processes are discovered without startup arguments',
-        () {
-          for (final shell in shells) {
-            expect(shell.arguments, isEmpty, reason: shell.id);
-          }
-        },
-      );
-    },
-    skip: Platform.isWindows ? false : 'Windows-only discovery path',
-  );
+    test('native shell processes are discovered without startup arguments', () {
+      for (final shell in shells) {
+        expect(shell.arguments, isEmpty, reason: shell.id);
+      }
+    });
+  }, skip: Platform.isWindows ? false : 'Windows-only discovery path');
 }

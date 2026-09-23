@@ -19,31 +19,30 @@ abstract final class TerminalThemeCodec {
   }
 
   static Map<String, dynamic> themeToJson(TerminalTheme theme) => {
-        'cursor': colorToJson(theme.cursor),
-        'selection': colorToJson(theme.selection),
-        'foreground': colorToJson(theme.foreground),
-        'background': colorToJson(theme.background),
-        'black': colorToJson(theme.black),
-        'red': colorToJson(theme.red),
-        'green': colorToJson(theme.green),
-        'yellow': colorToJson(theme.yellow),
-        'blue': colorToJson(theme.blue),
-        'magenta': colorToJson(theme.magenta),
-        'cyan': colorToJson(theme.cyan),
-        'white': colorToJson(theme.white),
-        'brightBlack': colorToJson(theme.brightBlack),
-        'brightRed': colorToJson(theme.brightRed),
-        'brightGreen': colorToJson(theme.brightGreen),
-        'brightYellow': colorToJson(theme.brightYellow),
-        'brightBlue': colorToJson(theme.brightBlue),
-        'brightMagenta': colorToJson(theme.brightMagenta),
-        'brightCyan': colorToJson(theme.brightCyan),
-        'brightWhite': colorToJson(theme.brightWhite),
-        'searchHitBackground': colorToJson(theme.searchHitBackground),
-        'searchHitBackgroundCurrent':
-            colorToJson(theme.searchHitBackgroundCurrent),
-        'searchHitForeground': colorToJson(theme.searchHitForeground),
-      };
+    'cursor': colorToJson(theme.cursor),
+    'selection': colorToJson(theme.selection),
+    'foreground': colorToJson(theme.foreground),
+    'background': colorToJson(theme.background),
+    'black': colorToJson(theme.black),
+    'red': colorToJson(theme.red),
+    'green': colorToJson(theme.green),
+    'yellow': colorToJson(theme.yellow),
+    'blue': colorToJson(theme.blue),
+    'magenta': colorToJson(theme.magenta),
+    'cyan': colorToJson(theme.cyan),
+    'white': colorToJson(theme.white),
+    'brightBlack': colorToJson(theme.brightBlack),
+    'brightRed': colorToJson(theme.brightRed),
+    'brightGreen': colorToJson(theme.brightGreen),
+    'brightYellow': colorToJson(theme.brightYellow),
+    'brightBlue': colorToJson(theme.brightBlue),
+    'brightMagenta': colorToJson(theme.brightMagenta),
+    'brightCyan': colorToJson(theme.brightCyan),
+    'brightWhite': colorToJson(theme.brightWhite),
+    'searchHitBackground': colorToJson(theme.searchHitBackground),
+    'searchHitBackgroundCurrent': colorToJson(theme.searchHitBackgroundCurrent),
+    'searchHitForeground': colorToJson(theme.searchHitForeground),
+  };
 
   static TerminalTheme themeFromJson(Map<String, dynamic> json) {
     Color c(String key, Color fallback) =>
@@ -72,8 +71,10 @@ abstract final class TerminalThemeCodec {
       brightCyan: c('brightCyan', base.brightCyan),
       brightWhite: c('brightWhite', base.brightWhite),
       searchHitBackground: c('searchHitBackground', base.searchHitBackground),
-      searchHitBackgroundCurrent:
-          c('searchHitBackgroundCurrent', base.searchHitBackgroundCurrent),
+      searchHitBackgroundCurrent: c(
+        'searchHitBackgroundCurrent',
+        base.searchHitBackgroundCurrent,
+      ),
       searchHitForeground: c('searchHitForeground', base.searchHitForeground),
     );
   }

@@ -62,8 +62,10 @@ class _SplitViewState extends State<SplitView> {
                 ],
               ),
               Positioned(
-                left: (splitX - _kHandleThickness / 2)
-                    .clamp(0.0, totalW - _kHandleThickness),
+                left: (splitX - _kHandleThickness / 2).clamp(
+                  0.0,
+                  totalW - _kHandleThickness,
+                ),
                 top: 0,
                 bottom: 0,
                 width: _kHandleThickness,
@@ -91,8 +93,10 @@ class _SplitViewState extends State<SplitView> {
               ],
             ),
             Positioned(
-              top: (splitY - _kHandleThickness / 2)
-                  .clamp(0.0, totalH - _kHandleThickness),
+              top: (splitY - _kHandleThickness / 2).clamp(
+                0.0,
+                totalH - _kHandleThickness,
+              ),
               left: 0,
               right: 0,
               height: _kHandleThickness,
@@ -122,9 +126,8 @@ class _Handle extends StatelessWidget {
           : SystemMouseCursors.resizeRow,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onPanUpdate: (d) => onDrag(
-          axis == Axis.horizontal ? d.delta.dx : d.delta.dy,
-        ),
+        onPanUpdate: (d) =>
+            onDrag(axis == Axis.horizontal ? d.delta.dx : d.delta.dy),
         child: const SizedBox.expand(),
       ),
     );

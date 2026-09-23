@@ -50,7 +50,9 @@ class _ConnectionsPage extends StatelessWidget {
                     child: Text(
                       'Hosts',
                       style: TextStyle(
-                        color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                        color:
+                            AppColors.maybeOf(context)?.foreground ??
+                            _kFgActive,
                         fontSize: 28,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.5,
@@ -89,7 +91,11 @@ class _ConnectionsPage extends StatelessWidget {
                                   _SectionLabel('Active Sessions'),
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(
-                                        16, 6, 16, 20),
+                                      16,
+                                      6,
+                                      16,
+                                      20,
+                                    ),
                                     child: _ListCard(
                                       children: [
                                         for (var i = 0; i < tabs.length; i++)
@@ -110,12 +116,18 @@ class _ConnectionsPage extends StatelessWidget {
                                   _SectionLabel('Saved'),
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(
-                                        16, 6, 16, 20),
+                                      16,
+                                      6,
+                                      16,
+                                      20,
+                                    ),
                                     child: _ListCard(
                                       children: [
-                                        for (var i = 0;
-                                            i < savedHosts.length;
-                                            i++)
+                                        for (
+                                          var i = 0;
+                                          i < savedHosts.length;
+                                          i++
+                                        )
                                           _HostRow(
                                             host: savedHosts[i],
                                             isLast: i == savedHosts.length - 1,
@@ -132,16 +144,21 @@ class _ConnectionsPage extends StatelessWidget {
                                   _SectionLabel('SSH Config'),
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(
-                                        16, 6, 16, 20),
+                                      16,
+                                      6,
+                                      16,
+                                      20,
+                                    ),
                                     child: _ListCard(
                                       children: [
-                                        for (var i = 0;
-                                            i < configHosts.length;
-                                            i++)
+                                        for (
+                                          var i = 0;
+                                          i < configHosts.length;
+                                          i++
+                                        )
                                           _HostRow(
                                             host: configHosts[i],
-                                            isLast:
-                                                i == configHosts.length - 1,
+                                            isLast: i == configHosts.length - 1,
                                             onTap: () =>
                                                 onConnectHost(configHosts[i]),
                                           ),
@@ -153,7 +170,9 @@ class _ConnectionsPage extends StatelessWidget {
                                 // ── Empty state ──
                                 if (!hasAnything)
                                   Expanded(
-                                    child: _EmptyConnections(onNewSsh: onNewSsh),
+                                    child: _EmptyConnections(
+                                      onNewSsh: onNewSsh,
+                                    ),
                                   ),
 
                                 SizedBox(height: bottomPad),
@@ -210,7 +229,8 @@ class _ListCard extends StatelessWidget {
     // Card bg = AppColors.popup (chromeTabSelected) — same tint used for
     // desktop active tab chips, gives a subtle lift above the page bg so
     // the card is visually distinct from the Scaffold background.
-    final fill   = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final fill =
+        AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
     final colors = AppColors.fromBackground(fill);
     return Theme(
       data: Theme.of(context).copyWith(extensions: {colors}),
@@ -248,16 +268,16 @@ class _ActiveSessionRow extends StatelessWidget {
     final dotColor = error
         ? const Color(0xFFFF6E67)
         : connecting
-            ? const Color(0xFFFFD166)
-            : const Color(0xFF34C759);
+        ? const Color(0xFFFFD166)
+        : const Color(0xFF34C759);
 
     final subtitle = error
         ? 'Connection error'
         : connecting
-            ? 'Connecting…'
-            : isActive
-                ? 'Active'
-                : 'Connected';
+        ? 'Connecting…'
+        : isActive
+        ? 'Active'
+        : 'Connected';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -311,7 +331,9 @@ class _ActiveSessionRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              color:
+                                  AppColors.maybeOf(context)?.foreground ??
+                                  _kFgActive,
                               fontSize: 15,
                               fontWeight: isActive
                                   ? FontWeight.w600
@@ -323,7 +345,8 @@ class _ActiveSessionRow extends StatelessWidget {
                             style: TextStyle(
                               color: error
                                   ? const Color(0xFFFF6E67)
-                                  : AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                                  : AppColors.maybeOf(context)?.foregroundDim ??
+                                        _kFgInactive,
                               fontSize: 12,
                             ),
                           ),
@@ -331,10 +354,7 @@ class _ActiveSessionRow extends StatelessWidget {
                       ),
                     ),
                     // Open in Terminal button
-                    _PillButton(
-                      label: 'Open',
-                      onTap: onOpen,
-                    ),
+                    _PillButton(label: 'Open', onTap: onOpen),
                     const SizedBox(width: 4),
                     // Close
                     GestureDetector(
@@ -345,7 +365,10 @@ class _ActiveSessionRow extends StatelessWidget {
                         child: Icon(
                           Icons.close_rounded,
                           size: 16,
-                          color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.5),
+                          color:
+                              (AppColors.maybeOf(context)?.foregroundDim ??
+                                      _kFgInactive)
+                                  .withValues(alpha: 0.5),
                         ),
                       ),
                     ),
@@ -356,8 +379,12 @@ class _ActiveSessionRow extends StatelessWidget {
           ),
         ),
         if (!isLast)
-          Divider(height: 1, indent: 64,
-              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18)),
+          Divider(
+            height: 1,
+            indent: 64,
+            color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                .withValues(alpha: 0.18),
+          ),
       ],
     );
   }
@@ -397,13 +424,18 @@ class _HostRow extends StatelessWidget {
                       height: 36,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.15),
+                        color:
+                            (AppColors.maybeOf(context)?.foregroundDim ??
+                                    _kFgInactive)
+                                .withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         Icons.dns_rounded,
                         size: 17,
-                        color: AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF6E6E6E),
+                        color:
+                            AppColors.maybeOf(context)?.foregroundDim ??
+                            const Color(0xFF6E6E6E),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -417,7 +449,9 @@ class _HostRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              color:
+                                  AppColors.maybeOf(context)?.foreground ??
+                                  _kFgActive,
                               fontSize: 15,
                             ),
                           ),
@@ -426,7 +460,9 @@ class _HostRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                              color:
+                                  AppColors.maybeOf(context)?.foregroundDim ??
+                                  _kFgInactive,
                               fontSize: 12,
                             ),
                           ),
@@ -436,7 +472,10 @@ class _HostRow extends StatelessWidget {
                     Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.45),
+                      color:
+                          (AppColors.maybeOf(context)?.foregroundDim ??
+                                  _kFgInactive)
+                              .withValues(alpha: 0.45),
                     ),
                   ],
                 ),
@@ -445,8 +484,12 @@ class _HostRow extends StatelessWidget {
           ),
         ),
         if (!isLast)
-          Divider(height: 1, indent: 64,
-              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18)),
+          Divider(
+            height: 1,
+            indent: 64,
+            color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                .withValues(alpha: 0.18),
+          ),
       ],
     );
   }
@@ -495,8 +538,8 @@ class _NewConnectionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.maybeOf(context);
-    final bg     = colors?.popup    ?? _kCardFill;
-    final fg     = colors?.foreground ?? Colors.white;
+    final bg = colors?.popup ?? _kCardFill;
+    final fg = colors?.foreground ?? Colors.white;
     final border = fg.withValues(alpha: 0.16);
     return GestureDetector(
       onTap: onTap,
@@ -507,7 +550,11 @@ class _NewConnectionButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: border, width: 1),
           boxShadow: const [
-            BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
+            BoxShadow(
+              color: Color(0x30000000),
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
           ],
         ),
         child: Row(
@@ -515,8 +562,14 @@ class _NewConnectionButton extends StatelessWidget {
           children: [
             Icon(Icons.add_rounded, size: 16, color: fg),
             const SizedBox(width: 4),
-            Text('New',
-                style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w600)),
+            Text(
+              'New',
+              style: TextStyle(
+                color: fg,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
@@ -555,7 +608,11 @@ class _EmptyConnections extends StatelessWidget {
                 width: 0.5,
               ),
             ),
-            child: const Icon(Icons.terminal_rounded, size: 32, color: _kAccent),
+            child: const Icon(
+              Icons.terminal_rounded,
+              size: 32,
+              color: _kAccent,
+            ),
           ),
           const SizedBox(height: 20),
           Text(
@@ -572,7 +629,8 @@ class _EmptyConnections extends StatelessWidget {
             'Tap New to connect to your first server.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.7),
+              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                  .withValues(alpha: 0.7),
               fontSize: 14,
               height: 1.5,
             ),

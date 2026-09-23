@@ -33,12 +33,14 @@ const _kTransferMenuWidth = 280.0;
 String _fmtBytes(int b) {
   if (b < 1024) return '${b}B';
   if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)}K';
-  if (b < 1024 * 1024 * 1024) return '${(b / (1024 * 1024)).toStringAsFixed(1)}M';
+  if (b < 1024 * 1024 * 1024)
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)}M';
   return '${(b / (1024 * 1024 * 1024)).toStringAsFixed(1)}G';
 }
 
-String _transferSizeLabel(TransferTask t) =>
-    t.total == 0 ? _fmtBytes(t.bytes) : '${_fmtBytes(t.bytes)} / ${_fmtBytes(t.total)}';
+String _transferSizeLabel(TransferTask t) => t.total == 0
+    ? _fmtBytes(t.bytes)
+    : '${_fmtBytes(t.bytes)} / ${_fmtBytes(t.total)}';
 
 OverlayEntry? _activeTransferMenu;
 
@@ -55,14 +57,15 @@ Future<void> showTransferMenu({
 
   final overlay = Overlay.of(context, rootOverlay: true);
   final screen = MediaQuery.sizeOf(context);
-  final left =
-      position.left.clamp(8.0, screen.width - _kTransferMenuWidth - 8);
-  final top = position.top
-      .clamp(8.0, screen.height - kTransferMenuHeight - 8);
+  final left = position.left.clamp(8.0, screen.width - _kTransferMenuWidth - 8);
+  final top = position.top.clamp(8.0, screen.height - kTransferMenuHeight - 8);
   // Capture theme colors before entering the OverlayEntry builder,
   // which may not inherit the local Theme.
-  final popupColor = AppColors.maybeOf(context)?.popup
-      ?? (frostedGlass ? FrostedGlassStyle.menuFillFrosted : FrostedGlassStyle.menuFillSolid);
+  final popupColor =
+      AppColors.maybeOf(context)?.popup ??
+      (frostedGlass
+          ? FrostedGlassStyle.menuFillFrosted
+          : FrostedGlassStyle.menuFillSolid);
   final menuColors = AppColors.fromBackground(popupColor);
   final appTheme = Theme.of(context);
 
@@ -169,8 +172,7 @@ class _TransferMenuHeader extends StatelessWidget {
             if (active > 0) ...[
               const SizedBox(width: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                   color: _kBlue,
                   borderRadius: BorderRadius.circular(6),
@@ -193,7 +195,8 @@ class _TransferMenuHeader extends StatelessWidget {
                 child: Text(
                   'Clear done',
                   style: TextStyle(
-                    color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+                    color:
+                        AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
                     fontSize: 10,
                   ),
                 ),
@@ -294,7 +297,9 @@ class _TransferRowState extends State<_TransferRow> {
               Icon(
                 isUp ? Icons.upload : Icons.download,
                 size: 13,
-                color: isActive ? _kBlue : AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+                color: isActive
+                    ? _kBlue
+                    : AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -312,9 +317,10 @@ class _TransferRowState extends State<_TransferRow> {
               Text(
                 _transferSizeLabel(task),
                 style: TextStyle(
-                    color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
-                    fontSize: 10,
-                    fontFamily: 'JetBrainsMono'),
+                  color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+                  fontSize: 10,
+                  fontFamily: 'JetBrainsMono',
+                ),
               ),
               const SizedBox(width: 4),
               if (isActive) ...[
@@ -328,10 +334,7 @@ class _TransferRowState extends State<_TransferRow> {
                   color: _kRed,
                 ),
               ] else
-                _Btn(
-                  icon: Icons.remove,
-                  onTap: () => manager.remove(task),
-                ),
+                _Btn(icon: Icons.remove, onTap: () => manager.remove(task)),
             ],
           ),
           const SizedBox(height: 5),
@@ -362,26 +365,41 @@ class _TransferRowState extends State<_TransferRow> {
           Text(
             '${(task.progress * 100).round()}%',
             style: TextStyle(
-                color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
-                fontSize: 10,
-                fontFamily: 'JetBrainsMono'),
+              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+              fontSize: 10,
+              fontFamily: 'JetBrainsMono',
+            ),
           ),
         ],
       );
     }
     return switch (status) {
-      TransferStatus.done => const Row(children: [
+      TransferStatus.done => const Row(
+        children: [
           Icon(Icons.check_circle_outline, size: 11, color: _kGreen),
           SizedBox(width: 4),
           Text('Done', style: TextStyle(color: _kGreen, fontSize: 11)),
-        ]),
-      TransferStatus.cancelled => Row(children: [
-          Icon(Icons.cancel_outlined, size: 11, color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted),
+        ],
+      ),
+      TransferStatus.cancelled => Row(
+        children: [
+          Icon(
+            Icons.cancel_outlined,
+            size: 11,
+            color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+          ),
           const SizedBox(width: 4),
-          Text('Cancelled',
-              style: TextStyle(color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted, fontSize: 11)),
-        ]),
-      TransferStatus.error => Row(children: [
+          Text(
+            'Cancelled',
+            style: TextStyle(
+              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+      TransferStatus.error => Row(
+        children: [
           const Icon(Icons.error_outline, size: 11, color: _kRed),
           const SizedBox(width: 4),
           Expanded(
@@ -392,11 +410,11 @@ class _TransferRowState extends State<_TransferRow> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-        ]),
+        ],
+      ),
       _ => const SizedBox.shrink(),
     };
   }
-
 }
 
 class _Btn extends StatelessWidget {
@@ -428,8 +446,9 @@ Future<void> showMobileTransferSheet({
   required BuildContext context,
   required TransferManager manager,
 }) {
-  final popupColor  = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
-  final menuColors  = AppColors.fromBackground(popupColor);
+  final popupColor =
+      AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+  final menuColors = AppColors.fromBackground(popupColor);
   final parentTheme = Theme.of(context);
   return showGeneralDialog<void>(
     context: context,
@@ -446,8 +465,14 @@ Future<void> showMobileTransferSheet({
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 400, maxHeight: screenH * 0.55),
-              child: _MobileTransferSheet(manager: manager, popupColor: popupColor),
+              constraints: BoxConstraints(
+                maxWidth: 400,
+                maxHeight: screenH * 0.55,
+              ),
+              child: _MobileTransferSheet(
+                manager: manager,
+                popupColor: popupColor,
+              ),
             ),
           ),
         ),
@@ -464,7 +489,10 @@ class _MobileTransferSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = popupColor ?? AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillFrosted;
+    final fill =
+        popupColor ??
+        AppColors.maybeOf(context)?.popup ??
+        FrostedGlassStyle.menuFillFrosted;
     return PopupSurface(
       color: fill,
       backdropBlur: 24,
@@ -594,19 +622,14 @@ class _MobileTransferList extends StatelessWidget {
       shrinkWrap: true,
       itemCount: tasks.length,
       separatorBuilder: (_, _) => const SizedBox(height: 1),
-      itemBuilder: (_, i) => _MobileTransferRow(
-        task: tasks[i],
-        manager: manager,
-      ),
+      itemBuilder: (_, i) =>
+          _MobileTransferRow(task: tasks[i], manager: manager),
     );
   }
 }
 
 class _MobileTransferRow extends StatefulWidget {
-  const _MobileTransferRow({
-    required this.task,
-    required this.manager,
-  });
+  const _MobileTransferRow({required this.task, required this.manager});
 
   final TransferTask task;
   final TransferManager manager;
@@ -708,7 +731,9 @@ class _MobileTransferRowState extends State<_MobileTransferRow> {
               // Action buttons
               if (isActive) ...[
                 _MobileBtn(
-                  icon: isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                  icon: isPaused
+                      ? Icons.play_arrow_rounded
+                      : Icons.pause_rounded,
                   onTap: isPaused ? task.resume : task.pause,
                 ),
                 const SizedBox(width: 4),
@@ -764,20 +789,22 @@ class _MobileTransferRowState extends State<_MobileTransferRow> {
 
   Widget _buildStatusRow(TransferStatus status, TransferTask task) {
     return switch (status) {
-      TransferStatus.done => const Row(children: [
+      TransferStatus.done => const Row(
+        children: [
           Icon(Icons.check_circle_outline, size: 13, color: _kGreen),
           SizedBox(width: 5),
           Text('Done', style: TextStyle(color: _kGreen, fontSize: 12)),
-        ]),
-      TransferStatus.cancelled => const Row(children: [
+        ],
+      ),
+      TransferStatus.cancelled => const Row(
+        children: [
           Icon(Icons.cancel_outlined, size: 13, color: _kFgMuted),
           SizedBox(width: 5),
-          Text(
-            'Cancelled',
-            style: TextStyle(color: _kFgMuted, fontSize: 12),
-          ),
-        ]),
-      TransferStatus.error => Row(children: [
+          Text('Cancelled', style: TextStyle(color: _kFgMuted, fontSize: 12)),
+        ],
+      ),
+      TransferStatus.error => Row(
+        children: [
           const Icon(Icons.error_outline, size: 13, color: _kRed),
           const SizedBox(width: 5),
           Expanded(
@@ -788,11 +815,11 @@ class _MobileTransferRowState extends State<_MobileTransferRow> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-        ]),
+        ],
+      ),
       _ => const SizedBox.shrink(),
     };
   }
-
 }
 
 class _MobileBtn extends StatelessWidget {

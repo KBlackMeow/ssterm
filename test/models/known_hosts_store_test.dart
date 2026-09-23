@@ -8,8 +8,9 @@ void main() {
     late Directory tempRoot;
 
     setUp(() async {
-      tempRoot =
-          await Directory.systemTemp.createTemp('ssterm-known-hosts-test-');
+      tempRoot = await Directory.systemTemp.createTemp(
+        'ssterm-known-hosts-test-',
+      );
       KnownHostsStore.debugDirOverride = tempRoot.path;
     });
 
@@ -21,8 +22,7 @@ void main() {
     });
 
     test('trusting a new host/port creates one entry', () async {
-      await KnownHostsStore.trust(
-          'example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
+      await KnownHostsStore.trust('example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
 
       final entries = await KnownHostsStore.load();
       expect(entries, hasLength(1));
@@ -32,29 +32,25 @@ void main() {
       expect(entries.single.fingerprint, equals('aabbcc'));
     });
 
-    test('trusting an already-known host/port replaces, not appends',
-        () async {
-      await KnownHostsStore.trust(
-          'example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
-      await KnownHostsStore.trust(
-          'example.com', 22, 'ssh-ed25519', 'dd:ee:ff');
+    test('trusting an already-known host/port replaces, not appends', () async {
+      await KnownHostsStore.trust('example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
+      await KnownHostsStore.trust('example.com', 22, 'ssh-ed25519', 'dd:ee:ff');
 
       final entries = await KnownHostsStore.load();
       expect(
         entries,
         hasLength(1),
-        reason: 'updating a host key must replace the old fingerprint, '
+        reason:
+            'updating a host key must replace the old fingerprint, '
             'not add a second entry for the same host/port',
       );
       expect(entries.single.fingerprint, equals('ddeeff'));
     });
 
     test('trust() for one host/port does not disturb another', () async {
-      await KnownHostsStore.trust(
-          'example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
+      await KnownHostsStore.trust('example.com', 22, 'ssh-ed25519', 'aa:bb:cc');
       await KnownHostsStore.trust('other.com', 22, 'ssh-ed25519', '11:22:33');
-      await KnownHostsStore.trust(
-          'example.com', 22, 'ssh-ed25519', 'dd:ee:ff');
+      await KnownHostsStore.trust('example.com', 22, 'ssh-ed25519', 'dd:ee:ff');
 
       final entries = await KnownHostsStore.load();
       expect(entries, hasLength(2));

@@ -35,7 +35,8 @@ class SshSessionView extends StatefulWidget {
   final Widget child;
   final SftpPanelPosition initialPosition;
   final double? initialSize;
-  final void Function(SftpPanelPosition position, double? size)? onLayoutChanged;
+  final void Function(SftpPanelPosition position, double? size)?
+  onLayoutChanged;
 
   /// Forwarded straight through to the embedded [SftpView] — see its
   /// doc comment for the contract.
@@ -43,7 +44,8 @@ class SshSessionView extends StatefulWidget {
     required String path,
     required String initialContent,
     required DateTime? mtime,
-  })? onOpenEditorTab;
+  })?
+  onOpenEditorTab;
 
   @override
   State<SshSessionView> createState() => _SshSessionViewState();
@@ -70,6 +72,7 @@ class _SshSessionViewState extends State<SshSessionView> {
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
   }
+
   final _sftpKey = GlobalKey();
 
   double _panelExtent(BoxConstraints constraints) {
@@ -124,16 +127,20 @@ class _SshSessionViewState extends State<SshSessionView> {
                         onDrag: (d) => setState(() {
                           final maxSide = constraints.maxWidth * _kMaxFraction;
                           final current = _customPanelSize ?? panelSize;
-                          _customPanelSize =
-                              (current - d).clamp(_kMinSide, maxSide);
-                          widget.onLayoutChanged
-                              ?.call(_position, _customPanelSize);
+                          _customPanelSize = (current - d).clamp(
+                            _kMinSide,
+                            maxSide,
+                          );
+                          widget.onLayoutChanged?.call(
+                            _position,
+                            _customPanelSize,
+                          );
                         }),
                       ),
                       Expanded(
                         child: _SftpFloatingChrome(
                           dockRight: true,
-                                          child: sftp,
+                          child: sftp,
                         ),
                       ),
                     ],
@@ -152,19 +159,22 @@ class _SshSessionViewState extends State<SshSessionView> {
                       _ResizeHandle(
                         axis: Axis.vertical,
                         onDrag: (d) => setState(() {
-                          final maxSide =
-                              constraints.maxHeight * _kMaxFraction;
+                          final maxSide = constraints.maxHeight * _kMaxFraction;
                           final current = _customPanelSize ?? panelSize;
-                          _customPanelSize =
-                              (current - d).clamp(_kMinSide, maxSide);
-                          widget.onLayoutChanged
-                              ?.call(_position, _customPanelSize);
+                          _customPanelSize = (current - d).clamp(
+                            _kMinSide,
+                            maxSide,
+                          );
+                          widget.onLayoutChanged?.call(
+                            _position,
+                            _customPanelSize,
+                          );
                         }),
                       ),
                       Expanded(
                         child: _SftpFloatingChrome(
                           dockRight: false,
-                                          child: sftp,
+                          child: sftp,
                         ),
                       ),
                     ],
@@ -185,10 +195,7 @@ class _SshSessionViewState extends State<SshSessionView> {
 
 /// Rounded, semi-transparent SFTP card over the terminal.
 class _SftpFloatingChrome extends StatelessWidget {
-  const _SftpFloatingChrome({
-    required this.dockRight,
-    required this.child,
-  });
+  const _SftpFloatingChrome({required this.dockRight, required this.child});
 
   final bool dockRight;
   final Widget child;
@@ -196,7 +203,12 @@ class _SftpFloatingChrome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final margin = dockRight
-        ? const EdgeInsets.fromLTRB(0, _kSftpPanelMargin, _kSftpPanelMargin, _kSftpPanelMargin)
+        ? const EdgeInsets.fromLTRB(
+            0,
+            _kSftpPanelMargin,
+            _kSftpPanelMargin,
+            _kSftpPanelMargin,
+          )
         : const EdgeInsets.fromLTRB(
             _kSftpPanelMargin,
             0,
@@ -204,7 +216,8 @@ class _SftpFloatingChrome extends StatelessWidget {
             _kSftpPanelMargin,
           );
 
-    final panelColor = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.panelFillFrosted;
+    final panelColor =
+        AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.panelFillFrosted;
     return Padding(
       padding: margin,
       child: PopupSurface(

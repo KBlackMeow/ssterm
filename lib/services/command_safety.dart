@@ -283,24 +283,53 @@ class CommandSafety {
   /// Programs that are ALWAYS interactive — there is no flag combination
   /// that makes them exit on their own.  Block unconditionally.
   static const _alwaysInteractive = {
-    'vim', 'vi', 'nvim', 'emacs', 'nano', 'pico',
-    'less', 'more', 'man', 'info',
-    'top', 'htop', 'btop', 'atop',
-    'tmux', 'screen', 'mc', 'ranger', 'lf',
-    'telnet', 'ftp', 'sftp',
+    'vim',
+    'vi',
+    'nvim',
+    'emacs',
+    'nano',
+    'pico',
+    'less',
+    'more',
+    'man',
+    'info',
+    'top',
+    'htop',
+    'btop',
+    'atop',
+    'tmux',
+    'screen',
+    'mc',
+    'ranger',
+    'lf',
+    'telnet',
+    'ftp',
+    'sftp',
   };
 
   /// Language REPLs.  Interactive iff invoked WITHOUT any positional /
   /// `-c` / `-e` / `-m` argument, OR with an explicit `-i` /
   /// `--interactive` flag.
   static const _repls = {
-    'python', 'python3', 'node', 'irb', 'ipython', 'pry', 'lua', 'ghci',
+    'python',
+    'python3',
+    'node',
+    'irb',
+    'ipython',
+    'pry',
+    'lua',
+    'ghci',
   };
 
   /// Database CLIs.  Interactive iff no execute mechanism is provided
   /// (per-CLI rules — see [_dbCliIsInteractive]).
   static const _dbClis = {
-    'mysql', 'psql', 'redis-cli', 'mongo', 'mongosh', 'sqlite3',
+    'mysql',
+    'psql',
+    'redis-cli',
+    'mongo',
+    'mongosh',
+    'sqlite3',
   };
 
   // Background EOL `&` — but NOT `&&` (logical AND) and NOT escaped `\&`.
@@ -456,8 +485,8 @@ class CommandSafety {
   /// order in [_builtinDangerRules] — stable, suitable for stable UI
   /// keys.
   static List<({String id, String label})> get builtinDangerRules => [
-        for (final r in _builtinDangerRules) (id: r.id, label: r.label),
-      ];
+    for (final r in _builtinDangerRules) (id: r.id, label: r.label),
+  ];
 
   /// Compile-check a candidate regex.  Used by the Settings UI's
   /// edit-time validator: returns true iff the pattern would actually
@@ -543,10 +572,7 @@ class CommandSafety {
       first = first.substring(1, first.length - 1);
     }
     first = _basename(first);
-    return (
-      name: first.toLowerCase(),
-      args: all.skip(i + 1).toList(),
-    );
+    return (name: first.toLowerCase(), args: all.skip(i + 1).toList());
   }
 
   /// Wrapper command names → set of short / long flags that consume the
@@ -561,9 +587,26 @@ class CommandSafety {
   /// marker IS handled correctly).
   static const _wrapperValueFlags = <String, Set<String>>{
     'sudo': {
-      '-u', '-g', '-h', '-p', '-r', '-t', '-T', '-U', '-C', '-D',
-      '--user', '--group', '--host', '--prompt', '--role', '--type',
-      '--command-timeout', '--other-user', '--close-from', '--chdir',
+      '-u',
+      '-g',
+      '-h',
+      '-p',
+      '-r',
+      '-t',
+      '-T',
+      '-U',
+      '-C',
+      '-D',
+      '--user',
+      '--group',
+      '--host',
+      '--prompt',
+      '--role',
+      '--type',
+      '--command-timeout',
+      '--other-user',
+      '--close-from',
+      '--chdir',
     },
     'doas': {'-u', '-C'},
     'env': {'-u', '-C', '-S', '--unset', '--chdir', '--split-string'},
@@ -574,8 +617,18 @@ class CommandSafety {
     'time': {'-f', '-o', '--format', '--output'},
     'timeout': {'-s', '-k', '--signal', '--kill-after'},
     'nice': {'-n', '--adjustment'},
-    'ionice': {'-c', '-n', '-p', '-P', '-u',
-               '--class', '--classdata', '--pid', '--pgid', '--uid'},
+    'ionice': {
+      '-c',
+      '-n',
+      '-p',
+      '-P',
+      '-u',
+      '--class',
+      '--classdata',
+      '--pid',
+      '--pgid',
+      '--uid',
+    },
   };
 
   static String _basename(String tok) {
@@ -601,16 +654,16 @@ class CommandSafety {
   // language's exact flag set: any unknown flag falls through to the
   // positional-arg check below, which is enough for the common cases.
   static const _replExecuteFlags = {
-    '-c', '-e', '-m', '-p',
-    '--command', '--eval', '--print',
+    '-c',
+    '-e',
+    '-m',
+    '-p',
+    '--command',
+    '--eval',
+    '--print',
   };
-  static const _replExecutePrefixes = [
-    '--command=', '--eval=', '--print=',
-  ];
-  static const _replInfoFlags = {
-    '-V', '-v', '-h',
-    '--version', '--help',
-  };
+  static const _replExecutePrefixes = ['--command=', '--eval=', '--print='];
+  static const _replInfoFlags = {'-V', '-v', '-h', '--version', '--help'};
 
   static bool _replIsInteractive(List<String> args) {
     if (args.isEmpty) return true;
@@ -719,15 +772,34 @@ class CommandSafety {
   /// Without this list we'd misclassify `redis-cli -h myhost ping` as
   /// `myhost` being a positional, which it isn't.
   static const _redisCliFlagsTakingValue = {
-    '-h', '-p', '-s', '-a', '-u', '-n', '-r', '-i', '-x', '--user', '--pass',
-    '--cert', '--key', '--cacert', '--cacertdir', '--tls-ciphers',
-    '--tls-ciphersuites', '--sni',
+    '-h',
+    '-p',
+    '-s',
+    '-a',
+    '-u',
+    '-n',
+    '-r',
+    '-i',
+    '-x',
+    '--user',
+    '--pass',
+    '--cert',
+    '--key',
+    '--cacert',
+    '--cacertdir',
+    '--tls-ciphers',
+    '--tls-ciphersuites',
+    '--sni',
   };
 
   /// Flags of `sqlite3` that consume the next arg.  `-init <file>`,
   /// `-cmd <cmd>` (treated separately as execute), `-separator <sep>`, …
   static const _sqlite3FlagsTakingValue = {
-    '-init', '-separator', '-newline', '-nullvalue', '-pagecache',
+    '-init',
+    '-separator',
+    '-newline',
+    '-nullvalue',
+    '-pagecache',
     '-lookaside',
   };
 

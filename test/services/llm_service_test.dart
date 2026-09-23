@@ -9,6 +9,26 @@ import 'package:ssterm/services/llm_service.dart';
 import 'package:ssterm/services/skill_service.dart';
 
 void main() {
+  test('recognizes a raw web-search envelope echoed as an answer', () {
+    const echoed = '''[Web search results]
+query: "Beijing current weather"
+(2 results)
+
+1. Beijing weather
+   Current conditions.''';
+
+    expect(LlmService.isRawWebSearchEnvelope(echoed), isTrue);
+    expect(
+      LlmService.isRawWebSearchEnvelope('北京当前多云，约 26°C。来源：[1]\n\n$echoed'),
+      isFalse,
+    );
+    expect(
+      LlmService.isRawWebSearchEnvelope(
+        'Here are the results you requested:\n\n```text\n$echoed\n```',
+      ),
+      isTrue,
+    );
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(

@@ -516,26 +516,35 @@ void main() {
     expect(toolMessage['content'], contains('not executed'));
 
     final anthropic = AgentProviderTools.anthropicMessages(transcript);
-    final anthropicResult = anthropic
-        .expand((message) {
-          final content = message['content'];
-          return content is List ? content : const <Object>[];
-        })
-        .where((block) => block is Map && block['type'] == 'tool_result')
-        .toList()
-        .single as Map;
+    final anthropicResult =
+        anthropic
+                .expand((message) {
+                  final content = message['content'];
+                  return content is List ? content : const <Object>[];
+                })
+                .where(
+                  (block) => block is Map && block['type'] == 'tool_result',
+                )
+                .toList()
+                .single
+            as Map;
     expect(anthropicResult['tool_use_id'], 'call_dangling');
     expect(anthropicResult['is_error'], true);
 
     final gemini = AgentProviderTools.geminiContents(transcript);
-    final geminiResponse = gemini
-        .expand((content) => (content['parts'] as List? ?? const []))
-        .where((part) => part is Map && part.containsKey('functionResponse'))
-        .toList()
-        .single as Map;
+    final geminiResponse =
+        gemini
+                .expand((content) => (content['parts'] as List? ?? const []))
+                .where(
+                  (part) => part is Map && part.containsKey('functionResponse'),
+                )
+                .toList()
+                .single
+            as Map;
     expect((geminiResponse['functionResponse'] as Map)['name'], 'bash');
     expect(
-      ((geminiResponse['functionResponse'] as Map)['response'] as Map)['is_error'],
+      ((geminiResponse['functionResponse'] as Map)['response']
+          as Map)['is_error'],
       true,
     );
   });
@@ -562,10 +571,7 @@ void main() {
     expect(sanitized[1], transcript[1]);
 
     final openAi = AgentProviderTools.openAiMessages(transcript);
-    expect(
-      openAi.where((message) => message['role'] == 'tool'),
-      hasLength(1),
-    );
+    expect(openAi.where((message) => message['role'] == 'tool'), hasLength(1));
     final anthropic = AgentProviderTools.anthropicMessages(transcript);
     expect(
       anthropic

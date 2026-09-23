@@ -63,8 +63,7 @@ class _WriteProposalCardState extends State<_WriteProposalCard> {
       _WriteProposalState.pending => const Color(0xFFE5C07B), // amber
       _WriteProposalState.applying => const Color(0xFF61AFEF), // blue
       _WriteProposalState.applied => const Color(0xFF98C379), // green
-      _WriteProposalState.rejected =>
-        dim, // muted — user said no, not an error
+      _WriteProposalState.rejected => dim, // muted — user said no, not an error
       _WriteProposalState.failed => const Color(0xFFFF6E67), // red
     };
 
@@ -143,9 +142,7 @@ class _WriteProposalCardState extends State<_WriteProposalCard> {
               child: Row(
                 children: [
                   Icon(
-                    _previewExpanded
-                        ? Icons.expand_less
-                        : Icons.expand_more,
+                    _previewExpanded ? Icons.expand_less : Icons.expand_more,
                     size: 14,
                     color: dim,
                   ),
@@ -195,14 +192,18 @@ class _WriteProposalCardState extends State<_WriteProposalCard> {
                 decoration: InputDecoration(
                   hintText: 'Why? (optional, sent to the model)',
                   hintStyle: TextStyle(
-                      color: dim.withValues(alpha: 0.6), fontSize: 12),
+                    color: dim.withValues(alpha: 0.6),
+                    fontSize: 12,
+                  ),
                   isDense: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: dim.withValues(alpha: 0.3)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 8),
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
@@ -289,8 +290,8 @@ class _WriteProposalCardState extends State<_WriteProposalCard> {
     final lineDelta = existingLines == null
         ? ''
         : ' (Δ ${(newLines - existingLines).abs()} '
-            'line${(newLines - existingLines).abs() == 1 ? '' : 's'} '
-            '${newLines >= existingLines ? 'added' : 'removed'})';
+              'line${(newLines - existingLines).abs() == 1 ? '' : 's'} '
+              '${newLines >= existingLines ? 'added' : 'removed'})';
     return 'Will overwrite: $existingBytes B → $newBytes B, '
         '${existingLines ?? "—"} → $newLines lines$lineDelta';
   }

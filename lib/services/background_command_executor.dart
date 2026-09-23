@@ -19,12 +19,12 @@ class CommandExecutionUpdate {
   final List<String> lastThreeLines;
 }
 
-typedef CommandExecutionUpdateListener = void Function(
-  CommandExecutionUpdate update,
-);
+typedef CommandExecutionUpdateListener =
+    void Function(CommandExecutionUpdate update);
 
 /// Returns true only when an observer has explicitly approved more waiting.
-typedef CommandSilenceDecider = FutureOr<bool?> Function(List<String> lastThreeLines);
+typedef CommandSilenceDecider =
+    FutureOr<bool?> Function(List<String> lastThreeLines);
 
 typedef BackgroundProcessStarter =
     Future<Process> Function(
@@ -145,6 +145,7 @@ class BackgroundCommandExecutor {
   });
 
   final Duration timeout;
+
   /// Stops a command which has made no observable progress for this interval.
   final Duration silenceTimeout;
   final int outputLimitBytes;
@@ -310,18 +311,28 @@ class BackgroundCommandExecutor {
         },
       );
       final silencePoll = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (cancelled || checkingSilence || DateTime.now().difference(lastOutputAt) < silenceTimeout) {
+        if (cancelled ||
+            checkingSilence ||
+            DateTime.now().difference(lastOutputAt) < silenceTimeout) {
           return;
         }
         checkingSilence = true;
-        unawaited(Future.sync(() => onSilence?.call(liveOutput.lastThreeLines))
-            .then((keepWaiting) {
-          if (keepWaiting == true) { lastOutputAt = DateTime.now(); return; }
-          stalled = true; cancelled = true;
-          termination = terminate(ProcessSignal.sigterm);
-          if (!cancellationRequested.isCompleted) cancellationRequested.complete();
-          timer.cancel();
-        }).whenComplete(() => checkingSilence = false));
+        unawaited(
+          Future.sync(() => onSilence?.call(liveOutput.lastThreeLines))
+              .then((keepWaiting) {
+                if (keepWaiting == true) {
+                  lastOutputAt = DateTime.now();
+                  return;
+                }
+                stalled = true;
+                cancelled = true;
+                termination = terminate(ProcessSignal.sigterm);
+                if (!cancellationRequested.isCompleted)
+                  cancellationRequested.complete();
+                timer.cancel();
+              })
+              .whenComplete(() => checkingSilence = false),
+        );
       });
 
       final timedOut = await Future.any<bool>([
@@ -446,16 +457,27 @@ class BackgroundCommandExecutor {
       timer.cancel();
     });
     final silencePoll = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (cancelled || checkingSilence || DateTime.now().difference(lastOutputAt) < silenceTimeout) {
+      if (cancelled ||
+          checkingSilence ||
+          DateTime.now().difference(lastOutputAt) < silenceTimeout) {
         return;
       }
       checkingSilence = true;
-      unawaited(Future.sync(() => onSilence?.call(liveOutput.lastThreeLines))
-          .then((keepWaiting) {
-        if (keepWaiting == true) { lastOutputAt = DateTime.now(); return; }
-        stalled = true; cancelled = true;
-        session.kill(SSHSignal.TERM); session.close(); timer.cancel();
-      }).whenComplete(() => checkingSilence = false));
+      unawaited(
+        Future.sync(() => onSilence?.call(liveOutput.lastThreeLines))
+            .then((keepWaiting) {
+              if (keepWaiting == true) {
+                lastOutputAt = DateTime.now();
+                return;
+              }
+              stalled = true;
+              cancelled = true;
+              session.kill(SSHSignal.TERM);
+              session.close();
+              timer.cancel();
+            })
+            .whenComplete(() => checkingSilence = false),
+      );
     });
     final timedOut = await Future.any<bool>([
       completed.then((_) => false),

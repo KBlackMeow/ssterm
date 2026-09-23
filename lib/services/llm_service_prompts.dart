@@ -155,6 +155,7 @@ Turn-shape rules:
 - A `web_search` tool call turn MUST NOT also contain a shell `tool_call`, [TASK_COMPLETE], [ASK_USER], `ask_user_question`, or `use_skill` — the agent loop intercepts the tool BEFORE executing anything, so combining silently drops later actions.
 - Issue ONE search per turn; iterate based on the results.
 - Cite results by index in your ANSWER turn (e.g. "per [3]") so the user can verify the source.
+- Never copy or display the raw `[Web search results]` envelope. Read it, then answer the user's question in natural language.
 - If the result envelope arrives as `[Web search failed]`, do NOT retry the same query — follow the `recovery` directive in that envelope.
 
 Example INVESTIGATE turn:

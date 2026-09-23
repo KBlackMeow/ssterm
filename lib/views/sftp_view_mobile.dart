@@ -17,20 +17,24 @@ class _CompactRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDir  = entry.attr.isDirectory;
+    final isDir = entry.attr.isDirectory;
     final isLink = entry.attr.isSymbolicLink;
 
-    final colors  = AppColors.maybeOf(context);
-    final fg      = colors?.foreground    ?? const Color(0xFFD4D4D4);
-    final fgDim   = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
+    final colors = AppColors.maybeOf(context);
+    final fg = colors?.foreground ?? const Color(0xFFD4D4D4);
+    final fgDim = colors?.foregroundDim ?? const Color(0xFF8E8E8E);
 
     final iconColor = isDir
         ? const Color(0xFFFFD166)
-        : isLink ? const Color(0xFF4EC9B0) : fgDim;
+        : isLink
+        ? const Color(0xFF4EC9B0)
+        : fgDim;
 
     final nameColor = isDir
         ? fg
-        : isLink ? const Color(0xFF4EC9B0) : fg.withValues(alpha: 0.70);
+        : isLink
+        ? const Color(0xFF4EC9B0)
+        : fg.withValues(alpha: 0.70);
 
     final metaColor = fgDim.withValues(alpha: 0.75);
     final arrowColor = fg.withValues(alpha: 0.15);
@@ -51,8 +55,10 @@ class _CompactRow extends StatelessWidget {
               SizedBox(
                 width: 36,
                 child: Icon(
-                  isDir ? Icons.folder_rounded
-                      : isLink ? Icons.link_rounded
+                  isDir
+                      ? Icons.folder_rounded
+                      : isLink
+                      ? Icons.link_rounded
                       : _fileIconForName(entry.filename),
                   size: 26,
                   color: iconColor,
@@ -62,7 +68,11 @@ class _CompactRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   entry.filename,
-                  style: TextStyle(color: nameColor, fontSize: 16, fontFamily: 'JetBrainsMono'),
+                  style: TextStyle(
+                    color: nameColor,
+                    fontSize: 16,
+                    fontFamily: 'JetBrainsMono',
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -73,22 +83,41 @@ class _CompactRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   if (sizeText.isNotEmpty)
-                    Text(sizeText,
-                        style: TextStyle(color: metaColor, fontSize: 13, fontFamily: 'JetBrainsMono')),
-                  Text(dateText,
-                      style: TextStyle(color: metaColor, fontSize: 13, fontFamily: 'JetBrainsMono')),
+                    Text(
+                      sizeText,
+                      style: TextStyle(
+                        color: metaColor,
+                        fontSize: 13,
+                        fontFamily: 'JetBrainsMono',
+                      ),
+                    ),
+                  Text(
+                    dateText,
+                    style: TextStyle(
+                      color: metaColor,
+                      fontSize: 13,
+                      fontFamily: 'JetBrainsMono',
+                    ),
+                  ),
                 ],
               ),
               if (isDir)
                 Padding(
                   padding: const EdgeInsets.only(left: 6),
-                  child: Icon(Icons.chevron_right_rounded, size: 18, color: arrowColor),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: arrowColor,
+                  ),
                 )
               else
                 Padding(
                   padding: const EdgeInsets.only(left: 6),
-                  child: Icon(Icons.more_vert_rounded, size: 17,
-                      color: arrowColor.withValues(alpha: arrowColor.a * 0.7)),
+                  child: Icon(
+                    Icons.more_vert_rounded,
+                    size: 17,
+                    color: arrowColor.withValues(alpha: arrowColor.a * 0.7),
+                  ),
                 ),
             ],
           ),
@@ -100,20 +129,43 @@ class _CompactRow extends StatelessWidget {
   static IconData _fileIconForName(String name) {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return switch (ext) {
-      'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' ||
-      'c' || 'cpp' || 'java' || 'swift' || 'kt' => Icons.code_rounded,
-      'json' || 'yaml' || 'yml' || 'toml' ||
-      'xml' || 'ini' || 'conf'                   => Icons.data_object_rounded,
-      'md' || 'txt' || 'log' || 'rst'            => Icons.description_outlined,
-      'png' || 'jpg' || 'jpeg' || 'gif' ||
-      'svg' || 'webp' || 'ico'                   => Icons.image_outlined,
-      'zip' || 'tar' || 'gz' || 'bz2' ||
-      'xz' || '7z' || 'rar'                      => Icons.archive_outlined,
-      'sh' || 'bash' || 'zsh' || 'fish'          => Icons.terminal_rounded,
-      _                                          => Icons.insert_drive_file_outlined,
+      'dart' ||
+      'py' ||
+      'js' ||
+      'ts' ||
+      'go' ||
+      'rs' ||
+      'c' ||
+      'cpp' ||
+      'java' ||
+      'swift' ||
+      'kt' => Icons.code_rounded,
+      'json' ||
+      'yaml' ||
+      'yml' ||
+      'toml' ||
+      'xml' ||
+      'ini' ||
+      'conf' => Icons.data_object_rounded,
+      'md' || 'txt' || 'log' || 'rst' => Icons.description_outlined,
+      'png' ||
+      'jpg' ||
+      'jpeg' ||
+      'gif' ||
+      'svg' ||
+      'webp' ||
+      'ico' => Icons.image_outlined,
+      'zip' ||
+      'tar' ||
+      'gz' ||
+      'bz2' ||
+      'xz' ||
+      '7z' ||
+      'rar' => Icons.archive_outlined,
+      'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal_rounded,
+      _ => Icons.insert_drive_file_outlined,
     };
   }
-
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -134,17 +186,21 @@ class _MobileActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDir     = entry.attr.isDirectory;
+    final isDir = entry.attr.isDirectory;
     final bottomPad = MediaQuery.of(context).viewPadding.bottom;
-    const radius    = BorderRadius.vertical(top: Radius.circular(20));
+    const radius = BorderRadius.vertical(top: Radius.circular(20));
 
-    final colors    = AppColors.maybeOf(context);
-    final fg        = colors?.foreground    ?? _kFgActive;
-    final fgDim     = colors?.foregroundDim ?? _kFgMuted;
-    final sheetBg   = colors?.popup ?? (frostedGlass ? FrostedGlassStyle.menuFillFrosted : const Color(0xFF111113));
+    final colors = AppColors.maybeOf(context);
+    final fg = colors?.foreground ?? _kFgActive;
+    final fgDim = colors?.foregroundDim ?? _kFgMuted;
+    final sheetBg =
+        colors?.popup ??
+        (frostedGlass
+            ? FrostedGlassStyle.menuFillFrosted
+            : const Color(0xFF111113));
     final topBorder = fg.withValues(alpha: 0.16);
-    final divColor  = fgDim.withValues(alpha: 0.18);
-    final iconBg    = fgDim.withValues(alpha: 0.15);
+    final divColor = fgDim.withValues(alpha: 0.18);
+    final iconBg = fgDim.withValues(alpha: 0.15);
 
     Widget sheet = Container(
       decoration: BoxDecoration(
@@ -161,80 +217,91 @@ class _MobileActionSheet extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-
-          // File header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 2, 20, 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: isDir
-                        ? const Color(0xFFFFD166).withValues(alpha: 0.12)
-                        : iconBg,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    isDir ? Icons.folder_rounded : Icons.insert_drive_file_outlined,
-                    size: 20,
-                    color: isDir ? const Color(0xFFFFD166) : fgDim,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        entry.filename,
-                        style: TextStyle(
-                          color: fg,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'JetBrainsMono',
-                          letterSpacing: -0.2,
+                  // File header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 2, 20, 14),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: isDir
+                                ? const Color(
+                                    0xFFFFD166,
+                                  ).withValues(alpha: 0.12)
+                                : iconBg,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            isDir
+                                ? Icons.folder_rounded
+                                : Icons.insert_drive_file_outlined,
+                            size: 20,
+                            color: isDir ? const Color(0xFFFFD166) : fgDim,
+                          ),
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        isDir ? 'Folder' : _sftpFmtSize(entry.attr.size ?? 0),
-                        style: TextStyle(color: fgDim, fontSize: 12),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                entry.filename,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'JetBrainsMono',
+                                  letterSpacing: -0.2,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                isDir
+                                    ? 'Folder'
+                                    : _sftpFmtSize(entry.attr.size ?? 0),
+                                style: TextStyle(color: fgDim, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
 
-          Divider(height: 1, color: divColor),
-          const SizedBox(height: 4),
+                  Divider(height: 1, color: divColor),
+                  const SizedBox(height: 4),
 
-          if (isDir)
-            _SheetItem(icon: Icons.folder_open_rounded, label: 'Open',
-                onTap: () => Navigator.pop(context, 'navigate')),
-          if (canDownload)
-            _SheetItem(
-              icon: Icons.download_rounded,
-              label: Platform.isIOS ? 'Save to Files' : 'Download',
-              onTap: () => Navigator.pop(context, 'download'),
-            ),
-          _SheetItem(icon: Icons.drive_file_rename_outline_rounded, label: 'Rename',
-              onTap: () => Navigator.pop(context, 'rename')),
-          const SizedBox(height: 4),
-          Divider(height: 1, color: divColor),
-          _SheetItem(
-            icon: Icons.delete_outline_rounded,
-            label: 'Delete',
-            labelColor: const Color(0xFFFF6E67),
-            iconColor:  const Color(0xFFFF6E67),
-            onTap: () => Navigator.pop(context, 'delete'),
-          ),
+                  if (isDir)
+                    _SheetItem(
+                      icon: Icons.folder_open_rounded,
+                      label: 'Open',
+                      onTap: () => Navigator.pop(context, 'navigate'),
+                    ),
+                  if (canDownload)
+                    _SheetItem(
+                      icon: Icons.download_rounded,
+                      label: Platform.isIOS ? 'Save to Files' : 'Download',
+                      onTap: () => Navigator.pop(context, 'download'),
+                    ),
+                  _SheetItem(
+                    icon: Icons.drive_file_rename_outline_rounded,
+                    label: 'Rename',
+                    onTap: () => Navigator.pop(context, 'rename'),
+                  ),
+                  const SizedBox(height: 4),
+                  Divider(height: 1, color: divColor),
+                  _SheetItem(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'Delete',
+                    labelColor: const Color(0xFFFF6E67),
+                    iconColor: const Color(0xFFFF6E67),
+                    onTap: () => Navigator.pop(context, 'delete'),
+                  ),
 
-          SizedBox(height: bottomPad + 8),
+                  SizedBox(height: bottomPad + 8),
                 ],
               ),
             ),
@@ -266,7 +333,8 @@ class _SheetHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final handleColor = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted).withValues(alpha: 0.35);
+    final handleColor = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgMuted)
+        .withValues(alpha: 0.35);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Container(
@@ -298,9 +366,9 @@ class _SheetItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors      = AppColors.maybeOf(context);
-    final effectiveIcon  = iconColor  ?? colors?.foregroundDim ?? _kFgMuted;
-    final effectiveLabel = labelColor ?? colors?.foreground    ?? _kFgActive;
+    final colors = AppColors.maybeOf(context);
+    final effectiveIcon = iconColor ?? colors?.foregroundDim ?? _kFgMuted;
+    final effectiveLabel = labelColor ?? colors?.foreground ?? _kFgActive;
     return Material(
       type: MaterialType.transparency,
       child: InkWell(
@@ -310,9 +378,15 @@ class _SheetItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
             children: [
-              SizedBox(width: 28, child: Icon(icon, size: 20, color: effectiveIcon)),
+              SizedBox(
+                width: 28,
+                child: Icon(icon, size: 20, color: effectiveIcon),
+              ),
               const SizedBox(width: 14),
-              Text(label, style: TextStyle(color: effectiveLabel, fontSize: 16)),
+              Text(
+                label,
+                style: TextStyle(color: effectiveLabel, fontSize: 16),
+              ),
             ],
           ),
         ),
@@ -334,9 +408,9 @@ class _MobileToolBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final disabled = onTap == null;
-    final colors   = AppColors.maybeOf(context);
-    final fg       = colors?.foreground    ?? Colors.white;
-    final fgDim    = colors?.foregroundDim ?? _kFgMuted;
+    final colors = AppColors.maybeOf(context);
+    final fg = colors?.foreground ?? Colors.white;
+    final fgDim = colors?.foregroundDim ?? _kFgMuted;
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
@@ -345,7 +419,9 @@ class _MobileToolBtn extends StatelessWidget {
         child: Icon(
           icon,
           size: 20,
-          color: disabled ? fg.withValues(alpha: 0.12) : fgDim.withValues(alpha: 0.85),
+          color: disabled
+              ? fg.withValues(alpha: 0.12)
+              : fgDim.withValues(alpha: 0.85),
         ),
       ),
     );

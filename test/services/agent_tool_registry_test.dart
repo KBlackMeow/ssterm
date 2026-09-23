@@ -140,6 +140,22 @@ void main() {
     });
   });
 
+  test('focused registry expands the canonical mcp capability', () {
+    final registry = AgentToolRegistry.build(
+      mcpTools: const [
+        McpTool(
+          serverId: 'demo',
+          serverName: 'Demo',
+          name: 'status',
+          description: 'Read status',
+          inputSchema: {'type': 'object'},
+        ),
+      ],
+    ).limitedTo({'mcp'});
+
+    expect(registry.names, contains('mcp__demo__status'));
+  });
+
   test('makes invalid or long MCP names provider-safe and routable', () {
     final registry = AgentToolRegistry.build(
       mcpTools: const [

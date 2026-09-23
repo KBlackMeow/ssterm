@@ -38,7 +38,9 @@ void main() {
   });
 
   test('Agent header exposes the existing clear-chat action', () {
-    final panel = File('lib/widgets/ai_assistant_panel.dart').readAsStringSync();
+    final panel = File(
+      'lib/widgets/ai_assistant_panel.dart',
+    ).readAsStringSync();
     final content = File(
       'lib/widgets/ai_assistant_panel_content.dart',
     ).readAsStringSync();

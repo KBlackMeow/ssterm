@@ -25,31 +25,42 @@ Future<SshHost?> showConnectDialog(
   if (Platform.isIOS || Platform.isAndroid) {
     return _showMobileConnectDialog(
       context,
-      child: _ConnectDialog(initialHost: initialHost, mobileSheet: true, popupColor: popupColor),
+      child: _ConnectDialog(
+        initialHost: initialHost,
+        mobileSheet: true,
+        popupColor: popupColor,
+      ),
     );
   }
   return showDialog<SshHost>(
     context: context,
     barrierColor: const Color(0x66000000),
-    builder: (_) => _ConnectDialog(initialHost: initialHost, popupColor: popupColor),
+    builder: (_) =>
+        _ConnectDialog(initialHost: initialHost, popupColor: popupColor),
   );
 }
 
-Future<SshHost?> showEditHostDialog(
-  BuildContext context, {
-  SshHost? host,
-}) {
+Future<SshHost?> showEditHostDialog(BuildContext context, {SshHost? host}) {
   final popupColor = AppColors.maybeOf(context)?.popup;
   if (Platform.isIOS || Platform.isAndroid) {
     return _showMobileConnectDialog(
       context,
-      child: _ConnectDialog(initialHost: host, editOnly: true, mobileSheet: true, popupColor: popupColor),
+      child: _ConnectDialog(
+        initialHost: host,
+        editOnly: true,
+        mobileSheet: true,
+        popupColor: popupColor,
+      ),
     );
   }
   return showDialog<SshHost>(
     context: context,
     barrierColor: const Color(0x66000000),
-    builder: (_) => _ConnectDialog(initialHost: host, editOnly: true, popupColor: popupColor),
+    builder: (_) => _ConnectDialog(
+      initialHost: host,
+      editOnly: true,
+      popupColor: popupColor,
+    ),
   );
 }
 
@@ -214,13 +225,11 @@ class _ConnectDialogState extends State<_ConnectDialog> {
           : _jumpUserCtrl.text.trim(),
       password: _jumpAuthMode == _AuthMode.password
           ? (_jumpPasswordCtrl.text.trim().isEmpty
-              ? null
-              : _jumpPasswordCtrl.text.trim())
+                ? null
+                : _jumpPasswordCtrl.text.trim())
           : null,
       identityFile: _jumpAuthMode == _AuthMode.key
-          ? (_jumpKeyCtrl.text.trim().isEmpty
-              ? null
-              : _jumpKeyCtrl.text.trim())
+          ? (_jumpKeyCtrl.text.trim().isEmpty ? null : _jumpKeyCtrl.text.trim())
           : null,
     );
   }
@@ -360,7 +369,9 @@ class _ConnectDialogState extends State<_ConnectDialog> {
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: screenH * 0.74),
             child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+              behavior: ScrollConfiguration.of(
+                context,
+              ).copyWith(scrollbars: false),
               child: SingleChildScrollView(
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
@@ -393,8 +404,8 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         Text(
           widget.editOnly
               ? (widget.initialHost != null
-                  ? 'Edit SSH Config'
-                  : 'Add SSH Config')
+                    ? 'Edit SSH Config'
+                    : 'Add SSH Config')
               : 'New SSH',
           style: TextStyle(
             color: _kTitle,
@@ -414,7 +425,9 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       const SizedBox(height: 10),
       Row(
         children: [
-          Expanded(child: _Field(label: 'IP / Hostname', ctrl: _hostCtrl)),
+          Expanded(
+            child: _Field(label: 'IP / Hostname', ctrl: _hostCtrl),
+          ),
           const SizedBox(width: 8),
           SizedBox(
             width: 72,
@@ -459,10 +472,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       const SizedBox(height: 8),
 
       // ── Port Forwarding ────────────────────────────────────────────────────
-      _ForwardSection(
-        rules: _forwardRules,
-        onChanged: () => setState(() {}),
-      ),
+      _ForwardSection(rules: _forwardRules, onChanged: () => setState(() {})),
 
       const SizedBox(height: 8),
 
@@ -478,10 +488,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
       if (_error != null) ...[
         const SizedBox(height: 12),
-        Text(
-          _error!,
-          style: const TextStyle(color: _kError, fontSize: 12),
-        ),
+        Text(_error!, style: const TextStyle(color: _kError, fontSize: 12)),
       ],
 
       const SizedBox(height: 20),

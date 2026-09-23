@@ -59,10 +59,7 @@ void main() {
         friendlyConnectError('Exception: something weird happened'),
         equals('something weird happened'),
       );
-      expect(
-        friendlyConnectError('Error: bad config'),
-        equals('bad config'),
-      );
+      expect(friendlyConnectError('Error: bad config'), equals('bad config'));
     });
 
     test('plain message with no prefix passes through unchanged', () {

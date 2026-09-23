@@ -25,7 +25,11 @@ class AgentToolRegistry {
   /// next step or ask for missing authority.
   AgentToolRegistry limitedTo(Set<String> allowedNames) {
     const required = {'bash', 'ask_user_question'};
-    final allowed = {...required, ...allowedNames};
+    final allowed = {
+      ...required,
+      ...allowedNames,
+      if (allowedNames.contains('mcp')) ..._mcpToolsByNativeName.keys,
+    };
     return AgentToolRegistry._(
       List.unmodifiable(
         definitions.where((definition) => allowed.contains(definition.name)),

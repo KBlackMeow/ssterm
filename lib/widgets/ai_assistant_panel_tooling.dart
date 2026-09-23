@@ -185,11 +185,6 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
               scheduled = false;
               if (!mounted || streamDone || gen != _generation) return;
               setState(() {
-                // A text, reasoning, tool, or diagnostics event proves the
-                // streamed model request is still making progress. Without
-                // this, the deep-decision card can show a false waiting
-                // warning while its reply is visibly streaming.
-                _activeDecisionCard?.markProgress();
                 // Hide markers during streaming — without this the user
                 // briefly sees `[`, `[TASK`, `[TASK_COMPLETE]` flicker
                 // before the post-stream strip runs.  See
@@ -653,9 +648,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // If the chat was cleared while `adapter.commit` was in flight,
     // `_clearChat` already nulled the pause field — abort instead of
     // injecting a stale envelope into a freshly-cleared transcript.
-    if (!mounted || !identical(_pendingWriteProposal, proposal)) {
-      return;
-    }
+    if (!mounted || !identical(_pendingWriteProposal, proposal)) return;
     // Clear the pause signal now that the decision has fully resolved and
     // the loop is about to resume.  Clearing here — rather than at the top —
     // keeps `_agentEngaged` true across the `adapter.commit` await above, so
@@ -913,9 +906,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // Mirror `_decideWriteProposal`: if the chat was cleared while the commit
     // was in flight, `_clearChat` already nulled the pause field — abort
     // instead of injecting a stale envelope into the cleared transcript.
-    if (!mounted || !identical(_pendingEditProposal, proposal)) {
-      return;
-    }
+    if (!mounted || !identical(_pendingEditProposal, proposal)) return;
     // Clear the pause signal once the decision is fully resolved (mirrors
     // `_decideWriteProposal`): keep `_agentEngaged` true across the commit
     // await so mid-commit input queues rather than racing the resume.

@@ -121,7 +121,11 @@ void main() {
     });
 
     test('key auth sets identityFile and clears password', () {
-      final h = success(authMode: SshAuthMode.key, key: '/id_rsa', password: '').host;
+      final h = success(
+        authMode: SshAuthMode.key,
+        key: '/id_rsa',
+        password: '',
+      ).host;
       expect(h.identityFile, equals('/id_rsa'));
       expect(h.password, isNull);
     });

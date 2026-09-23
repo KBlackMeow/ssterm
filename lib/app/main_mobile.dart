@@ -1,11 +1,11 @@
 part of '../main.dart';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
-const _kCardFill   = Color(0xFF1D1D1F);
-const _kDivider    = Color(0x0CFFFFFF);
-const _kAccent     = Color(0xFF2472C8);
+const _kCardFill = Color(0xFF1D1D1F);
+const _kDivider = Color(0x0CFFFFFF);
+const _kAccent = Color(0xFF2472C8);
 const _kCardRadius = 16.0;
-const _kBarRadius  = 28.0;
+const _kBarRadius = 28.0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Terminal page  (tab 1)
@@ -70,8 +70,9 @@ class _TerminalPage extends StatelessWidget {
     BuildContext context,
     ValueChanged<String> onInsert,
   ) async {
-    final popupColor  = AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillSolid;
-    final menuColors  = AppColors.fromBackground(popupColor);
+    final popupColor =
+        AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.menuFillSolid;
+    final menuColors = AppColors.fromBackground(popupColor);
     final parentTheme = Theme.of(context);
     await showDialog<void>(
       context: context,
@@ -84,7 +85,10 @@ class _TerminalPage extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 360, maxHeight: screenH * 0.55),
+                constraints: BoxConstraints(
+                  maxWidth: 360,
+                  maxHeight: screenH * 0.55,
+                ),
                 child: _CommandsSheet(onInsert: onInsert),
               ),
             ),
@@ -124,7 +128,8 @@ class _SessionTabStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final border = (AppColors.maybeOf(context)?.foreground ?? Colors.white).withValues(alpha: 0.10);
+    final border = (AppColors.maybeOf(context)?.foreground ?? Colors.white)
+        .withValues(alpha: 0.10);
     return Container(
       height: 44,
       decoration: BoxDecoration(
@@ -132,46 +137,46 @@ class _SessionTabStrip extends StatelessWidget {
         border: Border(bottom: BorderSide(color: border, width: 0.5)),
       ),
       child: Row(
-            children: [
-              Expanded(
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  itemCount: tabs.length,
-                  itemBuilder: (_, i) => _SessionTab(
-                    tab: tabs[i],
-                    isActive: i == active,
-                    onTap: () => onSelect(i),
-                    onClose: () => onClose(i),
-                  ),
-                ),
+        children: [
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              itemCount: tabs.length,
+              itemBuilder: (_, i) => _SessionTab(
+                tab: tabs[i],
+                isActive: i == active,
+                onTap: () => onSelect(i),
+                onClose: () => onClose(i),
               ),
-              // Add session
-              _StripIconBtn(
-                icon: Icons.add_rounded,
-                onTap: onAdd,
-                tooltip: 'New session',
-              ),
-              // Commands
-              if (onCommands != null)
-                Builder(
-                  builder: (ctx) => _StripIconBtn(
-                    icon: Icons.code,
-                    onTap: () => onCommands!(ctx),
-                    tooltip: 'Commands',
-                  ),
-                ),
-              // Agent — same affordance as the desktop tab bar.
-              if (onToggleAgentPanel != null)
-                _StripIconBtn(
-                  icon: Icons.auto_awesome,
-                  onTap: onToggleAgentPanel!,
-                  tooltip: 'Toggle Agent',
-                  activeColor: agentPanelVisible ? _kAccent : null,
-                ),
-              const SizedBox(width: 4),
-            ],
+            ),
           ),
+          // Add session
+          _StripIconBtn(
+            icon: Icons.add_rounded,
+            onTap: onAdd,
+            tooltip: 'New session',
+          ),
+          // Commands
+          if (onCommands != null)
+            Builder(
+              builder: (ctx) => _StripIconBtn(
+                icon: Icons.code,
+                onTap: () => onCommands!(ctx),
+                tooltip: 'Commands',
+              ),
+            ),
+          // Agent — same affordance as the desktop tab bar.
+          if (onToggleAgentPanel != null)
+            _StripIconBtn(
+              icon: Icons.auto_awesome,
+              onTap: onToggleAgentPanel!,
+              tooltip: 'Toggle Agent',
+              activeColor: agentPanelVisible ? _kAccent : null,
+            ),
+          const SizedBox(width: 4),
+        ],
+      ),
     );
   }
 }
@@ -194,17 +199,17 @@ class _SessionTab extends StatelessWidget {
     final connecting = tab.kind == _TabKind.sshConnecting;
     final error = tab.kind == _TabKind.sshError;
     final colors = AppColors.maybeOf(context);
-    final fg     = colors?.foreground    ?? _kFgActive;
-    final fgDim  = colors?.foregroundDim ?? _kFgInactive;
+    final fg = colors?.foreground ?? _kFgActive;
+    final fgDim = colors?.foregroundDim ?? _kFgInactive;
     // popup = chromeTabSelected = the "selected" tint, mirrors desktop _TabChip.
-    final activeBg     = colors?.popup ?? const Color(0x22FFFFFF);
+    final activeBg = colors?.popup ?? const Color(0x22FFFFFF);
     final activeBorder = fgDim.withValues(alpha: 0.28);
 
     final dotColor = error
         ? const Color(0xFFFF6E67)
         : connecting
-            ? const Color(0xFFFFD166)
-            : const Color(0xFF34C759);
+        ? const Color(0xFFFFD166)
+        : const Color(0xFF34C759);
 
     return GestureDetector(
       onTap: onTap,
@@ -232,7 +237,10 @@ class _SessionTab extends StatelessWidget {
                 : Container(
                     width: 7,
                     height: 7,
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                      shape: BoxShape.circle,
+                    ),
                   ),
             const SizedBox(width: 6),
             Flexible(
@@ -285,8 +293,11 @@ class _StripIconBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = activeColor ??
-        (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.8);
+    final color =
+        activeColor ??
+        (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(
+          alpha: 0.8,
+        );
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -349,7 +360,8 @@ class _CommandsSheetState extends State<_CommandsSheet> {
             'No commands saved.\nAdd commands in Settings.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.6),
+              color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+                  .withValues(alpha: 0.6),
               fontSize: 13,
               height: 1.6,
             ),
@@ -357,14 +369,15 @@ class _CommandsSheetState extends State<_CommandsSheet> {
         ),
       );
     } else {
-      final colors   = AppColors.maybeOf(context);
-      final fg       = colors?.foreground    ?? _kFgActive;
-      final fgDim    = colors?.foregroundDim ?? _kFgInactive;
-      final divColor = (colors?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18);
+      final colors = AppColors.maybeOf(context);
+      final fg = colors?.foreground ?? _kFgActive;
+      final fgDim = colors?.foregroundDim ?? _kFgInactive;
+      final divColor = (colors?.foregroundDim ?? _kFgInactive).withValues(
+        alpha: 0.18,
+      );
       final rows = <Widget>[
         for (var i = 0; i < _commands.length; i++) ...[
-          if (i > 0)
-            Divider(height: 1, color: divColor),
+          if (i > 0) Divider(height: 1, color: divColor),
           Material(
             type: MaterialType.transparency,
             child: InkWell(
@@ -381,13 +394,17 @@ class _CommandsSheetState extends State<_CommandsSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(_commands[i].name,
-                          style: TextStyle(color: fg, fontSize: 13)),
+                      Text(
+                        _commands[i].name,
+                        style: TextStyle(color: fg, fontSize: 13),
+                      ),
                       if (_commands[i].description.isNotEmpty)
-                        Text(_commands[i].description,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: fgDim, fontSize: 11)),
+                        Text(
+                          _commands[i].description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: fgDim, fontSize: 11),
+                        ),
                     ],
                   ),
                 ),
@@ -405,9 +422,11 @@ class _CommandsSheetState extends State<_CommandsSheet> {
       );
     }
 
-    final colors     = AppColors.maybeOf(context);
-    final headerDim  = colors?.foregroundDim ?? const Color(0xFF6E6E6E);
-    final divColor   = (colors?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.18);
+    final colors = AppColors.maybeOf(context);
+    final headerDim = colors?.foregroundDim ?? const Color(0xFF6E6E6E);
+    final divColor = (colors?.foregroundDim ?? _kFgInactive).withValues(
+      alpha: 0.18,
+    );
     return PopupSurface(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -542,10 +561,7 @@ class _MobileSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _GlassNavBar(
-          title: 'Settings',
-          chromeBackground: chromeBackground,
-        ),
+        _GlassNavBar(title: 'Settings', chromeBackground: chromeBackground),
         Expanded(
           child: SettingsPage(
             settings: settings,
@@ -579,15 +595,28 @@ class _NoSessionsPlaceholder extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.terminal_rounded, size: 40,
-                  color: fgDim.withValues(alpha: 0.3)),
+              Icon(
+                Icons.terminal_rounded,
+                size: 40,
+                color: fgDim.withValues(alpha: 0.3),
+              ),
               const SizedBox(height: 14),
-              Text('No active sessions',
-                  style: TextStyle(color: fgDim.withValues(alpha: 0.6),
-                      fontSize: 15, fontWeight: FontWeight.w500)),
+              Text(
+                'No active sessions',
+                style: TextStyle(
+                  color: fgDim.withValues(alpha: 0.6),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text('Go to Hosts to start a session.',
-                  style: TextStyle(color: fgDim.withValues(alpha: 0.4), fontSize: 13)),
+              Text(
+                'Go to Hosts to start a session.',
+                style: TextStyle(
+                  color: fgDim.withValues(alpha: 0.4),
+                  fontSize: 13,
+                ),
+              ),
             ],
           ),
         ),
@@ -612,36 +641,46 @@ class _MobilePagePlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: chromeBackground,
-      child: Builder(builder: (context) {
-        final colors = AppColors.maybeOf(context);
-        final fg     = colors?.foreground    ?? Colors.white;
-        final fgDim  = colors?.foregroundDim ?? _kFgInactive;
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: fg.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(16),
+      child: Builder(
+        builder: (context) {
+          final colors = AppColors.maybeOf(context);
+          final fg = colors?.foreground ?? Colors.white;
+          final fgDim = colors?.foregroundDim ?? _kFgInactive;
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: fg.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 28,
+                      color: fgDim.withValues(alpha: 0.3),
+                    ),
                   ),
-                  child: Icon(icon, size: 28,
-                      color: fgDim.withValues(alpha: 0.3)),
-                ),
-                const SizedBox(height: 14),
-                Text(message,
+                  const SizedBox(height: 14),
+                  Text(
+                    message,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: fgDim.withValues(alpha: 0.45),
-                        fontSize: 13, height: 1.55)),
-              ],
+                    style: TextStyle(
+                      color: fgDim.withValues(alpha: 0.45),
+                      fontSize: 13,
+                      height: 1.55,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      }),
+          );
+        },
+      ),
     );
   }
 }

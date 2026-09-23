@@ -30,8 +30,7 @@ void main() {
       // Title isn't entity-decoded today (Brave returns plain text in
       // most cases); only description is.  That's deliberate — keeps
       // the parser narrow and predictable.
-      expect(r!.description,
-          equals('Use <script> tags & classes'));
+      expect(r!.description, equals('Use <script> tags & classes'));
     });
 
     test('returns null when title is missing', () {
@@ -81,16 +80,13 @@ void main() {
 
   group('WebSearchService.formatForLlm', () {
     test('renders the standard envelope header', () {
-      final out = WebSearchService.formatForLlm(
-        'flutter docs',
-        const [
-          BraveSearchResult(
-            title: 'Flutter Documentation',
-            url: 'https://docs.flutter.dev',
-            description: 'Official Flutter docs',
-          ),
-        ],
-      );
+      final out = WebSearchService.formatForLlm('flutter docs', const [
+        BraveSearchResult(
+          title: 'Flutter Documentation',
+          url: 'https://docs.flutter.dev',
+          description: 'Official Flutter docs',
+        ),
+      ]);
       // Envelope header must match what the system prompt advertises —
       // otherwise the model is looking for the wrong cue.
       expect(out, contains('[Web search results]'));
@@ -99,15 +95,10 @@ void main() {
     });
 
     test('numbers results starting from 1 so the model can cite them', () {
-      final out = WebSearchService.formatForLlm(
-        'q',
-        const [
-          BraveSearchResult(
-              title: 'A', url: 'https://a', description: 'first'),
-          BraveSearchResult(
-              title: 'B', url: 'https://b', description: 'second'),
-        ],
-      );
+      final out = WebSearchService.formatForLlm('q', const [
+        BraveSearchResult(title: 'A', url: 'https://a', description: 'first'),
+        BraveSearchResult(title: 'B', url: 'https://b', description: 'second'),
+      ]);
       // Order matters: 1 before 2, both visible.
       expect(out.indexOf('1. A'), greaterThanOrEqualTo(0));
       expect(out.indexOf('2. B'), greaterThanOrEqualTo(0));
@@ -115,19 +106,15 @@ void main() {
     });
 
     test('appends age when present, omits the suffix when not', () {
-      final out = WebSearchService.formatForLlm(
-        'q',
-        const [
-          BraveSearchResult(
-            title: 'A',
-            url: 'https://a',
-            description: 'd',
-            age: '3 days ago',
-          ),
-          BraveSearchResult(
-              title: 'B', url: 'https://b', description: 'd'),
-        ],
-      );
+      final out = WebSearchService.formatForLlm('q', const [
+        BraveSearchResult(
+          title: 'A',
+          url: 'https://a',
+          description: 'd',
+          age: '3 days ago',
+        ),
+        BraveSearchResult(title: 'B', url: 'https://b', description: 'd'),
+      ]);
       expect(out, contains('https://a  (age: 3 days ago)'));
       // No bare `(age: )` for entry B.
       expect(out, isNot(contains('https://b  (age:')));
@@ -173,8 +160,7 @@ void main() {
       final out = WebSearchService.formatForLlm(
         'how to "quote" in bash',
         const [
-          BraveSearchResult(
-              title: 't', url: 'https://x', description: 'd'),
+          BraveSearchResult(title: 't', url: 'https://x', description: 'd'),
         ],
       );
       expect(out, contains(r'query: "how to \"quote\" in bash"'));
@@ -186,20 +172,35 @@ void main() {
       for (final kind in WebSearchErrorKind.values) {
         final e = WebSearchException(kind, 'fixture message');
         final out = WebSearchService.formatErrorForLlm('q', e);
-        expect(out, contains('[Web search failed]'),
-            reason: 'kind=${kind.name} missing envelope header');
-        expect(out, contains('reason: ${kind.name}'),
-            reason: 'kind=${kind.name} missing reason line');
-        expect(out, contains('fixture message'),
-            reason: 'kind=${kind.name} missing upstream message');
+        expect(
+          out,
+          contains('[Web search failed]'),
+          reason: 'kind=${kind.name} missing envelope header',
+        );
+        expect(
+          out,
+          contains('reason: ${kind.name}'),
+          reason: 'kind=${kind.name} missing reason line',
+        );
+        expect(
+          out,
+          contains('fixture message'),
+          reason: 'kind=${kind.name} missing upstream message',
+        );
         // The recovery hint is what stops the model from blindly
         // retrying the same query in a loop — every kind must ship
         // one even if it's just "proceed without".
         final recoveryStart = out.indexOf('\n\n');
-        expect(recoveryStart, greaterThan(0),
-            reason: 'kind=${kind.name} missing recovery block');
-        expect(out.substring(recoveryStart).trim(), isNotEmpty,
-            reason: 'kind=${kind.name} empty recovery body');
+        expect(
+          recoveryStart,
+          greaterThan(0),
+          reason: 'kind=${kind.name} missing recovery block',
+        );
+        expect(
+          out.substring(recoveryStart).trim(),
+          isNotEmpty,
+          reason: 'kind=${kind.name} empty recovery body',
+        );
       }
     });
 
@@ -209,8 +210,7 @@ void main() {
       // expecting a transient failure.
       final out = WebSearchService.formatErrorForLlm(
         'q',
-        const WebSearchException(
-            WebSearchErrorKind.missingKey, 'no key'),
+        const WebSearchException(WebSearchErrorKind.missingKey, 'no key'),
       );
       expect(out.toLowerCase(), contains('do not retry'));
     });
@@ -219,8 +219,7 @@ void main() {
       // Transient failure — retrying after cooldown IS the right path.
       final out = WebSearchService.formatErrorForLlm(
         'q',
-        const WebSearchException(
-            WebSearchErrorKind.rateLimit, '429'),
+        const WebSearchException(WebSearchErrorKind.rateLimit, '429'),
       );
       expect(out.toLowerCase(), isNot(contains('do not retry')));
     });

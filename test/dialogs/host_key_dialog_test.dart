@@ -18,31 +18,34 @@ void main() {
   // real app invokes it (from createHostKeyVerifier's async callback).
   Future<Future<bool>> pumpDialog(WidgetTester tester) async {
     late Future<bool> resultFuture;
-    await tester.pumpWidget(MaterialApp(
-      home: Builder(
-        builder: (context) => ElevatedButton(
-          onPressed: () {
-            resultFuture = showHostKeyChangedDialog(
-              context,
-              hostname: 'example.com',
-              port: 22,
-              existing: existing,
-              keyType: 'ssh-ed25519',
-              fingerprint: 'ddeeff',
-            );
-          },
-          child: const Text('open dialog'),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () {
+              resultFuture = showHostKeyChangedDialog(
+                context,
+                hostname: 'example.com',
+                port: 22,
+                existing: existing,
+                keyType: 'ssh-ed25519',
+                fingerprint: 'ddeeff',
+              );
+            },
+            child: const Text('open dialog'),
+          ),
         ),
       ),
-    ));
+    );
     await tester.tap(find.text('open dialog'));
     await tester.pumpAndSettle();
     return resultFuture;
   }
 
   group('showHostKeyChangedDialog', () {
-    testWidgets('shows the warning title and both action buttons',
-        (tester) async {
+    testWidgets('shows the warning title and both action buttons', (
+      tester,
+    ) async {
       await pumpDialog(tester);
 
       expect(find.text('Host Key Changed'), findsOneWidget);
@@ -59,8 +62,9 @@ void main() {
       expect(await resultFuture, isFalse);
     });
 
-    testWidgets('"Update Key and Connect" resolves the future to true',
-        (tester) async {
+    testWidgets('"Update Key and Connect" resolves the future to true', (
+      tester,
+    ) async {
       final resultFuture = await pumpDialog(tester);
 
       await tester.tap(find.text('Update Key and Connect'));

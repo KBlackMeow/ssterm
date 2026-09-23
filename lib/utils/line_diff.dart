@@ -50,7 +50,11 @@ List<DiffLine> computeLineDiff(
   if (n * m > maxCells) {
     return [
       for (var k = 0; k < n; k++)
-        DiffLine(kind: DiffLineKind.removed, text: oldLines[k], oldLineNo: k + 1),
+        DiffLine(
+          kind: DiffLineKind.removed,
+          text: oldLines[k],
+          oldLineNo: k + 1,
+        ),
       for (var k = 0; k < m; k++)
         DiffLine(kind: DiffLineKind.added, text: newLines[k], newLineNo: k + 1),
     ];
@@ -70,44 +74,42 @@ List<DiffLine> computeLineDiff(
   var i = 0, j = 0;
   while (i < n && j < m) {
     if (oldLines[i] == newLines[j]) {
-      result.add(DiffLine(
-        kind: DiffLineKind.equal,
-        text: oldLines[i],
-        oldLineNo: i + 1,
-        newLineNo: j + 1,
-      ));
+      result.add(
+        DiffLine(
+          kind: DiffLineKind.equal,
+          text: oldLines[i],
+          oldLineNo: i + 1,
+          newLineNo: j + 1,
+        ),
+      );
       i++;
       j++;
     } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      result.add(DiffLine(
-        kind: DiffLineKind.removed,
-        text: oldLines[i],
-        oldLineNo: i + 1,
-      ));
+      result.add(
+        DiffLine(
+          kind: DiffLineKind.removed,
+          text: oldLines[i],
+          oldLineNo: i + 1,
+        ),
+      );
       i++;
     } else {
-      result.add(DiffLine(
-        kind: DiffLineKind.added,
-        text: newLines[j],
-        newLineNo: j + 1,
-      ));
+      result.add(
+        DiffLine(kind: DiffLineKind.added, text: newLines[j], newLineNo: j + 1),
+      );
       j++;
     }
   }
   while (i < n) {
-    result.add(DiffLine(
-      kind: DiffLineKind.removed,
-      text: oldLines[i],
-      oldLineNo: i + 1,
-    ));
+    result.add(
+      DiffLine(kind: DiffLineKind.removed, text: oldLines[i], oldLineNo: i + 1),
+    );
     i++;
   }
   while (j < m) {
-    result.add(DiffLine(
-      kind: DiffLineKind.added,
-      text: newLines[j],
-      newLineNo: j + 1,
-    ));
+    result.add(
+      DiffLine(kind: DiffLineKind.added, text: newLines[j], newLineNo: j + 1),
+    );
     j++;
   }
   return result;

@@ -33,8 +33,9 @@ class ApiKeyStorage {
       final f = await _file;
       if (await f.exists()) {
         final raw = await f.readAsString();
-        _cache = (jsonDecode(raw) as Map<String, dynamic>)
-            .map((k, v) => MapEntry(k, v as String));
+        _cache = (jsonDecode(raw) as Map<String, dynamic>).map(
+          (k, v) => MapEntry(k, v as String),
+        );
         return;
       }
     } catch (_) {}
@@ -59,9 +60,7 @@ class ApiKeyStorage {
           await Process.run('chmod', ['600', f.path]);
         } catch (_) {}
       }
-      await f.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(_cache),
-      );
+      await f.writeAsString(const JsonEncoder.withIndent('  ').convert(_cache));
       // Re-assert mode after the write — `writeAsString` has been observed
       // to recreate the file on some platforms which can drop perms.
       if (!Platform.isWindows) {

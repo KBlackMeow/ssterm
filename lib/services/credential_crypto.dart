@@ -9,10 +9,38 @@ import 'package:pointycastle/export.dart';
 class CredentialCrypto {
   // 32-byte hardcoded key: "ssterm-password-encryption-keyv1"
   static final _key = Uint8List.fromList([
-    0x73, 0x73, 0x74, 0x65, 0x72, 0x6d, 0x2d, 0x70,
-    0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x2d,
-    0x65, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74, 0x69,
-    0x6f, 0x6e, 0x2d, 0x6b, 0x65, 0x79, 0x76, 0x31,
+    0x73,
+    0x73,
+    0x74,
+    0x65,
+    0x72,
+    0x6d,
+    0x2d,
+    0x70,
+    0x61,
+    0x73,
+    0x73,
+    0x77,
+    0x6f,
+    0x72,
+    0x64,
+    0x2d,
+    0x65,
+    0x6e,
+    0x63,
+    0x72,
+    0x79,
+    0x70,
+    0x74,
+    0x69,
+    0x6f,
+    0x6e,
+    0x2d,
+    0x6b,
+    0x65,
+    0x79,
+    0x76,
+    0x31,
   ]);
 
   static Future<String> encrypt(String plaintext) async {
@@ -34,14 +62,22 @@ class CredentialCrypto {
     if (sep <= 0) return null;
     try {
       final iv = Uint8List.fromList(base64Decode(payload.substring(0, sep)));
-      final cipherText =
-          Uint8List.fromList(base64Decode(payload.substring(sep + 1)));
+      final cipherText = Uint8List.fromList(
+        base64Decode(payload.substring(sep + 1)),
+      );
 
-      final cipher = GCMBlockCipher(AESEngine())
-        ..init(false, AEADParameters(KeyParameter(_key), 128, iv, Uint8List(0)));
+      final cipher = GCMBlockCipher(
+        AESEngine(),
+      )..init(false, AEADParameters(KeyParameter(_key), 128, iv, Uint8List(0)));
 
       final out = Uint8List(cipherText.length);
-      var offset = cipher.processBytes(cipherText, 0, cipherText.length, out, 0);
+      var offset = cipher.processBytes(
+        cipherText,
+        0,
+        cipherText.length,
+        out,
+        0,
+      );
       offset += cipher.doFinal(out, offset);
       return utf8.decode(out.sublist(0, offset));
     } catch (_) {

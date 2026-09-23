@@ -119,7 +119,8 @@ class SftpView extends StatefulWidget {
     required String path,
     required String initialContent,
     required DateTime? mtime,
-  })? onOpenEditorTab;
+  })?
+  onOpenEditorTab;
 
   /// Set to false to hide the compact toolbar (use in full-screen page mode).
   final bool showToolbar;
@@ -204,13 +205,16 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
     try {
       final raw = await widget.sftp.listdir(path);
       raw.sort((a, b) {
-        final r = sftpEntryRank(
+        final r =
+            sftpEntryRank(
               isDirectory: a.attr.isDirectory,
               isSymbolicLink: a.attr.isSymbolicLink,
-            ).compareTo(sftpEntryRank(
-              isDirectory: b.attr.isDirectory,
-              isSymbolicLink: b.attr.isSymbolicLink,
-            ));
+            ).compareTo(
+              sftpEntryRank(
+                isDirectory: b.attr.isDirectory,
+                isSymbolicLink: b.attr.isSymbolicLink,
+              ),
+            );
         return r != 0 ? r : a.filename.compareTo(b.filename);
       });
       if (mounted && requestId == _listRequestId) {
@@ -245,7 +249,9 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
     if (!await dir.exists()) {
       try {
         await dir.create(recursive: true);
-      } catch (_) {/* fall through; openWrite will surface the real error */}
+      } catch (_) {
+        /* fall through; openWrite will surface the real error */
+      }
     }
     return dir.path;
   }
@@ -262,9 +268,11 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         localPath: dest,
       );
       if (mounted) {
-        setState(() => _status = (Platform.isIOS || Platform.isAndroid)
-            ? 'Downloading…'
-            : 'Downloading to $dest');
+        setState(
+          () => _status = (Platform.isIOS || Platform.isAndroid)
+              ? 'Downloading…'
+              : 'Downloading to $dest',
+        );
       }
       if (Platform.isIOS || Platform.isAndroid) {
         _shareOnComplete(task, dest, safeName);
@@ -288,23 +296,28 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
             final topLeft = box.localToGlobal(Offset.zero);
             final size = box.size;
             origin = Rect.fromCenter(
-              center: Offset(topLeft.dx + size.width / 2,
-                             topLeft.dy + size.height / 2),
+              center: Offset(
+                topLeft.dx + size.width / 2,
+                topLeft.dy + size.height / 2,
+              ),
               width: 1,
               height: 1,
             );
           }
-          SharePlus.instance.share(ShareParams(
-            files: [XFile(localPath)],
-            subject: fileName,
-            sharePositionOrigin: origin,
-          ));
+          SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(localPath)],
+              subject: fileName,
+              sharePositionOrigin: origin,
+            ),
+          );
         }
       } else if (task.status == TransferStatus.error) {
         task.removeListener(listener);
         if (mounted) setState(() => _status = 'Download error: ${task.error}');
       }
     }
+
     task.addListener(listener);
   }
 
@@ -326,11 +339,14 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
       void listener() {
         if (!task.isActive) {
           task.removeListener(listener);
-          if (mounted && task.status == TransferStatus.done && _path == uploadDir) {
+          if (mounted &&
+              task.status == TransferStatus.done &&
+              _path == uploadDir) {
             _listDir(_path);
           }
         }
       }
+
       task.addListener(listener);
     } catch (e) {
       if (mounted) setState(() => _status = 'Upload error: $e');
@@ -339,12 +355,14 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
 
   @override
   Future<void> _delete(SftpName entry) async {
-    final colors      = AppColors.maybeOf(context);
+    final colors = AppColors.maybeOf(context);
     final parentTheme = Theme.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => Theme(
-        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        data: parentTheme.copyWith(
+          extensions: colors != null ? {colors} : null,
+        ),
         child: _ConfirmDialog(
           title: 'Delete',
           body: 'Delete "${entry.filename}"?',
@@ -370,13 +388,15 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
 
   @override
   Future<void> _rename(SftpName entry) async {
-    final ctrl        = TextEditingController(text: entry.filename);
-    final colors      = AppColors.maybeOf(context);
+    final ctrl = TextEditingController(text: entry.filename);
+    final colors = AppColors.maybeOf(context);
     final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => Theme(
-        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        data: parentTheme.copyWith(
+          extensions: colors != null ? {colors} : null,
+        ),
         child: _InputDialog(title: 'Rename', ctrl: ctrl, confirm: 'Rename'),
       ),
     );
@@ -401,13 +421,15 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   }
 
   Future<void> _mkdir() async {
-    final ctrl        = TextEditingController();
-    final colors      = AppColors.maybeOf(context);
+    final ctrl = TextEditingController();
+    final colors = AppColors.maybeOf(context);
     final parentTheme = Theme.of(context);
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => Theme(
-        data: parentTheme.copyWith(extensions: colors != null ? {colors} : null),
+        data: parentTheme.copyWith(
+          extensions: colors != null ? {colors} : null,
+        ),
         child: _InputDialog(title: 'New Folder', ctrl: ctrl, confirm: 'Create'),
       ),
     );
@@ -429,9 +451,9 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
 
   Future<void> _navigateEntry(SftpName e) async {
     if (e.attr.isDirectory) {
-      await _listDir(e.filename == '..'
-          ? sftpParent(_path)
-          : sftpJoin(_path, e.filename));
+      await _listDir(
+        e.filename == '..' ? sftpParent(_path) : sftpJoin(_path, e.filename),
+      );
       return;
     }
     if (e.attr.isSymbolicLink) {
@@ -470,7 +492,10 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
     if (onOpen == null) return;
 
     final path = sftpJoin(_path, entry.filename);
-    final adapter = SftpFileSystemAdapter(sftp: widget.sftp, label: widget.host);
+    final adapter = SftpFileSystemAdapter(
+      sftp: widget.sftp,
+      label: widget.host,
+    );
     try {
       final preview = await adapter.preview(path);
       if (preview.existingSize > 4 * 1024 * 1024) {
@@ -490,12 +515,14 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
       final message = e.kind == FileWriteErrorKind.io
           ? 'Not a text file — cannot edit.'
           : 'Could not open file: ${e.message}';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not open file: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not open file: $e')));
     }
   }
 
@@ -572,10 +599,12 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   }
 
   Widget _buildCompactToolbar() {
-    final colors    = AppColors.maybeOf(context);
-    final fgDim     = colors?.foregroundDim ?? _kFgMuted;
-    final toolbarBg = (colors?.popup ?? const Color(0xFF141620)).withValues(alpha: 0.65);
-    final border    = (colors?.foreground ?? Colors.white).withValues(alpha: 0.10);
+    final colors = AppColors.maybeOf(context);
+    final fgDim = colors?.foregroundDim ?? _kFgMuted;
+    final toolbarBg = (colors?.popup ?? const Color(0xFF141620)).withValues(
+      alpha: 0.65,
+    );
+    final border = (colors?.foreground ?? Colors.white).withValues(alpha: 0.10);
     Widget bar = Container(
       height: 50,
       decoration: BoxDecoration(
@@ -596,7 +625,11 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
                   _path,
-                  style: TextStyle(color: fgDim, fontSize: 12, fontFamily: 'JetBrainsMono'),
+                  style: TextStyle(
+                    color: fgDim,
+                    fontSize: 12,
+                    fontFamily: 'JetBrainsMono',
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textDirection: TextDirection.rtl,
@@ -610,14 +643,8 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
             onTap: () => _listDir(_path),
           ),
           // New folder
-          _MobileToolBtn(
-            icon: Icons.create_new_folder_outlined,
-            onTap: _mkdir,
-          ),
-          _MobileToolBtn(
-            icon: Icons.upload_rounded,
-            onTap: _upload,
-          ),
+          _MobileToolBtn(icon: Icons.create_new_folder_outlined, onTap: _mkdir),
+          _MobileToolBtn(icon: Icons.upload_rounded, onTap: _upload),
           // Position toggle
           if (widget.panelPosition != null &&
               widget.onPanelPositionChanged != null)
@@ -633,10 +660,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
             ),
           // Close
           if (widget.onClose != null)
-            _MobileToolBtn(
-              icon: Icons.close_rounded,
-              onTap: widget.onClose,
-            ),
+            _MobileToolBtn(icon: Icons.close_rounded, onTap: widget.onClose),
         ],
       ),
     );
@@ -680,11 +704,13 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         ),
       );
     }
-    final divColor = (AppColors.maybeOf(context)?.foreground ?? Colors.white).withValues(alpha: 0.08);
+    final divColor = (AppColors.maybeOf(context)?.foreground ?? Colors.white)
+        .withValues(alpha: 0.08);
     return ListView.separated(
       padding: EdgeInsets.zero,
       itemCount: _entries.length,
-      separatorBuilder: (_, _) => Divider(height: 1, color: divColor, indent: 52),
+      separatorBuilder: (_, _) =>
+          Divider(height: 1, color: divColor, indent: 52),
       itemBuilder: (_, i) {
         final e = _entries[i];
         return _CompactRow(
@@ -738,7 +764,9 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
                       alignment: Alignment.center,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 12),
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           color: _kAccent.withAlpha(200),
                           borderRadius: BorderRadius.circular(8),
@@ -750,7 +778,10 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
                             SizedBox(width: 8),
                             Text(
                               'Drop to upload',
-                              style: TextStyle(color: Colors.white, fontSize: 13),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
                             ),
                           ],
                         ),
@@ -769,9 +800,10 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   Widget _buildToolbar() {
     final canDown = _selected != null && !_selected!.attr.isDirectory;
     final canDel = _selected != null;
-    final colors  = AppColors.maybeOf(context);
-    final fgDim   = colors?.foregroundDim ?? _kFgMuted;
-    final divider = colors?.foreground.withValues(alpha: 0.12) ?? const Color(0xFF3A3A3A);
+    final colors = AppColors.maybeOf(context);
+    final fgDim = colors?.foregroundDim ?? _kFgMuted;
+    final divider =
+        colors?.foreground.withValues(alpha: 0.12) ?? const Color(0xFF3A3A3A);
     final toolbarBg = colors?.foreground.withValues(alpha: 0.06) ?? _kChromeBar;
     return Container(
       height: 34,
@@ -884,9 +916,10 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   }
 
   Widget _buildColumnHeader() {
-    final colors   = AppColors.maybeOf(context);
-    final fgDim    = colors?.foregroundDim ?? _kFgDim;
-    final headerBg = colors?.foreground.withValues(alpha: 0.04) ?? _kChromeHeader;
+    final colors = AppColors.maybeOf(context);
+    final fgDim = colors?.foregroundDim ?? _kFgDim;
+    final headerBg =
+        colors?.foreground.withValues(alpha: 0.04) ?? _kChromeHeader;
     return Container(
       height: 24,
       color: headerBg,
@@ -896,23 +929,41 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
           const SizedBox(width: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('Name',
-              style: TextStyle(color: fgDim, fontSize: 11, fontWeight: FontWeight.w600)),
+            child: Text(
+              'Name',
+              style: TextStyle(
+                color: fgDim,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
           SizedBox(
             width: _kSizeColWidth,
-            child: Text('Size',
+            child: Text(
+              'Size',
               textAlign: TextAlign.right,
-              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
+              style: TextStyle(
+                color: fgDim,
+                fontSize: _kMetaFontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           const SizedBox(width: 4),
           SizedBox(
             width: _kDateColWidth,
-            child: Text('Modified',
+            child: Text(
+              'Modified',
               textAlign: TextAlign.right,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: fgDim, fontSize: _kMetaFontSize, fontWeight: FontWeight.w600)),
+              style: TextStyle(
+                color: fgDim,
+                fontSize: _kMetaFontSize,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -933,11 +984,12 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         ),
       );
     }
-    final colors  = AppColors.maybeOf(context);
-    final fg      = colors?.foreground    ?? const Color(0xFFC7C7C7);
-    final fgFile  = colors?.foreground.withValues(alpha: 0.67) ?? const Color(0xFFAAAAAA);
-    final fgDim   = colors?.foregroundDim ?? _kFgDim;
-    final fgIcon  = colors?.foregroundDim ?? _kFgDim;
+    final colors = AppColors.maybeOf(context);
+    final fg = colors?.foreground ?? const Color(0xFFC7C7C7);
+    final fgFile =
+        colors?.foreground.withValues(alpha: 0.67) ?? const Color(0xFFAAAAAA);
+    final fgDim = colors?.foregroundDim ?? _kFgDim;
+    final fgIcon = colors?.foregroundDim ?? _kFgDim;
 
     return ListView.builder(
       itemCount: _entries.length,
@@ -949,8 +1001,7 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
         return GestureDetector(
           onSecondaryTapDown: (d) =>
               _showDesktopContextMenu(e, d.globalPosition),
-          onLongPressStart: (d) =>
-              _showDesktopContextMenu(e, d.globalPosition),
+          onLongPressStart: (d) => _showDesktopContextMenu(e, d.globalPosition),
           child: InkWell(
             onTap: () => _navigateEntry(e),
             onDoubleTap: () => _openInEditor(e),
@@ -964,14 +1015,14 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
                     isDir
                         ? Icons.folder
                         : isLink
-                            ? Icons.link
-                            : _fileIcon(e.filename),
+                        ? Icons.link
+                        : _fileIcon(e.filename),
                     size: 14,
                     color: isDir
                         ? const Color(0xFFFFD166)
                         : isLink
-                            ? const Color(0xFF4EC9B0)
-                            : fgIcon,
+                        ? const Color(0xFF4EC9B0)
+                        : fgIcon,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -981,7 +1032,11 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
                       child: Text(
                         e.filename,
                         style: TextStyle(
-                          color: isDir ? fg : isLink ? const Color(0xFF4EC9B0) : fgFile,
+                          color: isDir
+                              ? fg
+                              : isLink
+                              ? const Color(0xFF4EC9B0)
+                              : fgFile,
                           fontSize: 13,
                           fontFamily: 'JetBrainsMono',
                         ),
@@ -1059,21 +1114,43 @@ class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   }
 
   IconData _fileIcon(String name) {
-
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
     return switch (ext) {
-      'dart' || 'py' || 'js' || 'ts' || 'go' || 'rs' ||
-      'c' || 'cpp' || 'java' || 'swift' || 'kt' => Icons.code,
-      'json' || 'yaml' || 'yml' || 'toml' ||
-      'xml' || 'ini' || 'conf' => Icons.data_object,
+      'dart' ||
+      'py' ||
+      'js' ||
+      'ts' ||
+      'go' ||
+      'rs' ||
+      'c' ||
+      'cpp' ||
+      'java' ||
+      'swift' ||
+      'kt' => Icons.code,
+      'json' ||
+      'yaml' ||
+      'yml' ||
+      'toml' ||
+      'xml' ||
+      'ini' ||
+      'conf' => Icons.data_object,
       'md' || 'txt' || 'log' || 'rst' => Icons.description_outlined,
-      'png' || 'jpg' || 'jpeg' || 'gif' ||
-      'svg' || 'webp' || 'ico' => Icons.image_outlined,
-      'zip' || 'tar' || 'gz' || 'bz2' ||
-      'xz' || '7z' || 'rar' => Icons.archive_outlined,
+      'png' ||
+      'jpg' ||
+      'jpeg' ||
+      'gif' ||
+      'svg' ||
+      'webp' ||
+      'ico' => Icons.image_outlined,
+      'zip' ||
+      'tar' ||
+      'gz' ||
+      'bz2' ||
+      'xz' ||
+      '7z' ||
+      'rar' => Icons.archive_outlined,
       'sh' || 'bash' || 'zsh' || 'fish' => Icons.terminal,
       _ => Icons.insert_drive_file_outlined,
     };
   }
-
 }

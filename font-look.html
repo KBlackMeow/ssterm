@@ -1,0 +1,27 @@
+<div id="font-look" aria-label="字体样式对比">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap');
+    #font-look { color: var(--foreground); font-size: var(--font-size-base); }
+    #font-look .font-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 26px; }
+    #font-look .sample { padding: 8px 0 14px; border-bottom: 1px solid var(--border); }
+    #font-look .name { font-weight: 500; margin-bottom: 6px; }
+    #font-look .meta { color: var(--muted-foreground); font-size: 12px; margin-left: 8px; }
+    #font-look .latin { font-size: 25px; line-height: 1.25; white-space: nowrap; }
+    #font-look .mixed { margin-top: 5px; font-size: 18px; line-height: 1.45; }
+    #font-look .sf { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif; }
+    #font-look .current { font-family: Consolas, 'Microsoft YaHei', monospace; }
+    #font-look .segoe { font-family: 'Segoe UI', sans-serif; }
+    #font-look .yahei { font-family: 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif; }
+    #font-look .inter { font-family: Inter, 'Noto Sans SC', sans-serif; }
+    #font-look .hint { margin: 14px 0 0; color: var(--muted-foreground); }
+    @media (max-width: 520px) { #font-look .font-list { grid-template-columns: 1fr; } }
+  </style>
+  <div class="font-list">
+    <section class="sample current"><div class="name">现在：Consolas + 微软雅黑 <span class="meta">Windows 终端默认</span></div><div class="latin">The quick brown fox 0123</div><div class="mixed">你好，世界 · Interface Design</div></section>
+    <section class="sample sf"><div class="name">SF Pro <span class="meta">Apple</span></div><div class="latin">The quick brown fox 0123</div><div class="mixed">你好，世界 · Interface Design</div></section>
+    <section class="sample segoe"><div class="name">Segoe UI <span class="meta">Windows 英文</span></div><div class="latin">The quick brown fox 0123</div><div class="mixed">你好，世界 · Interface Design</div></section>
+    <section class="sample yahei"><div class="name">Microsoft YaHei UI <span class="meta">Windows 中文</span></div><div class="latin">The quick brown fox 0123</div><div class="mixed">你好，世界 · Interface Design</div></section>
+    <section class="sample inter"><div class="name">Inter <span class="meta">开源替代</span></div><div class="latin">The quick brown fox 0123</div><div class="mixed">你好，世界 · Interface Design</div></section>
+  </div>
+  <p class="hint">注意：中文实际由系统中的中文字体补齐；这正是混排时视觉差异的来源。</p>
+</div>

@@ -24,7 +24,9 @@ class _DesktopHomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasAnything =
-        localShells.isNotEmpty || savedHosts.isNotEmpty || configHosts.isNotEmpty;
+        localShells.isNotEmpty ||
+        savedHosts.isNotEmpty ||
+        configHosts.isNotEmpty;
 
     return Container(
       color: chromeBackground,
@@ -32,7 +34,9 @@ class _DesktopHomePage extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 8),
               child: Column(
@@ -47,7 +51,9 @@ class _DesktopHomePage extends StatelessWidget {
                           child: Text(
                             'New Session',
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              color:
+                                  AppColors.maybeOf(context)?.foreground ??
+                                  _kFgActive,
                               fontSize: 20,
                               fontWeight: FontWeight.w600,
                               letterSpacing: -0.4,
@@ -167,13 +173,18 @@ class _ShellRow extends StatelessWidget {
                       height: 36,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.15),
+                        color:
+                            (AppColors.maybeOf(context)?.foregroundDim ??
+                                    _kFgInactive)
+                                .withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         shell.isWsl ? Icons.laptop_windows : Icons.terminal,
                         size: 17,
-                        color: AppColors.maybeOf(context)?.foregroundDim ?? const Color(0xFF6E6E6E),
+                        color:
+                            AppColors.maybeOf(context)?.foregroundDim ??
+                            const Color(0xFF6E6E6E),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -187,7 +198,9 @@ class _ShellRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foreground ?? _kFgActive,
+                              color:
+                                  AppColors.maybeOf(context)?.foreground ??
+                                  _kFgActive,
                               fontSize: 15,
                             ),
                           ),
@@ -196,7 +209,9 @@ class _ShellRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive,
+                              color:
+                                  AppColors.maybeOf(context)?.foregroundDim ??
+                                  _kFgInactive,
                               fontSize: 11,
                             ),
                           ),
@@ -206,7 +221,10 @@ class _ShellRow extends StatelessWidget {
                     Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color: (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive).withValues(alpha: 0.45),
+                      color:
+                          (AppColors.maybeOf(context)?.foregroundDim ??
+                                  _kFgInactive)
+                              .withValues(alpha: 0.45),
                     ),
                   ],
                 ),

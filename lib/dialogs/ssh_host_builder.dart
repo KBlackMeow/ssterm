@@ -36,7 +36,8 @@ SshHostFormResult buildSshHostResult({
 
   if (host.isEmpty) return SshHostFormError('Enter IP or hostname');
   if (user.isEmpty) return SshHostFormError('Username is required');
-  if (port < 1 || port > 65535) return SshHostFormError('Invalid port (1–65535)');
+  if (port < 1 || port > 65535)
+    return SshHostFormError('Invalid port (1–65535)');
 
   final alias = aliasText.trim();
   final autoAlias = '$user@$host${port != 22 ? ":$port" : ""}';

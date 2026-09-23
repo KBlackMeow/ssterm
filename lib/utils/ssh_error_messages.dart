@@ -16,7 +16,5 @@ String friendlyConnectError(Object e) {
   if (s.contains('nodename') || s.contains('socketexception')) {
     return 'Cannot resolve host';
   }
-  return e.toString()
-      .replaceAll('Exception: ', '')
-      .replaceAll('Error: ', '');
+  return e.toString().replaceAll('Exception: ', '').replaceAll('Error: ', '');
 }

@@ -121,12 +121,16 @@ Future<void> _migrateLegacyAppData(Directory target) async {
         .first;
     try {
       await legacy.rename('${legacy.path}.legacy-$stamp');
-    } catch (_) {/* best-effort */}
+    } catch (_) {
+      /* best-effort */
+    }
   } else {
     // Adopt the orphan as our home.
     try {
       await legacy.rename(target.path);
-    } catch (_) {/* best-effort */}
+    } catch (_) {
+      /* best-effort */
+    }
   }
 }
 

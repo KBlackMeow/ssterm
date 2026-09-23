@@ -50,14 +50,14 @@ class BundledSkillDef {
   }) : name = name ?? id;
 
   Skill toSkill() => Skill(
-        id: id,
-        name: name,
-        description: description,
-        whenToUse: whenToUse,
-        // No assetPath — body comes from [buildBody], not the bundle.
-        assetPath: null,
-        source: SkillSource.bundled,
-      );
+    id: id,
+    name: name,
+    description: description,
+    whenToUse: whenToUse,
+    // No assetPath — body comes from [buildBody], not the bundle.
+    assetPath: null,
+    source: SkillSource.bundled,
+  );
 }
 
 /// Process-wide registry for bundled dynamic skills.  Populated at app

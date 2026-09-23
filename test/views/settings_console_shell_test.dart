@@ -109,6 +109,32 @@ void main() {
     expect(find.byKey(const Key('settings-console-rail')), findsOneWidget);
   });
 
+  testWidgets('Agent settings no longer expose evidence-grounded mode', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: AgentConfig(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+
+    expect(find.text('Decision Quality'), findsNothing);
+    expect(
+      find.text('Evidence-grounded Agent run (experimental)'),
+      findsNothing,
+    );
+  });
+
   testWidgets('default model menu shows the raw model id', (tester) async {
     var agent = AgentConfig(
       defaultProvider: 'deepseek',
@@ -484,7 +510,10 @@ void main() {
       '16384',
     );
     await tester.tap(
-      find.descendant(of: find.byType(AlertDialog), matching: find.text('Save')),
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Save'),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -538,7 +567,10 @@ void main() {
       '',
     );
     await tester.tap(
-      find.descendant(of: find.byType(AlertDialog), matching: find.text('Save')),
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Save'),
+      ),
     );
     await tester.pumpAndSettle();
 

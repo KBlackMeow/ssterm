@@ -35,15 +35,12 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 | **Custom skills** | Add user-defined skills from Settings or share them through `~/.agents/skills/<id>/SKILL.md`; no built-in playbooks are enabled by default |
 | **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
 | **Streaming replies** | Real-time text with reasoning/thinking channel display and Markdown rendering |
-| **Adaptive decision quality** | Direct and clear single-path tasks avoid separate deliberation; ambiguous tasks may use a compact router, while complex or high-risk work gets concise planning plus conditional critique and verification; disabled by default |
 
 ### Tool calling
 
 SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, built-in skills, and configured MCP tools. For providers with native support, calls and results remain structured through the provider's conversation format; the agent executes at most one actionable call per turn. Ollama uses the existing fenced-JSON/text protocol so local models continue to work.
 
 Native calls use the same safeguards as the compatibility path: dangerous commands stop for review, file changes are presented as apply/reject proposals, and MCP calls go through SSTerm's existing tool executor. Tool-call cards redact sensitive argument values and truncate unusually long values before displaying them.
-
-For local-model calibration, use the [adaptive decision evaluation suite](docs/agent-evals/adaptive-decision-suite.md) before enabling the experimental per-model option by default.
 
 ### MCP servers
 

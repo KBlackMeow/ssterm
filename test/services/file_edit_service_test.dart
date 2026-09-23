@@ -23,9 +23,11 @@ void main() {
           newString: 'B',
           replaceAll: false,
         ),
-        throwsA(isA<EditMatchException>()
-            .having((e) => e.kind, 'kind', equals(EditMatchErrorKind.noMatch))
-            .having((e) => e.matchCount, 'matchCount', equals(0))),
+        throwsA(
+          isA<EditMatchException>()
+              .having((e) => e.kind, 'kind', equals(EditMatchErrorKind.noMatch))
+              .having((e) => e.matchCount, 'matchCount', equals(0)),
+        ),
       );
     });
 
@@ -38,10 +40,15 @@ void main() {
           newString: 'y',
           replaceAll: false,
         ),
-        throwsA(isA<EditMatchException>()
-            .having((e) => e.kind, 'kind',
-                equals(EditMatchErrorKind.ambiguousMatch))
-            .having((e) => e.matchCount, 'matchCount', equals(3))),
+        throwsA(
+          isA<EditMatchException>()
+              .having(
+                (e) => e.kind,
+                'kind',
+                equals(EditMatchErrorKind.ambiguousMatch),
+              )
+              .having((e) => e.matchCount, 'matchCount', equals(3)),
+        ),
       );
     });
 
@@ -105,15 +112,13 @@ void main() {
     });
 
     test('ambiguous-match envelope reports the count and the two fixes', () {
-      final out =
-          FileEditService.formatAmbiguousForLlm('/tmp/x', 'needle', 4);
+      final out = FileEditService.formatAmbiguousForLlm('/tmp/x', 'needle', 4);
       expect(out, contains('reason: ambiguous_match'));
       expect(out, contains('4 times'));
       expect(out, contains('replace_all'));
     });
 
-    test('success envelope includes the edit count alongside byte/mtime',
-        () {
+    test('success envelope includes the edit count alongside byte/mtime', () {
       final r = FileWriteResult(
         resolvedPath: '/tmp/x',
         bytesWritten: 10,
@@ -127,8 +132,10 @@ void main() {
     });
 
     test('rejection envelope blocks blind retry, same as write_file\'s', () {
-      final out = FileEditService.formatRejectionForLlm('/tmp/x',
-          reason: 'wrong file');
+      final out = FileEditService.formatRejectionForLlm(
+        '/tmp/x',
+        reason: 'wrong file',
+      );
       expect(out, contains('[File edit rejected by user]'));
       expect(out, contains('wrong file'));
       expect(out, contains('Do NOT re-emit'));
@@ -152,10 +159,7 @@ void main() {
         'edit_file, not write_file', () {
       final out = FileEditService.formatAdapterErrorForLlm(
         '/tmp/x',
-        const FileWriteException(
-          FileWriteErrorKind.mtimeMismatch,
-          'changed',
-        ),
+        const FileWriteException(FileWriteErrorKind.mtimeMismatch, 'changed'),
       );
       expect(out, contains('issue a NEW edit_file tool call'));
       expect(out, isNot(contains('write_file tool call')));

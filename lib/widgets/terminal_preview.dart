@@ -79,16 +79,14 @@ class _TerminalPreviewState extends State<TerminalPreview> {
       bool italic = false,
       bool underline = false,
       Color? bg,
-    }) =>
-        base.copyWith(
-          color: color,
-          backgroundColor: bg,
-          fontWeight: bold ? FontWeight.bold : base.fontWeight,
-          fontStyle: italic ? FontStyle.italic : FontStyle.normal,
-          decoration:
-              underline ? TextDecoration.underline : TextDecoration.none,
-          decorationColor: color,
-        );
+    }) => base.copyWith(
+      color: color,
+      backgroundColor: bg,
+      fontWeight: bold ? FontWeight.bold : base.fontWeight,
+      fontStyle: italic ? FontStyle.italic : FontStyle.normal,
+      decoration: underline ? TextDecoration.underline : TextDecoration.none,
+      decorationColor: color,
+    );
 
     final wallpaper = settings.hasWallpaper
         ? WallpaperStorage.resolveFile(settings.wallpaperId)
@@ -232,22 +230,14 @@ class _CursorGlyph extends StatelessWidget {
     }
     switch (type) {
       case TerminalCursorType.block:
-        return Container(
-          width: cellWidth,
-          height: cellHeight,
-          color: color,
-        );
+        return Container(width: cellWidth, height: cellHeight, color: color);
       case TerminalCursorType.underline:
         return SizedBox(
           width: cellWidth,
           height: cellHeight,
           child: Align(
             alignment: Alignment.bottomLeft,
-            child: Container(
-              width: cellWidth,
-              height: 2,
-              color: color,
-            ),
+            child: Container(width: cellWidth, height: 2, color: color),
           ),
         );
       case TerminalCursorType.verticalBar:
@@ -256,11 +246,7 @@ class _CursorGlyph extends StatelessWidget {
           height: cellHeight,
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Container(
-              width: 2,
-              height: cellHeight,
-              color: color,
-            ),
+            child: Container(width: 2, height: cellHeight, color: color),
           ),
         );
     }

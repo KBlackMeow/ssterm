@@ -36,14 +36,17 @@ void main() {
       }
     });
 
-    test('reports exists=false for a missing file under an existing dir', () async {
-      final adapter = const LocalFileSystemAdapter();
-      final preview = await adapter.preview('${tempRoot.path}/new.txt');
-      expect(preview.exists, isFalse);
-      expect(preview.existingSize, equals(0));
-      expect(preview.mtime, isNull);
-      expect(preview.resolvedPath, equals('${tempRoot.path}/new.txt'));
-    });
+    test(
+      'reports exists=false for a missing file under an existing dir',
+      () async {
+        final adapter = const LocalFileSystemAdapter();
+        final preview = await adapter.preview('${tempRoot.path}/new.txt');
+        expect(preview.exists, isFalse);
+        expect(preview.existingSize, equals(0));
+        expect(preview.mtime, isNull);
+        expect(preview.resolvedPath, equals('${tempRoot.path}/new.txt'));
+      },
+    );
 
     test('throws parentMissing when the parent dir does not exist', () async {
       final adapter = const LocalFileSystemAdapter();
@@ -51,7 +54,13 @@ void main() {
       // generic "io error".
       await expectLater(
         () => adapter.preview('${tempRoot.path}/missing-dir/file.txt'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.parentMissing))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.parentMissing),
+          ),
+        ),
       );
     });
 
@@ -70,7 +79,13 @@ void main() {
       final adapter = const LocalFileSystemAdapter();
       await expectLater(
         () => adapter.preview(''),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.invalidPath),
+          ),
+        ),
       );
     });
 
@@ -81,7 +96,13 @@ void main() {
       final adapter = const LocalFileSystemAdapter();
       await expectLater(
         () => adapter.preview('relative/path.txt'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.invalidPath),
+          ),
+        ),
       );
     });
 
@@ -118,16 +139,19 @@ void main() {
       }
     });
 
-    test('creates a new file with correct contents + returns created=true', () async {
-      final path = '${tempRoot.path}/new.txt';
-      final result = await adapter.commit(path, 'hello world');
-      expect(result.created, isTrue);
-      expect(result.bytesWritten, equals(11));
-      expect(result.mtime, isNotNull);
-      // Verify on disk — defence against the adapter reporting success
-      // when the rename actually no-op'd.
-      expect(File(path).readAsStringSync(), equals('hello world'));
-    });
+    test(
+      'creates a new file with correct contents + returns created=true',
+      () async {
+        final path = '${tempRoot.path}/new.txt';
+        final result = await adapter.commit(path, 'hello world');
+        expect(result.created, isTrue);
+        expect(result.bytesWritten, equals(11));
+        expect(result.mtime, isNotNull);
+        // Verify on disk — defence against the adapter reporting success
+        // when the rename actually no-op'd.
+        expect(File(path).readAsStringSync(), equals('hello world'));
+      },
+    );
 
     test('overwrites an existing file atomically', () async {
       final path = '${tempRoot.path}/overwrite.txt';
@@ -137,19 +161,28 @@ void main() {
       expect(File(path).readAsStringSync(), equals('new and longer body'));
     });
 
-    test('mtime mismatch throws mtimeMismatch and leaves the file untouched', () async {
-      final path = '${tempRoot.path}/concurrent.txt';
-      File(path).writeAsStringSync('original');
-      // Pretend we previewed BEFORE the file was even created — any
-      // mtime from before-now will trip the > 1s mismatch guard.
-      final staleMtime = DateTime.now().subtract(const Duration(hours: 1));
-      await expectLater(
-        () => adapter.commit(path, 'new', expectedMtime: staleMtime),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.mtimeMismatch))),
-      );
-      // The file MUST be unchanged after a refused commit.
-      expect(File(path).readAsStringSync(), equals('original'));
-    });
+    test(
+      'mtime mismatch throws mtimeMismatch and leaves the file untouched',
+      () async {
+        final path = '${tempRoot.path}/concurrent.txt';
+        File(path).writeAsStringSync('original');
+        // Pretend we previewed BEFORE the file was even created — any
+        // mtime from before-now will trip the > 1s mismatch guard.
+        final staleMtime = DateTime.now().subtract(const Duration(hours: 1));
+        await expectLater(
+          () => adapter.commit(path, 'new', expectedMtime: staleMtime),
+          throwsA(
+            isA<FileWriteException>().having(
+              (e) => e.kind,
+              'kind',
+              equals(FileWriteErrorKind.mtimeMismatch),
+            ),
+          ),
+        );
+        // The file MUST be unchanged after a refused commit.
+        expect(File(path).readAsStringSync(), equals('original'));
+      },
+    );
 
     test('mtime tolerance: a < 1s mismatch is accepted (clock slop)', () async {
       final path = '${tempRoot.path}/clock-slop.txt';
@@ -167,7 +200,10 @@ void main() {
       await adapter.commit(path, 'content');
       // The atomic temp+rename strategy uses sibling tmp files;
       // they MUST be cleaned up on success (the rename consumed them).
-      final lingering = tempRoot.listSync().where((e) => e.path.contains('.ssterm-tmp-')).toList();
+      final lingering = tempRoot
+          .listSync()
+          .where((e) => e.path.contains('.ssterm-tmp-'))
+          .toList();
       expect(lingering, isEmpty);
     });
 
@@ -177,7 +213,13 @@ void main() {
       // the same `mkdir -p` hint.
       await expectLater(
         () => adapter.commit('${tempRoot.path}/no-such-dir/x', 'data'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.parentMissing))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.parentMissing),
+          ),
+        ),
       );
     });
   });
@@ -206,7 +248,13 @@ void main() {
     test('throws io when the file does not exist', () async {
       await expectLater(
         () => adapter.readContent('${tempRoot.path}/missing.txt'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.io))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.io),
+          ),
+        ),
       );
     });
 
@@ -217,7 +265,13 @@ void main() {
       File(path).writeAsBytesSync(List.filled(4 * 1024 * 1024 + 1, 65));
       await expectLater(
         () => adapter.readContent(path),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.tooLarge))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.tooLarge),
+          ),
+        ),
       );
     });
 
@@ -226,7 +280,13 @@ void main() {
       File(path).writeAsBytesSync([0xFF, 0xFE, 0x00, 0xD8, 0x00, 0x00]);
       await expectLater(
         () => adapter.readContent(path),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.io))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.io),
+          ),
+        ),
       );
     });
   });
@@ -241,7 +301,13 @@ void main() {
       final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.preview('/etc/hosts'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
 
@@ -249,7 +315,13 @@ void main() {
       final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.commit('/etc/hosts', 'x'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
 
@@ -257,7 +329,13 @@ void main() {
       final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: dead');
       await expectLater(
         () => adapter.readContent('/etc/hosts'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
 
@@ -268,7 +346,11 @@ void main() {
 
     test('currentDirectory reflects cwdProvider snapshot', () {
       String? pwd = '/home/me/initial';
-      final adapter = SftpFileSystemAdapter(sftp: null, label: 'ssh: live', cwdProvider: () => pwd);
+      final adapter = SftpFileSystemAdapter(
+        sftp: null,
+        label: 'ssh: live',
+        cwdProvider: () => pwd,
+      );
       expect(adapter.currentDirectory, equals('/home/me/initial'));
       // Simulate a verified Agent `cd` result — the next read should pick up
       // the new value without rebuilding the adapter.
@@ -294,7 +376,13 @@ void main() {
       );
       await expectLater(
         () => adapter.preview('/tmp/x'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
 
@@ -307,7 +395,13 @@ void main() {
       );
       await expectLater(
         () => adapter.readContent('/tmp/x'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
 
@@ -320,7 +414,13 @@ void main() {
       );
       await expectLater(
         () => adapter.commit('/tmp/x', 'content'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.notSupported))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
       );
     });
   });
@@ -372,21 +472,32 @@ void main() {
       expect(preview.resolvedPath, equals('${tempRoot.path}/d'));
     });
 
-    test('still rejects a relative path when cwdProvider returns null', () async {
-      // Important: removing the `cwdProvider` (or having it report null)
-      // must NOT regress to "resolve against `Directory.current`" —
-      // that would land the file in the Flutter process CWD, never the
-      // Agent's independent cwd.
-      final adapter = LocalFileSystemAdapter(cwdProvider: () => null);
-      await expectLater(
-        () => adapter.preview('foo.txt'),
-        throwsA(
-          isA<FileWriteException>()
-              .having((e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))
-              .having((e) => e.message, 'message', contains('Agent working directory is not known yet')),
-        ),
-      );
-    });
+    test(
+      'still rejects a relative path when cwdProvider returns null',
+      () async {
+        // Important: removing the `cwdProvider` (or having it report null)
+        // must NOT regress to "resolve against `Directory.current`" —
+        // that would land the file in the Flutter process CWD, never the
+        // Agent's independent cwd.
+        final adapter = LocalFileSystemAdapter(cwdProvider: () => null);
+        await expectLater(
+          () => adapter.preview('foo.txt'),
+          throwsA(
+            isA<FileWriteException>()
+                .having(
+                  (e) => e.kind,
+                  'kind',
+                  equals(FileWriteErrorKind.invalidPath),
+                )
+                .having(
+                  (e) => e.message,
+                  'message',
+                  contains('Agent working directory is not known yet'),
+                ),
+          ),
+        );
+      },
+    );
 
     test('still rejects a relative path when cwdProvider returns a '
         'non-absolute string', () async {
@@ -396,31 +507,51 @@ void main() {
       final adapter = LocalFileSystemAdapter(cwdProvider: () => 'no-slash');
       await expectLater(
         () => adapter.preview('foo.txt'),
-        throwsA(isA<FileWriteException>().having((e) => e.kind, 'kind', equals(FileWriteErrorKind.invalidPath))),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.invalidPath),
+          ),
+        ),
       );
     });
 
-    test('cwdProvider that already ends in `/` does not produce `//`', () async {
-      // Cosmetic but easy to get wrong with a naive `'$cwd/$rel'`.
-      Directory('${tempRoot.path}/end-slash').createSync();
-      final adapter = LocalFileSystemAdapter(cwdProvider: () => '${tempRoot.path}/');
-      final preview = await adapter.preview('end-slash');
-      expect(preview.resolvedPath, equals('${tempRoot.path}/end-slash'));
-    });
+    test(
+      'cwdProvider that already ends in `/` does not produce `//`',
+      () async {
+        // Cosmetic but easy to get wrong with a naive `'$cwd/$rel'`.
+        Directory('${tempRoot.path}/end-slash').createSync();
+        final adapter = LocalFileSystemAdapter(
+          cwdProvider: () => '${tempRoot.path}/',
+        );
+        final preview = await adapter.preview('end-slash');
+        expect(preview.resolvedPath, equals('${tempRoot.path}/end-slash'));
+      },
+    );
 
     test('currentDirectory prefers cwdProvider over homeOverride', () async {
       // The verified Agent cwd is the freshest signal, so it should win even
       // when a HOME override is configured.
-      final adapter = LocalFileSystemAdapter(homeOverride: '/h', cwdProvider: () => '/tmp/pwd');
+      final adapter = LocalFileSystemAdapter(
+        homeOverride: '/h',
+        cwdProvider: () => '/tmp/pwd',
+      );
       expect(adapter.currentDirectory, equals('/tmp/pwd'));
     });
 
-    test('currentDirectory falls back to HOME when cwdProvider is null', () async {
-      // Before the first verified Agent command, HOME is still a useful
-      // starting hint for the model.
-      final adapter = LocalFileSystemAdapter(homeOverride: '/h', cwdProvider: () => null);
-      expect(adapter.currentDirectory, equals('/h'));
-    });
+    test(
+      'currentDirectory falls back to HOME when cwdProvider is null',
+      () async {
+        // Before the first verified Agent command, HOME is still a useful
+        // starting hint for the model.
+        final adapter = LocalFileSystemAdapter(
+          homeOverride: '/h',
+          cwdProvider: () => null,
+        );
+        expect(adapter.currentDirectory, equals('/h'));
+      },
+    );
 
     test('homeDirectory returns the configured override', () async {
       final adapter = LocalFileSystemAdapter(homeOverride: '/h');
@@ -445,7 +576,10 @@ void main() {
     });
 
     test('rejection envelope blocks blind retry of the same path', () {
-      final out = FileWriteService.formatRejectionForLlm('/etc/hosts', reason: 'too risky');
+      final out = FileWriteService.formatRejectionForLlm(
+        '/etc/hosts',
+        reason: 'too risky',
+      );
       expect(out, contains('[File write rejected by user]'));
       expect(out, contains('reason: too risky'));
       // The "Do NOT re-emit" line is the key safety hint — it stops
@@ -461,13 +595,32 @@ void main() {
 
     test('every error kind has a recovery hint in formatErrorForLlm', () {
       for (final kind in FileWriteErrorKind.values) {
-        final out = FileWriteService.formatErrorForLlm('/some/path', FileWriteException(kind, 'detail $kind'));
-        expect(out, contains('[File write failed]'), reason: 'kind=$kind missing envelope header');
-        expect(out, contains('reason: ${kind.name}'), reason: 'kind=$kind missing reason line');
-        expect(out, contains('detail $kind'), reason: 'kind=$kind missing upstream message');
+        final out = FileWriteService.formatErrorForLlm(
+          '/some/path',
+          FileWriteException(kind, 'detail $kind'),
+        );
+        expect(
+          out,
+          contains('[File write failed]'),
+          reason: 'kind=$kind missing envelope header',
+        );
+        expect(
+          out,
+          contains('reason: ${kind.name}'),
+          reason: 'kind=$kind missing reason line',
+        );
+        expect(
+          out,
+          contains('detail $kind'),
+          reason: 'kind=$kind missing upstream message',
+        );
         // Recovery body is everything past the blank line.
         final recovery = out.split('\n\n').sublist(1).join('\n\n').trim();
-        expect(recovery, isNotEmpty, reason: 'kind=$kind missing recovery hint');
+        expect(
+          recovery,
+          isNotEmpty,
+          reason: 'kind=$kind missing recovery hint',
+        );
       }
     });
 

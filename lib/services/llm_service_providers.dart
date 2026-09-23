@@ -31,54 +31,64 @@ Future<LlmResponse> _callOpenAiCompatible(
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
       ? baseUrl
       : '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/chat/completions';
 
-  final body = {
-    'model': model,
-    'messages': [
-      {'role': 'system', 'content': systemPrompt},
-      ...AgentProviderTools.openAiMessages(
-        messages,
-        includeReasoningContent: provider.id == 'deepseek',
-      ),
-    ],
-    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
-    if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
-    if (tools.isNotEmpty) 'tool_choice': 'auto',
-    if (tools.isNotEmpty) 'parallel_tool_calls': false,
-    if (provider.id == 'deepseek' && reasoningLevel != null)
-      'thinking': {
-        'type': reasoningLevel == AgentReasoningLevel.disabled
-            ? 'disabled'
-            : 'enabled',
-      },
-    if (provider.id == 'deepseek' &&
-        reasoningLevel != null &&
-        reasoningLevel != AgentReasoningLevel.disabled)
-      'reasoning_effort': reasoningLevel.name,
-  };
-
   final client = HttpClient();
   try {
-    final request = await client.postUrl(Uri.parse(url));
-    request.headers.set('Content-Type', 'application/json; charset=utf-8');
-    request.headers.set('Authorization', 'Bearer $apiKey');
-    request.add(utf8.encode(jsonEncode(body)));
-    final response = await request.close();
-    final responseBody = await response.transform(utf8.decoder).join();
+    Future<({int status, String body})> send(bool withJsonMode) async {
+      final body = {
+        'model': model,
+        'messages': [
+          {'role': 'system', 'content': systemPrompt},
+          ...AgentProviderTools.openAiMessages(
+            messages,
+            includeReasoningContent: provider.id == 'deepseek',
+          ),
+        ],
+        'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+        if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
+        if (tools.isNotEmpty) 'tool_choice': 'auto',
+        if (tools.isNotEmpty) 'parallel_tool_calls': false,
+        if (withJsonMode) 'response_format': const {'type': 'json_object'},
+        if (provider.id == 'deepseek' && reasoningLevel != null)
+          'thinking': {
+            'type': reasoningLevel == AgentReasoningLevel.disabled
+                ? 'disabled'
+                : 'enabled',
+          },
+        if (provider.id == 'deepseek' &&
+            reasoningLevel != null &&
+            reasoningLevel != AgentReasoningLevel.disabled)
+          'reasoning_effort': reasoningLevel.name,
+      };
+      final request = await client.postUrl(Uri.parse(url));
+      request.headers.set('Content-Type', 'application/json; charset=utf-8');
+      request.headers.set('Authorization', 'Bearer $apiKey');
+      request.add(utf8.encode(jsonEncode(body)));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      return (status: response.statusCode, body: responseBody);
+    }
 
-    if (response.statusCode != 200) {
+    var result = await send(jsonMode);
+    // A strict gateway may reject the optional response_format parameter.
+    // Degrade to prompt-only JSON once so such endpoints keep working.
+    if (result.status == 400 && jsonMode) {
+      result = await send(false);
+    }
+    if (result.status != 200) {
       return LlmResponse(
         text: '',
-        error: 'HTTP ${response.statusCode}: ${_extractError(responseBody)}',
+        error: 'HTTP ${result.status}: ${_extractError(result.body)}',
       );
     }
 
-    final data = jsonDecode(responseBody) as Map<String, dynamic>;
+    final data = jsonDecode(result.body) as Map<String, dynamic>;
     final choice =
         (data['choices'] as List?)?.firstOrNull as Map<String, dynamic>?;
     final text = choice?['message']?['content'] as String? ?? '';
@@ -133,11 +143,17 @@ Future<LlmResponse> _callAnthropic(
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
 
   final apiMessages = AgentProviderTools.anthropicMessages(messages);
+  // Anthropic has no response_format parameter; the native JSON technique is
+  // an assistant prefill that the model must continue into an object.
+  if (jsonMode) {
+    apiMessages.add({'role': 'assistant', 'content': '{'});
+  }
 
   final body = {
     'model': model,
@@ -153,7 +169,10 @@ Future<LlmResponse> _callAnthropic(
     AgentReasoningLevel.medium => 1024,
     _ => 2048,
   };
-  if (_anthropicSupportsThinking(model) &&
+  // Extended thinking is incompatible with assistant prefill, so JSON mode
+  // deliberately wins over thinking for these bounded structured calls.
+  if (!jsonMode &&
+      _anthropicSupportsThinking(model) &&
       reasoningLevel != null &&
       reasoningLevel != AgentReasoningLevel.disabled &&
       (maxOutputTokens == null || maxOutputTokens > thinkingBudget)) {
@@ -187,7 +206,8 @@ Future<LlmResponse> _callAnthropic(
         .map((c) => c['text'] as String)
         .join('\n');
     return LlmResponse(
-      text: text,
+      // The prefill is not echoed back, so re-attach it to form the object.
+      text: jsonMode ? '{$text' : text,
       toolCalls: AgentProviderTools.parseAnthropicToolCalls(data),
       usage: ProviderTokenUsage.fromAnthropic(data),
     );
@@ -206,6 +226,7 @@ Future<LlmResponse> _callGemini(
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
+  bool jsonMode = false,
 }) async {
   final baseUrl =
       provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -223,6 +244,8 @@ Future<LlmResponse> _callGemini(
     'contents': contents,
     'generationConfig': {
       'maxOutputTokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+      // Gemini's native JSON mode: constrains output to valid JSON.
+      if (jsonMode) 'responseMimeType': 'application/json',
     },
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
@@ -433,6 +456,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.openai.com/v1';
   final url = baseUrl.endsWith('/chat/completions')
@@ -440,51 +464,61 @@ Stream<LlmStreamEvent> _streamOpenAi(
       : '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/chat/completions';
 
   final isDeepSeek = provider.id == 'deepseek';
-  final body = <String, dynamic>{
-    'model': model,
-    'messages': [
-      {'role': 'system', 'content': systemPrompt},
-      ...AgentProviderTools.openAiMessages(
-        messages,
-        includeReasoningContent: isDeepSeek || provider.id == 'glm',
-      ),
-    ],
-    'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
-    'stream': true,
-    // Chat Completions sends stream usage only when explicitly requested.
-    // Limit this extension to our known OpenAI-compatible providers so custom
-    // endpoints are not rejected for an unsupported optional parameter.
-    if (provider.id == 'chatgpt' || isDeepSeek)
-      'stream_options': {'include_usage': true},
-    if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
-    if (tools.isNotEmpty) 'tool_choice': 'auto',
-    if (tools.isNotEmpty) 'parallel_tool_calls': false,
-    // GLM's OpenAI-compatible stream omits function-call deltas unless this
-    // vendor extension is enabled (GLM-4.6 and newer).
-    if (provider.id == 'glm' && tools.isNotEmpty) 'tool_stream': true,
-    // GLM clears prior reasoning by default. Preserve it between tool turns
-    // so the model can continue its interleaved-thinking chain.
-    if (provider.id == 'glm')
-      'thinking': {'type': 'enabled', 'clear_thinking': false},
-    // DeepSeek thinking-mode tool calls require the model's original
-    // `reasoning_content` in the following assistant turn. The transcript
-    // adapter above preserves that opaque state, and this toggles the mode.
-    if (isDeepSeek)
-      'thinking': {
-        'type': reasoningLevel == AgentReasoningLevel.disabled
-            ? 'disabled'
-            : 'enabled',
-      },
-    if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
-      'reasoning_effort': (reasoningLevel ?? AgentReasoningLevel.high).name,
-  };
 
-  final request = await client.postUrl(Uri.parse(url));
-  request.headers.set('Content-Type', 'application/json; charset=utf-8');
-  request.headers.set('Authorization', 'Bearer $apiKey');
-  request.add(utf8.encode(jsonEncode(body)));
-  final response = await request.close();
+  Future<HttpClientResponse> send(bool withJsonMode) async {
+    final body = <String, dynamic>{
+      'model': model,
+      'messages': [
+        {'role': 'system', 'content': systemPrompt},
+        ...AgentProviderTools.openAiMessages(
+          messages,
+          includeReasoningContent: isDeepSeek || provider.id == 'glm',
+        ),
+      ],
+      'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+      'stream': true,
+      // Chat Completions sends stream usage only when explicitly requested.
+      // Limit this extension to our known OpenAI-compatible providers so custom
+      // endpoints are not rejected for an unsupported optional parameter.
+      if (provider.id == 'chatgpt' || isDeepSeek)
+        'stream_options': {'include_usage': true},
+      if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
+      if (tools.isNotEmpty) 'tool_choice': 'auto',
+      if (tools.isNotEmpty) 'parallel_tool_calls': false,
+      // GLM's OpenAI-compatible stream omits function-call deltas unless this
+      // vendor extension is enabled (GLM-4.6 and newer).
+      if (provider.id == 'glm' && tools.isNotEmpty) 'tool_stream': true,
+      // GLM clears prior reasoning by default. Preserve it between tool turns
+      // so the model can continue its interleaved-thinking chain.
+      if (provider.id == 'glm')
+        'thinking': {'type': 'enabled', 'clear_thinking': false},
+      // DeepSeek thinking-mode tool calls require the model's original
+      // `reasoning_content` in the following assistant turn. The transcript
+      // adapter above preserves that opaque state, and this toggles the mode.
+      if (isDeepSeek)
+        'thinking': {
+          'type': reasoningLevel == AgentReasoningLevel.disabled
+              ? 'disabled'
+              : 'enabled',
+        },
+      if (isDeepSeek && reasoningLevel != AgentReasoningLevel.disabled)
+        'reasoning_effort': (reasoningLevel ?? AgentReasoningLevel.high).name,
+      if (withJsonMode) 'response_format': const {'type': 'json_object'},
+    };
+    final request = await client.postUrl(Uri.parse(url));
+    request.headers.set('Content-Type', 'application/json; charset=utf-8');
+    request.headers.set('Authorization', 'Bearer $apiKey');
+    request.add(utf8.encode(jsonEncode(body)));
+    return request.close();
+  }
 
+  var response = await send(jsonMode);
+  if (response.statusCode == 400 && jsonMode) {
+    // A strict gateway may reject the optional response_format parameter.
+    // Degrade to prompt-only JSON once so such endpoints keep working.
+    await response.drain<void>();
+    response = await send(false);
+  }
   if (response.statusCode != 200) {
     final errorBody = await response.transform(utf8.decoder).join();
     throw LlmHttpException(response.statusCode, _extractError(errorBody));
@@ -530,11 +564,17 @@ Stream<LlmStreamEvent> _streamAnthropic(
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'https://api.anthropic.com';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
 
   final apiMessages = AgentProviderTools.anthropicMessages(messages);
+  // Anthropic has no response_format parameter; the native JSON technique is
+  // an assistant prefill that the model must continue into an object.
+  if (jsonMode) {
+    apiMessages.add({'role': 'assistant', 'content': '{'});
+  }
 
   final body = <String, dynamic>{
     'model': model,
@@ -547,16 +587,16 @@ Stream<LlmStreamEvent> _streamAnthropic(
       'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
   };
   // Extended thinking is only supported on Claude Sonnet 3.7+ and the v4+
-  // Sonnet / Opus families.  Sending it to claude-3-5-sonnet, claude-3-haiku,
-  // or claude-3-opus elicits a 400 "thinking is not supported for this
-  // model" — gate the parameter behind a model-name match so the user can
-  // freely switch models without hitting that wall.
+  // Sonnet / Opus families (see _anthropicSupportsThinking) — and it is
+  // incompatible with assistant prefill, so JSON mode deliberately wins
+  // over thinking for these bounded structured calls.
   final thinkingBudget = switch (reasoningLevel) {
     AgentReasoningLevel.low => 512,
     AgentReasoningLevel.medium => 1024,
     _ => 2048,
   };
-  if (_anthropicSupportsThinking(model) &&
+  if (!jsonMode &&
+      _anthropicSupportsThinking(model) &&
       reasoningLevel != AgentReasoningLevel.disabled &&
       (maxOutputTokens == null || maxOutputTokens > thinkingBudget)) {
     body['thinking'] = {'type': 'enabled', 'budget_tokens': thinkingBudget};
@@ -574,6 +614,8 @@ Stream<LlmStreamEvent> _streamAnthropic(
     throw LlmHttpException(response.statusCode, _extractError(errorBody));
   }
 
+  // The prefill is not echoed back, so the first text delta re-attaches it.
+  var prefillPending = jsonMode;
   final toolNames = <String, String>{};
   final toolArguments = <String, StringBuffer>{};
   final thinkingBuffers = <int, StringBuffer>{};
@@ -641,7 +683,12 @@ Stream<LlmStreamEvent> _streamAnthropic(
         } else {
           final text = delta['text'] as String?;
           if (text != null && text.isNotEmpty) {
-            yield LlmStreamEvent('text', text);
+            if (prefillPending) {
+              prefillPending = false;
+              yield LlmStreamEvent('text', '{$text');
+            } else {
+              yield LlmStreamEvent('text', text);
+            }
           }
         }
       }
@@ -684,6 +731,7 @@ Stream<LlmStreamEvent> _streamGemini(
   String systemPrompt, {
   List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
+  bool jsonMode = false,
 }) async* {
   final baseUrl =
       provider.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -704,6 +752,8 @@ Stream<LlmStreamEvent> _streamGemini(
     'contents': contents,
     'generationConfig': {
       'maxOutputTokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
+      // Gemini's native JSON mode: constrains output to valid JSON.
+      if (jsonMode) 'responseMimeType': 'application/json',
     },
     if (tools.isNotEmpty) 'tools': AgentProviderTools.geminiTools(tools),
   };
@@ -815,6 +865,7 @@ Future<LlmResponse> _callOllama(
   String systemPrompt, {
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
@@ -832,6 +883,8 @@ Future<LlmResponse> _callOllama(
     'stream': false,
     if (reasoningLevel != null)
       'think': _ollamaThinkValue(model, reasoningLevel),
+    // Ollama's native JSON mode: constrains output to valid JSON.
+    if (jsonMode) 'format': 'json',
     'options': {
       'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     },
@@ -875,6 +928,7 @@ Stream<LlmStreamEvent> _streamOllama(
   String systemPrompt, {
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
+  bool jsonMode = false,
 }) async* {
   final baseUrl = provider.baseUrl ?? 'http://localhost:11434';
   final url = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat';
@@ -890,6 +944,8 @@ Stream<LlmStreamEvent> _streamOllama(
     'stream': true,
     if (reasoningLevel != null)
       'think': _ollamaThinkValue(model, reasoningLevel),
+    // Ollama's native JSON mode: constrains output to valid JSON.
+    if (jsonMode) 'format': 'json',
     'options': {
       'num_predict': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     },

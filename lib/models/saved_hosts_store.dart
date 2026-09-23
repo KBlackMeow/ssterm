@@ -138,7 +138,9 @@ class SavedHostsStore {
 
     SshHost? jumpHost;
     if (json['jumpHost'] is Map<String, dynamic>) {
-      jumpHost = await _hostFromStorage(json['jumpHost'] as Map<String, dynamic>);
+      jumpHost = await _hostFromStorage(
+        json['jumpHost'] as Map<String, dynamic>,
+      );
     }
 
     return SshHost(
