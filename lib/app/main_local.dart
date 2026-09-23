@@ -57,43 +57,28 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     );
   }
 
-  RustTerminalCore? _openRustTerminalCore({
+  RustTerminalCore _openRustTerminalCore({
     required int columns,
     required int rows,
   }) {
-    // ChatCode and similar full-screen CLIs make extensive use of alternate
-    // buffers and synchronized, cursor-addressed output. Until the native
-    // core has feature parity for those sequences, use xterm's battle-tested
-    // parser on macOS, where this is the shipped desktop target. The native
-    // parser remains available for performance testing with
-    // SSTERM_RUST_TERMINAL_CORE=1.
-    final forceRustTerminalCore =
-        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '1';
-    if (Platform.environment['SSTERM_DART_TERMINAL_CORE'] == '1' ||
-        Platform.environment['SSTERM_RUST_TERMINAL_CORE'] == '0' ||
-        (Platform.isMacOS && !forceRustTerminalCore)) {
-      return null;
-    }
-    try {
-      return RustTerminalCore.open(
-        columns: columns,
-        rows: rows,
-        // xterm's `maxLines` includes the visible viewport, while the native
-        // core's limit counts history only.
-        maxScrollbackRows: rows >= 5000 ? 0 : 5000 - rows,
-        backgroundRgb:
-            _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
-        foregroundRgb:
-            _config.terminal.resolveTheme().foreground.toARGB32() & 0xffffff,
-      );
-    } catch (_) {
-      // An unavailable optional dylib must not prevent a user from opening a
-      // shell if a platform bundle is missing the native library.
-      return null;
-    }
+    // Rust is the only parser and screen authority. The bridge imports a
+    // complete native frame for each publish, so cursor-addressed redraws
+    // split across PTY chunks cannot leave cells from an earlier frame on the
+    // Flutter surface. xterm remains the Flutter painter and input adapter.
+    return RustTerminalCore.open(
+      columns: columns,
+      rows: rows,
+      // xterm's `maxLines` includes the visible viewport, while the native
+      // core's limit counts history only.
+      maxScrollbackRows: rows >= 5000 ? 0 : 5000 - rows,
+      backgroundRgb:
+          _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
+      foregroundRgb:
+          _config.terminal.resolveTheme().foreground.toARGB32() & 0xffffff,
+    );
   }
 
-  RustTerminalBridge? _openRustTerminalBridge({
+  RustTerminalBridge _openRustTerminalBridge({
     required Terminal terminal,
     required void Function(Uint8List bytes) onResponseBytes,
     void Function(String path)? onWorkingDirectoryChange,
@@ -102,14 +87,12 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       columns: terminal.viewWidth,
       rows: terminal.viewHeight,
     );
-    return core == null
-        ? null
-        : RustTerminalBridge(
-            core: core,
-            terminal: terminal,
-            onResponseBytes: onResponseBytes,
-            onWorkingDirectoryChange: onWorkingDirectoryChange,
-          );
+    return RustTerminalBridge(
+      core: core,
+      terminal: terminal,
+      onResponseBytes: onResponseBytes,
+      onWorkingDirectoryChange: onWorkingDirectoryChange,
+    );
   }
 
   void _syncPaneAfterShown(_Tab tab, {required int pane}) {
@@ -163,20 +146,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   static bool _isRestartKey(String data) {
     if (data.isEmpty) return false;
     return data.codeUnits.every((c) => c == 0x0d || c == 0x0a);
-  }
-
-  List<int> Function(List<int>) _sshOutputTransform(
-    _Tab tab,
-    int pane,
-    RemoteCwdParser parser,
-  ) {
-    return (bytes) {
-      final parsed = parser.process(bytes);
-      if (parsed.cwd != null) {
-        _noteRemoteCwd(tab, pane, parsed.cwd!);
-      }
-      return parsed.cleaned;
-    };
   }
 
   void _noteRemoteCwd(_Tab tab, int pane, String cwd) {
@@ -378,14 +347,12 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       }
     }
 
-    final rustTerminalBridge = rustTerminalCore == null
-        ? null
-        : RustTerminalBridge(
-            core: rustTerminalCore,
-            terminal: terminal,
-            onResponseBytes: (bytes) => pty.write(bytes),
-            onWorkingDirectoryChange: noteLocalCwd,
-          );
+    final rustTerminalBridge = RustTerminalBridge(
+      core: rustTerminalCore,
+      terminal: terminal,
+      onResponseBytes: (bytes) => pty.write(bytes),
+      onWorkingDirectoryChange: noteLocalCwd,
+    );
     var columns = terminal.viewWidth;
     var rows = terminal.viewHeight;
     try {
@@ -403,8 +370,8 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         ackRead: true,
       );
     } catch (e) {
-      rustTerminalBridge?.close();
-      rustTerminalCore?.close();
+      rustTerminalBridge.close();
+      rustTerminalCore.close();
       if (!mounted) return;
       terminal.write('\r\n[Failed to start shell: $e]\r\n$_kRestartPrompt');
       _setPaneSessionEnded(tab, pane, true);
@@ -430,7 +397,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       tab.rustTerminalCore = rustTerminalCore;
     }
 
-    final cwdParser = RemoteCwdParser();
     final pipe = OutputPipe(
       terminal,
       holdOutputUntilRelease: true,
@@ -443,26 +409,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         }
       },
       terminalByteSink: rustTerminalBridge,
-      // Only the Dart-parsing fallback needs the OSC 7 observer transform;
-      // Rust-backed terminals report cwd through onWorkingDirectoryChange
-      // above, parsed once by the native core.
-      transform: rustTerminalBridge == null
-          ? (bytes) {
-              final parsed = cwdParser.process(bytes);
-              var cwd = parsed.cwd;
-              if (cwd != null && Platform.isWindows) {
-                final drive = RegExp(r'^/([A-Za-z]:.*)$').firstMatch(cwd);
-                if (drive != null) cwd = drive.group(1)!.replaceAll('/', r'\');
-              }
-              if (cwd != null &&
-                  tab.localPath != null &&
-                  !tab.manuallyDisconnected) {
-                tab.localPath!.value = cwd;
-                tab.agentCwd = cwd;
-              }
-              return parsed.cleaned;
-            }
-          : null,
     )..bind(pty.output);
 
     if (isSplit) {
@@ -517,7 +463,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         liveRows >= 1 &&
         (liveColumns != columns || liveRows != rows)) {
       pty.resize(liveRows, liveColumns);
-      rustTerminalBridge?.resize(liveColumns, liveRows);
+      rustTerminalBridge.resize(liveColumns, liveRows);
     }
 
     pty.exitCode.then((code) {
@@ -667,7 +613,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           )
           .timeout(const Duration(seconds: 15));
 
-      final cwdParser = RemoteCwdParser();
       final rustTerminalBridge = _openRustTerminalBridge(
         terminal: terminal,
         onResponseBytes: (bytes) => session.stdin.add(bytes),
@@ -678,9 +623,6 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
         terminalByteSink: rustTerminalBridge,
-        transform: rustTerminalBridge == null
-            ? _sshOutputTransform(tab, pane, cwdParser)
-            : null,
       );
 
       _bindTerminalInput(
@@ -690,7 +632,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
       );
       terminal.onResize = (w, h, pw, ph) {
         session.resizeTerminal(w, h);
-        rustTerminalBridge?.resize(w, h);
+        rustTerminalBridge.resize(w, h);
       };
 
       pipe.bind(session.stdout);
@@ -704,7 +646,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab.splitRustTerminalCore?.close();
         tab.splitPipe = pipe;
         tab.splitRustTerminalBridge = rustTerminalBridge;
-        tab.splitRustTerminalCore = rustTerminalBridge?.core;
+        tab.splitRustTerminalCore = rustTerminalBridge.core;
       } else {
         tab.sshSession?.close();
         tab.sshSession = session;
@@ -713,7 +655,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         tab.rustTerminalCore?.close();
         tab.pipe = pipe;
         tab.rustTerminalBridge = rustTerminalBridge;
-        tab.rustTerminalCore = rustTerminalBridge?.core;
+        tab.rustTerminalCore = rustTerminalBridge.core;
       }
       _scheduleSyncPaneAfterShown(tab, pane: pane);
 

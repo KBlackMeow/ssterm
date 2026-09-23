@@ -330,12 +330,14 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
-  test('local PTY output defaults to the Rust-authoritative render path', () {
+  test('local PTY output has no Dart parser fallback', () {
     final localSource = File('lib/app/main_local.dart').readAsStringSync();
     final tabSource = File('lib/models/tab_model.dart').readAsStringSync();
 
-    expect(localSource, contains("SSTERM_DART_TERMINAL_CORE'] == '1'"));
-    expect(localSource, contains("SSTERM_RUST_TERMINAL_CORE'] == '0'"));
+    expect(localSource, contains('RustTerminalCore _openRustTerminalCore'));
+    expect(localSource, contains('RustTerminalBridge _openRustTerminalBridge'));
+    expect(localSource, isNot(contains('SSTERM_DART_TERMINAL_CORE')));
+    expect(localSource, isNot(contains('SSTERM_RUST_TERMINAL_CORE')));
     expect(localSource, contains('terminalByteSink: rustTerminalBridge'));
     expect(localSource, isNot(contains('rustTerminalCore?.feed(')));
     expect(localSource, contains('rustTerminalBridge?.resize(w, h)'));

@@ -156,7 +156,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       return;
     }
 
-    final cwdParser = RemoteCwdParser();
     final rustTerminalBridge = _openRustTerminalBridge(
       terminal: terminal,
       onResponseBytes: (bytes) => session.stdin.add(bytes),
@@ -168,9 +167,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
       terminalByteSink: rustTerminalBridge,
-      transform: rustTerminalBridge == null
-          ? _sshOutputTransform(tab, 0, cwdParser)
-          : null,
     );
 
     // The SFTP subsystem handshake and the $HOME probe used to run here, on
@@ -195,7 +191,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     tab.activeSshPane = 0;
     tab.pipe = pipe;
     tab.rustTerminalBridge = rustTerminalBridge;
-    tab.rustTerminalCore = rustTerminalBridge?.core;
+    tab.rustTerminalCore = rustTerminalBridge.core;
     tab.connectionError = null;
     tab.primarySessionEnded = false;
 
@@ -371,7 +367,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       return;
     }
 
-    final cwdParser = RemoteCwdParser();
     final rustTerminalBridge = _openRustTerminalBridge(
       terminal: splitTerminal,
       onResponseBytes: (bytes) => session.stdin.add(bytes),
@@ -382,9 +377,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       holdOutputUntilRelease: true,
       pauseSourceOnBackpressure: false,
       terminalByteSink: rustTerminalBridge,
-      transform: rustTerminalBridge == null
-          ? _sshOutputTransform(tab, 1, cwdParser)
-          : null,
     );
 
     _wireSshSession(
@@ -401,8 +393,8 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
 
     if (!mounted) {
       pipe.dispose();
-      rustTerminalBridge?.close();
-      rustTerminalBridge?.core.close();
+      rustTerminalBridge.close();
+      rustTerminalBridge.core.close();
       session.close();
       return;
     }
@@ -412,7 +404,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.splitSshSession = session;
       tab.splitPipe = pipe;
       tab.splitRustTerminalBridge = rustTerminalBridge;
-      tab.splitRustTerminalCore = rustTerminalBridge?.core;
+      tab.splitRustTerminalCore = rustTerminalBridge.core;
       tab.splitAxis = axis;
       tab.remoteCwdPane1 = tab.remoteCwdPane0;
     });
@@ -495,7 +487,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.clearSplit();
 
       final session = result.session!;
-      final cwdParser = RemoteCwdParser();
 
       SessionLogger? logger;
       if (profile.sessionLog) {
@@ -523,9 +514,6 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
         holdOutputUntilRelease: true,
         pauseSourceOnBackpressure: false,
         terminalByteSink: rustTerminalBridge,
-        transform: rustTerminalBridge == null
-            ? _sshOutputTransform(tab, 0, cwdParser)
-            : null,
       );
 
       tab.primarySessionEnded = false;
@@ -554,7 +542,7 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
       tab.rustTerminalCore?.close();
       tab.pipe = pipe;
       tab.rustTerminalBridge = rustTerminalBridge;
-      tab.rustTerminalCore = rustTerminalBridge?.core;
+      tab.rustTerminalCore = rustTerminalBridge.core;
       _scheduleSyncPaneAfterShown(tab, pane: 0);
       tab.sshSession = session;
       tab.sshClient = result.client;

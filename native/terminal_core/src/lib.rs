@@ -100,6 +100,12 @@ enum ParseState {
     OscEscape,
     Dcs,
     DcsEscape,
+    /// APC, PM, and SOS are application-private strings. In particular,
+    /// Claude Code emits Kitty graphics as `ESC _ G … ESC \\`; SSTerm does
+    /// not render those graphics, but must consume the whole payload instead
+    /// of letting its base64/text parameters corrupt the terminal grid.
+    IgnoreString,
+    IgnoreStringEscape,
     CharsetG0,
     CharsetG1,
     EscapeIgnore,
@@ -1374,6 +1380,12 @@ impl TerminalCore {
                         self.dcs.clear();
                         self.state = ParseState::Dcs;
                     }
+                    // C1 SOS (0x98), PM (0x9e), and APC (0x9f) strings are
+                    // not display text. Consume them through ST just as the
+                    // 7-bit ESC-prefixed forms below.
+                    0x98 | 0x9e | 0x9f if self.utf8.is_empty() => {
+                        self.state = ParseState::IgnoreString;
+                    }
                     0x1b => {
                         self.emit_utf8(true);
                         self.state = ParseState::Escape;
@@ -1402,6 +1414,9 @@ impl TerminalCore {
                         self.dcs.clear();
                         self.state = ParseState::Dcs;
                     }
+                    // APC contains the Kitty graphics protocol (`ESC _ G`).
+                    // PM and SOS are likewise non-rendering string controls.
+                    b'_' | b'^' | b'X' => self.state = ParseState::IgnoreString,
                     b'(' => self.state = ParseState::CharsetG0,
                     b')' => self.state = ParseState::CharsetG1,
                     b'*' | b'+' | b'-' | b'.' | b'/' | b'%' | b'#' => {
@@ -1569,6 +1584,21 @@ impl TerminalCore {
                         self.track_string_utf8(byte);
                         self.state = ParseState::Dcs;
                     }
+                }
+                ParseState::IgnoreString => match byte {
+                    0x9c => self.state = ParseState::Ground,
+                    0x18 | 0x1a => self.state = ParseState::Ground,
+                    0x1b => self.state = ParseState::IgnoreStringEscape,
+                    _ => {}
+                },
+                ParseState::IgnoreStringEscape => {
+                    // String Terminator is ESC \\. Any other byte belongs to
+                    // the ignored payload, including a literal ESC byte.
+                    self.state = if byte == b'\\' {
+                        ParseState::Ground
+                    } else {
+                        ParseState::IgnoreString
+                    };
                 }
                 ParseState::CharsetG0 => {
                     self.g0_dec_graphics = byte == b'0';
@@ -2330,6 +2360,23 @@ mod tests {
             terminal.feed(std::slice::from_ref(byte));
         }
         assert_eq!(terminal.row_text(0), text);
+    }
+
+    #[test]
+    fn kitty_graphics_apc_payload_never_reaches_the_screen() {
+        let mut terminal = TerminalCore::new(80, 1);
+        // Claude Code emits its status artwork through the Kitty graphics
+        // protocol. We do not render it, but its encoded parameters must not
+        // be mistaken for ordinary terminal text.
+        terminal.feed(b"before\x1b_Gi=No,exitv=1,a=q,t=d,f=24;AAAA\x1b\\after");
+        assert_eq!(terminal.row_text(0), "beforeafter");
+    }
+
+    #[test]
+    fn ignores_c1_apc_pm_and_sos_strings() {
+        let mut terminal = TerminalCore::new(80, 1);
+        terminal.feed(b"a\x9fapc\x9cb\x9epm\x9cc\x98sos\x9cd");
+        assert_eq!(terminal.row_text(0), "abcd");
     }
 
     #[test]

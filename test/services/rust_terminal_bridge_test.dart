@@ -189,6 +189,37 @@ void main() {
     skip: available ? false : 'run cargo build --release before this ABI test',
   );
 
+  test(
+    'bridge clears an earlier TUI frame when its redraw spans PTY chunks',
+    () {
+      final terminal = Terminal()..resize(12, 2);
+      final core = RustTerminalCore.open(
+        columns: 12,
+        rows: 2,
+        libraryPath: path,
+      );
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      addTearDown(() {
+        bridge.close();
+        core.close();
+      });
+
+      bridge.write(utf8.encode('stale-top\r\nstale-bottom'));
+      // A real TUI can send its cursor motion, erase, and replacement text in
+      // different PTY reads. The Flutter model must mirror the final native
+      // frame rather than retain cells from the old one between those writes.
+      bridge.write(utf8.encode('\x1b[1;1H\x1b[2K'));
+      bridge.write(utf8.encode('fresh-top'));
+      bridge.write(utf8.encode('\x1b[2;1H\x1b[2Kfresh-bottom'));
+
+      expect(terminal.buffer.lines[0].toString(), 'fresh-top');
+      expect(terminal.buffer.lines[1].toString(), 'fresh-bottom');
+      expect(terminal.buffer.lines[0].toString(), isNot(contains('stale')));
+      expect(terminal.buffer.lines[1].toString(), isNot(contains('stale')));
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
   testWidgets('bridge defers a resize publish until after terminal layout', (
     tester,
   ) async {
