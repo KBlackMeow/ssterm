@@ -29,7 +29,6 @@ import 'services/local_shell_discovery.dart';
 import 'services/login_shell_environment.dart';
 import 'services/local_shell_wrapper.dart';
 import 'services/port_forward_service.dart';
-import 'services/remote_cwd_parser.dart';
 import 'services/remote_home.dart';
 import 'services/rust_terminal_core.dart';
 import 'services/rust_terminal_bridge.dart';
@@ -142,7 +141,14 @@ class SsTermApp extends StatelessWidget {
     return MaterialApp(
       title: 'SSTerm',
       debugShowCheckedModeBanner: false,
-      darkTheme: ThemeData.dark(useMaterial3: true),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+        fontFamily: Platform.isWindows ? 'Segoe UI' : null,
+        fontFamilyFallback: Platform.isWindows
+            ? const ['Microsoft YaHei']
+            : null,
+      ),
       themeMode: ThemeMode.dark,
       home: const TerminalHome(),
     );

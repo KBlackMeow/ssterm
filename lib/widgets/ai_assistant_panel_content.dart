@@ -609,6 +609,20 @@ class _AiPanelContent extends StatelessWidget {
           fontFamilyFallback: _agentBodyFontFallback,
           fontWeight: FontWeight.w400,
         ),
+        // gpt_markdown replaces the body style for `#` headings with its
+        // Material headline style. Match the body font and weight on Windows
+        // so CJK glyphs do not switch face inside the same reply.
+        styleSheet: Platform.isWindows
+            ? GptMarkdownStyleSheet(
+                heading: HeadingStyle(
+                  textStyle: TextStyle(
+                    fontFamily: _agentBodyFontFamily,
+                    fontFamilyFallback: _agentBodyFontFallback,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              )
+            : null,
         // We override fenced-code-block rendering for two reasons:
         //   1. `gpt_markdown` 1.1.7's `CodeBlockMd` regex captures the
         //      `\n` BEFORE the closing fence into the body string, then
