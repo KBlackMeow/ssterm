@@ -1822,7 +1822,13 @@ impl TerminalCore {
                     if start < end {
                         target[..end - start].copy_from_slice(&logical[start..end]);
                     }
-                    if chunk_count > 1 {
+                    // Wrap metadata belongs to the row that continues into
+                    // the next row. Do not carry old markers into a new
+                    // layout, or a later resize will join hard line breaks.
+                    for cell in &mut target {
+                        cell.reserved[0] &= !1;
+                    }
+                    if chunk + 1 < chunk_count {
                         target[0].reserved[0] |= 1;
                     }
                     reflowed.push(target);
@@ -2371,6 +2377,18 @@ mod tests {
         terminal.resize(8, 3);
         assert_eq!(terminal.row_text(0), "abcd");
         assert_eq!(terminal.row_text(1), "efgh");
+    }
+
+    #[test]
+    fn resize_round_trip_preserves_separate_output_lines() {
+        let mut terminal = TerminalCore::with_scrollback(8, 4, 8);
+        terminal.feed(b"abcdef\r\nxy\r\n");
+
+        terminal.resize(4, 4);
+        terminal.resize(8, 4);
+
+        assert_eq!(terminal.row_text(0), "abcdef");
+        assert_eq!(terminal.row_text(1), "xy");
     }
     #[test]
     fn preserves_utf8_across_pty_chunks() {
