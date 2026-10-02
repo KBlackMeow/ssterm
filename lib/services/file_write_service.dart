@@ -51,6 +51,8 @@ enum FileWriteErrorKind {
   tooLarge,
 }
 
+/// Agent 文件写入提案无法读取目标、生成差异或写入落盘时抛出的错误，
+/// 供提案卡展示并保留原文件。
 class FileWriteException implements Exception {
   final FileWriteErrorKind kind;
   final String message;
@@ -104,6 +106,8 @@ class FileWritePreview {
   });
 }
 
+/// 文件提案结果，包含目标路径、旧/新内容及差异预览；
+/// 生成提案本身不代表已经写入，应用动作由用户确认流程触发。
 class FileWriteResult {
   /// Absolute path actually written to.
   final String resolvedPath;

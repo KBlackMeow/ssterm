@@ -1,62 +1,52 @@
-/// Transport type for an MCP server connection.
+/// MCP 服务器的连接传输方式。
 enum McpTransportType {
-  /// Launch the server as a subprocess and communicate over stdin/stdout
-  /// with newline-delimited JSON-RPC 2.0 messages.
+  /// 将服务器作为子进程启动，通过标准输入/输出交换逐行 JSON-RPC 2.0 消息。
   stdio,
 
-  /// Connect to a remote MCP server via Streamable HTTP (POST + SSE).
+  /// 通过 Streamable HTTP 连接远程服务器，使用 HTTP POST 及 SSE 接收响应。
   streamableHttp,
 }
 
-/// Configuration for one MCP (Model Context Protocol) server.
-///
-/// Each server exposes tools that the agent can discover and call at
-/// runtime.  Servers are user-configured in Settings → Agent → MCP.
+/// 一个 MCP 服务器的连接和超时配置。服务器可向 Agent 暴露工具，由设置页管理；
+/// 传输类型决定使用子进程参数还是 HTTP 地址。
 class McpServerConfig {
-  /// Stable user-chosen slug used as the server identifier in tool-call
-  /// dispatch.  Must be unique across all configured servers.  Keep it
-  /// short and descriptive (e.g. "github", "filesystem", "jira").
+  /// 用户指定的稳定 ID，用于工具调用路由；同一配置中的服务器必须唯一。
   final String id;
 
-  /// Human-readable label shown in Settings and agent feedback cards.
+  /// 设置页和 Agent 工具结果卡中展示的服务器名称。
   String displayName;
 
-  /// When false the server is persisted but not connected at startup.
+  /// 是否在 Agent 启动时连接该服务器；关闭时配置仍保留。
   bool enabled;
 
-  /// Transport mechanism.
+  /// 连接方式；决定使用 `command` 参数还是 `url`。
   McpTransportType transport;
 
   // ── stdio ──────────────────────────────────────────────────────────
 
-  /// The command to launch the server subprocess (e.g. "npx", "uvx",
-  /// "python").  Only meaningful when [transport] is [McpTransportType.stdio].
+  /// 启动 stdio 服务器的可执行命令，例如 `npx` 或 `python`；HTTP 传输时忽略。
   String? command;
 
-  /// Arguments passed to [command].  Only meaningful for stdio transport.
+  /// 传给 [command] 的参数列表；仅 stdio 传输使用。
   List<String> args;
 
-  /// Extra environment variables merged into the subprocess environment.
+  /// 启动子进程时额外设置的环境变量；仅 stdio 传输使用。
   Map<String, String>? env;
 
   // ── Streamable HTTP ────────────────────────────────────────────────
 
-  /// The MCP endpoint URL (e.g. "http://localhost:3000/mcp").  Only
-  /// meaningful when [transport] is [McpTransportType.streamableHttp].
+  /// Streamable HTTP MCP 服务端点；仅 HTTP 传输使用。
   String? url;
 
-  /// Optional HTTP headers sent with every request (e.g. an
-  /// Authorization bearer token).
+  /// 随每次 HTTP 请求发送的额外请求头，可用于认证；仅 HTTP 传输使用。
   Map<String, String>? headers;
 
   // ── Timeouts ───────────────────────────────────────────────────────
 
-  /// Maximum time to wait for the transport to establish (subprocess
-  /// spawn + initialize handshake or HTTP connect).  Default 30 s.
+  /// 等待传输建立并完成初始化握手的最长时间，单位秒；默认 30 秒。
   int connectionTimeoutSeconds;
 
-  /// Maximum time to wait for a single `tools/call` round-trip.
-  /// Default 60 s.
+  /// 等待一次 `tools/call` 完成的最长时间，单位秒；默认 60 秒。
   int toolCallTimeoutSeconds;
 
   McpServerConfig({
@@ -89,8 +79,8 @@ class McpServerConfig {
     'toolCallTimeoutSeconds': toolCallTimeoutSeconds,
   };
 
-  /// Returns null for malformed entries so the caller can skip them
-  /// rather than abort the whole config load.
+  /// 从配置映射构造服务器。字段缺失或格式错误时返回 `null`，
+  /// 让调用方跳过单条坏配置而保留其他设置。
   static McpServerConfig? tryFromJson(Map<String, dynamic> json) {
     final id = json['id'];
     if (id is! String || id.isEmpty) return null;
@@ -185,24 +175,22 @@ class McpServerConfig {
   );
 }
 
-/// A tool discovered from an MCP server.
+/// 从 MCP 服务器发现的工具定义，保留模型调用所需的参数 schema 和来源信息。
 class McpTool {
-  /// The [McpServerConfig.id] this tool belongs to.
+  /// 所属服务器的稳定 ID，用于把模型调用路由回正确的 MCP 连接。
   final String serverId;
 
-  /// The server's [McpServerConfig.displayName] (cached at discovery time).
+  /// 发现工具时缓存的服务器显示名称，用于工具调用结果的来源标签。
   final String serverName;
 
-  /// Tool name as reported by the server.
+  /// MCP 服务器报告的工具原始名称。
   final String name;
 
-  /// Human-readable description.  May be empty.
+  /// 模型用于判断何时调用该工具的说明；服务器可返回空文本。
   final String description;
 
-  /// JSON Schema for the tool's parameters (the `inputSchema` from the
-  /// MCP `tools/list` response).  Always a Map; the client must not
-  /// assume a particular JSON Schema dialect, though servers SHOULD
-  /// output 2020-12 or draft-07.
+  /// 工具参数的 JSON Schema，即 MCP `tools/list` 返回的 `inputSchema`；
+  /// 调用方不应假设具体 Schema 方言。
   final Map<String, Object?> inputSchema;
 
   const McpTool({
@@ -213,16 +201,20 @@ class McpTool {
     required this.inputSchema,
   });
 
-  /// Fully-qualified name for LLM tool-call dispatch:
-  /// `mcp__<serverId>__<toolName>`.
+  /// 发送给模型的唯一工具名，使用 `mcp__<serverId>__<toolName>`
+  /// 避免不同服务器的同名工具冲突。
   String get qualifiedName => 'mcp__${serverId}__$name';
 }
 
-/// Result of an MCP `tools/call` invocation.
+/// MCP `tools/call` 的结果，保留来源、内容块以及成功/错误状态。
 class McpToolResult {
+  /// 返回结果的服务器 ID，便于界面标注来源。
   final String serverId;
+  /// 被调用的 MCP 工具名称。
   final String toolName;
+  /// 按 MCP 内容块形式保留的文本、图片或资源结果。
   final List<McpContentBlock> content;
+  /// 是否为工具执行错误；错误结果仍会传回 Agent 作为工具反馈。
   final bool isError;
 
   const McpToolResult({
@@ -232,7 +224,7 @@ class McpToolResult {
     this.isError = false,
   });
 
-  /// Convenience constructor for a simple text result.
+  /// 创建只包含一个文本内容块的结果。
   factory McpToolResult.text({
     required String serverId,
     required String toolName,
@@ -245,8 +237,7 @@ class McpToolResult {
     isError: isError,
   );
 
-  /// Convenience constructor for an error result from the client side
-  /// (connection lost, timeout, JSON-RPC protocol error).
+  /// 将客户端连接中断、超时或 JSON-RPC 错误转换为 MCP 错误结果。
   factory McpToolResult.clientError({
     required String serverId,
     required String toolName,
@@ -258,31 +249,31 @@ class McpToolResult {
     isError: true,
   );
 
-  /// Concatenated text from all `text`-type content blocks.
+  /// 按原顺序拼接所有文本内容块；图片等非文本块不包含在结果中。
   String get textContent => content
       .where((b) => b.type == 'text')
       .map((b) => b.text ?? '')
       .join('\n');
 }
 
-/// A single content block in an MCP tool result.
+/// MCP 工具结果中的一个内容块；可承载文本、图片、音频或资源引用。
 class McpContentBlock {
-  /// One of: "text", "image", "audio", "resource_link", "resource".
+  /// 内容种类，例如 `text`、`image`、`audio` 或资源链接。
   final String type;
 
-  /// Present for type "text".
+  /// 文本内容块的文本值；其他类型通常为空。
   final String? text;
 
-  /// Base64-encoded data for type "image" / "audio".
+  /// 图片或音频内容的 Base64 数据。
   final String? data;
 
-  /// MIME type for type "image" / "audio" / "resource" / "resource_link".
+  /// 内容数据的 MIME 类型，用于显示或解码资源。
   final String? mimeType;
 
-  /// URI for type "resource_link" or embedded "resource".
+  /// 资源链接或嵌入资源的 URI。
   final String? uri;
 
-  /// Name for type "resource_link".
+  /// 资源链接的人类可读名称。
   final String? name;
 
   const McpContentBlock({
@@ -298,7 +289,7 @@ class McpContentBlock {
       McpContentBlock(type: 'text', text: text);
 }
 
-/// Event emitted by [McpService] to notify listeners of server state changes.
+/// MCP 服务状态事件；通知 Agent 和界面服务器连接或工具列表发生变化。
 enum McpServiceEventKind {
   checking,
   connected,
@@ -307,9 +298,14 @@ enum McpServiceEventKind {
   error,
 }
 
+/// MCP 服务层发出的状态事件，携带事件类型及受影响服务器/工具信息，供 Agent
+/// 刷新可用工具列表或界面状态。
 class McpServiceEvent {
+  /// 当前变化的类别，例如正在连接、已连接、工具更新或发生错误。
   final McpServiceEventKind kind;
+  /// 产生此事件的服务器 ID。
   final String serverId;
+  /// 连接或发现工具失败时的附加说明；正常状态事件可为空。
   final String? message;
 
   const McpServiceEvent({

@@ -4,6 +4,8 @@ import 'package:ssterm/io/output_pipe.dart';
 
 import '../utils/app_dir.dart';
 
+/// 以原始字节记录 SSH 会话输入/输出，便于使用终端工具回放。
+/// 日志文件按会话创建并由拥有者关闭；写日志失败不应中断终端收发。
 class SessionLogger implements LogSink {
   final IOSink _sink;
   final String path;

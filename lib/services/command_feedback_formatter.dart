@@ -1,9 +1,14 @@
+/// 将命令结果整理为下一轮模型请求的反馈文本。大输出采用首尾截取并附带退出状态和
+/// 风险信息，避免把完整日志无限制塞进上下文。
+
 import 'dart:convert';
 
 import '../io/output_pipe.dart';
 import 'command_risk.dart';
 import 'agent_output_store.dart';
 
+/// 把退出码、命令风险和输出片段组合成 Agent 可消费的反馈。输出按字节数限制，
+/// 超长时保留开头和结尾，减少上下文占用且保留错误线索。
 class CommandFeedbackFormatter {
   const CommandFeedbackFormatter({
     this.maxFeedbackBytes = 8 * 1024,

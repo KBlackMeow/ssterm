@@ -17,6 +17,8 @@ class AgentImageAttachment {
   });
 }
 
+/// 图片读取、解码或转换为 provider 可接受格式失败时使用的领域异常，
+/// 供对话界面显示附件错误。
 class AgentImageAttachmentException implements Exception {
   final String message;
   const AgentImageAttachmentException(this.message);

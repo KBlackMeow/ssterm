@@ -40,6 +40,8 @@ TextStyle _menuTextStyle({
   );
 }
 
+/// 展示用户命令列表；选择项目后通过回调把命令文本插入当前终端，
+/// 不在此处执行命令。列表数据由命令存储提供。
 class CmdPickerButton extends StatefulWidget {
   const CmdPickerButton({super.key, required this.onInsert, this.loadCommands});
 

@@ -7,12 +7,15 @@ import '../services/credential_storage.dart';
 import 'port_forward_rule.dart';
 import 'ssh_host.dart';
 
+/// SSH 主机配置的持久化入口。负责读写主机列表及字段兼容；
+/// 密码和私钥口令交由凭据存储处理，不应以明文放进配置文件。
 class SavedHostsStore {
   static Future<File> _file() async {
     final dir = await appDataDir();
     return File('${dir.path}/hosts.json');
   }
 
+  /// 读取主机配置并从凭据存储还原密码；损坏或不存在时返回空列表。
   static Future<List<SshHost>> load() async {
     final f = await _file();
     if (!await f.exists()) return [];
@@ -39,6 +42,7 @@ class SavedHostsStore {
     }
   }
 
+  /// 保存主机配置并把密码写入系统凭据库，不在主机 JSON 中保存明文。
   static Future<void> save(List<SshHost> hosts) async {
     final f = await _file();
     final data = <Map<String, dynamic>>[];
@@ -53,6 +57,7 @@ class SavedHostsStore {
     }
   }
 
+  /// 按 profile key 替换或追加主机，并清理不再使用的旧凭据。
   static Future<void> upsert(SshHost host) async {
     final hosts = await load();
     final stale = hosts.where((h) => h.profileKey == host.profileKey).toList();
@@ -64,6 +69,7 @@ class SavedHostsStore {
     }
   }
 
+  /// 移除主机档案并删除该主机及其跳板机的凭据。
   static Future<void> deleteHost(SshHost host) async {
     final hosts = await load();
     hosts.removeWhere((h) => h.profileKey == host.profileKey);

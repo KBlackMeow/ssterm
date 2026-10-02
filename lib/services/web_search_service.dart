@@ -109,6 +109,8 @@ enum WebSearchErrorKind {
   server,
 }
 
+/// 网络搜索服务错误，携带可区分的失败类别和面向 Agent 的说明；
+/// 调用方可把错误反馈给模型或显示给用户。
 class WebSearchException implements Exception {
   final WebSearchErrorKind kind;
   final String message;

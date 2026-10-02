@@ -10,6 +10,7 @@ const _kAccent = Color(0xFF2472C8);
 
 // ── Color picker dialog ──────────────────────────────────────────────────────
 
+/// 提供预设色和自定义颜色选择，并将用户选择值返回设置页；取消时不应覆盖原颜色。
 class ColorPickerDialog extends StatefulWidget {
   const ColorPickerDialog({super.key, required this.initial});
 
@@ -123,6 +124,8 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
 
 // ── Command edit dialog ──────────────────────────────────────────────────────
 
+/// 编辑命令名称、说明和实际命令文本。确认前由表单校验必填字段，
+/// 返回结果交由设置页更新命令存储。
 class CommandDialog extends StatefulWidget {
   const CommandDialog({super.key, this.existing});
 

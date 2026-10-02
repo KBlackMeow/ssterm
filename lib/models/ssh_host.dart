@@ -3,25 +3,34 @@ import 'dart:io';
 import '../utils/app_dir.dart';
 import 'port_forward_rule.dart';
 
+/// 一个可保存和复用的 SSH 连接档案，包含目标地址、账号、密码/私钥认证、跳板机、
+/// 转发规则和断线重连选项。连接运行时资源不放在此模型中。
 class SshHost {
+  /// 用户自定义别名；用于标签、保存列表和连接提示。
   final String alias;
+  /// 连接目标的 DNS 名称或 IP 地址。
   final String hostname;
+  /// SSH 服务端口；未指定时使用标准端口 22。
   final int port;
+  /// 登录用户名；为空时回退到当前平台的默认用户名。
   final String? user;
+  /// 私钥文件路径；为空时由 SSH 客户端尝试默认身份文件。
   final String? identityFile;
+  /// 密码认证凭据。持久化时由凭据存储单独保存，不应明文写入主机 JSON。
   final String? password;
 
-  // Feature 1: port forwarding
+  /// 连接建立后需要启动的本地、远程或动态转发规则。
   final List<PortForwardRule> forwardRules;
 
-  // Feature 2: jump host
+  /// 可选跳板主机；目标连接经由此档案建立单跳 ProxyJump。
   final SshHost? jumpHost;
 
-  // Feature 4: keepalive + auto-reconnect
+  /// Keepalive 间隔秒数；`0` 表示禁用探测。
   final int keepaliveInterval; // seconds, 0 = disabled
+  /// 会话意外断开时是否自动尝试重连。
   final bool autoReconnect;
 
-  // Feature 5: session logging
+  /// 是否将本次 SSH 终端会话原始数据写入可回放日志。
   final bool sessionLog;
 
   const SshHost({
@@ -84,6 +93,8 @@ class SshHost {
   );
 }
 
+/// 判断输入是否像私钥文件路径，以便连接表单区分路径和直接粘贴的密钥内容。
+/// 这里只做格式识别，不检查文件存在性或密钥有效性。
 bool looksLikeKeyPath(String value) {
   final t = value.trim();
   if (t.isEmpty) return false;
@@ -92,6 +103,8 @@ bool looksLikeKeyPath(String value) {
   return RegExp(r'\.(pem|key)$', caseSensitive: false).hasMatch(t);
 }
 
+/// 将以 `~` 开头的私钥路径替换为应用识别的用户目录路径；其他路径保持原样。
+/// 该函数不解析 shell 变量或相对路径。
 String expandHomePath(String path) {
   final home = appBasePath();
   if (path.startsWith('~/')) return '$home${path.substring(1)}';

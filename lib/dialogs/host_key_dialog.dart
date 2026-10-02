@@ -6,6 +6,7 @@ import '../models/known_hosts_store.dart';
 import '../utils/ssh_fingerprint.dart';
 import '../widgets/frosted_glass.dart';
 
+/// 请求用户信任此前未见过的 SSH 主机密钥。
 Future<bool> showHostKeyConfirmDialog(
   BuildContext context, {
   required String hostname,
@@ -90,6 +91,7 @@ Future<bool> showHostKeyConfirmDialog(
   ).then((v) => v ?? false);
 }
 
+/// 已信任的 SSH 主机密钥发生变化时请求用户决定。
 Future<bool> showHostKeyChangedDialog(
   BuildContext context, {
   required String hostname,
@@ -197,6 +199,7 @@ Future<bool> showHostKeyChangedDialog(
   ).then((v) => v ?? false);
 }
 
+/// 将已保存的指纹格式化，以便在主机密钥对话框中显示。
 String formatMd5FingerprintFromStored(String stored) {
   final norm = normalizeFingerprint(stored);
   if (norm.length % 2 != 0) return stored;

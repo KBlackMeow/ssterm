@@ -84,6 +84,9 @@ class _ClampingScrollBehavior extends MaterialScrollBehavior {
       const ClampingScrollPhysics();
 }
 
+/// 管理单个远程文件编辑器的缓冲区、语法模式和保存状态。
+/// 保存时使用加载/上次保存时记录的修改时间作为并发令牌，
+/// 避免无提示覆盖远端已变化的文件。
 class FileEditorViewState extends State<FileEditorView> {
   /// Used to reach the inner [EditableText] (its own vertical scroll
   /// controller and [RenderEditable]) so the editor can scroll the caret

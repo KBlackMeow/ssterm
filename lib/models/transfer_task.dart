@@ -8,30 +8,49 @@ import 'package:flutter/foundation.dart';
 import 'ssh_host.dart';
 import '../services/sftp_download_worker.dart';
 
+/// 任务的数据流向，用于选择上传或下载实现以及对应的进度处理。
 enum TransferType { upload, download }
 
+/// 传输任务生命周期状态。暂停和取消只对运行中的任务有意义；
+/// 完成或失败后的状态用于队列展示，不能再恢复传输。
 enum TransferStatus { running, paused, done, cancelled, error }
 
+/// 一次上传或下载的可观察模型，持有名称、总量、已传量和状态，
+/// 并通过通知驱动队列界面刷新。暂停、继续和取消会转发给对应的活动传输。
 class TransferTask extends ChangeNotifier {
   TransferTask._({required this.name, required this.type, required this.total});
 
+  /// 队列中显示的文件名，不保证包含完整本地或远程路径。
   final String name;
+  /// 上传或下载方向，决定任务控制和数据通路。
   final TransferType type;
+  /// 任务开始时探测到的文件总字节数；未知大小按 0 处理。
   final int total;
+  /// 已成功传输的字节数，用于计算进度。
   int bytes = 0;
+  /// 当前任务状态；变化时通过 `ChangeNotifier` 通知队列界面。
   TransferStatus status = TransferStatus.running;
+  /// 任务失败时用于展示的错误文本，成功或仍在运行时为空。
   String? error;
 
+  /// 上传取消回调；关闭远端句柄由实际上传协程负责收尾。
   Future<void> Function()? _abortUpload;
+  /// 上传协程的完成 future，取消任务时等待其完成清理。
   Future<void>? _uploadDone;
+  /// 暂停上传时阻塞数据源的门闩，恢复或取消时释放。
   Completer<void>? _uploadResumeGate;
   // Used only by isolated downloads for cancellation.
+  /// 下载任务使用的后台 isolate，取消时立即终止。
   Isolate? _downloadIsolate;
+  /// 接收后台下载进度、完成和错误消息的端口。
   ReceivePort? _downloadReceivePort;
 
+  /// 上次通知 UI 的时间，用于限制高频进度重绘。
   DateTime? _lastProgressNotify;
+  /// 进度通知的最小间隔，避免每个数据块都触发界面重建。
   static const _progressNotifyInterval = Duration(milliseconds: 100);
 
+  /// 是否已释放监听器和后台资源；为 true 后不再派发进度通知。
   bool _disposed = false;
   bool get isActive =>
       status == TransferStatus.running || status == TransferStatus.paused;
@@ -133,16 +152,20 @@ class TransferTask extends ChangeNotifier {
   }
 }
 
+/// 一个 SSH 连接对应的传输队列管理器。它创建任务、限制并发数并转发任务状态；
+/// 关闭时应取消/清理由该管理器启动的工作。
 class TransferManager extends ChangeNotifier {
   TransferManager({this.sshProfile});
 
+  /// 上传时每次提交给 SFTP writer 的字节块大小。
   static const _uploadWriteChunkSize = 32 * 1024;
+  /// 上传最多同时等待确认的写请求数，用于限制内存和远端队列积压。
   static const _uploadMaxPendingWrites = 64;
 
-  /// SSH credentials used to open a dedicated download connection in an
-  /// isolate, keeping the main isolate free for Flutter rendering.
+  /// 下载隔离执行器用于新建独立 SSH 连接的配置；上传仍使用调用方传入的客户端。
   final SshHost? sshProfile;
 
+  /// 当前队列中的任务，最新加入的任务放在列表前端。
   final _tasks = <TransferTask>[];
 
   List<TransferTask> get tasks => List.unmodifiable(_tasks);
@@ -417,6 +440,9 @@ class TransferManager extends ChangeNotifier {
 /// avoids normal collisions; exclusive creation provides the actual safety
 /// guarantee if a collision nevertheless occurs.
 @visibleForTesting
+/// 根据目标路径生成同目录下的唯一暂存文件名。上传先写入暂存文件，
+/// 完成后再重命名为目标路径，避免中断时留下半截正式文件；
+/// 测试可注入 nonce 以稳定复现路径。
 String sftpUploadTempPath(String remotePath, {String? nonce}) {
   final slash = remotePath.lastIndexOf('/');
   final directory = slash < 0 ? '' : remotePath.substring(0, slash + 1);
@@ -437,6 +463,8 @@ String _newSftpUploadNonce() {
 /// both keeps failures inside the transfer task and lets us safely drain the
 /// remaining in-flight requests before the remote handle is closed.
 @visibleForTesting
+/// 将字节流分块写入已打开的远程文件句柄，并通过回调报告进度。
+/// 实现会限制未完成写请求的数量；关闭句柄前需等待在途写入结束，避免传输被截断。
 Future<void> pumpSftpUpload({
   required Stream<List<int>> source,
   required Future<void> Function(Uint8List data, int offset) write,
@@ -513,8 +541,11 @@ class _UploadWriteResult {
 
   const _UploadWriteResult.failure(this.length, this.error, this.stackTrace);
 
+  /// 本次写入成功确认的字节数。
   final int length;
+  /// 写请求失败时保存的原始异常；成功时为空。
   final Object? error;
+  /// 写请求失败时对应的堆栈，用于保留诊断信息。
   final StackTrace? stackTrace;
 }
 
@@ -524,6 +555,8 @@ class _UploadWriteResult {
 /// cleanup impossible. In particular, a close failure must not prevent the
 /// subsequent remove attempt or replace the transfer's original error.
 @visibleForTesting
+/// 在上传失败路径中尽力关闭远程句柄并删除暂存文件。
+/// 清理错误不会覆盖原始传输错误，避免掩盖真正失败原因。
 Future<void> cleanupIncompleteSftpUpload({
   required Future<void> Function() close,
   required Future<void> Function() remove,

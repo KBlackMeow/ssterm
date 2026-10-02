@@ -70,6 +70,8 @@ final class RustTerminalSnapshotMetadata extends Struct {
   external int historyEpoch;
 }
 
+/// 将 Rust 核心打包的单个终端单元格解码为字符、前景/背景色和样式标志，
+/// 主要用于跨 FFI 边界后的检查和诊断。
 class RustTerminalCellValue {
   RustTerminalCellValue._(RustTerminalCell cell)
     : codepoint = cell.codepoint,

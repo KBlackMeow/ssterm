@@ -9,6 +9,9 @@ import '../utils/app_dir.dart';
 import 'host_key_verifier.dart';
 import 'no_delay_socket.dart';
 
+/// 使用主机档案完成跳板/直连、主机密钥校验、认证和会话初始化。
+/// 成功时返回 `ConnectResult`；任一步骤失败都会先清理已建立的
+/// SSH 或跳板资源，再向上传递错误。
 Future<ConnectResult> connectSshHost(
   SshHost host, {
   ConnectMode mode = ConnectMode.terminal,

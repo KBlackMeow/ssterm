@@ -82,6 +82,8 @@ const _kFgDim = Color(0xFF686868);
 const _kFgDisabled = Color(0xFF3A3A3A);
 const _kAccent = Color(0xFF2472C8);
 
+/// 显示指定 SFTP client 当前目录中的文件，并提供导航、上传、下载、
+/// 重命名和删除等操作。目录与 SSH 标签的远程工作目录同步由父级协调。
 class SftpView extends StatefulWidget {
   const SftpView({
     super.key,
@@ -132,6 +134,8 @@ class SftpView extends StatefulWidget {
   State<SftpView> createState() => SftpViewState();
 }
 
+/// 负责读取目录列表、维护当前位置与选择状态，并发起 SFTP 文件操作。
+/// 该状态对象不拥有 SSH client，连接断开或重连由父级通知并重新绑定。
 class SftpViewState extends State<SftpView> with _SftpMenusMixin {
   @override
   String _path = '/';

@@ -4,8 +4,10 @@ import 'dart:io';
 import '../utils/app_dir.dart';
 import 'command.dart';
 
+/// 读写用户自定义命令列表的文件存储。它与内置命令分开管理，负责 JSON
+/// 转换及首次启动时的空列表回退。
 class CommandsStore {
-  /// Isolates file-backed command tests from the user's real command list.
+  /// 测试专用的命令文件路径覆盖值；为空时读写用户配置目录中的正式文件。
   static File? debugFileOverride;
 
   static Future<File> _file() async {
@@ -15,6 +17,7 @@ class CommandsStore {
     return File('${dir.path}/commands.json');
   }
 
+  /// 读取用户命令 JSON；不存在或无法解析时返回空列表。
   static Future<List<Command>> load() async {
     final f = await _file();
     if (!await f.exists()) {
@@ -30,6 +33,7 @@ class CommandsStore {
     }
   }
 
+  /// 将用户命令列表以缩进 JSON 写入配置目录或测试覆盖文件。
   static Future<void> save(List<Command> commands) async {
     final f = await _file();
     await f.writeAsString(

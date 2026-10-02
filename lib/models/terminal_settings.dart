@@ -6,7 +6,8 @@ import 'package:xterm/xterm.dart';
 import 'terminal_theme_codec.dart';
 import 'terminal_theme_presets.dart';
 
-/// User preferences for terminal appearance and cursor behavior.
+/// 保存终端显示、光标、壁纸和字符宽度策略，并负责在应用启动或设置变更时恢复兼容
+/// 值。
 class TerminalSettings {
   /// Defaults match each platform's native terminal conventions:
   ///   Windows → Consolas         (native Windows terminal face)
@@ -79,40 +80,60 @@ class TerminalSettings {
        fontWeight = fontWeight ?? defaultFontWeight,
        customTheme = customTheme ?? TerminalThemePresets.defaultTheme;
 
+  /// 选中的主题预设 ID；用于恢复主题选择器状态。
   String themePresetId;
+
+  /// 用户自定义主题色；应用主题时在自定义主题模式下使用。
   TerminalTheme customTheme;
 
+  /// 终端主要字体族名称，需为打包字体或系统已安装字体。
   String fontFamily;
+
+  /// CJK 字符的回退字体族，避免主字体缺少汉字字形。
   String cjkFontFamily;
+
+  /// 终端字号，单位为逻辑像素。
   double fontSize;
+
+  /// 行高相对倍数，影响每行终端单元格的垂直占用。
   double lineHeight;
+
+  /// 终端字体粗细。
   FontWeight fontWeight;
 
+  /// 光标形状：块、下划线或竖线。
   TerminalCursorType cursorType;
+
+  /// 是否闪烁终端光标。
   bool cursorBlink;
+
+  /// 光标闪烁周期，单位毫秒。
   int cursorBlinkPeriodMs;
+
+  /// 终端文字的整体缩放比例。
   double textScale;
 
-  /// Filename under `~/.ssterm/wallpapers/`, or null when none chosen.
+  /// `~/.ssterm/wallpapers/` 下的壁纸文件名；为空表示用户尚未选择壁纸。
   String? wallpaperId;
 
-  /// When false, [wallpaperId] is kept but wallpaper is not shown.
+  /// 壁纸显示开关；关闭时保留 [wallpaperId] 和其他壁纸参数，
+  /// 重新开启可恢复原设置。
   bool wallpaperEnabled;
+
+  /// 壁纸显示不透明度，范围通常为 0 到 1。
   double wallpaperOpacity;
 
-  /// Gaussian blur radius (sigma) for the wallpaper, 0 = none.
+  /// 壁纸高斯模糊的 sigma 值；0 表示不模糊。
   double wallpaperBlur;
 
-  /// Terminal cell background opacity when a wallpaper is set (0 = transparent).
+  /// 壁纸启用时终端单元格背景的不透明度；0 完全透明，1 完全遮挡壁纸。
   double backgroundOpacity;
 
-  /// Cell-width semantics for new output: 'modern' (Unicode 16 deltas +
-  /// emoji double width + VS16/VS15 rules, iTerm2 parity) or 'legacy'
-  /// (historical Unicode 11 table, for old full-screen apps).
+  /// 新输出使用的字符宽度规则：`modern` 使用新版 Unicode/emoji 行为；
+  /// `legacy` 使用旧版 Unicode 11 表，兼容部分全屏程序。
   String widthProfile;
 
-  /// iTerm2's "Ambiguous Double Width": treat East_Asian_Width=A characters
-  /// (±, ※, some box glyphs) as two cells. Off by default like iTerm2.
+  /// 是否将 Unicode East_Asian_Width=A 的模糊宽度字符按双格处理；默认关闭。
   bool ambiguousDoubleWidth;
 
   bool get hasWallpaper =>
@@ -297,9 +318,13 @@ class TerminalSettings {
     return _brightenText(base);
   }
 
+  /// 非 Windows 平台默认前景色提亮幅度。
   static const _kTextLift = 0.06;
+  /// 非 Windows 平台 ANSI 色提亮幅度。
   static const _kAnsiLift = 0.04;
+  /// Windows 平台默认前景色提亮幅度。
   static const _kWindowsTextLift = 0.02;
+  /// Windows 平台 ANSI 色提亮幅度。
   static const _kWindowsAnsiLift = 0.015;
 
   static TerminalTheme _brightenText(TerminalTheme t) {

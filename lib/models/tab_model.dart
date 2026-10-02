@@ -14,6 +14,8 @@ import '../views/file_editor_view.dart';
 import 'ssh_host.dart';
 import 'transfer_task.dart';
 
+/// 标签内容状态机的种类，决定主视图展示终端、SSH 连接过程、错误页、
+/// 设置页或远程文件编辑器。切换类型时需同步建立或释放对应资源。
 enum AppTabKind { local, ssh, sshConnecting, sshError, settings, editor }
 
 /// Best-effort SSH teardown; must not throw when the transport is already dead.
@@ -25,38 +27,63 @@ void safeSshTeardown(void Function() close) {
   } catch (_) {}
 }
 
+/// 单个标签的运行期模型，持有终端 pane、PTY/SSH/SFTP、输出管道、
+/// 分屏和传输等状态，并负责释放自己拥有的资源。编辑器借用来源 SSH
+/// 标签的 SFTP client，因此编辑器标签不能关闭该 client。
 class AppTab {
+  /// 当前内容类型；页面构建逻辑据此选择终端、设置、错误或编辑器界面。
   AppTabKind kind;
+  /// 标签栏显示文本；SSH/本地连接可更新它，编辑器通常使用文件路径。
   String title;
+  /// 本地标签启动时使用的 Shell 选项；SSH 和非终端标签为空。
   LocalShellOption? localShell;
 
-  /// Populated while [kind] is [AppTabKind.sshError]; cleared on retry.
+  /// SSH 建连失败时显示的错误内容；重试前清空，连接成功后不再使用。
   String? connectionError;
 
   // ── Pane 0 ──────────────────────────────────────────────────────────────────
+  /// 主 pane 的 xterm 状态，接收 Rust 终端核心同步后的屏幕数据。
   Terminal? terminal;
+  /// 主 pane 的本地 PTY 进程句柄；SSH pane 中为空。
   Pty? pty;
+  /// 主 pane 持有的 Rust 终端解析/屏幕核心实例。
   RustTerminalCore? rustTerminalCore;
+  /// 将主 pane 输出、Rust 核心状态和 xterm 画面连接起来的桥接器。
   RustTerminalBridge? rustTerminalBridge;
+  /// 主 pane 的 SSH 客户端；关闭时由本标签释放。
   SSHClient? sshClient;
+  /// 经由跳板连接时持有的中间 SSH 客户端；直连时为空。
   SSHClient? jumpClient;
+  /// 主 pane 的交互 Shell 通道；本地 PTY 标签中为空。
   SSHSession? sshSession;
+  /// 主 pane 的 SFTP 通道；不支持/未建立文件传输时为空。
   SftpClient? sftp;
+  /// SFTP 面板当前目录的可监听值。
   ValueNotifier<String>? remotePath;
+  /// pane 0 最近一次 OSC 7 上报的远程工作目录。
   String? remoteCwdPane0;
+  /// pane 1 最近一次 OSC 7 上报的远程工作目录。
   String? remoteCwdPane1;
 
   /// True after pane 0 has emitted an OSC-7 cwd report. Kept separately from
   /// [remoteCwdPane0] because `/` is both a valid cwd and the initial fallback.
   bool remoteCwdPane0Observed = false;
+  /// 当前被视为活动 SSH pane 的索引，0 为主 pane，1 为分屏 pane。
   int activeSshPane = 0;
+  /// 本地 Shell 最近上报的工作目录，供新建命令或面板使用。
   ValueNotifier<String>? localPath;
+  /// 主 pane 的输出缓冲、转换和日志管道。
   OutputPipe? pipe;
+  /// 绑定主 pane 终端视图的 key，用于读取或控制可见视图状态。
   final terminalViewKey = GlobalKey<TerminalViewState>();
 
+  /// 当前 SSH 标签的端口转发资源管理器。
   PortForwardService? forwardService;
+  /// 当前 SSH 连接使用的档案，供重连和设置同步使用。
   SshHost? sshProfile;
+  /// 用户主动断开时置为 true，防止自动重连逻辑重新连接。
   bool manuallyDisconnected = false;
+  /// 定期探测 SSH 连接健康状态的计时器。
   Timer? keepaliveTimer;
 
   /// True while a keepalive `client.run('true')` is still pending.  Used to
@@ -69,12 +96,14 @@ class AppTab {
   /// connection.  Reset to 0 on success.  Drives exponential backoff and
   /// the hard retry ceiling in `_reconnectTab`.
   int reconnectAttempt = 0;
+  /// 当前标签是否显示 SFTP 面板。
   bool sftpPanelVisible = false;
 
-  /// The Agent executes in separate background processes, but its starting
-  /// cwd follows the active terminal pane's OSC-7 reports.
+  /// 当前标签是否显示 Agent 面板。
   bool agentPanelVisible = false;
+  /// Agent 后台命令的工作目录；成功命令返回的新 cwd 会更新此值。
   String? agentCwd;
+  /// 当前标签的 Agent 命令是否已被取消；取消后不再采纳迟到的 cwd 结果。
   bool _agentExecutionCancelled = false;
 
   bool get isAgentExecutionCancelled => _agentExecutionCancelled;
@@ -91,6 +120,7 @@ class AppTab {
     agentCwd = cwd;
   }
 
+  /// 当前 SSH 标签的上传/下载队列；本地或轻量标签中为空。
   TransferManager? transferManager;
 
   // ── Editor-tab-only state (AppTabKind.editor) ────────────────────────────
@@ -141,19 +171,31 @@ class AppTab {
   final editorViewKey = GlobalKey<FileEditorViewState>();
 
   // ── Pane 1 ──────────────────────────────────────────────────────────────────
+  /// 分屏 pane 的 xterm 状态；为空表示当前没有第二个 pane。
   Terminal? splitTerminal;
+  /// 分屏 pane 的 SSH Shell 通道，本地分屏时为空。
   SSHSession? splitSshSession;
+  /// 分屏 pane 的本地 PTY 句柄，SSH 分屏时为空。
   Pty? splitPty;
+  /// 分屏 pane 的 Rust 终端解析和屏幕状态。
   RustTerminalCore? splitRustTerminalCore;
+  /// 分屏 pane 的 Rust 核心到 xterm 的状态桥接器。
   RustTerminalBridge? splitRustTerminalBridge;
+  /// 分屏 pane 的输出缓冲、转换和日志管道。
   OutputPipe? splitPipe;
+  /// 绑定分屏 pane 终端视图的 key。
   final splitViewKey = GlobalKey<TerminalViewState>();
+  /// 分屏方向；horizontal 表示左右排列，vertical 表示上下排列。
   Axis splitAxis = Axis.horizontal;
 
+  /// 主 pane 的键盘输入和选择控制器。
   final terminalController = TerminalController();
+  /// 分屏 pane 的键盘输入和选择控制器。
   final splitTerminalController = TerminalController();
 
+  /// 主 pane 会话是否已结束，用于视图显示退出状态并防止重复清理。
   bool primarySessionEnded = false;
+  /// 分屏 pane 会话是否已结束。
   bool splitSessionEnded = false;
 
   bool get isSplit => splitTerminal != null;

@@ -1,3 +1,6 @@
+/// 统一检查和维护各 Shell 的 SSTerm 集成区块。写入前保留用户配置文件其余内容，
+/// 并识别缺失、重复或损坏的管理标记。
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,6 +11,9 @@ import 'local_shell_discovery.dart';
 const _integrationBegin = '# >>> SSTerm Shell Integration v1 >>>';
 const _integrationEnd = '# <<< SSTerm Shell Integration v1 <<<';
 
+/// 描述某个 Shell 集成目标的检测结果。`checking` 和 `unavailable`
+/// 表示暂时无法确认安装状态；`damaged` 表示管理区块存在，
+/// 但无法识别为完整安装。
 enum ShellIntegrationState {
   checking,
   notInstalled,
@@ -16,6 +22,8 @@ enum ShellIntegrationState {
   unavailable,
 }
 
+/// 决定使用哪种启动文件和集成脚本的 Shell 标识，包含原生 POSIX Shell、WSL
+/// Shell 和 Windows 命令解释器。
 enum ShellIntegrationKind {
   powershell,
   bash,
@@ -27,6 +35,8 @@ enum ShellIntegrationKind {
   cmd,
 }
 
+/// 一个可检查/修改的 Shell 安装目标，提供稳定标识、显示名称、Shell 类型和对应
+/// profile 路径；WSL 目标还需带发行版信息。
 class ShellIntegrationTarget {
   const ShellIntegrationTarget({
     required this.id,
@@ -60,6 +70,8 @@ class ShellIntegrationTarget {
   );
 }
 
+/// 识别受支持 Shell 的启动配置，并以带版本边界标记的区块安装或修复 OSC 7 集成。
+/// 删除/修复时只改动 SSTerm 管理区块，不重写用户其他配置。
 class ShellIntegrationManager {
   static Future<List<ShellIntegrationTarget>> discover() async {
     final targets = <String, ShellIntegrationTarget>{};
@@ -489,6 +501,8 @@ class _WslResult {
   final String stderr;
 }
 
+/// 将 WSL 命令的进程输出解码为 Dart 字符串，支持 UTF-16LE 和 UTF-8。
+/// 当接口未提供明确编码时，可通过 `assumeUtf16Le` 指定回退方式。
 String decodeWslProcessOutput(Object? value, {bool assumeUtf16Le = false}) {
   if (value is String) return value;
   if (value is! List<int> || value.isEmpty) return '';
@@ -528,6 +542,9 @@ String? parseWindowsRegistryValue(String output) {
   return null;
 }
 
+/// 从 profile 原始字节识别 UTF-8/UTF-16 编码并剥离 BOM，
+/// 供后续字符串级区块编辑使用。保存时需保留编码信息，
+/// 并传给 `encodeProfileContent`。
 String decodeProfileBytes(List<int> bytes) {
   if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {
     return _decodeUtf16(bytes.sublist(2), littleEndian: true);
@@ -545,6 +562,8 @@ String decodeProfileBytes(List<int> bytes) {
   return utf8.decode(bytes.sublist(offset));
 }
 
+/// 将修改后的 profile 按原有 UTF-8 或 UTF-16 字节序重新编码，并保留对应 BOM，
+/// 避免安装集成时改变用户文件编码。
 List<int> encodeProfileContent(String content, List<int>? originalBytes) {
   if (originalBytes != null &&
       originalBytes.length >= 2 &&
@@ -616,6 +635,8 @@ List<int> _encodeUtf16(String value, {required bool littleEndian}) {
   );
 }
 
+/// 若文件已有完整的 SSTerm 标记区块则原位替换；若没有则在末尾追加，
+/// 并确保区块边界与现有文本正确换行。
 String upsertShellIntegrationBlock(String content, String block) {
   final newline = content.contains('\r\n') ? '\r\n' : '\n';
   final body = block.replaceAll('\r\n', '\n').replaceAll('\n', newline);
@@ -634,6 +655,8 @@ String upsertShellIntegrationBlock(String content, String block) {
   return '${content.trimRight()}$newline$newline$normalizedBlock$newline';
 }
 
+/// 删除成对边界标记及其中的集成脚本，保留前后用户内容；
+/// 不完整标记由修复流程单独处理。
 String removeShellIntegrationBlock(String content) {
   final newline = content.contains('\r\n') ? '\r\n' : '\n';
   final begin = content.indexOf(_integrationBegin);
@@ -647,6 +670,8 @@ String removeShellIntegrationBlock(String content) {
   return '${merged.replaceAll(RegExp(r'(?:\r?\n){3,}'), '$newline$newline').trimRight()}$newline';
 }
 
+/// 处理只有起始/结束标记或边界次序异常的 profile：移除无法确认完整性的旧区块，
+/// 再写入一份完整集成区块。
 String repairShellIntegrationBlock(String content, String block) {
   final begin = content.indexOf(_integrationBegin);
   final end = content.indexOf(_integrationEnd);
@@ -664,6 +689,8 @@ String repairShellIntegrationBlock(String content, String block) {
   return upsertShellIntegrationBlock(content, block);
 }
 
+/// 按 Shell 类型生成对应的 OSC 7 集成代码。调用方将结果交给 profile
+/// 区块管理函数写入，而不是直接覆盖启动文件。
 String shellIntegrationBlockFor(ShellIntegrationKind kind) => switch (kind) {
   ShellIntegrationKind.powershell =>
     r'''if ($env:TERM_PROGRAM -eq 'ssterm' -and -not $global:SSTermShellIntegrationLoaded) {

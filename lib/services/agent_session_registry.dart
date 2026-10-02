@@ -4,6 +4,8 @@ import 'dart:math';
 
 import '../utils/app_dir.dart';
 
+/// 会话注册表对外暴露的会话描述，不包含运行中的客户端或互斥锁等内部资源。
+/// 可用于列出会话和选择恢复目标。
 class AgentSessionDescriptor {
   const AgentSessionDescriptor({
     required this.id,
@@ -58,6 +60,8 @@ class AgentSessionDescriptor {
   }
 }
 
+/// 会话不存在、已关闭或无法取得访问权时抛出。调用方可将其作为会话级错误处理，
+/// 而不应继续使用失效的 lease。
 class AgentSessionUnavailableException implements Exception {
   const AgentSessionUnavailableException(this.sessionId);
   final String sessionId;
@@ -66,6 +70,8 @@ class AgentSessionUnavailableException implements Exception {
   String toString() => 'Agent session is unavailable: $sessionId';
 }
 
+/// 对注册会话的临时独占租约。使用者必须在操作结束后释放租约，
+/// 否则其他请求可能无法取得该会话。
 class AgentSessionLease {
   AgentSessionLease._(this._registry, this.session, this._token);
 
@@ -81,6 +87,8 @@ class AgentSessionLease {
   }
 }
 
+/// 为标签和后台任务登记 Agent 会话，提供查找、占用和释放机制，
+/// 避免同一会话被并发执行路径同时修改。
 class AgentSessionRegistry {
   AgentSessionRegistry({this.indexFile});
 

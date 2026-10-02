@@ -8,6 +8,8 @@ bool isOsc7CompatiblePosixShellPath(String path) {
   return name == 'bash' || name == 'zsh' || name == 'fish';
 }
 
+/// 根据发现结果中的平台标记和可执行路径识别 Git Bash，供 Windows
+/// 环境变量和启动参数选择逻辑复用。
 bool isGitBashShell(LocalShellOption shell) {
   final executable = shell.executable.toLowerCase().replaceAll('/', r'\');
   return shell.id.startsWith('git-bash') ||

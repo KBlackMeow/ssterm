@@ -23,6 +23,8 @@
 ///     timestamp each new chat without touching the cached path.
 library;
 
+/// 生成 Agent 可见的会话上下文，包括活动标签、工作目录和时间等信息。
+/// 上下文从标签状态快照构造，避免 Agent 直接持有 Flutter widget。
 class SessionContext {
   SessionContext._();
 

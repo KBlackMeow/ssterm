@@ -43,6 +43,8 @@ const _kFg = Color(0xFFE4EDF8);
 const _kFgMuted = Color(0xFF8797AD);
 const _kAccent = Color(0xFF56C8FF);
 
+/// 设置页状态入口，协调终端外观、连接、Agent、安全和 Shell 集成等分区，
+/// 并将修改写回应用配置或各自服务。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,

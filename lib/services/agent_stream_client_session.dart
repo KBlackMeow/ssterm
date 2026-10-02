@@ -1,5 +1,7 @@
 import 'dart:io';
 
+/// Agent 流结束或取消时调用的 HTTP 客户端关闭函数。`force`
+/// 用于要求中断仍在进行的网络请求。
 typedef AgentHttpClientCloser =
     void Function(HttpClient client, {required bool force});
 
@@ -56,6 +58,8 @@ class AgentStreamClientSession {
   }
 }
 
+/// 流式请求遇到限流或瞬时网络错误时使用的重试时序。不同错误类别采用不同延迟；
+/// 永久错误应直接返回，不进入重试。
 class AgentStreamRetryPolicy {
   static const rateLimitDelay = Duration(seconds: 3);
   static const maxRateLimitRetries = 5;
@@ -97,6 +101,8 @@ class AgentStreamRetryPolicy {
   }
 }
 
+/// 在写日志前遮蔽 URL 凭据等敏感值并裁剪过长内容，
+/// 避免诊断日志泄露密钥或被异常响应撑大。
 class AgentStreamLogSanitizer {
   static final _uriUserInfo = RegExp(r'(https?://)[^/@\s]+@');
   static final _sensitiveValue = RegExp(

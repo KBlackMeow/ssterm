@@ -1,10 +1,19 @@
+/// 按优先级合并模型给出的风险和主机侧安全规则，产出最终等级及命中来源。
+/// 主机规则可提升风险，不能把危险命令降级。
+
 import '../models/agent_config.dart';
 import 'command_safety.dart';
 
+/// 命令执行策略使用的严重级别：普通命令可按模式自动运行，
+/// 警告和危险等级可能要求用户确认。
 enum CommandRiskLevel { normal, warning, dangerous }
 
+/// 说明最终等级来自模型判断、主机回退规则、主机覆盖规则，
+/// 还是缺少模型判断时的安全回退。
 enum CommandRiskSource { ai, hostFallback, hostOverride, missingAiFallback }
 
+/// 一次风险评估的完整结果，包含生效等级、说明、模型与主机等级，
+/// 以及命中的主机规则标识，供审批逻辑和结果卡片共用。
 class CommandRiskAssessment {
   final CommandRiskLevel level;
   final String reason;
@@ -32,6 +41,8 @@ class _WarningRule {
     : pattern = RegExp(pattern, caseSensitive: false);
 }
 
+/// 对模型风险判断应用主机级规则和缺省策略。保留风险来源便于 UI
+/// 解释为何某条命令被要求确认。
 class CommandRisk {
   static const _mandatoryDangerRules = {
     'rm-rf-root',

@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'local_shell_discovery.dart';
 
+/// 允许测试或平台实现替换登录 Shell 的 PATH 探测过程。正常情况下探测登录环境，
+/// 以继承 GUI 应用启动时缺失的用户 PATH 配置。
 typedef LoginShellPathReader = Future<String?> Function(LocalShellOption shell);
 
 /// Reads the exported PATH of a user's login shell once per shell executable.

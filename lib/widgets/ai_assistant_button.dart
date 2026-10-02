@@ -1,9 +1,13 @@
+/// Agent 面板的工具栏切换控件。
+
 import 'package:flutter/material.dart';
 
 import 'frosted_glass.dart';
 
 const _kFgInactive = Color(0xFF8E8E8E);
 
+/// 根据 `visible` 显示当前开关状态，点击时只调用父级回调，
+/// 由标签状态决定面板显隐和布局尺寸。
 class AiAssistantButton extends StatelessWidget {
   const AiAssistantButton({
     super.key,

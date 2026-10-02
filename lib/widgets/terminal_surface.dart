@@ -10,6 +10,8 @@ import 'wallpaper_background.dart';
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
 
+/// 终端右键/长按菜单的能力配置，集中提供复制、粘贴、选择及自定义操作回调；
+/// 菜单组件据此决定显示哪些项目。
 class TerminalContextMenuConfig {
   const TerminalContextMenuConfig({
     required this.controller,

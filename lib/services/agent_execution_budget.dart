@@ -52,8 +52,12 @@ class AgentExecutionBudget {
       : null;
 }
 
+/// Agent 执行预算中可触发停止的上限类别，分别限制模型请求数、Shell
+/// 调用数和总执行时长。
 enum AgentBudgetLimit { modelRequests, shellCalls, elapsed }
 
+/// 执行达到预算上限时携带的停止原因。调用方可据此显示具体限制并决定是否将停止状
+/// 态写入会话记录。
 class AgentBudgetStop {
   const AgentBudgetStop(this.limit);
 

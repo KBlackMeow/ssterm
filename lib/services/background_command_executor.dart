@@ -19,6 +19,8 @@ class CommandExecutionUpdate {
   final List<String> lastThreeLines;
 }
 
+/// 后台命令产生新输出、退出或取消状态时调用的监听器。回调可能多次触发，
+/// 界面应按更新增量而不是当作最终结果处理。
 typedef CommandExecutionUpdateListener =
     void Function(CommandExecutionUpdate update);
 
@@ -26,6 +28,8 @@ typedef CommandExecutionUpdateListener =
 typedef CommandSilenceDecider =
     FutureOr<bool?> Function(List<String> lastThreeLines);
 
+/// 注入的本地进程启动器，便于执行器统一控制命令、工作目录和环境变量，
+/// 也让测试能替换真实进程创建。
 typedef BackgroundProcessStarter =
     Future<Process> Function(
       String executable,
@@ -36,9 +40,13 @@ typedef BackgroundProcessStarter =
       bool runInShell,
     });
 
+/// 注入的 SSH 命令启动器。它在已认证客户端上创建独立命令通道，
+/// 不复用可见终端的交互式 Shell。
 typedef BackgroundSshSessionStarter =
     Future<SSHSession> Function(SSHClient client, String command);
 
+/// 从远程命令结果文件读取 Shell 执行后确认的 cwd；没有结果文件时返回空值，
+/// 由调用方保留原始目录上下文。
 typedef BackgroundSshCwdResultReader =
     Future<List<int>?> Function(SSHClient client, String resultPath);
 
@@ -869,6 +877,8 @@ String buildSshBackgroundCommand(
       '$executionCommand';
 }
 
+/// 将结果文件路径按 POSIX shell 规则转义后生成读取命令，
+/// 避免路径中的空格或元字符被当作 shell 语法执行。
 String buildSshCwdResultReadCommand(String resultPath) {
   final quotedPath = BackgroundCommandExecutor.shellQuotePosix(resultPath);
   return 'if [ -r $quotedPath ]; then head -c '

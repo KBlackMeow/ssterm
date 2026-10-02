@@ -1,9 +1,16 @@
+/// SSH 认证被服务器拒绝后用于重新输入密码。此对话框禁止点击遮罩关闭，
+/// 确认后同时返回密码和是否保存到凭据库的选择。
+
 import 'package:flutter/material.dart';
 
 import '../models/ssh_host.dart';
 
+/// 用户提交密码框时返回的记录。`save` 表示调用方可将该密码交给凭据存储；
+/// 关闭对话框时不会产生此结果。
 typedef PasswordPromptResult = ({String password, bool save});
 
+/// 显示阻止式密码提示框。用户确认时返回密码和保存选项，取消或路由关闭时返回
+/// `null`。
 Future<PasswordPromptResult?> showPasswordPromptDialog(
   BuildContext context,
   SshHost host,

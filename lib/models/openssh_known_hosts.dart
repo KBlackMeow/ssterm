@@ -15,12 +15,16 @@ class _OpenSshKeyLine {
     required this.fingerprint,
   });
 
+  /// 此 known_hosts 行对应的一个或多个主机模式。
   final List<String> hostPatterns;
+  /// OpenSSH 行中公钥使用的算法名称。
   final String keyType;
+  /// 从公钥字节计算出的规范化指纹。
   final String fingerprint;
 }
 
-/// Reads OpenSSH `~/.ssh/known_hosts` (plain and hashed `|1|` entries).
+/// 读取 OpenSSH `~/.ssh/known_hosts`，并解析普通和哈希主机条目，
+/// 以便连接时将系统 SSH 的信任记录导入 SSTerm 的校验流程。
 class OpenSshKnownHosts {
   static Future<File> file() async {
     return File('${userSshDir()}/known_hosts');

@@ -68,6 +68,8 @@ part 'app/main_mobile_nav.dart';
 part 'app/main_mobile_connections.dart';
 part 'app/main_views.dart';
 
+/// 初始化 Flutter、技能目录和桌面窗口，然后启动应用。
+/// 文件描述符限制和技能注册必须在创建终端会话前完成；移动端跳过桌面窗口初始化。
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Must run before the first Pty.start: spawned shells inherit RLIMIT_NOFILE
@@ -130,6 +132,8 @@ void main() async {
   runApp(const SsTermApp());
 }
 
+/// 构建全局 `MaterialApp`，统一设置应用标题、深色 Material 3 主题和首页。
+/// 平台窗口初始化在 `main()` 中完成，不放在 widget 生命周期里。
 class SsTermApp extends StatelessWidget {
   const SsTermApp({super.key});
 
@@ -155,6 +159,8 @@ typedef _Tab = AppTab;
 typedef _TabKind = AppTabKind;
 
 // ── Home ──────────────────────────────────────────────────────────────────────
+/// 桌面和移动端共享的主应用状态入口。负责初始化配置、创建首个标签、加载 SSH
+/// 主机，并在销毁时关闭 Agent 服务及标签持有的会话资源。
 class TerminalHome extends StatefulWidget {
   const TerminalHome({super.key});
 

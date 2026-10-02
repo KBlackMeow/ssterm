@@ -1,3 +1,6 @@
+/// 根据主机配置启动并释放 SSH 端口转发。启动失败会逐条收集错误，
+/// 调用方可选择在保留其他成功转发的同时向用户报告失败项。
+
 import 'dart:async';
 import 'dart:io';
 
@@ -5,6 +8,8 @@ import 'package:dartssh2/dartssh2.dart';
 
 import '../models/port_forward_rule.dart';
 
+/// 启动一组转发规则后仍有规则失败时抛出的聚合异常；`failures`
+/// 按规则保留各自错误，便于界面逐项显示。
 class PortForwardException implements Exception {
   PortForwardException(this.failures);
 
@@ -14,6 +19,8 @@ class PortForwardException implements Exception {
   String toString() => failures.join('; ');
 }
 
+/// 持有当前连接启动的本地监听 socket、远程转发和 SOCKS5 转发。
+/// `startAll` 会尝试所有启用规则；停止或释放服务时关闭已建立的转发资源。
 class PortForwardService {
   final _serverSockets = <ServerSocket>[];
   final _remoteForwards = <SSHRemoteForward>[];

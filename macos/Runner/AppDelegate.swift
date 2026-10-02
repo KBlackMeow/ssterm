@@ -1,3 +1,5 @@
+// 配置 macOS 应用启动和窗口生命周期行为。
+
 import Cocoa
 import FlutterMacOS
 

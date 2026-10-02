@@ -3,7 +3,9 @@ import 'dart:io';
 import '../utils/app_dir.dart';
 import 'ssh_host.dart';
 
-/// Parses OpenSSH `~/.ssh/config` (and optional `Include` files).
+/// 解析 OpenSSH 配置及其 `Include` 文件，提取支持的主机别名、地址、
+/// 端口、用户和身份文件，转换为可供连接界面使用的 [SshHost] 列表。
+/// 通配 Host 项不会作为可直接连接的主机返回。
 Future<List<SshHost>> parseSshConfig() async {
   final home = appBasePath();
   final root = File('${userSshDir()}/config');

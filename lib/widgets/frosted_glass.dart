@@ -54,6 +54,8 @@ abstract final class FrostedGlassStyle {
 /// Theme extension that carries app-wide color tokens.
 /// Inject once near the root; [PopupSurface] and dialogs read from it.
 @immutable
+/// Material `ThemeExtension`，集中提供标签栏、弹出菜单等应用外框颜色。
+/// 由终端背景色推导，并随主题插值以支持 Flutter 动画。
 class AppColors extends ThemeExtension<AppColors> {
   const AppColors({
     required this.popup,

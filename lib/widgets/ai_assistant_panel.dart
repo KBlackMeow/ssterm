@@ -106,6 +106,8 @@ const _commandFeedbackFormatter = CommandFeedbackFormatter();
 /// use the same orientation and persistence model.
 enum AiPanelPosition { bottom, right }
 
+/// Agent 面板的有状态根组件，负责把当前标签的会话、配置和工具回调传给面板内容，
+/// 并协调面板显隐、停靠位置及尺寸变化。
 class AiAssistantOverlay extends StatefulWidget {
   const AiAssistantOverlay({
     super.key,

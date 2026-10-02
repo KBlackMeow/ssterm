@@ -7,6 +7,8 @@ import 'sftp_view.dart';
 
 const _kSftpPanelMargin = 8.0;
 
+/// 控制 SFTP 浏览器相对终端的布局方向：停靠右侧或底部；
+/// 对应尺寸由应用配置持久化。
 enum SftpPanelPosition { right, bottom }
 
 /// Wraps [child] (terminal or split view) with a floating SFTP overlay panel.

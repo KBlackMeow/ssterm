@@ -442,6 +442,8 @@ class _Btn extends StatelessWidget {
 // Mobile transfer bottom sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// 在移动布局中打开传输队列底部弹层，并将当前 `TransferManager` 传入队列视图；
+/// 弹层关闭不会关闭 SSH 连接或传输管理器。
 Future<void> showMobileTransferSheet({
   required BuildContext context,
   required TransferManager manager,

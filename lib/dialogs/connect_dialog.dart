@@ -40,6 +40,7 @@ Future<SshHost?> showConnectDialog(
   );
 }
 
+/// 打开 SSH 主机编辑器；确认后返回保存的配置。
 Future<SshHost?> showEditHostDialog(BuildContext context, {SshHost? host}) {
   final popupColor = AppColors.maybeOf(context)?.popup;
   if (Platform.isIOS || Platform.isAndroid) {

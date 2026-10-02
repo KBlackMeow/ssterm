@@ -49,6 +49,8 @@ class LlmHttpException implements Exception {
 /// Null values retain the normal Agent prompt and full tool catalogue.
 enum AgentReasoningLevel { disabled, low, medium, high }
 
+/// 将 Agent 配置解析成一次请求实际使用的 provider、模型和能力参数，
+/// 避免请求构造过程反复解释全局配置。
 class AgentRequestProfile {
   const AgentRequestProfile({
     this.systemPromptOverride,

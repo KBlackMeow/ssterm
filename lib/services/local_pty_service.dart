@@ -3,6 +3,8 @@ import 'dart:io';
 import 'local_shell_discovery.dart';
 import 'login_shell_environment.dart';
 
+/// 为 Windows CMD 提示符生成兼容包装，在显示提示符时输出 OSC 7 当前目录报告。
+/// 若已有自定义提示符，会将其保留在包装后的提示中。
 String buildCmdOsc7Prompt(String? originalPrompt) =>
     r'$E]7;file:///$P$E\' + (originalPrompt ?? r'$P$G');
 

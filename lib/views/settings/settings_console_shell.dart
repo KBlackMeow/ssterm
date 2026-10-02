@@ -1,3 +1,6 @@
+/// 设置控制台的共用布局：根据可用宽度排列导航栏，
+/// 并让选中的设置页与标签控制器保持同步。
+
 import 'package:flutter/material.dart';
 
 const _consoleBackground = Color(0xFF0B0F16);
@@ -7,6 +10,8 @@ const _consoleSignal = Color(0xFF56C8FF);
 const _consoleMuted = Color(0xFF8090A5);
 const _consoleForeground = Color(0xFFE4EDF8);
 
+/// 设置控制台侧栏的一项目的地配置。顺序应与 `TabController` 的长度以及
+/// `tabViews` 一一对应。
 class SettingsConsoleDestination {
   const SettingsConsoleDestination({required this.label, required this.icon});
 
@@ -14,6 +19,8 @@ class SettingsConsoleDestination {
   final IconData icon;
 }
 
+/// 组合设置导航、可选标题栏和标签内容；窄窗口下切换为紧凑布局。`destinations`、
+/// `tabViews` 和控制器索引必须保持相同顺序。
 class SettingsConsoleShell extends StatelessWidget {
   const SettingsConsoleShell({
     super.key,
@@ -187,6 +194,7 @@ class _ConsoleRailItem extends StatelessWidget {
   }
 }
 
+/// 显示当前设置区域标题和辅助操作的统一标题栏，供设置各分区共享样式。
 class SettingsConsoleHeader extends StatelessWidget {
   const SettingsConsoleHeader({super.key, required this.title});
 

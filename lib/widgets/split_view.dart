@@ -1,7 +1,12 @@
+/// 可拖动分隔条的双区域布局。
+
 import 'package:flutter/material.dart';
 
 const _kHandleThickness = 6.0;
 
+/// 按横向或纵向放置主区域和次区域，并将拖动比例限制在
+/// `minRatio` 与 `maxRatio` 之间。当前比例保存在 widget 状态中，
+/// 父级可通过初始比例设定首次布局。
 class SplitView extends StatefulWidget {
   const SplitView({
     super.key,

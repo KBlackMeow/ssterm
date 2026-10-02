@@ -10,6 +10,8 @@ List<String> localShellStartupArguments(String executable) {
   return const [];
 }
 
+/// 生成交互式 zsh/bash 启动包装脚本，负责加载用户原有启动配置并安装 SSTerm
+/// 的目录跟踪钩子；普通非交互命令不应使用该脚本。
 String buildInteractiveShellWrapper() => r'''
 shell="${SHELL:-/bin/sh}"
 shell_name="${shell##*/}"

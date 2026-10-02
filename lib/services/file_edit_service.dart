@@ -10,6 +10,8 @@ enum EditMatchErrorKind {
   ambiguousMatch,
 }
 
+/// 文件编辑定位结果不唯一、目标文本缺失或上下文不匹配时抛出，防止 Agent
+/// 把修改应用到错误位置。
 class EditMatchException implements Exception {
   final EditMatchErrorKind kind;
 
@@ -23,6 +25,8 @@ class EditMatchException implements Exception {
   String toString() => 'EditMatchException(${kind.name}, count=$matchCount)';
 }
 
+/// 描述编辑匹配情况及生成的新内容。调用方可检查命中数，
+/// 要求精确匹配时避免静默替换多个位置。
 class EditMatchResult {
   /// Full file content after applying the replacement.
   final String newContent;

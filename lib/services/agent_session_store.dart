@@ -115,6 +115,8 @@ class AgentSessionSnapshot {
       );
 }
 
+/// 持久化 transcript 中的一项，保留角色和序列化内容，供恢复会话时重建 provider
+/// 对话历史。
 class AgentSessionTranscriptItem {
   const AgentSessionTranscriptItem({required this.role, required this.content});
 
@@ -140,8 +142,12 @@ class AgentSessionTranscriptItem {
   Map<String, String> toJson() => {'role': role, 'content': content};
 }
 
+/// 描述恢复结果：没有可恢复记录、成功恢复，或因版本/数据问题丢弃记录。
+/// 界面可据此决定是否提示用户。
 enum AgentSessionLoadState { empty, restored, discarded }
 
+/// 一次 transcript 加载的状态和快照。仅 `restored` 状态含有效恢复内容；
+/// 其他状态用于明确区分空会话和被丢弃的数据。
 class AgentSessionLoadResult {
   const AgentSessionLoadResult._(this.state, this.snapshot);
 

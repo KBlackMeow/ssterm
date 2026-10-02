@@ -193,11 +193,12 @@ class Skill {
   }
 }
 
-/// Returned by [Skill.tryParse]: the catalogue entry plus the markdown
-/// body so SkillService can cache the body on first load without re-reading
-/// the asset.
+/// [Skill.tryParse] 的解析结果，同时携带目录项和 Markdown 正文，
+/// 让技能服务可缓存正文，避免每次读取资产文件。
 class SkillParseResult {
+  /// 解析出的技能元数据，例如 ID、名称、来源和描述。
   final Skill skill;
+  /// 去除头部元数据后的 Markdown 技能说明正文。
   final String body;
   const SkillParseResult({required this.skill, required this.body});
 }

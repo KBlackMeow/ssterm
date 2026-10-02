@@ -1,3 +1,5 @@
+// 配置 iOS Flutter 应用并注册插件。
+
 import Flutter
 import UIKit
 

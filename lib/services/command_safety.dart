@@ -62,6 +62,7 @@ class DangerVerdict {
   });
 }
 
+/// 标记安全规则来自内置基线还是用户自定义配置，便于解释和管理规则。
 enum DangerRuleSource { builtin, custom }
 
 /// Built-in rule definition.  Kept private — external callers see only
@@ -279,6 +280,8 @@ RegExp? _compileDanger(String pattern) {
   }
 }
 
+/// 执行命令安全规则匹配。内置危险规则不可被用户关闭；
+/// 配置规则可补充主机特定模式，并用于提高审批等级。
 class CommandSafety {
   /// Programs that are ALWAYS interactive — there is no flag combination
   /// that makes them exit on their own.  Block unconditionally.

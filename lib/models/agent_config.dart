@@ -2,11 +2,8 @@ import 'mcp_server_config.dart';
 
 // ── Provider ids ──────────────────────────────────────────────────────────
 
-/// HTTP wire format used for an Agent provider.
-///
-/// Compatible providers must select one protocol deliberately.  Guessing by
-/// URL or model name is unsafe because a tool-result continuation can only be
-/// encoded in the same protocol as its original tool call.
+/// Agent provider 使用的 HTTP 请求协议。兼容端点必须显式选择协议，
+/// 以保证工具调用的后续结果仍按原协议编码。
 enum ProviderProtocol {
   openAiCompatible,
   anthropicCompatible,
@@ -35,17 +32,16 @@ enum ProviderProtocol {
   }
 }
 
+/// Agent 配置中可选择的模型服务商标识。该枚举用于配置序列化和 provider 路由；
+/// 新增值时需同步处理显示名称、默认协议和请求构造。
 enum LlmProvider {
   chatgpt,
   claude,
   gemini,
   deepseek,
 
-  /// Local Ollama server (https://ollama.ai).  Uses the native `/api/chat`
-  /// NDJSON streaming endpoint (NOT the OpenAI-compat shim) so we get
-  /// first-class access to the `thinking` channel from reasoning models
-  /// like deepseek-r1 / qwq and don't have to lie about needing a bearer
-  /// token the local daemon ignores anyway.
+  /// 本地 Ollama 服务。使用原生 `/api/chat` NDJSON 流接口，
+  /// 以读取推理模型的 `thinking` 通道；默认不要求 API 密钥。
   ollama;
 
   String get displayName {
@@ -98,26 +94,28 @@ enum LlmProvider {
 
 // ── Per-provider configuration ────────────────────────────────────────────
 
+/// 一个模型服务商的连接配置。凭据通过独立的安全存储按 `id` 读取；
+/// 本对象保存接口地址、模型标识及服务商特有参数，不应直接承载明文密钥。
 class ProviderConfig {
+  /// 稳定的 provider 标识，用于查找配置和对应的 API 密钥。
   final String id;
+  /// 设置界面和 Agent 状态栏显示的服务商名称。
   String displayName;
+  /// 请求协议类型，决定调用哪个 provider 适配器。
   final ProviderProtocol protocol;
+  /// 是否允许该服务商出现在模型选择和请求路由中。
   bool enabled;
+  /// API 根地址；内置 provider 有默认值，自定义 provider 需填写。
   String? baseUrl;
+  /// 此服务商可供选择的模型 ID 列表。
   List<String> models;
+  /// 模型 ID 到上下文窗口 token 上限的映射。
   Map<String, int> modelContextWindows;
+  /// 模型 ID 到单次回复最大输出 token 数的映射。
   Map<String, int> modelMaxOutputTokens;
 
-  /// True iff this provider requires a per-user API key.  Cloud providers
-  /// (OpenAI/Anthropic/Gemini/DeepSeek) all do; local-only providers like
-  /// Ollama do NOT — they run on the user's own machine and have no
-  /// auth wall by default.  The Settings UI uses this flag to hide the
-  /// API-key field, and [LlmService] skips the "no key configured"
-  /// pre-flight that would otherwise refuse to dispatch.
-  ///
-  /// Conservative default `true`: a third-party / unknown provider id is
-  /// safer treated as needing a key (better to surface a "configure key"
-  /// nudge than to silently dispatch unauthenticated).
+  /// 该 provider 是否需要用户配置 API 密钥。设置页据此显示密钥输入框，
+  /// 请求发送前也据此检查凭据；未知 provider 默认按需要密钥处理。
   final bool requiresApiKey;
 
   ProviderConfig({
@@ -497,22 +495,18 @@ Map<String, int> _parseModelContextWindows(Object? raw) {
 /// user only ever adds/edits CUSTOM patterns through Settings → Safety;
 /// built-ins are toggled on/off via [DangerousCommandsPolicy.disabledBuiltins].
 class CustomDangerPattern {
-  /// Stable id used as the persistence key.  Independent from [pattern]
-  /// on purpose: editing the regex must NOT reset the rule's identity
-  /// (so e.g. its position in the Settings list, or future "matched N
-  /// times" telemetry, survives a typo fix).
+  /// 持久化用的稳定规则 ID，与正则内容分离；编辑正则不会改变规则身份或列表位置
+  /// 。
   final String id;
 
-  /// One-line human-readable description shown in the chat card / modal
-  /// when this rule fires.  E.g. "Recursive delete of $HOME".
+  /// 规则命中时显示给用户的说明文字，用于审批卡和风险提示。
   String label;
 
-  /// Dart-`RegExp` source.  Compile-validated at edit time in the
-  /// Settings UI; runtime compile failures are silently skipped so one
-  /// bad rule can't take down the whole classifier (and with it, the
-  /// agent loop).
+  /// Dart 正则表达式文本。设置页保存前会编译校验；
+  /// 运行期若仍无法编译则跳过此规则，避免单条坏规则中断 Agent。
   String pattern;
 
+  /// 是否参与命令风险匹配；禁用后保留规则但不生效。
   bool enabled;
 
   CustomDangerPattern({
@@ -557,33 +551,17 @@ class CustomDangerPattern {
   );
 }
 
-/// Settings for the dangerous-command blacklist.
-///
-/// When the agent (in auto-execute mode) is about to run a command
-/// matching any enabled rule, the loop pauses and a chat card asks
-/// the user to Approve / Reject.  Default ON: the surface reuses the
-/// same Apply/Reject UX as file-writes and only fires on the rare
-/// LLM-emitted destructive command, so silently shipping it on costs
-/// nothing for the common case.
-///
-/// We deliberately do NOT gate user-typed terminal input — accurately
-/// reconstructing what the shell will execute from raw keystrokes
-/// (history recall, autosuggest accept, tab completion, mid-line
-/// edits, heredocs) requires either a brittle byte-state-machine
-/// that silently misses on common paths, or a shell-integration hook
-/// we don't currently have.  A safety net that fires inconsistently
-/// is worse than none: it trains the user to either tune out the
-/// prompts or assume safety when there isn't any.
+/// 控制 Agent 命令的危险规则与审批行为。规则仅应用于 Agent 即将执行的命令；
+/// 用户直接在终端输入的内容不经此策略拦截。
 class DangerousCommandsPolicy {
+  /// Agent 自动执行模式下，危险命令是否仍需用户逐条确认。
   bool agentConfirmEnabled;
 
-  /// Built-in rule ids the user has explicitly disabled.  We persist
-  /// the *disabled* set (not enabled) so adding a new built-in rule in
-  /// a future release auto-applies for existing users without
-  /// requiring a settings touch — matches how new providers back-fill
-  /// in [AgentConfig.fromJson].
+  /// 用户明确关闭的内置规则 ID 集合。只保存关闭项可使新版本新增的内置规则默认生
+  /// 效。
   Set<String> disabledBuiltins;
 
+  /// 用户自定义的正则风险规则；无效表达式在匹配时会被跳过。
   List<CustomDangerPattern> customPatterns;
 
   DangerousCommandsPolicy({
@@ -643,6 +621,8 @@ class DangerousCommandsPolicy {
 
 // ── Top-level agent config ─────────────────────────────────────────────────
 
+/// Agent 的持久化总配置，包括 provider 列表、默认模型、执行模式、工具开关、MCP
+/// 服务和技能设置。读写格式由本类的 JSON 转换逻辑维护。
 class AgentConfig {
   /// Provider id used by [ApiKeyStorage] for the Brave Search API key.
   /// We deliberately reuse the existing key-storage path (keychain +
@@ -657,8 +637,11 @@ class AgentConfig {
   /// provider arrives, lift this into its own enum/class.
   static const braveSearchKeyId = 'brave-search';
 
+  /// 默认模型服务商 ID；为空时由当前可用 provider 选择默认值。
   String? defaultProvider;
+  /// 默认模型 ID；为空时使用所选 provider 的首个可用模型。
   String? defaultModel;
+  /// 已配置服务商列表，包含内置服务商和用户自定义端点。
   List<ProviderConfig> providers;
 
   /// Render assistant replies as full markdown (bold, lists, headings,
@@ -669,59 +652,26 @@ class AgentConfig {
   /// toggle it off in Settings.
   bool markdownEnabled;
 
-  /// Master switch for the (Brave-backed) web-search tool.  When false,
-  /// the tool is hidden from the LLM entirely — saves prompt tokens AND
-  /// stops the model from cheerfully asking to use a tool that can't
-  /// fire.  The Brave API key itself is stored under [braveSearchKeyId]
-  /// in [ApiKeyStorage], NOT here, so toggling this off doesn't wipe
-  /// the key.
+  /// 是否向模型开放网页搜索工具。关闭时工具不会进入提示词；Brave 密钥单独存储，
+  /// 关闭开关不会删除密钥。
   bool webSearchEnabled;
 
-  /// Master switch for the file-write tool (`[WRITE_FILE_BEGIN: …]` /
-  /// `[WRITE_FILE_END]` marker pair).  When false the tool block is
-  /// omitted from the system prompt so the model won't try to emit the
-  /// marker.  When true, the agent loop still REQUIRES the user to
-  /// click "Apply" on each proposed write — there is no auto-apply
-  /// (yet); flipping this switch only makes the *capability* available,
-  /// it does not grant blanket file-write authority.
-  ///
-  /// ON by default.  The "writes are irreversible" worry that
-  /// originally kept this off is already mitigated by the per-write
-  /// Apply confirmation in the UI — the model can PROPOSE writes but
-  /// nothing hits disk until the user clicks through.  Shipping off
-  /// just meant the agent silently refused to even draft a file for
-  /// review, which surprised more users than it protected.
+  /// 是否允许模型提出文件写入/编辑提案。开启只开放提案能力；
+  /// 每个文件仍需用户在界面点击应用后才会写入磁盘。
   bool fileWriteEnabled;
 
-  /// Whitelist of skill ids the agent is allowed to use.  Semantics:
-  ///   • null (the default) → ALL installed skills are enabled.  Newly
-  ///     dropped-in user-dir skills auto-appear without a settings
-  ///     change — matches the principle of least surprise.
-  ///   • non-null set → only ids in this set are enabled.  An empty set
-  ///     means "all skills explicitly disabled" — the LLM won't even
-  ///     see the catalogue.
-  ///
-  /// We picked the whitelist (vs a `disabledSkills` blacklist) so the
-  /// Settings UI can serialise its toggle state directly.  The trade-off:
-  /// if the user once flipped a toggle and then later installs a new
-  /// skill, they'll need to manually enable it — which the UI's "enable
-  /// all" / "disable all" buttons make trivial.
+  /// Agent 可用技能的白名单。`null` 表示启用所有已安装技能；
+  /// 非空集合只启用列出的 ID；空集合表示全部禁用。
   Set<String>? enabledSkills;
 
-  /// Dangerous-command blacklist + agent confirmation toggle.  See
-  /// [DangerousCommandsPolicy] for semantics; defaults to ON.
-  /// Non-nullable so the agent loop never has to null-check before
-  /// consulting the policy on every command.
+  /// 危险命令规则和确认策略；始终非空，默认启用 Agent 命令确认。
   DangerousCommandsPolicy dangerousPolicy;
 
-  /// Master switch for MCP (Model Context Protocol) tool integration.
-  /// When false, the MCP tools block is omitted from the system prompt
-  /// even if servers are configured.  Defaults to false — opt-in; the
-  /// user must explicitly enable this in Settings after adding servers.
+  /// 是否启用 MCP 工具接入。关闭时即使配置了服务器，
+  /// 也不会连接服务器或向模型提供其工具。
   bool mcpEnabled;
 
-  /// Configured MCP servers.  Only servers where [McpServerConfig.enabled]
-  /// is true are connected at startup.  Defaults to empty.
+  /// MCP 服务器配置列表；启动连接时还会跳过各自 `enabled` 为 `false` 的服务器。
   List<McpServerConfig> mcpServers;
 
   AgentConfig({
@@ -739,8 +689,8 @@ class AgentConfig {
        mcpServers = mcpServers ?? [],
        providers = providers ?? ProviderConfig.builtIns;
 
-  /// The currently enabled provider matching [defaultProvider], or the first
-  /// enabled provider if none is explicitly selected.
+  /// 当前生效的 provider：优先返回 [defaultProvider] 指定且已启用的项，
+  /// 否则返回首个启用项；没有启用项时为空。
   ProviderConfig? get current {
     if (defaultProvider != null) {
       final match = providers
@@ -751,8 +701,8 @@ class AgentConfig {
     return providers.where((p) => p.enabled).firstOrNull;
   }
 
-  /// Resolved model name: the global [defaultModel] if it belongs to the
-  /// current provider's model list, or the first model from the current provider.
+  /// 当前 provider 实际使用的模型 ID。全局默认模型属于该 provider 时优先使用，
+  /// 否则回退到模型列表首项；列表为空时返回空值。
   String? get resolvedModel {
     final p = current;
     if (p == null) return null;

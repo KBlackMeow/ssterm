@@ -128,12 +128,16 @@ class SkillArchiveImporter {
   }
 }
 
+/// 记录技能归档导入的成功项、跳过项或失败信息，供设置界面汇总显示；
+/// 不持有归档文件句柄。
 class SkillArchiveImportResult {
   const SkillArchiveImportResult({required this.skillId});
 
   final String skillId;
 }
 
+/// 归档格式不受支持、路径不安全或内容无法验证时抛出，
+/// 导入器应在写入技能目录前完成检查。
 class SkillArchiveImportException implements Exception {
   const SkillArchiveImportException(this.message);
 
