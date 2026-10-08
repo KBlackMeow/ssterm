@@ -12,6 +12,9 @@ import '../../services/command_safety.dart';
 import '../../services/command_risk.dart';
 import '../../services/file_picker_service.dart';
 import '../../services/llm_service.dart';
+import '../../services/agent_stream_client_session.dart';
+import '../../services/agent_tool_contract.dart';
+import '../../services/provider_speed_test.dart';
 import '../../widgets/frosted_glass.dart';
 import '../../models/agent_config.dart';
 import '../../models/command.dart';
@@ -42,6 +45,51 @@ const _kSurface = Color(0xFF121A26); // dropdown / button backgrounds
 const _kFg = Color(0xFFE4EDF8);
 const _kFgMuted = Color(0xFF8797AD);
 const _kAccent = Color(0xFF56C8FF);
+
+/// One visual treatment for every selector in the settings page and its dialogs.
+Widget _settingsDropdown<T>({
+  Key? key,
+  T? value,
+  String? label,
+  Widget? hint,
+  required List<DropdownMenuItem<T>> items,
+  required ValueChanged<T?>? onChanged,
+}) {
+  return Align(
+    alignment: Alignment.centerLeft,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: IntrinsicWidth(
+        child: ButtonTheme(
+          alignedDropdown: true,
+          child: DropdownButtonFormField<T>(
+            key: key,
+            initialValue: value,
+            isExpanded: true,
+            dropdownColor: _kSurface,
+            borderRadius: BorderRadius.circular(10),
+            menuMaxHeight: 280,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 19),
+            iconEnabledColor: _kAccent,
+            iconDisabledColor: _kFgMuted,
+            style: const TextStyle(color: _kFg, fontSize: 13),
+            decoration: InputDecoration(
+              labelText: label,
+              floatingLabelBehavior: FloatingLabelBehavior.always,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 12,
+              ),
+            ),
+            hint: hint,
+            items: items,
+            onChanged: onChanged,
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 /// 设置页状态入口，协调终端外观、连接、Agent、安全和 Shell 集成等分区，
 /// 并将修改写回应用配置或各自服务。
@@ -76,6 +124,9 @@ class _SettingsPageState extends State<SettingsPage>
   late TabController _tabController;
   PackageInfo? _packageInfo;
   List<Command> _commands = const [];
+  final _providerSpeedTests = <String, ProviderSpeedTest>{};
+  final _providerSpeedLabels = <String, String>{};
+  final _providerSpeedModels = <String, String>{};
   bool _skillImporting = false;
   bool _skillDragOver = false;
   List<ShellIntegrationTarget> _shellIntegrationTargets = const [];
@@ -187,6 +238,9 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
+    for (final test in _providerSpeedTests.values) {
+      test.cancel();
+    }
     _shellIntegrationSubscription?.cancel();
     _mcpStatusSubscription?.cancel();
     _tabController.dispose();
@@ -218,29 +272,58 @@ class _SettingsPageState extends State<SettingsPage>
       SettingsConsoleDestination(
         label: 'Appearance',
         icon: Icons.palette_outlined,
+        description: 'Theme, colors, and wallpaper',
       ),
-      SettingsConsoleDestination(label: 'Font', icon: Icons.text_fields),
-      SettingsConsoleDestination(label: 'Cursor', icon: Icons.edit_outlined),
-      SettingsConsoleDestination(label: 'SSH', icon: Icons.dns_outlined),
+      SettingsConsoleDestination(
+        label: 'Font',
+        icon: Icons.text_fields,
+        description: 'Typeface, size, and character width',
+      ),
+      SettingsConsoleDestination(
+        label: 'Cursor',
+        icon: Icons.edit_outlined,
+        description: 'Shape and blink behavior',
+      ),
+      SettingsConsoleDestination(
+        label: 'SSH',
+        icon: Icons.dns_outlined,
+        description: 'Saved connection profiles',
+      ),
       SettingsConsoleDestination(
         label: 'Commands',
         icon: Icons.terminal_outlined,
+        description: 'Reusable terminal commands',
       ),
       SettingsConsoleDestination(
         label: 'Agent',
         icon: Icons.smart_toy_outlined,
+        description: 'Models, tools, and providers',
       ),
       SettingsConsoleDestination(
         label: 'Skills',
         icon: Icons.extension_outlined,
+        description: 'Agent capabilities and imports',
       ),
-      SettingsConsoleDestination(label: 'MCP', icon: Icons.hub_outlined),
-      SettingsConsoleDestination(label: 'Safety', icon: Icons.shield_outlined),
+      SettingsConsoleDestination(
+        label: 'MCP',
+        icon: Icons.hub_outlined,
+        description: 'External tool servers',
+      ),
+      SettingsConsoleDestination(
+        label: 'Safety',
+        icon: Icons.shield_outlined,
+        description: 'Command confirmation rules',
+      ),
       SettingsConsoleDestination(
         label: 'Shell Integration',
         icon: Icons.sync_alt_outlined,
+        description: 'Working-directory synchronization',
       ),
-      SettingsConsoleDestination(label: 'About', icon: Icons.info_outline),
+      SettingsConsoleDestination(
+        label: 'About',
+        icon: Icons.info_outline,
+        description: 'Application and build information',
+      ),
     ];
 
     final tabBar = TabBar(
@@ -284,14 +367,78 @@ class _SettingsPageState extends State<SettingsPage>
       _buildAboutTab(),
     ];
 
-    return Material(
-      color: _kSheetBg,
-      child: SettingsConsoleShell(
-        controller: _tabController,
-        destinations: destinations,
-        tabBar: tabBar,
-        tabViews: tabViews,
-        header: const SettingsConsoleHeader(title: 'Settings'),
+    final baseTheme = Theme.of(context);
+    return Theme(
+      data: baseTheme.copyWith(
+        scaffoldBackgroundColor: _kSheetBg,
+        dividerColor: _kDivider,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        inputDecorationTheme: InputDecorationTheme(
+          isDense: true,
+          filled: true,
+          fillColor: _kSheetBg.withValues(alpha: .58),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 11,
+          ),
+          labelStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
+          hintStyle: const TextStyle(color: _kFgMuted, fontSize: 12),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: _kDivider),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: _kAccent),
+          ),
+        ),
+        switchTheme: SwitchThemeData(
+          thumbColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? _kAccent : _kFgMuted,
+          ),
+          trackColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? _kAccent.withValues(alpha: .32)
+                : _kDivider,
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: _kAccent,
+            textStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(7),
+            ),
+          ),
+        ),
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(
+            foregroundColor: _kFgMuted,
+            hoverColor: _kAccent.withValues(alpha: .08),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(7),
+            ),
+          ),
+        ),
+        listTileTheme: const ListTileThemeData(
+          textColor: _kFg,
+          iconColor: _kFgMuted,
+          minVerticalPadding: 10,
+        ),
+      ),
+      child: Material(
+        color: _kSheetBg,
+        child: SettingsConsoleShell(
+          controller: _tabController,
+          destinations: destinations,
+          tabBar: tabBar,
+          tabViews: tabViews,
+        ),
       ),
     );
   }
@@ -444,7 +591,6 @@ class _SettingsPageState extends State<SettingsPage>
             style: TextStyle(color: _kFg, fontSize: 13),
           ),
           value: _s.widthProfile != 'legacy',
-          activeTrackColor: _kAccent,
           onChanged: (v) =>
               _apply(_s.copyWith(widthProfile: v ? 'modern' : 'legacy')),
         ),
@@ -459,7 +605,6 @@ class _SettingsPageState extends State<SettingsPage>
             style: TextStyle(color: _kFgMuted, fontSize: 11),
           ),
           value: _s.ambiguousDoubleWidth,
-          activeTrackColor: _kAccent,
           onChanged: (v) => _apply(_s.copyWith(ambiguousDoubleWidth: v)),
         ),
       ],
@@ -484,7 +629,6 @@ class _SettingsPageState extends State<SettingsPage>
             style: TextStyle(color: _kFg, fontSize: 13),
           ),
           value: _s.cursorBlink,
-          activeTrackColor: _kAccent,
           onChanged: (v) => _apply(_s.copyWith(cursorBlink: v)),
         ),
         if (_s.cursorBlink)
@@ -767,7 +911,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _consoleSurface({required Widget child}) => Material(
     color: _kSurface,
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       side: const BorderSide(color: _kDivider),
     ),
     clipBehavior: Clip.antiAlias,
@@ -885,7 +1029,6 @@ class _SettingsPageState extends State<SettingsPage>
             style: const TextStyle(color: _kFgMuted, fontSize: 11),
           ),
           value: enabled,
-          activeTrackColor: _kAccent,
           onChanged: (v) {
             if (v && storedFile == null) {
               _pickWallpaper();
@@ -976,25 +1119,18 @@ class _SettingsPageState extends State<SettingsPage>
     final value = options.contains(_s.fontFamily)
         ? _s.fontFamily
         : TerminalSettings.defaultFontFamily;
-    return DropdownButtonFormField<String>(
-      initialValue: value,
-      dropdownColor: _kSurface,
-      style: const TextStyle(color: _kFg, fontSize: 13),
-      decoration: const InputDecoration(
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: _kDivider),
-        ),
-        focusedBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: _kAccent),
-        ),
-      ),
+    return _settingsDropdown<String>(
+      key: const Key('settings-font-dropdown'),
+      value: value,
       items: [
         for (final f in options)
           DropdownMenuItem(
             value: f,
-            child: Text(TerminalSettings.fontFamilyLabel(f)),
+            child: Text(
+              TerminalSettings.fontFamilyLabel(f),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
       onChanged: (v) {
@@ -1008,22 +1144,14 @@ class _SettingsPageState extends State<SettingsPage>
     final value = options.contains(_s.cjkFontFamily)
         ? _s.cjkFontFamily
         : options.first;
-    return DropdownButtonFormField<String>(
-      initialValue: value,
-      dropdownColor: _kSurface,
-      style: const TextStyle(color: _kFg, fontSize: 13),
-      decoration: const InputDecoration(
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        enabledBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: _kDivider),
-        ),
-        focusedBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: _kAccent),
-        ),
-      ),
+    return _settingsDropdown<String>(
+      value: value,
       items: [
-        for (final f in options) DropdownMenuItem(value: f, child: Text(f)),
+        for (final f in options)
+          DropdownMenuItem(
+            value: f,
+            child: Text(f, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
       ],
       onChanged: (v) {
         if (v != null) _apply(_s.copyWith(cjkFontFamily: v));

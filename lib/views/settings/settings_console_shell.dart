@@ -1,5 +1,5 @@
-/// 设置控制台的共用布局：根据可用宽度排列导航栏，
-/// 并让选中的设置页与标签控制器保持同步。
+// 设置控制台的共用布局：根据可用宽度排列导航栏，
+// 并让选中的设置页与标签控制器保持同步。
 
 import 'package:flutter/material.dart';
 
@@ -9,14 +9,20 @@ const _consoleBorder = Color(0xFF263443);
 const _consoleSignal = Color(0xFF56C8FF);
 const _consoleMuted = Color(0xFF8090A5);
 const _consoleForeground = Color(0xFFE4EDF8);
+const _consoleSurface = Color(0xFF121A26);
 
 /// 设置控制台侧栏的一项目的地配置。顺序应与 `TabController` 的长度以及
 /// `tabViews` 一一对应。
 class SettingsConsoleDestination {
-  const SettingsConsoleDestination({required this.label, required this.icon});
+  const SettingsConsoleDestination({
+    required this.label,
+    required this.icon,
+    this.description,
+  });
 
   final String label;
   final IconData icon;
+  final String? description;
 }
 
 /// 组合设置导航、可选标题栏和标签内容；窄窗口下切换为紧凑布局。`destinations`、
@@ -69,7 +75,13 @@ class SettingsConsoleShell extends StatelessWidget {
 
   Widget _content() => Column(
     children: [
-      ?header,
+      if (header != null)
+        header!
+      else
+        _SettingsConsoleSectionHeader(
+          controller: controller,
+          destinations: destinations,
+        ),
       Expanded(
         child: AnimatedBuilder(
           animation: controller,
@@ -94,7 +106,7 @@ class _SettingsConsoleRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       key: const Key('settings-console-rail'),
-      width: 192,
+      width: 208,
       child: Material(
         color: _consoleRail,
         child: AnimatedBuilder(
@@ -103,7 +115,7 @@ class _SettingsConsoleRail extends StatelessWidget {
             padding: EdgeInsets.zero,
             children: [
               const Padding(
-                padding: EdgeInsets.fromLTRB(18, 20, 18, 16),
+                padding: EdgeInsets.fromLTRB(20, 22, 18, 18),
                 child: Row(
                   children: [
                     Icon(Icons.tune_rounded, size: 16, color: _consoleSignal),
@@ -162,12 +174,11 @@ class _ConsoleRailItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
           color: selected ? _consoleSignal.withValues(alpha: .12) : null,
-          borderRadius: BorderRadius.circular(6),
-          border: Border(
-            left: BorderSide(
-              color: selected ? _consoleSignal : Colors.transparent,
-              width: 2,
-            ),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected
+                ? _consoleSignal.withValues(alpha: .24)
+                : Colors.transparent,
           ),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -190,6 +201,76 @@ class _ConsoleRailItem extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SettingsConsoleSectionHeader extends StatelessWidget {
+  const _SettingsConsoleSectionHeader({
+    required this.controller,
+    required this.destinations,
+  });
+
+  final TabController controller;
+  final List<SettingsConsoleDestination> destinations;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final destination = destinations[controller.index];
+        return Container(
+          decoration: const BoxDecoration(
+            color: _consoleBackground,
+            border: Border(bottom: BorderSide(color: _consoleBorder)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: _consoleSurface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _consoleBorder),
+                ),
+                child: Icon(destination.icon, size: 17, color: _consoleSignal),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${destination.label} settings',
+                      style: const TextStyle(
+                        color: _consoleForeground,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -.2,
+                      ),
+                    ),
+                    if (destination.description != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        destination.description!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _consoleMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

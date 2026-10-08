@@ -70,8 +70,8 @@ extension _AgentSettingsExt on _SettingsPageState {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<ProviderProtocol>(
-                  initialValue: protocol,
+                _settingsDropdown<ProviderProtocol>(
+                  value: protocol,
                   hint: const Text('Choose a protocol'),
                   items: const [
                     DropdownMenuItem(
@@ -541,25 +541,19 @@ extension _AgentSettingsExt on _SettingsPageState {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DropdownButtonFormField<String>(
+            _settingsDropdown<String>(
               key: ValueKey('settings-default-provider-${currentProvider?.id}'),
-              initialValue: currentProvider?.id,
-              decoration: const InputDecoration(
-                labelText: 'Provider',
-                labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                border: OutlineInputBorder(),
-              ),
-              style: const TextStyle(color: _kFg, fontSize: 13),
-              dropdownColor: _kSurface,
+              value: currentProvider?.id,
+              label: 'Provider',
               hint: const Text('Enable a provider below'),
               items: enabledProviders.map((p) {
                 return DropdownMenuItem(
                   value: p.id,
-                  child: Text(p.displayName),
+                  child: Text(
+                    p.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 );
               }).toList(),
               onChanged: enabledProviders.isEmpty
@@ -571,30 +565,30 @@ extension _AgentSettingsExt on _SettingsPageState {
             ),
             if (currentProvider != null) ...[
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
+              _settingsDropdown<String>(
                 key: ValueKey('settings-default-model-${currentProvider.id}'),
-                initialValue:
+                value:
                     _agentConfig.defaultModel != null &&
                         allModels.contains(_agentConfig.defaultModel)
                     ? _agentConfig.defaultModel
                     : null,
-                decoration: const InputDecoration(
-                  labelText: 'Default Model',
-                  labelStyle: TextStyle(color: _kFgMuted, fontSize: 13),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  border: OutlineInputBorder(),
-                ),
-                style: const TextStyle(color: _kFg, fontSize: 13),
-                dropdownColor: _kSurface,
+                label: 'Default Model',
                 hint: Text(
                   allModels.isNotEmpty ? allModels.first : 'No models',
                   style: const TextStyle(color: _kFgMuted, fontSize: 13),
                 ),
                 items: allModels.map((m) {
-                  return DropdownMenuItem(value: m, child: Text(m));
+                  return DropdownMenuItem(
+                    value: m,
+                    child: Tooltip(
+                      message: m,
+                      child: Text(
+                        m,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  );
                 }).toList(),
                 onChanged: (v) {
                   if (v == null) return;
@@ -721,10 +715,169 @@ extension _AgentSettingsExt on _SettingsPageState {
             ),
             const SizedBox(height: 8),
             _buildModelSection(provider, idx),
+            const SizedBox(height: 8),
+            _buildProviderSpeedTest(provider),
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildProviderSpeedTest(ProviderConfig provider) {
+    final running = _providerSpeedTests.containsKey(provider.id);
+    final selected = _providerSpeedModels[provider.id];
+    final model = provider.models.contains(selected)
+        ? selected
+        : provider.models.firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (model != null)
+              Container(
+                key: Key('settings-provider-speed-selector-${provider.id}'),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                decoration: BoxDecoration(
+                  color: _kSheetBg.withValues(alpha: .58),
+                  border: Border.all(color: _kDivider),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: ButtonTheme(
+                    alignedDropdown: true,
+                    child: DropdownButton<String>(
+                      key: Key('settings-provider-speed-model-${provider.id}'),
+                      value: model,
+                      isDense: true,
+                      dropdownColor: _kSurface,
+                      borderRadius: BorderRadius.circular(10),
+                      menuMaxHeight: 280,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 19,
+                      ),
+                      iconEnabledColor: _kAccent,
+                      iconDisabledColor: _kFgMuted,
+                      style: const TextStyle(color: _kFg, fontSize: 13),
+                      // DropdownButton normally sizes its trigger to the
+                      // longest menu option. Keep it aligned with the selected
+                      // model instead; the popup follows the trigger width.
+                      selectedItemBuilder: (context) => [
+                        for (final _ in provider.models)
+                          Text(
+                            model,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                      items: [
+                        for (final m in provider.models)
+                          DropdownMenuItem(
+                            value: m,
+                            child: Tooltip(
+                              message: m,
+                              child: Text(
+                                m,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                      ],
+                      onChanged: running
+                          ? null
+                          : (value) => setState(() {
+                              _providerSpeedModels[provider.id] = value!;
+                              _providerSpeedLabels.remove(provider.id);
+                            }),
+                    ),
+                  ),
+                ),
+              ),
+            TextButton.icon(
+              key: Key('settings-provider-speed-${provider.id}'),
+              icon: Icon(running ? Icons.stop : Icons.speed, size: 16),
+              label: Text(running ? 'Stop test' : 'Speed test (5s)'),
+              onPressed: running
+                  ? () => _providerSpeedTests[provider.id]?.cancel()
+                  : model == null
+                  ? null
+                  : () => _testProviderSpeed(provider, model),
+            ),
+          ],
+        ),
+        Text(
+          _providerSpeedLabels[provider.id] ??
+              'One model request; average includes startup latency. May incur API charges.',
+          key: Key('settings-provider-speed-result-${provider.id}'),
+          style: const TextStyle(color: _kFgMuted, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _testProviderSpeed(ProviderConfig provider, String model) async {
+    final test = ProviderSpeedTest();
+    final session = AgentStreamClientSession();
+    final config = _agentConfig.copyWith(
+      defaultProvider: provider.id,
+      defaultModel: model,
+      webSearchEnabled: false,
+      fileWriteEnabled: false,
+      mcpEnabled: false,
+      enabledSkills: {},
+    );
+    setState(() {
+      _providerSpeedTests[provider.id] = test;
+      _providerSpeedLabels[provider.id] =
+          '$model · Testing for up to 5 seconds…';
+    });
+    try {
+      final result = await test.run(
+        start: () => LlmService.chatStream(
+          config: config,
+          session: session,
+          profile: const AgentRequestProfile(
+            systemPromptOverride:
+                'You are a text generation benchmark. Follow the prompt directly. Do not reason or call tools.',
+            allowedNativeToolNames: {},
+            maxOutputTokens: 4096,
+          ),
+          messages: [
+            const AgentConversationItem.text(
+              role: 'user',
+              content:
+                  'Write a long continuous English description of a forest, at least 2000 words. Begin immediately and keep writing without headings.',
+            ),
+          ],
+        ).stream,
+        abort: () => session.close(force: true),
+      );
+      if (!mounted) return;
+      final first = result.firstToken;
+      setState(() {
+        _providerSpeedLabels[provider.id] = first == null
+            ? '$model · No output within 5 seconds.'
+            : '$model · ${result.exact ? '' : '≈ '}${result.tokensPerSecond.toStringAsFixed(1)} tokens/s'
+                  ' · ${result.millisecondsPerToken.toStringAsFixed(1)} ms/token'
+                  ' · First token ${(first.inMilliseconds / 1000).toStringAsFixed(2)}s'
+                  ' · ${result.tokens} ${result.exact ? 'tokens' : 'estimated tokens'}'
+                  ' / ${(result.elapsed.inMilliseconds / 1000).toStringAsFixed(2)}s';
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _providerSpeedLabels[provider.id] =
+              '$model · Test stopped or failed. Check the API key, URL, and model.';
+        });
+      }
+    } finally {
+      session.close(force: true);
+      if (mounted) setState(() => _providerSpeedTests.remove(provider.id));
+    }
   }
 
   Widget _agentTextFieldRow({
@@ -1351,12 +1504,9 @@ class _McpServerDialogState extends State<_McpServerDialog> {
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<McpTransportType>(
-              initialValue: _transport,
-              decoration: const InputDecoration(
-                labelText: 'Transport',
-                border: OutlineInputBorder(),
-              ),
+            _settingsDropdown<McpTransportType>(
+              value: _transport,
+              label: 'Transport',
               items: const [
                 DropdownMenuItem(
                   value: McpTransportType.stdio,

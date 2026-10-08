@@ -8,29 +8,35 @@
 
 ## ✨ Highlights
 
-- **🤖 AI Agent** — Chat with an AI assistant beside your terminal. Auto-execute commands, capture output, review dangerous operations, and let the agent write files — all with tab-scoped session context.
+- **🤖 AI Agent** — Chat with an AI assistant beside your terminal. Run commands in independent background sessions, review file diffs, attach images, and resume saved conversations — with command risk checks and automatic context compaction.
 - **🔀 Split Panes** — Horizontal and vertical splits within every tab. Run a local shell and an SSH session side-by-side, or monitor logs while editing remotely.
-- **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Concurrent transfers with a live progress queue. Drag-and-drop upload support.
+- **📁 SFTP Browser** — Browse, upload, download, rename, and manage remote files from a dockable panel. Syntax-highlighted remote file editing, concurrent transfers with a live progress queue, staged uploads, and drag-and-drop support.
 - **🔐 Full SSH Client** — Password and private-key auth, `~/.ssh/config` import, jump host / ProxyJump, port forwarding (local, remote, SOCKS5), keepalive with auto-reconnect, and session logging.
 - **🎨 Deep Customization** — 9 terminal theme presets, custom colors, bundled JetBrains Mono plus platform-native fonts with CJK fallback, cursor shape & blink, wallpaper with frosted glass blur and opacity.
-- **⚡ Local Shell** — PTY-backed with TrueColor, OSC 7-integrated shell discovery (zsh, bash, fish, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
+- **⚡ Local Shell** — Rust-backed terminal parsing and PTY I/O with TrueColor, OSC 7-integrated shell discovery (zsh, bash, fish, WSL, Git Bash), and pre-raised file descriptor limits for plugin-heavy setups.
 - **🖥️ Cross-Platform** — macOS (primary), Windows, Linux. Mobile (iOS/Android) for SSH & SFTP.
 
 ---
 
 ## 🤖 AI Agent
 
-The tab-scoped agent panel is the standout feature — converse with an AI assistant that executes commands in its own background session and iterates on structured results.
+The tab-scoped agent panel is the standout feature — converse with an AI assistant that executes local or SSH commands in its own background session and iterates on structured results. Create a fresh conversation or resume a saved session from the session picker.
 
 | Capability | Description |
 |---|---|
 | **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local), plus a compatible-provider catalog (OpenRouter, Kimi, Qwen, GLM, Mistral, MiniMax, SiliconFlow) and custom OpenAI/Anthropic-compatible endpoints |
 | **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
-| **Session context** | Active tab, working directory, and date/time sent on first turn |
+| **Session context** | Active tab, working directory, and date/time sent on first turn; verified command cwd carries forward to later commands and relative file operations |
+| **Saved sessions** | Create, resume, and delete conversations; sessions are saved after the first message |
+| **Task controls** | Stop a running task, queue follow-up input, and use slash command completion for session actions and skills |
 | **Auto-execute mode** | Ordinary and warning commands run automatically; dangerous commands pause for approval |
 | **Cautious mode** | Ordinary commands run directly; warning and dangerous commands require confirmation |
 | **Three-level command risk** | AI classifies commands as normal, warning, or dangerous; host rules can only raise the level, and result cards show the final classification |
-| **File-write proposals** | Agent proposes file writes with a diff preview; apply or reject per-file |
+| **File writes & edits** | Create or replace files, or make precise text replacements, with a diff preview and per-file Apply / Reject review |
+| **Image support** | Attach images to prompts and let vision-capable models inspect local workspace images through the image tool |
+| **Provider speed test** | Benchmark a selected provider/model for up to 5 seconds; show average tokens/s, ms/token, and first-token latency, with estimated counts clearly labeled |
+| **Context management** | Automatic conversation compaction, token usage display, and per-model context window and maximum output settings |
+| **Command results** | Structured command history and expandable result cards show command purpose, risk, output, and execution outcome |
 | **Web search** | Brave Search integration for current web results (configurable) |
 | **Custom skills** | Add user-defined skills from Settings or share them through `~/.agents/skills/<id>/SKILL.md`; no built-in playbooks are enabled by default |
 | **MCP integration** | Connect user-configured Model Context Protocol servers through local stdio or Streamable HTTP, then expose their discovered tools to the agent |
@@ -38,7 +44,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 
 ### Tool calling
 
-SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, built-in skills, and configured MCP tools. For providers with native support, calls and results remain structured through the provider's conversation format; the agent executes at most one actionable call per turn. Ollama uses the existing fenced-JSON/text protocol so local models continue to work.
+SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, local image inspection, enabled custom skills, and configured MCP tools. For providers with native support, calls and results remain structured through the provider's conversation format; the agent executes at most one actionable call per turn. Ollama uses the existing fenced-JSON/text protocol so local models continue to work.
 
 Native calls use the same safeguards as the compatibility path: dangerous commands stop for review, file changes are presented as apply/reject proposals, and MCP calls go through SSTerm's existing tool executor. Tool-call cards redact sensitive argument values and truncate unusually long values before displaying them.
 
@@ -63,6 +69,7 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 | **File operations** | Browse, upload, download, rename, mkdir, delete |
 | **In-app file editor** | Double-click a remote file to open a syntax-highlighted editor tab (language detection, line folding) and save changes back over SFTP |
 | **Transfer queue** | Concurrent transfers with live progress, pause/resume/cancel per task |
+| **Staged uploads** | Upload to a temporary sibling file with pipelined writes, then rename into place after completion |
 | **Drag & drop** | Drop files onto the terminal to upload |
 | **Panel docking** | Bottom or right side, persisted in config |
 | **Path sync** | SFTP directory follows the SSH terminal's working directory (OSC 7) |
@@ -97,7 +104,9 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 
 ## ⚡ Local Shell
 
-- PTY-backed with `xterm-256color` and TrueColor (24-bit).
+- Rust-backed terminal parsing, screen buffers, and native PTY I/O with `xterm-256color` and TrueColor (24-bit).
+- Batched output and flow control for high-volume local and SSH sessions; resize reflow, CJK/emoji cell handling, terminal query responses, and mouse reporting for interactive TUIs.
+- Windows uses ConPTY with bundled OpenConsole components and a system ConPTY fallback.
 - Auto-detects OSC 7-integrated zsh, bash, and fish on macOS/Linux; compatible WSL distros, CMD, PowerShell, and Git Bash on Windows.
 - Visible terminal shells use OSC 7 for their own working-directory tracking.
   Agent commands run in independent background processes or SSH channels, and
@@ -124,8 +133,8 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 | Component | Technology |
 |---|---|
 | UI framework | [Flutter](https://flutter.dev) (Material 3 Dark) |
-| Terminal emulator | [xterm](packages/xterm) (vendored) |
-| Local PTY | [flutter_pty](packages/flutter_pty) (vendored) |
+| Terminal emulator | [Rust terminal core](native/terminal_core) for parsing and screen state + [xterm](packages/xterm) (vendored) for rendering and input |
+| Local PTY | [Rust PTY core](native/pty_core) + [flutter_pty](packages/flutter_pty) (vendored bridge), with ConPTY on Windows |
 | SSH / SFTP | [dartssh2](https://pub.dev/packages/dartssh2) |
 | AI Agent | [mcp_dart](https://pub.dev/packages/mcp_dart) (MCP) + provider-native tool calling |
 | File editor | [flutter_code_editor](https://pub.dev/packages/flutter_code_editor) + [highlight](https://pub.dev/packages/highlight) |
@@ -170,7 +179,10 @@ lib/
   widgets/           # Terminal surface, split view, transfer panel, AI panel …
 packages/
   flutter_pty/       # Native PTY plugin (vendored)
-  xterm/             # Terminal emulator (vendored)
+  xterm/             # Terminal rendering & input (vendored)
+native/
+  terminal_core/     # Rust terminal parser & screen buffers
+  pty_core/          # Rust PTY lifecycle & I/O (Unix PTY / Windows ConPTY)
 ```
 
 ---

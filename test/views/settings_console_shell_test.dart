@@ -621,6 +621,133 @@ void main() {
     expect(agent.defaultModel, isNull);
     expect(find.text('上下文窗口 (tokens)'), findsNothing);
   });
+
+  testWidgets('speed model menu matches the selected item width', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: AgentConfig(
+            defaultProvider: 'deepseek',
+            providers: [
+              ProviderConfig.deepseek().copyWith(
+                enabled: true,
+                models: [
+                  'deepseek-v4-pro',
+                  'deepseek-v4.1-flash-expires-on-0910',
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final selector = find.byKey(
+      const Key('settings-provider-speed-model-deepseek'),
+    );
+    await tester.ensureVisible(selector);
+    await tester.pumpAndSettle();
+    final buttonWidth = tester.getSize(selector).width;
+    final inputHeight = tester
+        .getSize(
+          find.byKey(const Key('settings-provider-speed-selector-deepseek')),
+        )
+        .height;
+    expect(buttonWidth, lessThan(240));
+
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    final menuWidth = tester.getSize(find.byType(ListView).last).width;
+    final menuRow = find
+        .descendant(
+          of: find.byType(ListView).last,
+          matching: find.byType(DropdownMenuItem<String>),
+        )
+        .first;
+    expect(menuWidth, closeTo(buttonWidth, 4));
+    expect(tester.getSize(menuRow).height, closeTo(inputHeight, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('settings form menu does not exceed its input width', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Font'));
+    await tester.pump();
+    final input = find.byKey(const Key('settings-font-dropdown'));
+    final inputWidth = tester.getSize(input).width;
+    final inputHeight = tester.getSize(input).height;
+    expect(inputWidth, lessThanOrEqualTo(280));
+    await tester.tap(input);
+    await tester.pumpAndSettle();
+
+    final menuWidth = tester.getSize(find.byType(ListView).last).width;
+    final menuRow = find
+        .descendant(
+          of: find.byType(ListView).last,
+          matching: find.byType(DropdownMenuItem<String>),
+        )
+        .first;
+    expect(menuWidth, closeTo(inputWidth, 1));
+    expect(tester.getSize(menuRow).height, closeTo(inputHeight, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('labeled provider menu rows match the input height', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _mockPackageInfo(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          settings: TerminalSettings(cursorBlink: false),
+          onChanged: (_) {},
+          agent: AgentConfig(
+            defaultProvider: 'deepseek',
+            providers: [ProviderConfig.deepseek().copyWith(enabled: true)],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Agent'));
+    await tester.pump();
+    final input = find.byKey(const Key('settings-default-provider-deepseek'));
+    final inputHeight = tester.getSize(input).height;
+    await tester.tap(input);
+    await tester.pumpAndSettle();
+    final menuRow = find
+        .descendant(
+          of: find.byType(ListView).last,
+          matching: find.byType(DropdownMenuItem<String>),
+        )
+        .first;
+    expect(tester.getSize(menuRow).height, closeTo(inputHeight, 1));
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _Harness extends StatefulWidget {
