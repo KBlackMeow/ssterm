@@ -36,6 +36,7 @@ import 'services/session_logger.dart';
 import 'services/llm_service.dart';
 import 'services/mcp_service.dart';
 import 'services/skill_service.dart';
+import 'services/startup_appearance.dart';
 import 'services/ssh_connection.dart';
 import 'services/background_command_executor.dart';
 import 'services/command_execution_history.dart';
@@ -67,14 +68,24 @@ part 'app/main_mobile_nav.dart';
 part 'app/main_mobile_connections.dart';
 part 'app/main_views.dart';
 
-/// 初始化 Flutter、技能目录和桌面窗口，然后启动应用。
-/// 文件描述符限制和技能注册必须在创建终端会话前完成；移动端跳过桌面窗口初始化。
+final _initialLocalShells = LocalShellDiscovery.discoverSync();
+final _localShellLoginEnvironmentResolver = LoginShellEnvironmentResolver();
+
+/// Initialize Flutter and the desktop window, then start background services.
+/// The file descriptor limit must be raised before launching any shell.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Must run before the first Pty.start: spawned shells inherit RLIMIT_NOFILE
   // from this process, and macOS's default 256 is too low for plugin-heavy
   // zsh setups.
   raiseFileDescriptorLimit();
+
+  // Linux's first PTY reuses this login PATH probe. On macOS the visible
+  // shell itself starts in login mode, matching Terminal.app.
+  if (Platform.isLinux) {
+    final shell = LocalShellDiscovery.defaultShell(_initialLocalShells);
+    unawaited(_localShellLoginEnvironmentResolver.resolvePath(shell));
+  }
 
   // Register bundled DYNAMIC skills (Dart functions that produce SKILL.md
   // content with live runtime data — see services/bundled_skills.dart)
@@ -83,12 +94,10 @@ void main() async {
   // init() is async + reads the asset manifest.
   registerDefaultBundledSkills();
 
-  // Discover bundled Skills (assets/skills/*/SKILL.md PLUS the dynamic
-  // ones above) BEFORE runApp so the first LLM call already sees the
-  // catalogue when the agent loop announces it.  init() is fast (a few
-  // small text files) and fail-safe: a malformed SKILL.md is logged and
-  // skipped, never throws.
-  await SkillService.init();
+  // Read appearance concurrently with native window setup. macOS keeps its
+  // window hidden until the first Flutter frame has the saved wallpaper.
+  final startupConfigFuture = Platform.isMacOS ? AppConfig.load() : null;
+  AppConfig? startupConfig;
 
   // Custom title bar: hide the OS-drawn caption strip and let the tab bar take
   // its place (Chrome / Edge / Windows Terminal style). On macOS the native
@@ -122,19 +131,48 @@ void main() async {
     if (Platform.isMacOS) {
       await windowManager.setBrightness(Brightness.dark);
     }
-    await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
+    if (Platform.isMacOS) {
+      await windowManager.waitUntilReadyToShow(windowOptions);
+      startupConfig = await startupConfigFuture;
+      final settings = startupConfig!.terminal;
+      if (settings.hasWallpaper) {
+        final file = WallpaperStorage.resolveFile(settings.wallpaperId);
+        if (file != null) await preloadStartupWallpaper(file);
+      }
+    } else {
+      await windowManager.waitUntilReadyToShow(windowOptions, () async {
+        await windowManager.show();
+        await windowManager.focus();
+      });
+    }
   }
 
-  runApp(const SsTermApp());
+  runApp(SsTermApp(initialConfig: startupConfig));
+
+  // Terminal startup does not use Skills. Agent requests await startupReady,
+  // so even a request made before the scan completes gets the full catalogue.
+  unawaited(
+    SkillService.startInitialLoad().then((_) {
+      LlmService.refreshSystemPrompt();
+    }),
+  );
+
+  if (Platform.isMacOS) {
+    await WidgetsBinding.instance.waitUntilFirstFrameRasterized.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () {},
+    );
+    await windowManager.show();
+    await windowManager.focus();
+  }
 }
 
 /// 构建全局 `MaterialApp`，统一设置应用标题、深色 Material 3 主题和首页。
 /// 平台窗口初始化在 `main()` 中完成，不放在 widget 生命周期里。
 class SsTermApp extends StatelessWidget {
-  const SsTermApp({super.key});
+  const SsTermApp({super.key, this.initialConfig});
+
+  final AppConfig? initialConfig;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +188,7 @@ class SsTermApp extends StatelessWidget {
             : null,
       ),
       themeMode: ThemeMode.dark,
-      home: const TerminalHome(),
+      home: TerminalHome(initialConfig: initialConfig),
     );
   }
 }
@@ -168,7 +206,9 @@ typedef _TabKind = AppTabKind;
 /// 桌面和移动端共享的主应用状态入口。负责初始化配置、创建首个标签、加载 SSH
 /// 主机，并在销毁时关闭 Agent 服务及标签持有的会话资源。
 class TerminalHome extends StatefulWidget {
-  const TerminalHome({super.key});
+  const TerminalHome({super.key, this.initialConfig});
+
+  final AppConfig? initialConfig;
 
   @override
   State<TerminalHome> createState() => _TerminalHomeState();
@@ -192,38 +232,53 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
   @override
   void initState() {
     super.initState();
+    final initialConfig = widget.initialConfig;
+    if (initialConfig != null) {
+      _config = initialConfig;
+      if (initialConfig.cachedShells.isNotEmpty) {
+        _localShells = initialConfig.cachedShells;
+      }
+    }
     // iOS sandbox forbids forkpty(); local shell is unavailable on iOS/iPadOS.
     // Start with an SSH connect dialog instead of a doomed local tab.
     if (!Platform.isIOS) {
       _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
     }
     _loadSshHosts();
-    AppConfig.load().then((c) {
-      if (!mounted) return;
-      setState(() {
-        _config = c;
-        // Prefer the persisted list (includes WSL distros on Windows) over the
-        // boot-time sync discovery. Falls back to the sync result when the
-        // config has nothing yet (first launch).
-        if (c.cachedShells.isNotEmpty) _localShells = c.cachedShells;
+    if (initialConfig != null) {
+      _onConfigReady(initialConfig);
+    } else {
+      AppConfig.load().then((c) {
+        if (!mounted) return;
+        setState(() {
+          _config = c;
+          // Prefer the persisted list (includes WSL distros on Windows) over the
+          // boot-time sync discovery. Falls back to the sync result when the
+          // config has nothing yet (first launch).
+          if (c.cachedShells.isNotEmpty) _localShells = c.cachedShells;
+        });
+        _onConfigReady(c);
       });
-      // Background diff: only setState + save when the discovered list
-      // actually differs from what we just restored. This keeps subsequent
-      // `+` clicks free of any discovery cost and avoids gratuitous rebuilds
-      // of the chrome (which would otherwise thrash the paragraph caches of
-      // every open terminal).
-      unawaited(_refreshLocalShellsIfChanged());
-      // Connect to enabled MCP servers in the background — slow/offline
-      // servers must never block the app from becoming interactive.
-      McpService.onToolsChanged = () {
-        LlmService.refreshSystemPrompt();
-      };
-      try {
-        McpService.init(c.agent?.mcpServers ?? []);
-      } catch (_) {
-        // MCP init failure is non-fatal; the user can retry from Settings.
-      }
-    });
+    }
+  }
+
+  void _onConfigReady(AppConfig c) {
+    // Background diff: only setState + save when the discovered list
+    // actually differs from what we just restored. This keeps subsequent
+    // `+` clicks free of any discovery cost and avoids gratuitous rebuilds
+    // of the chrome (which would otherwise thrash the paragraph caches of
+    // every open terminal).
+    unawaited(_refreshLocalShellsIfChanged());
+    // Connect to enabled MCP servers in the background — slow/offline
+    // servers must never block the app from becoming interactive.
+    McpService.onToolsChanged = () {
+      LlmService.refreshSystemPrompt();
+    };
+    try {
+      McpService.init(c.agent?.mcpServers ?? []);
+    } catch (_) {
+      // MCP init failure is non-fatal; the user can retry from Settings.
+    }
   }
 
   @override

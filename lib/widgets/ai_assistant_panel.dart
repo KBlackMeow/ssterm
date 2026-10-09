@@ -208,6 +208,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   @override
   void initState() {
     super.initState();
+    SkillService.startupReady.then((_) {
+      if (!mounted) return;
+      setState(() {});
+    });
     _position = widget.initialPosition;
     _customPanelSize = widget.initialSize;
     _sessionRegistry = widget.sessionRegistry ?? AgentSessionRegistry();
@@ -599,10 +603,12 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
         _showCapabilities(showSkills: false);
         return true;
       case '/skills':
+        await SkillService.startupReady;
         _showCapabilities(showSkills: true);
         return true;
       default:
         if (skillMatch == null) return false;
+        await SkillService.startupReady;
         final id = skillMatch.group(1)!;
         final enabled = SkillService.filterEnabled(
           widget.agentConfig?.enabledSkills,

@@ -152,7 +152,19 @@ extension _AgentSettingsExt on _SettingsPageState {
   Widget _buildSkillsTab() {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      children: [_sectionTitle('Skills'), _buildSkillsSection()],
+      children: [
+        _sectionTitle('Skills'),
+        if (SkillService.isStartupLoading)
+          FutureBuilder<void>(
+            future: SkillService.startupReady,
+            builder: (context, snapshot) =>
+                snapshot.connectionState == ConnectionState.done
+                ? _buildSkillsSection()
+                : const Center(child: CircularProgressIndicator()),
+          )
+        else
+          _buildSkillsSection(),
+      ],
     );
   }
 

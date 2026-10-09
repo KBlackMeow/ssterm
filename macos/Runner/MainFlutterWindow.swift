@@ -6,6 +6,9 @@ class MainFlutterWindow: NSWindow {
   private static let defaultContentSize = NSSize(width: 960, height: 720)
 
   override func awakeFromNib() {
+    // Flutter shows this window after its first wallpaper-backed frame is
+    // rasterized. Showing the nib window here exposes an empty black view.
+    setIsVisible(false)
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
     self.appearance = NSAppearance(named: .vibrantDark)
@@ -46,9 +49,6 @@ class MainFlutterWindow: NSWindow {
     // drag.  NSWindow does not participate in hitTest, so mouse events
     // are unaffected.
     setupDesktopDrop(for: flutterViewController)
-
-    makeKeyAndOrderFront(nil)
-    NSApp.activate(ignoringOtherApps: true)
   }
 
   // MARK: - Swizzle mouseDownCanMoveWindow

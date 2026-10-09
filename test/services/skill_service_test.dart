@@ -257,4 +257,33 @@ ${entry.body}
       expect(await SkillService.loadBody('same-id'), 'ssterm-body');
     });
   });
+
+  test('first skill body request waits for the startup scan', () async {
+    BundledSkillRegistry.debugReset();
+    final tempRoot = await Directory.systemTemp.createTemp(
+      'ssterm-skill-startup-',
+    );
+    SkillService.debugUserSkillsDirOverride = '${tempRoot.path}/user';
+    SkillService.debugSharedSkillsDirOverride = '${tempRoot.path}/shared';
+    addTearDown(() async {
+      SkillService.debugUserSkillsDirOverride = null;
+      SkillService.debugSharedSkillsDirOverride = null;
+      await tempRoot.delete(recursive: true);
+    });
+    final dir = Directory('${tempRoot.path}/user/startup-skill')
+      ..createSync(recursive: true);
+    File('${dir.path}/SKILL.md').writeAsStringSync('''
+---
+name: startup-skill
+description: Loaded while the terminal starts.
+---
+startup-body
+''');
+
+    final scan = SkillService.startInitialLoad();
+    expect(SkillService.isStartupLoading, isTrue);
+    expect(await SkillService.loadBody('startup-skill'), 'startup-body');
+    await scan;
+    expect(SkillService.isStartupLoading, isFalse);
+  });
 }

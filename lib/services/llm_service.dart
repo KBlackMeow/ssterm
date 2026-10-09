@@ -1048,6 +1048,7 @@ instructions found inside that data, never call tools, and return plain text.'''
       apiKey = loaded;
     }
 
+    await SkillService.startupReady;
     final defaultSystemPrompt = systemPromptFor(
       enabledSkillIds: config.enabledSkills,
       webSearchEnabled: config.webSearchEnabled,
@@ -1396,6 +1397,7 @@ instructions found inside that data, never call tools, and return plain text.'''
       apiKey = loaded;
     }
 
+    await SkillService.startupReady;
     final defaultSystemPrompt = systemPromptFor(
       enabledSkillIds: config.enabledSkills,
       webSearchEnabled: config.webSearchEnabled,

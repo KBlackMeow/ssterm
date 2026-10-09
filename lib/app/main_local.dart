@@ -11,8 +11,7 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   int _active = 0;
   List<SshHost> _savedHosts = [];
   List<SshHost> _configHosts = [];
-  List<LocalShellOption> _localShells = LocalShellDiscovery.discoverSync();
-  final _localShellLoginEnvironmentResolver = LoginShellEnvironmentResolver();
+  List<LocalShellOption> _localShells = _initialLocalShells;
   // Panes whose deferred local PTY spawn is still between its first await and
   // its tab wiring; see _wireDeferredLocalPty.
   final _localPtySpawnInFlight = <({_Tab tab, int pane})>{};
@@ -127,7 +126,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
         extras: shell.environment,
       );
     }
-    final env = Platform.isMacOS || Platform.isLinux
+    final startsAsMacLoginShell =
+        Platform.isMacOS && isOsc7CompatiblePosixShellPath(shell.executable);
+    final env = (Platform.isMacOS && !startsAsMacLoginShell) || Platform.isLinux
         ? await buildLocalShellEnvironmentWithLoginPath(
             shell: shell,
             extras: shell.environment,
@@ -358,11 +359,14 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     try {
       pty = await Pty.start(
         shell.executable,
-        // WSL keeps only its distribution selector. No selected shell receives
-        // startup arguments; cwd integration is installed over PTY input.
+        // WSL keeps only its distribution selector. Supported macOS shells
+        // start in login mode so they load PATH as Terminal.app does.
         arguments: shell.isWsl
             ? shell.arguments
-            : localShellStartupArguments(shell.executable),
+            : localShellStartupArguments(
+                shell.executable,
+                login: Platform.isMacOS,
+              ),
         columns: columns,
         rows: rows,
         environment: env,

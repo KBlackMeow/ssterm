@@ -1,15 +1,26 @@
+import 'local_shell_discovery.dart';
+
+/// Arguments for a visible local shell. macOS uses the same login mode as
+/// Terminal.app for supported POSIX shells; other platforms keep their
+/// existing direct interactive launch.
+List<String> localShellStartupArguments(
+  String executable, {
+  bool login = false,
+}) {
+  // Fish 4.7+ terminal queries are answered by xterm's protocol parser.
+  // A macOS login shell reads its own PATH, like Terminal.app, so the visible
+  // shell does not need a separate login-shell PATH probe before PTY spawn.
+  return login && isOsc7CompatiblePosixShellPath(executable)
+      ? const ['-l']
+      : const [];
+}
+
 /// Returns a POSIX shell script that launches the user's login shell inside
 /// a clean environment with OSC 7 working-directory reporting wired up.
 ///
 /// Handles zsh (ZDOTDIR isolation), bash (ENV fd trick), and fish. Other
 /// shells are rejected explicitly because launching them without a correct
 /// prompt hook would silently break OSC 7 cwd tracking.
-List<String> localShellStartupArguments(String executable) {
-  // Keep this API so callers can supply shell-specific startup options later.
-  // Fish 4.7+ terminal queries are answered by xterm's protocol parser.
-  return const [];
-}
-
 /// 生成交互式 zsh/bash 启动包装脚本，负责加载用户原有启动配置并安装 SSTerm
 /// 的目录跟踪钩子；普通非交互命令不应使用该脚本。
 String buildInteractiveShellWrapper() => r'''

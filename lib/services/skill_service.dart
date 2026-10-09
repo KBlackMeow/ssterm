@@ -13,11 +13,11 @@ import 'bundled_skills.dart';
 /// `~/.agents/skills/<id>/SKILL.md`.
 ///
 /// Lifecycle:
-///   • [init] runs ONCE at app boot from `main.dart`, before runApp.  It
-///     scans the asset manifest, parses every SKILL.md it finds, and
-///     pulls in every dynamic bundled skill registered by that point.
-///     This is cheap (a handful of small text files + sync registrations)
-///     and removes the need for any async work on the hot LLM call path.
+///   • [startInitialLoad] begins the first [init] after `runApp` so catalogue
+///     discovery does not delay the terminal window. Agent requests await
+///     [startupReady] before building their prompt or loading a skill body.
+///     The scan reads the asset manifest, user directories, and registered
+///     dynamic skills.
 ///   • After init, [skills] returns the catalogue synchronously — used
 ///     by [LlmService] to build the `<available_skills>` block in the
 ///     system prompt (or, with the system-reminder injection scheme, by
@@ -37,6 +37,21 @@ import 'bundled_skills.dart';
 /// Useful for tests and (eventually) for a "reload skills" debug action.
 class SkillService {
   SkillService._();
+
+  static Future<void>? _startupLoad;
+  static bool _startupPending = false;
+
+  /// Starts the first catalogue scan without delaying the terminal window.
+  /// Agent requests wait for this future before building their system prompt.
+  static Future<void> startInitialLoad() {
+    if (_startupLoad != null) return _startupLoad!;
+    _startupPending = true;
+    return _startupLoad = init().whenComplete(() => _startupPending = false);
+  }
+
+  static Future<void> get startupReady => _startupLoad ?? Future<void>.value();
+
+  static bool get isStartupLoading => _startupPending;
 
   static final List<Skill> _skills = [];
   // Asset-backed AND user-dir-backed bodies share one map — both are
@@ -203,6 +218,7 @@ class SkillService {
   /// must not abort startup, because a single bad file would lock the
   /// user out of every other skill.
   static Future<void> init() async {
+    _initialized = false;
     _skills.clear();
     _assetBodies.clear();
     _bundledBuilders.clear();
@@ -411,6 +427,7 @@ class SkillService {
   /// For bundled dynamic skills the body is produced by their registered
   /// builder on first request and memoised per-process.
   static Future<String?> loadBody(String id) async {
+    await startupReady;
     final asset = _assetBodies[id];
     if (asset != null) return asset.trim();
     final cached = _bundledBodyCache[id];

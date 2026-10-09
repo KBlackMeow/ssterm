@@ -44,6 +44,17 @@ void main() {
       expect(script, isNot(contains('no-query-term')));
     });
 
+    test('macOS visible POSIX shells can launch as login shells', () {
+      for (final shell in ['/bin/zsh', '/bin/bash', '/opt/homebrew/bin/fish']) {
+        expect(localShellStartupArguments(shell, login: true), ['-l']);
+      }
+      expect(
+        localShellStartupArguments('/usr/local/bin/custom-shell', login: true),
+        isEmpty,
+      );
+      expect(localShellStartupArguments('/bin/zsh'), isEmpty);
+    });
+
     test(
       'rejects unknown shells instead of launching without cwd metadata',
       () {
