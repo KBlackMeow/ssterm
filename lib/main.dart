@@ -139,6 +139,19 @@ void main() async {
         final file = WallpaperStorage.resolveFile(settings.wallpaperId);
         if (file != null) await preloadStartupWallpaper(file);
       }
+    } else if (Platform.isWindows) {
+      // The Windows runner already supplies the initial size and position.
+      // Keep the plugin's native taskbar setup, then configure only the
+      // properties the runner cannot establish before showing.
+      await windowManager.waitUntilReadyToShow();
+      await windowManager.setTitleBarStyle(
+        TitleBarStyle.hidden,
+        windowButtonVisibility: true,
+      );
+      await windowManager.setMinimumSize(const Size(640, 480));
+      await windowManager.setBackgroundColor(const Color(0xFF1E1E1E));
+      await windowManager.show();
+      await windowManager.focus();
     } else {
       await windowManager.waitUntilReadyToShow(windowOptions, () async {
         await windowManager.show();
