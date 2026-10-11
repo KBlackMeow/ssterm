@@ -18,6 +18,7 @@ import '../services/command_feedback_formatter.dart';
 import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
+import '../services/agent_conversation_manager.dart';
 import '../services/agent_execution_budget.dart';
 import '../services/agent_session_store.dart';
 import '../services/agent_session_registry.dart';
@@ -25,10 +26,12 @@ import '../services/agent_output_store.dart';
 import '../services/agent_stream_client_session.dart';
 import '../services/command_safety.dart';
 import '../services/command_risk.dart';
-import '../services/conversation_compactor.dart';
 import '../services/llm_service.dart';
 import '../services/agent_tool_contract.dart';
+import '../services/agent_tool_batch.dart';
+import '../services/agent_tool_registry.dart';
 import '../services/agent_image_attachment.dart';
+import '../services/agent_read_tools.dart';
 import '../services/file_picker_service.dart';
 import '../services/file_write_service.dart';
 import '../services/file_edit_service.dart';
@@ -82,23 +85,6 @@ const _kPanelMaxFraction = 0.6;
 /// `_kSftpPanelMargin` in `ssh_session_view.dart` so the two side-by-side
 /// panels (SFTP card + AI card) share the same floating "card" rhythm.
 const _kAiPanelMargin = 8.0;
-
-// ── Agent-loop tunables ────────────────────────────────────────────────────
-// Top-level (instead of static members on `_AiAssistantOverlayState`) so the
-// `_AiAgentLoopExt` extension in `ai_assistant_panel_loop.dart` can read them
-// directly — extension members can't reach `_AiAssistantOverlayState.<static>`
-// without a class qualifier.  Library-private (`_`-prefixed) so nothing
-// outside this library can read them.
-
-/// Max conversation turns / loop iterations before we summarise old ones.
-const _recentHistoryItems = 16;
-const _historyItemFallbackLimit = 80;
-
-/// Number of head messages kept across truncation — typically the user's
-/// initial task + the agent's first response.  Pinning these prevents the
-/// agent from "forgetting its goal" when long auto-execute chains push the
-/// conversation past [_maxHistoryTurns].
-const _kPinnedHeadMessages = 2;
 
 const _commandFeedbackFormatter = CommandFeedbackFormatter();
 

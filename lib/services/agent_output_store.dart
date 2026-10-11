@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import '../utils/app_dir.dart';
+import 'agent_utf8_page.dart';
 
 /// Opaque reference to bounded command output stored locally for one session.
 class AgentOutputReference {
@@ -21,14 +22,27 @@ class AgentOutputReference {
   final String preview;
 }
 
+class AgentOutputPage {
+  const AgentOutputPage({
+    required this.content,
+    required this.nextOffset,
+    required this.storedBytes,
+  });
+
+  final String content;
+  final int nextOffset;
+  final int storedBytes;
+  bool get hasMore => nextOffset < storedBytes;
+}
+
 /// Bounded output artifacts. The public API accepts only opaque ids, never
 /// paths, which keeps the model and UI from reading arbitrary local files.
 class AgentOutputStore {
   AgentOutputStore({
     this.directory,
     required this.sessionId,
-    this.maxArtifactBytes = 64 * 1024,
-    this.maxSessionBytes = 512 * 1024,
+    this.maxArtifactBytes = 256 * 1024,
+    this.maxSessionBytes = 2 * 1024 * 1024,
     this.maxReadBytes = 8 * 1024,
   }) : assert(maxArtifactBytes > 0),
        assert(maxSessionBytes >= maxArtifactBytes),
@@ -44,7 +58,13 @@ class AgentOutputStore {
   Future<AgentOutputReference> save(String output) async {
     final bytes = utf8.encode(output);
     final stored = bytes.length > maxArtifactBytes
-        ? bytes.sublist(0, maxArtifactBytes)
+        ? bytes.sublist(
+            0,
+            AgentUtf8Page.decode(
+              bytes.sublist(0, maxArtifactBytes),
+              hasMore: true,
+            ).consumed,
+          )
         : bytes;
     final used = await _currentStoredBytes();
     if (used + stored.length > maxSessionBytes) {
@@ -72,6 +92,12 @@ class AgentOutputStore {
     String id, {
     required int offset,
     required int maxBytes,
+  }) async => (await readPage(id, offset: offset, maxBytes: maxBytes)).content;
+
+  Future<AgentOutputPage> readPage(
+    String id, {
+    required int offset,
+    required int maxBytes,
   }) async {
     if (!RegExp(r'^out-[a-f0-9]+$').hasMatch(id)) {
       throw ArgumentError.value(id, 'id', 'must be an opaque artifact id');
@@ -84,9 +110,23 @@ class AgentOutputStore {
       throw StateError('Agent output artifact missing');
     }
     final bytes = await target.readAsBytes();
-    if (offset >= bytes.length) return '';
+    if (offset >= bytes.length) {
+      return AgentOutputPage(
+        content: '',
+        nextOffset: bytes.length,
+        storedBytes: bytes.length,
+      );
+    }
     final end = min(bytes.length, offset + maxBytes);
-    return utf8.decode(bytes.sublist(offset, end), allowMalformed: true);
+    final decoded = AgentUtf8Page.decode(
+      bytes.sublist(offset, end),
+      hasMore: end < bytes.length,
+    );
+    return AgentOutputPage(
+      content: decoded.text,
+      nextOffset: offset + decoded.consumed,
+      storedBytes: bytes.length,
+    );
   }
 
   /// Removes artifacts belonging to this session without touching unrelated

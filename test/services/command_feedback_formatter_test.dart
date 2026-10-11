@@ -59,6 +59,15 @@ void main() {
       expect(feedback, contains('bytes elided'));
     });
 
+    test('default feedback bounds long output to four KiB plus metadata', () {
+      final feedback = const CommandFeedbackFormatter().format(
+        'build',
+        CommandResult(output: 'x' * 16000, exitCode: 0),
+      );
+      expect(feedback, contains('~4 KB sent'));
+      expect(utf8.encode(feedback).length, lessThan(4600));
+    });
+
     test('includes final risk metadata and sanitizes its reason', () {
       const assessment = CommandRiskAssessment(
         level: CommandRiskLevel.dangerous,

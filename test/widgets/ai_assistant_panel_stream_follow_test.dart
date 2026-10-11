@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/models/agent_config.dart';
+import 'package:ssterm/services/file_write_service.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 /// Regression test for the "agent stops auto-following the latest content
@@ -17,6 +20,131 @@ import 'package:ssterm/widgets/ai_assistant_panel.dart';
 /// following for the rest of the turn — and every turn after it.  Following
 /// must instead be paused ONLY by a genuine user scroll.
 void main() {
+  testWidgets('approved native write resumes with a paired tool result', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        {
+          'index': 0,
+          'id': 'call_write',
+          'function': {
+            'name': 'write_file',
+            'arguments': jsonEncode({
+              'path': '/fixture/result.txt',
+              'content': 'COPPER-19\n',
+            }),
+          },
+        },
+      ]),
+      _sseForText('The file was created. [TASK_COMPLETE]'),
+    ]);
+    HttpOverrides.global = http;
+    addTearDown(() => HttpOverrides.global = null);
+    final files = _MemoryFileSystemAdapter();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            agentConfig: _fakeAgentConfig().copyWith(fileWriteEnabled: true),
+            fileSystemAdapter: files,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'Create result.txt');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    for (var i = 0; i < 80; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(find.text('Apply'), findsOneWidget);
+    await tester.tap(find.text('Apply'));
+    for (var i = 0; i < 80; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await tester.pumpAndSettle();
+
+    expect(files.writtenContent, 'COPPER-19\n');
+    expect(http.requestBodies, hasLength(2));
+    final second = jsonDecode(http.requestBodies.last) as Map<String, dynamic>;
+    final messages = second['messages'] as List<dynamic>;
+    expect(
+      messages.any(
+        (message) =>
+            message is Map &&
+            message['role'] == 'tool' &&
+            message['tool_call_id'] == 'call_write',
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('mixed shell and file search both execute in one tool turn', (
+    tester,
+  ) async {
+    const path = '/fixture/sample.txt';
+    HttpOverrides.global = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        {
+          'index': 0,
+          'id': 'call_shell',
+          'function': {
+            'name': 'bash',
+            'arguments': jsonEncode({
+              'command': 'pwd',
+              'reason': 'Check directory',
+              'risk_level': 'normal',
+              'risk_reason': 'Read only',
+            }),
+          },
+        },
+        {
+          'index': 1,
+          'id': 'call_search',
+          'function': {
+            'name': 'grep_file',
+            'arguments': jsonEncode({'path': path, 'pattern': 'target'}),
+          },
+        },
+      ]),
+      _sseForText('Found the target marker. [TASK_COMPLETE]'),
+    ]);
+    addTearDown(() => HttpOverrides.global = null);
+    final executed = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            agentConfig: _fakeAgentConfig(),
+            fileSystemAdapter: _MemoryFileSystemAdapter(),
+            onExecuteAsync: (cmd, {isCancelled, onUpdate, onSilence}) async {
+              executed.add(cmd);
+              return CommandResult(output: '', exitCode: 0);
+            },
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'Find the marker');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    for (var i = 0; i < 80; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await tester.pumpAndSettle();
+
+    expect(executed, ['pwd']);
+    expect(find.textContaining('1: target marker'), findsOneWidget);
+    expect(find.textContaining('Found the target marker'), findsOneWidget);
+  });
+
   testWidgets(
     'raw web-search envelopes are retried instead of shown as answers',
     (tester) async {
@@ -137,6 +265,18 @@ List<String> _sseForText(String text) => [
   'data: [DONE]',
 ];
 
+List<String> _sseForToolCalls(List<Map<String, Object?>> calls) => [
+  'data: ${jsonEncode({
+    'choices': [
+      {
+        'delta': {'tool_calls': calls},
+        'finish_reason': 'tool_calls',
+      },
+    ],
+  })}',
+  'data: [DONE]',
+];
+
 AgentConfig _fakeAgentConfig() {
   final provider = ProviderConfig(
     id: 'fake-openai',
@@ -181,18 +321,21 @@ class _MockHttpClient implements HttpClient {
 class _QueuedHttpOverrides extends HttpOverrides {
   _QueuedHttpOverrides(this.responses);
   final List<List<String>> responses;
+  final List<String> requestBodies = [];
 
   @override
   HttpClient createHttpClient(SecurityContext? context) =>
-      _QueuedHttpClient(responses);
+      _QueuedHttpClient(responses, requestBodies);
 }
 
 class _QueuedHttpClient implements HttpClient {
-  _QueuedHttpClient(this.responses);
+  _QueuedHttpClient(this.responses, this.requestBodies);
   final List<List<String>> responses;
+  final List<String> requestBodies;
 
   @override
-  Future<HttpClientRequest> postUrl(Uri url) async => _QueuedRequest(responses);
+  Future<HttpClientRequest> postUrl(Uri url) async =>
+      _QueuedRequest(responses, requestBodies);
 
   @override
   void close({bool force = false}) {}
@@ -203,18 +346,22 @@ class _QueuedHttpClient implements HttpClient {
 }
 
 class _QueuedRequest implements HttpClientRequest {
-  _QueuedRequest(this.responses);
+  _QueuedRequest(this.responses, this.requestBodies);
   final List<List<String>> responses;
+  final List<String> requestBodies;
+  final bytes = <int>[];
 
   @override
   HttpHeaders get headers => _MockHeaders();
 
   @override
-  void add(List<int> data) {}
+  void add(List<int> data) => bytes.addAll(data);
 
   @override
-  Future<HttpClientResponse> close() async =>
-      _MockResponse(_sseStream(responses.removeAt(0)));
+  Future<HttpClientResponse> close() async {
+    requestBodies.add(utf8.decode(bytes));
+    return _MockResponse(_sseStream(responses.removeAt(0)));
+  }
 
   Stream<List<int>> _sseStream(List<String> events) async* {
     for (final event in events) {
@@ -294,4 +441,54 @@ class _MockResponse implements HttpClientResponse {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('HttpClientResponse.${invocation.memberName}');
+}
+
+class _MemoryFileSystemAdapter implements FileSystemAdapter {
+  String? writtenContent;
+
+  @override
+  String get label => 'fixture';
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  String? get currentDirectory => '/fixture';
+
+  @override
+  Future<FileWritePreview> preview(String path) async =>
+      FileWritePreview(resolvedPath: path, exists: false, existingSize: 0);
+
+  @override
+  Future<FileWriteResult> commit(
+    String path,
+    String content, {
+    DateTime? expectedMtime,
+  }) async {
+    writtenContent = content;
+    return FileWriteResult(
+      resolvedPath: path,
+      bytesWritten: utf8.encode(content).length,
+      created: true,
+    );
+  }
+
+  @override
+  Future<AgentFileChunk> readRange(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) async {
+    final bytes = utf8.encode('target marker\n');
+    final end = (offset + maxBytes).clamp(0, bytes.length);
+    return AgentFileChunk(
+      bytes: Uint8List.fromList(bytes.sublist(offset, end)),
+      totalBytes: bytes.length,
+      offset: offset,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('FileSystemAdapter.${invocation.memberName}');
 }

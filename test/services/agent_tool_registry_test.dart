@@ -21,6 +21,11 @@ void main() {
       final registry = AgentToolRegistry.build();
 
       expect(registry.names, containsAll(['bash', 'ask_user_question']));
+      expect(registry.names, contains('read_output'));
+      expect(registry.byName('read_output')!.toJsonSchema()['required'], [
+        'id',
+        'offset',
+      ]);
       final schema = registry.byName('bash')!.toJsonSchema();
       expect(
         schema['required'],

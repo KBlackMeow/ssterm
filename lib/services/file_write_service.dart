@@ -132,6 +132,21 @@ class FileWriteResult {
   });
 }
 
+/// A bounded byte slice of a text file. Offsets refer to the original bytes.
+class AgentFileChunk {
+  const AgentFileChunk({
+    required this.bytes,
+    required this.totalBytes,
+    required this.offset,
+  });
+
+  final Uint8List bytes;
+  final int totalBytes;
+  final int offset;
+  int get nextOffset => offset + bytes.length;
+  bool get hasMore => nextOffset < totalBytes;
+}
+
 /// Pluggable backend behind [FileWriteService].  Two implementations
 /// today: [LocalFileSystemAdapter] (dart:io on the host running
 /// ssterm) and [SftpFileSystemAdapter] (a `dartssh2`-backed SFTP
@@ -212,6 +227,26 @@ abstract class FileSystemAdapter {
   ///     path-resolution and existence failures as [preview].
   ///   - [FileWriteErrorKind.tooLarge]: file exceeds [_maxEditableSize].
   Future<String> readContent(String path);
+
+  /// Read at most [maxBytes] from [offset], without loading the whole file.
+  /// Older custom adapters can use the bounded readContent fallback.
+  Future<AgentFileChunk> readRange(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) async {
+    if (offset < 0 || maxBytes <= 0 || maxBytes > 32768) {
+      throw ArgumentError('Invalid file read range');
+    }
+    final bytes = utf8.encode(await readContent(path));
+    final start = offset.clamp(0, bytes.length);
+    final end = (start + maxBytes).clamp(0, bytes.length);
+    return AgentFileChunk(
+      bytes: Uint8List.fromList(bytes.sublist(start, end)),
+      totalBytes: bytes.length,
+      offset: start,
+    );
+  }
 }
 
 /// dart:io-backed adapter.  Used for LOCAL terminal tabs.  Atomic
@@ -325,6 +360,32 @@ class LocalFileSystemAdapter implements FileSystemAdapter {
         FileWriteErrorKind.io,
         'File is not valid UTF-8 text, cannot edit in place: $resolved',
       );
+    }
+  }
+
+  @override
+  Future<AgentFileChunk> readRange(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) async {
+    if (offset < 0 || maxBytes <= 0 || maxBytes > 32768) {
+      throw ArgumentError('Invalid file read range');
+    }
+    final file = File(_resolvePath(path));
+    final totalBytes = await file.length();
+    final start = offset.clamp(0, totalBytes);
+    final handle = await file.open();
+    try {
+      await handle.setPosition(start);
+      final bytes = await handle.read(maxBytes);
+      return AgentFileChunk(
+        bytes: bytes,
+        totalBytes: totalBytes,
+        offset: start,
+      );
+    } finally {
+      await handle.close();
     }
   }
 
@@ -534,6 +595,17 @@ class WslFileSystemAdapter implements FileSystemAdapter {
   @override
   Future<String> readContent(String path) async =>
       _local.readContent(_uncPath(await _resolveLinuxPath(path)));
+
+  @override
+  Future<AgentFileChunk> readRange(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) async => _local.readRange(
+    _uncPath(await _resolveLinuxPath(path)),
+    offset: offset,
+    maxBytes: maxBytes,
+  );
 
   @override
   Future<FileWriteResult> commit(
@@ -796,6 +868,51 @@ class SftpFileSystemAdapter implements FileSystemAdapter {
   Future<String> readContent(String path) => _readContentImpl(
     path,
   ).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+
+  @override
+  Future<AgentFileChunk> readRange(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) => _readRangeImpl(
+    path,
+    offset: offset,
+    maxBytes: maxBytes,
+  ).timeout(opTimeout, onTimeout: () => throw _timeoutException());
+
+  Future<AgentFileChunk> _readRangeImpl(
+    String path, {
+    required int offset,
+    required int maxBytes,
+  }) async {
+    if (offset < 0 || maxBytes <= 0 || maxBytes > 32768) {
+      throw ArgumentError('Invalid file read range');
+    }
+    final client = sftp;
+    if (client == null) {
+      throw const FileWriteException(
+        FileWriteErrorKind.notSupported,
+        'SSH session is not connected yet.',
+      );
+    }
+    final resolved = await _resolveRemotePath(path);
+    final attrs = await client.stat(resolved);
+    final totalBytes = attrs.size ?? 0;
+    final start = offset.clamp(0, totalBytes);
+    final remote = await client.open(resolved);
+    try {
+      final bytes = start == totalBytes
+          ? Uint8List(0)
+          : await remote.readBytes(length: maxBytes, offset: start);
+      return AgentFileChunk(
+        bytes: bytes,
+        totalBytes: totalBytes,
+        offset: start,
+      );
+    } finally {
+      await remote.close();
+    }
+  }
 
   Future<String> _readContentImpl(String path) async {
     final client = sftp;

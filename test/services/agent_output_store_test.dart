@@ -28,10 +28,41 @@ void main() {
       final reference = await store.save('0123456789');
 
       expect(await store.read(reference.id, offset: 3, maxBytes: 4), '3456');
+      final page = await store.readPage(reference.id, offset: 3, maxBytes: 4);
+      expect(page.content, '3456');
+      expect(page.nextOffset, 7);
+      expect(page.hasMore, isTrue);
       await expectLater(
         store.read('../outside', offset: 0, maxBytes: 4),
         throwsArgumentError,
       );
+    });
+
+    test('keeps a UTF-8 character intact across output pages', () async {
+      final reference = await store.save('AB中C');
+      final first = await store.readPage(reference.id, offset: 0, maxBytes: 4);
+      expect(first.content, isNot(contains('�')));
+      expect(first.nextOffset, greaterThan(0));
+      final rest = await store.readPage(
+        reference.id,
+        offset: first.nextOffset,
+        maxBytes: 8,
+      );
+      expect('${first.content}${rest.content}', 'AB中C');
+    });
+
+    test('does not store half a UTF-8 character at the artifact cap', () async {
+      final limited = AgentOutputStore(
+        directory: directory,
+        sessionId: 'unicode-cap',
+        maxArtifactBytes: 4,
+        maxSessionBytes: 8,
+      );
+      final reference = await limited.save('AB中C');
+      final page = await limited.readPage(reference.id, offset: 0, maxBytes: 8);
+      expect(page.content, 'AB');
+      expect(reference.storedBytes, 2);
+      expect(reference.truncated, isTrue);
     });
 
     test('enforces the per-session storage limit', () async {

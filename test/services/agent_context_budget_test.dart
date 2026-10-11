@@ -25,6 +25,15 @@ void main() {
       );
     });
 
+    test(
+      'small context windows never start above the compaction threshold',
+      () {
+        final budget = AgentContextBudget.forContextWindow(8000);
+        expect(budget.autoCompactAtTokens, 4000);
+        expect(budget.hardLimitTokens, greaterThan(budget.autoCompactAtTokens));
+      },
+    );
+
     test('uses exact usage ahead of the item-count fallback', () {
       final budget = AgentContextBudget.forContextWindow(128000);
 

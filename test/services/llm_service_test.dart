@@ -1576,6 +1576,7 @@ Done.
         expect(prompt, isNot(contains('```tool_call')));
         expect(prompt, isNot(contains('<file_write_tool>')));
         expect(prompt, isNot(contains('<web_search_tool>')));
+        expect(prompt, contains('<native_mutating_tools>'));
       },
     );
   });

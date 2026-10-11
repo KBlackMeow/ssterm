@@ -23,6 +23,26 @@ class _HangingSftpClient implements SftpClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('local ranged reads work past the edit size limit', () async {
+    final root = await Directory.systemTemp.createTemp('ssterm-range-test-');
+    try {
+      final path = '${root.path}/large.txt';
+      final file = File(path);
+      await file.writeAsBytes(List<int>.filled(5 * 1024 * 1024, 65));
+      final adapter = const LocalFileSystemAdapter();
+      final page = await adapter.readRange(
+        path,
+        offset: 5 * 1024 * 1024 - 10,
+        maxBytes: 8,
+      );
+      expect(page.bytes, List<int>.filled(8, 65));
+      expect(page.hasMore, isTrue);
+      expect(page.nextOffset, 5 * 1024 * 1024 - 2);
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
   group('LocalFileSystemAdapter.preview', () {
     late Directory tempRoot;
 
@@ -395,6 +415,24 @@ void main() {
       );
       await expectLater(
         () => adapter.readContent('/tmp/x'),
+        throwsA(
+          isA<FileWriteException>().having(
+            (e) => e.kind,
+            'kind',
+            equals(FileWriteErrorKind.notSupported),
+          ),
+        ),
+      );
+    });
+
+    test('ranged reads time out when the SSH connection is dead', () async {
+      final adapter = SftpFileSystemAdapter(
+        sftp: _HangingSftpClient(),
+        label: 'ssh: dead-but-not-null',
+        opTimeout: const Duration(milliseconds: 50),
+      );
+      await expectLater(
+        () => adapter.readRange('/tmp/x', offset: 0, maxBytes: 1024),
         throwsA(
           isA<FileWriteException>().having(
             (e) => e.kind,

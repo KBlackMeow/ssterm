@@ -37,6 +37,9 @@ class AgentToolParameter {
   const AgentToolParameter.boolean({bool required = false, String? description})
     : this._(type: 'boolean', required: required, description: description);
 
+  const AgentToolParameter.integer({bool required = false, String? description})
+    : this._(type: 'integer', required: required, description: description);
+
   const AgentToolParameter.object({bool required = false, String? description})
     : this._(type: 'object', required: required, description: description);
 
@@ -249,6 +252,21 @@ class AgentConversationItem {
 
   AgentConversationItem.toolResults(Iterable<AgentToolResult> results)
     : this._(toolResults: List.unmodifiable(results));
+
+  int estimatedTokens() {
+    var bytes =
+        utf8.encode(role ?? '').length + utf8.encode(content ?? '').length;
+    for (final call in toolCalls) {
+      bytes += utf8.encode(call.id).length;
+      bytes += utf8.encode(call.name).length;
+      bytes += utf8.encode(jsonEncode(call.arguments)).length;
+    }
+    for (final result in toolResults) {
+      bytes += utf8.encode(result.toolCallId).length;
+      bytes += utf8.encode(result.content).length;
+    }
+    return (bytes / 3).ceil();
+  }
 }
 
 /// Transitional list wrapper that keeps existing panel call sites source
@@ -356,11 +374,16 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
   List<AgentConversationItem> compactionCandidate({
     required int pinnedItemCount,
     required int recentItemCount,
+    int? recentTokenBudget,
   }) {
     final start = _safeCompactionStart(pinnedItemCount);
     var end = _items.length;
     var kept = 0;
-    while (end > start && kept < recentItemCount) {
+    var keptTokens = 0;
+    while (end > start &&
+        (recentTokenBudget == null
+            ? kept < recentItemCount
+            : keptTokens < recentTokenBudget || kept == 0)) {
       var groupStart = end - 1;
       var groupSize = 1;
       if (_items[groupStart].toolResults.isNotEmpty &&
@@ -369,8 +392,19 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
         groupStart--;
         groupSize = 2;
       }
-      if (kept + groupSize > recentItemCount) break;
+      if (recentTokenBudget == null && kept + groupSize > recentItemCount) {
+        break;
+      }
+      final groupTokens = _items
+          .sublist(groupStart, end)
+          .fold<int>(0, (sum, item) => sum + item.estimatedTokens());
+      if (recentTokenBudget != null &&
+          kept > 0 &&
+          keptTokens + groupTokens > recentTokenBudget) {
+        break;
+      }
       kept += groupSize;
+      keptTokens += groupTokens;
       end = groupStart;
     }
     return List.unmodifiable(_items.sublist(start, end));
@@ -380,10 +414,12 @@ class AgentConversationHistory extends ListBase<AgentConversationItem> {
     required String summary,
     required int pinnedItemCount,
     required int recentItemCount,
+    int? recentTokenBudget,
   }) {
     final candidate = compactionCandidate(
       pinnedItemCount: pinnedItemCount,
       recentItemCount: recentItemCount,
+      recentTokenBudget: recentTokenBudget,
     );
     if (candidate.isEmpty) return false;
     final start = _safeCompactionStart(pinnedItemCount);

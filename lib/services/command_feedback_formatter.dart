@@ -11,9 +11,9 @@ import 'agent_output_store.dart';
 /// 超长时保留开头和结尾，减少上下文占用且保留错误线索。
 class CommandFeedbackFormatter {
   const CommandFeedbackFormatter({
-    this.maxFeedbackBytes = 8 * 1024,
-    this.headBytes = 4 * 1024,
-    this.tailBytes = 4 * 1024,
+    this.maxFeedbackBytes = 4 * 1024,
+    this.headBytes = 2 * 1024,
+    this.tailBytes = 2 * 1024,
   }) : assert(headBytes + tailBytes <= maxFeedbackBytes);
 
   final int maxFeedbackBytes;
@@ -72,7 +72,7 @@ class CommandFeedbackFormatter {
     }
     if (rawBytes.length > maxFeedbackBytes) {
       header.writeln(
-        '[feedback_truncated=true reason="middle elided to fit context; ${rawBytes.length} bytes captured, ~8 KB sent"]',
+        '[feedback_truncated=true reason="middle elided to fit context; ${rawBytes.length} bytes captured, ~4 KB sent; use read_output for stored ranges"]',
       );
     }
     if (body.isEmpty) {

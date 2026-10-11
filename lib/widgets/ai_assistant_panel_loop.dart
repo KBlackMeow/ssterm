@@ -222,8 +222,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       final historyLenBefore = _conversationHistory.length;
 
-      // Truncate history — but pin the first [_kPinnedHeadMessages] (the
-      // user's goal + the first AI reply) so the agent never forgets WHAT
+      // Compact history while retaining the user's goal so the agent
+      // never forgets WHAT
       // it was asked to do. Native tool calls and results form one atomic
       // transcript group, so trimming must not split them.
       await _compactHistoryIfNeeded(gen, config);
@@ -371,12 +371,57 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
 
       final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
       final askUser = LlmService.hasAskUserMarker(protocolText);
+      if (resolvedStreamResult.toolCalls.isEmpty) {
+        final rejection = AgentToolBatch.legacyRejectionReason(
+          toolCalls.map((call) => call.name),
+          hasCompletionMarker: taskComplete || askUser,
+        );
+        if (rejection != null) {
+          _conversationHistory.add({'role': 'user', 'content': rejection});
+          setState(() => _messages.add(_ChatMessage.notice(rejection)));
+          continue;
+        }
+      }
+      if (resolvedStreamResult.toolCalls.isNotEmpty) {
+        final registry = AgentToolRegistry.build(
+          webSearchEnabled: config.webSearchEnabled,
+          fileWriteEnabled: config.fileWriteEnabled,
+          skillsEnabled: SkillService.filterEnabled(
+            config.enabledSkills,
+          ).isNotEmpty,
+          mcpTools: config.mcpEnabled ? McpService.allTools : const [],
+        );
+        final rejection = AgentToolBatch.rejectionReason(
+          resolvedStreamResult.toolCalls,
+          registry,
+          finishReason: resolvedStreamResult.finishReason,
+          hasCompletionMarker: taskComplete || askUser,
+        );
+        if (rejection != null) {
+          _conversationHistory.add(
+            AgentConversationItem.toolResults([
+              for (final call in resolvedStreamResult.toolCalls)
+                AgentToolResult(
+                  toolCallId: call.id,
+                  content: '[Tool call was not executed] $rejection',
+                  isError: true,
+                ),
+            ]),
+          );
+          setState(() => _messages.add(_ChatMessage.notice(rejection)));
+          logIter(
+            'iter=$loopIterations tools_rejected reason=${_logQuote(rejection)}',
+          );
+          continue;
+        }
+      }
       ToolCall? useSkillTool;
       ToolCall? webSearchTool;
       ToolCall? writeFileTool;
       ToolCall? editFileTool;
       ToolCall? askUserQuestionTool;
       ToolCall? readImageTool;
+      final readToolCalls = <ToolCall>[];
       final mcpToolCalls = <ToolCall>[];
       for (final call in toolCalls) {
         if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
@@ -408,6 +453,9 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         }
         if (readImageTool == null && call.isReadImage && call.path != null) {
           readImageTool = call;
+        }
+        if (call.isReadOutput || call.isReadFile || call.isGrepFile) {
+          readToolCalls.add(call);
         }
         if (call.isMcp &&
             call.mcpServerId != null &&
@@ -444,6 +492,8 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
         'protocol_chars=${protocolText.length} '
+        'prompt_tokens=${resolvedStreamResult.promptTokenCount ?? -1} '
+        'completion_tokens=${resolvedStreamResult.completionTokenCount ?? -1} '
         'tools=${toolCalls.length} dropped_tools=$droppedToolCallCount '
         'shell_tools=${shellToolCalls.length} '
         'cmds=${commands.length} marker=$markerLabel '
@@ -608,6 +658,42 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         continue;
       }
 
+      if (readToolCalls.isNotEmpty && shellToolCalls.isEmpty) {
+        final reader = AgentReadTools(
+          outputStore: _outputStore,
+          fileSystem: widget.fileSystemAdapter,
+        );
+        final feedbacks = <String>[];
+        final nativeResults = <AgentToolResult>[];
+        for (final call in readToolCalls) {
+          final result = await reader.execute(call.name, call.arguments);
+          if (!mounted || gen != _generation) return;
+          feedbacks.add(result.content);
+          nativeResults.add(
+            AgentToolResult(
+              toolCallId: call.id,
+              content: result.content,
+              isError: result.isError,
+            ),
+          );
+          setState(() => _messages.add(_ChatMessage.notice(result.content)));
+        }
+        _conversationHistory.add(
+          resolvedStreamResult.toolCalls.isEmpty
+              ? AgentConversationItem.text(
+                  role: 'user',
+                  content: feedbacks.join('\n\n'),
+                )
+              : AgentConversationItem.toolResults(
+                  AgentToolBatch.completeResults(
+                    resolvedStreamResult.toolCalls,
+                    nativeResults,
+                  ),
+                ),
+        );
+        continue;
+      }
+
       // ── MCP tool calls ──────────────────────────────────────────────
       // MCP tools are structured API calls (not shell commands), so they
       // bypass the auto-execute confirmation gate — same as web_search
@@ -669,17 +755,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                   role: 'user',
                   content: feedbacks.join('\n\n'),
                 )
-              : AgentConversationItem.toolResults([
-                  ...nativeResults,
-                  for (final call in toolCalls)
-                    if (!call.isMcp)
-                      AgentToolResult(
-                        toolCallId: call.id,
-                        content:
-                            'Tool call was not executed because this turn is processing MCP calls. Reissue it in a later turn if still needed.',
-                        isError: true,
-                      ),
-                ]),
+              : AgentConversationItem.toolResults(
+                  AgentToolBatch.completeResults(
+                    resolvedStreamResult.toolCalls,
+                    nativeResults,
+                  ),
+                ),
         );
         setState(() => _agentLoopStatus = 'MCP results sent, AI thinking…');
         continue;
@@ -817,6 +898,17 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       if (askUser) break;
       if (commands.isEmpty) break;
       if (widget.onExecuteAsync == null) {
+        if (resolvedStreamResult.toolCalls.isNotEmpty) {
+          _conversationHistory.add(
+            AgentConversationItem.toolResults(
+              AgentToolBatch.completeResults(
+                resolvedStreamResult.toolCalls,
+                const [],
+                missingReason: 'the active tab has no command executor',
+              ),
+            ),
+          );
+        }
         stopIter(loopIterations, 'no_executor');
         break;
       }
@@ -838,8 +930,40 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // feedback and command history already retain the final result.
       final feedbacks = <String>[];
       final nativeResults = <AgentToolResult>[];
-      for (var i = 0; i < shellToolCalls.length; i++) {
-        final toolCall = shellToolCalls[i];
+      final shellAndReadCalls = toolCalls
+          .where(
+            (call) =>
+                call.isShell ||
+                call.isReadOutput ||
+                call.isReadFile ||
+                call.isGrepFile,
+          )
+          .toList();
+      final mixedReader = readToolCalls.isEmpty
+          ? null
+          : AgentReadTools(
+              outputStore: _outputStore,
+              fileSystem: widget.fileSystemAdapter,
+            );
+      for (final toolCall in shellAndReadCalls) {
+        if (!toolCall.isShell) {
+          final read = await mixedReader!.execute(
+            toolCall.name,
+            toolCall.arguments,
+          );
+          if (!mounted || gen != _generation) return;
+          feedbacks.add(read.content);
+          nativeResults.add(
+            AgentToolResult(
+              toolCallId: toolCall.id,
+              content: read.content,
+              isError: read.isError,
+            ),
+          );
+          setState(() => _messages.add(_ChatMessage.notice(read.content)));
+          _scrollToBottom();
+          continue;
+        }
         final command = toolCall.command!.trim();
         // ── Confirmation gate ────────────────────────────────────────
         //
@@ -1044,7 +1168,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
                 role: 'user',
                 content: feedbacks.join('\n\n'),
               )
-            : AgentConversationItem.toolResults(nativeResults),
+            : AgentConversationItem.toolResults(
+                AgentToolBatch.completeResults(
+                  resolvedStreamResult.toolCalls,
+                  nativeResults,
+                ),
+              ),
       );
       logIter(
         'iter=$loopIterations feedback +${feedbacks.length} '
@@ -1067,52 +1196,26 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final budget = AgentContextBudget.forContextWindow(
       model == null ? null : provider?.modelContextWindows[model],
     );
-    final estimatedTokens = AgentContextBudget.estimateHistoryTokens(
-      _conversationHistory,
-    );
-    if (!force &&
-        !budget.shouldCompact(
-          estimatedTokens: estimatedTokens,
-          exactUsageTokens: _lastAgentPromptTokenCount,
-          itemCount: _conversationHistory.length,
-        )) {
-      return;
-    }
-    final candidate = _conversationHistory.compactionCandidate(
-      pinnedItemCount: _kPinnedHeadMessages,
-      recentItemCount: _recentHistoryItems,
-    );
-    if (candidate.isEmpty) {
-      _conversationHistory.trimToMaxItems(
-        maxItems: _historyItemFallbackLimit,
-        pinnedItemCount: _kPinnedHeadMessages,
-      );
-      return;
-    }
-    if (mounted) setState(() => _agentLoopStatus = 'Compressing context…');
-    final summary = await LlmService.compactConversation(
-      config: config,
-      prompt: ConversationCompactor.buildPrompt(
-        existingSummary: _conversationHistory.summaryContent ?? '',
-        items: candidate,
-      ),
+    final outcome = await const AgentConversationManager().compactIfNeeded(
+      history: _conversationHistory,
+      budget: budget,
+      lastPromptTokenCount: _lastAgentPromptTokenCount,
+      force: force,
+      isCurrent: () => gen == _generation,
+      onStart: () {
+        if (mounted) setState(() => _agentLoopStatus = 'Compressing context…');
+      },
+      summarize: (prompt) =>
+          LlmService.compactConversation(config: config, prompt: prompt),
     );
     if (mounted && gen == _generation) {
       setState(() => _agentLoopStatus = null);
     }
-    if (gen == _generation && summary != null) {
-      _conversationHistory.replaceWithSummary(
-        summary: summary,
-        pinnedItemCount: _kPinnedHeadMessages,
-        recentItemCount: _recentHistoryItems,
-      );
-      _logAgent('context_compaction result=summary');
-    } else if (gen == _generation) {
-      _conversationHistory.trimToMaxItems(
-        maxItems: _historyItemFallbackLimit,
-        pinnedItemCount: _kPinnedHeadMessages,
-      );
-      _logAgent('context_compaction result=fallback_trim');
+    if (outcome == AgentCompactionOutcome.summarized ||
+        outcome == AgentCompactionOutcome.trimmed) {
+      // Provider usage from before compaction cannot measure the new context.
+      _lastAgentPromptTokenCount = null;
+      _logAgent('context_compaction result=${outcome.name}');
     }
   }
 

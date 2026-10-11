@@ -128,6 +128,43 @@ class AgentToolRegistry {
           ),
         },
       ),
+      const AgentToolDefinition(
+        name: 'read_file',
+        description:
+            'Read a bounded byte range of a text file in the active '
+            'local or SSH workspace. Start at offset 0 and use the returned '
+            'next offset to continue; at most 8192 bytes per call.',
+        parameters: {
+          'path': AgentToolParameter.string(required: true),
+          'offset': AgentToolParameter.integer(required: true),
+          'max_bytes': AgentToolParameter.integer(),
+        },
+      ),
+      const AgentToolDefinition(
+        name: 'grep_file',
+        description:
+            'Search one text file in the active local or SSH '
+            'workspace for a literal string. Returns line numbers and at '
+            'most 50 matches from the first MiB. Use bash rg to search '
+            'directories or larger ranges.',
+        parameters: {
+          'path': AgentToolParameter.string(required: true),
+          'pattern': AgentToolParameter.string(required: true),
+          'ignore_case': AgentToolParameter.boolean(),
+        },
+      ),
+      const AgentToolDefinition(
+        name: 'read_output',
+        description:
+            'Read a bounded byte range from a previous command '
+            'output artifact. Use its opaque id and an offset; each call '
+            'returns at most 8192 bytes.',
+        parameters: {
+          'id': AgentToolParameter.string(required: true),
+          'offset': AgentToolParameter.integer(required: true),
+          'max_bytes': AgentToolParameter.integer(),
+        },
+      ),
     ];
 
     if (webSearchEnabled) {

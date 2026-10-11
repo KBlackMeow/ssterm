@@ -305,6 +305,12 @@ class ToolCall {
 
   bool get isReadImage => name == 'read_image';
 
+  bool get isReadOutput => name == 'read_output';
+
+  bool get isReadFile => name == 'read_file';
+
+  bool get isGrepFile => name == 'grep_file';
+
   /// The MCP server id from `arguments['server']`.
   String? get mcpServerId {
     final v = arguments['server'];

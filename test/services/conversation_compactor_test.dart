@@ -99,4 +99,55 @@ void main() {
       );
     }
   });
+
+  test('summary input bounds a large tool result', () {
+    final prompt = ConversationCompactor.buildPrompt(
+      existingSummary: '',
+      items: [
+        AgentConversationItem.toolResults([
+          AgentToolResult(toolCallId: 'one', content: 'x' * 50000),
+        ]),
+      ],
+    );
+    expect(prompt, contains('further characters omitted'));
+    expect(prompt.length, lessThan(3000));
+  });
+
+  test('summary input remains bounded with many tool results', () {
+    final prompt = ConversationCompactor.buildPrompt(
+      existingSummary: 'goal',
+      items: List.generate(
+        100,
+        (index) => AgentConversationItem.toolResults([
+          AgentToolResult(toolCallId: '$index', content: 'x' * 5000),
+        ]),
+      ),
+    );
+    expect(prompt, contains('Earlier transcript omitted'));
+    expect(prompt.length, lessThan(65000));
+  });
+
+  test('token budget retains a complete recent tool pair', () {
+    final call = AgentToolCall.fromRaw(
+      id: 'one',
+      name: 'bash',
+      arguments: const {'command': 'echo x'},
+    )!;
+    final history = AgentConversationHistory()
+      ..add(const {'role': 'user', 'content': 'goal'})
+      ..add(const {'role': 'assistant', 'content': 'old work'})
+      ..add(AgentConversationItem.assistantToolCalls([call]))
+      ..add(
+        AgentConversationItem.toolResults(const [
+          AgentToolResult(toolCallId: 'one', content: 'x'),
+        ]),
+      );
+    final candidate = history.compactionCandidate(
+      pinnedItemCount: 1,
+      recentItemCount: 0,
+      recentTokenBudget: 1,
+    );
+    expect(candidate, hasLength(1));
+    expect(candidate.single.content, 'old work');
+  });
 }

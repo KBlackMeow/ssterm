@@ -26,13 +26,14 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 |---|---|
 | **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local), plus a compatible-provider catalog (OpenRouter, Kimi, Qwen, GLM, Mistral, MiniMax, SiliconFlow) and custom OpenAI/Anthropic-compatible endpoints |
 | **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
-| **Session context** | Active tab, working directory, and date/time sent on first turn; verified command cwd carries forward to later commands and relative file operations |
+| **Session context** | A tab-scoped session context sends the active tab, working directory, and date/time on the first turn; verified command cwd carries forward to later commands and relative file operations |
 | **Saved sessions** | Create, resume, and delete conversations; sessions are saved after the first message |
 | **Task controls** | Stop a running task, queue follow-up input, and use slash command completion for session actions and skills |
 | **Auto-execute mode** | Ordinary and warning commands run automatically; dangerous commands pause for approval |
 | **Cautious mode** | Ordinary commands run directly; warning and dangerous commands require confirmation |
 | **Three-level command risk** | AI classifies commands as normal, warning, or dangerous; host rules can only raise the level, and result cards show the final classification |
 | **File writes & edits** | Create or replace files, or make precise text replacements, with a diff preview and per-file Apply / Reject review |
+| **Bounded reads** | Read local or SSH files by byte range, search one file for matching lines, and retrieve stored command output by range when a result was shortened |
 | **Image support** | Attach images to prompts and let vision-capable models inspect local workspace images through the image tool |
 | **Provider speed test** | Benchmark a selected provider/model for up to 5 seconds; show average tokens/s, ms/token, and first-token latency, with estimated counts clearly labeled |
 | **Context management** | Automatic conversation compaction, token usage display, and per-model context window and maximum output settings |

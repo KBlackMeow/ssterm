@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:math';
 
 import 'agent_tool_contract.dart';
 
@@ -36,7 +36,10 @@ class AgentContextBudget {
     return AgentContextBudget._(
       contextWindowTokens: contextWindowTokens,
       summaryReserveTokens: reserve,
-      autoCompactAtTokens: contextWindowTokens - reserve - 12000,
+      autoCompactAtTokens: max(
+        contextWindowTokens ~/ 2,
+        contextWindowTokens - reserve - 12000,
+      ),
       hardLimitTokens: (contextWindowTokens * 0.9).floor(),
       isFallbackWindow: false,
     );
@@ -67,20 +70,14 @@ class AgentContextBudget {
   /// usage. UTF-8 bytes / 3 is deliberately safer for CJK and JSON-heavy tool
   /// payloads than the common English-only characters / 4 shortcut.
   static int estimateHistoryTokens(Iterable<AgentConversationItem> items) {
-    var bytes = 0;
+    var tokens = 0;
     for (final item in items) {
-      bytes += utf8.encode(item.role ?? '').length;
-      bytes += utf8.encode(item.content ?? '').length;
-      for (final call in item.toolCalls) {
-        bytes += utf8.encode(call.id).length;
-        bytes += utf8.encode(call.name).length;
-        bytes += utf8.encode(jsonEncode(call.arguments)).length;
-      }
-      for (final result in item.toolResults) {
-        bytes += utf8.encode(result.toolCallId).length;
-        bytes += utf8.encode(result.content).length;
-      }
+      tokens += estimateItemTokens(item);
     }
-    return (bytes / 3).ceil();
+    return tokens;
+  }
+
+  static int estimateItemTokens(AgentConversationItem item) {
+    return item.estimatedTokens();
   }
 }
