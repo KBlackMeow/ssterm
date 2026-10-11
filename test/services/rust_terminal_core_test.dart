@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/services/rust_terminal_core.dart';
 import 'package:xterm/xterm.dart';
+import 'package:xterm/src/utils/unicode_v11.dart' show isExtendedPictographic;
 
 String _libraryPath() {
   const base = 'native/terminal_core/target/release';
@@ -16,6 +18,156 @@ String _libraryPath() {
 void main() {
   final path = _libraryPath();
   final available = File(path).existsSync();
+
+  test(
+    'native and Dart widths agree for every Unicode scalar and width setting',
+    () {
+      final nativeWidth = DynamicLibrary.open(path)
+          .lookupFunction<
+            Uint32 Function(Uint32, Uint32, Uint32),
+            int Function(int, int, int)
+          >('ssterm_terminal_codepoint_width');
+
+      for (final profile in WidthProfile.values) {
+        for (final ambiguous in [false, true]) {
+          final policy = TerminalWidthPolicy(
+            profile: profile,
+            ambiguousDoubleWidth: ambiguous,
+          );
+          final nativeProfile = profile == WidthProfile.legacy ? 1 : 0;
+          for (var codePoint = 0; codePoint <= 0x10ffff; codePoint++) {
+            if (codePoint >= 0xd800 && codePoint <= 0xdfff) continue;
+            final expected = policy.widthOf(codePoint);
+            final actual = nativeWidth(
+              codePoint,
+              nativeProfile,
+              ambiguous ? 1 : 0,
+            );
+            if (actual != expected) {
+              fail(
+                'U+${codePoint.toRadixString(16)} $profile '
+                'ambiguous=$ambiguous: Dart=$expected Rust=$actual',
+              );
+            }
+          }
+        }
+      }
+      expect(nativeWidth(0xd800, 0, 0), 0xffffffff);
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
+    'native and Dart variation selectors agree for every pictographic base',
+    () {
+      final dart = Terminal()..resize(8, 1);
+      final rust = RustTerminalCore.open(
+        columns: 8,
+        rows: 1,
+        maxScrollbackRows: 0,
+        libraryPath: path,
+      );
+      addTearDown(rust.close);
+
+      for (var codePoint = 0; codePoint <= 0x10ffff; codePoint++) {
+        if (!isExtendedPictographic(codePoint)) continue;
+        for (final selector in ['\u{fe0e}', '\u{fe0f}']) {
+          final text = '\r\x1b[2K${String.fromCharCode(codePoint)}${selector}X';
+          dart.write(text);
+          rust.feed(Uint8List.fromList(utf8.encode(text)));
+          final line = dart.buffer.lines[dart.buffer.scrollBack];
+          for (var col = 0; col < 8; col++) {
+            final cell = rust.cell(0, col);
+            if (cell.codepoint != line.getCodePoint(col) ||
+                cell.width != line.getWidth(col)) {
+              fail(
+                'U+${codePoint.toRadixString(16)} selector '
+                'U+${selector.runes.single.toRadixString(16)} col $col: '
+                'Dart=${line.getCodePoint(col)}/${line.getWidth(col)} '
+                'Rust=${cell.codepoint}/${cell.width}',
+              );
+            }
+          }
+        }
+      }
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
+    'native width table and variation selectors match xterm',
+    () {
+      const samples = ['⏸', '⏭', '✔', '✉', '※', '你', '😀', '𠀀'];
+      for (final profile in WidthProfile.values) {
+        for (final ambiguous in [false, true]) {
+          for (final sample in samples) {
+            final policy = TerminalWidthPolicy(
+              profile: profile,
+              ambiguousDoubleWidth: ambiguous,
+            );
+            final dart = Terminal(widthPolicy: policy)..resize(8, 1);
+            final rust = RustTerminalCore.open(
+              columns: 8,
+              rows: 1,
+              maxScrollbackRows: 0,
+              libraryPath: path,
+            );
+            try {
+              rust.setWidthPolicy(
+                legacy: profile == WidthProfile.legacy,
+                ambiguousDoubleWidth: ambiguous,
+              );
+              final text = '$sample X';
+              dart.write(text);
+              rust.feed(Uint8List.fromList(utf8.encode(text)));
+              for (var col = 0; col < 8; col++) {
+                expect(
+                  rust.cell(0, col).width,
+                  dart.buffer.lines[0].getWidth(col),
+                  reason:
+                      '$sample / $profile / ambiguous=$ambiguous / col=$col',
+                );
+                expect(
+                  rust.cell(0, col).codepoint,
+                  dart.buffer.lines[0].getCodePoint(col),
+                );
+              }
+            } finally {
+              rust.close();
+            }
+          }
+        }
+      }
+
+      for (final text in ['⏸\u{fe0f}X', '✔\u{fe0e}X']) {
+        final dart = Terminal()..resize(8, 1);
+        final rust = RustTerminalCore.open(
+          columns: 8,
+          rows: 1,
+          maxScrollbackRows: 0,
+          libraryPath: path,
+        );
+        try {
+          dart.write(text);
+          rust.feed(Uint8List.fromList(utf8.encode(text)));
+          for (var col = 0; col < 8; col++) {
+            expect(
+              rust.cell(0, col).width,
+              dart.buffer.lines[0].getWidth(col),
+              reason: '$text / col=$col',
+            );
+            expect(
+              rust.cell(0, col).codepoint,
+              dart.buffer.lines[0].getCodePoint(col),
+            );
+          }
+        } finally {
+          rust.close();
+        }
+      }
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
 
   test(
     'Rust terminal ABI preserves split UTF-8 and emits OSC 7 state',

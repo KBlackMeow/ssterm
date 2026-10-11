@@ -1,5 +1,8 @@
 // ignore_for_file: constant_identifier_names
 
+// Source of truth for Dart and Rust terminal cell widths. After changing these
+// tables, run `dart tool/generate_terminal_width_table.dart` from the repo root.
+
 import 'dart:typed_data';
 
 const BMP_COMBINING = [
@@ -606,10 +609,12 @@ class UnicodeV11 {
     if (bisearch(codePoint, UNICODE16_NARROW_DELTA)) return 1;
     if (bisearch(codePoint, UNICODE16_WIDE_DELTA)) return 2;
     // Unicode 11's East Asian-width table predates the current convention for
-    // text-presentation emoji. Modern terminal UIs (including ChatCode) lay
-    // these symbols out as two cells even when they are emitted without VS16.
-    // A one-cell result makes cursor-addressed incremental redraws miss a
-    // cell, leaving a character from the previous frame behind.
+    // text-presentation emoji. Some terminal UIs lay these symbols out as two
+    // cells even when they are emitted without VS16. Bare media controls
+    // U+23ED–U+23EF, U+23F1–U+23F2, and U+23F8–U+23F9 remain one cell to
+    // match cursor-addressed redraws from TUIs such as Claude Code.
+    // For symbols in this set, a one-cell result makes cursor-addressed
+    // incremental redraws miss a cell and leave the previous frame behind.
     if (_isModernEmojiDoubleWidth(codePoint)) return 2;
     if (codePoint < 65536) return table[codePoint];
     if (bisearch(codePoint, HIGH_COMBINING)) return 0;
@@ -658,9 +663,6 @@ bool _isModernEmojiDoubleWidth(int codePoint) {
       _inRanges(codePoint, const [
         (0x2194, 0x2199),
         (0x231a, 0x231b),
-        (0x23ed, 0x23ef),
-        (0x23f1, 0x23f2),
-        (0x23f8, 0x23f9),
         (0x25aa, 0x25ab),
         (0x25fb, 0x25fc),
         (0x2600, 0x2604),

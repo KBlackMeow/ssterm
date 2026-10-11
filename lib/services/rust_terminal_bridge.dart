@@ -71,6 +71,10 @@ class RustTerminalBridge implements TerminalByteSink {
   @override
   void write(List<int> bytes) {
     if (_closed || bytes.isEmpty) return;
+    core.setWidthPolicy(
+      legacy: terminal.widthPolicy.profile == WidthProfile.legacy,
+      ambiguousDoubleWidth: terminal.widthPolicy.ambiguousDoubleWidth,
+    );
     _resizeCoreToTerminalIfNeeded();
     final input = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     final update = core.feed(input);

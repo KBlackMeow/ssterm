@@ -5,6 +5,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+dart tool/generate_terminal_width_table.dart --check
 cargo fmt --manifest-path native/terminal_core/Cargo.toml -- --check
 cargo test --manifest-path native/terminal_core/Cargo.toml
 cargo fmt --manifest-path native/pty_core/Cargo.toml -- --check

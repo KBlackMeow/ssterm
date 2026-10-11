@@ -74,6 +74,9 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
           _config.terminal.resolveTheme().background.toARGB32() & 0xffffff,
       foregroundRgb:
           _config.terminal.resolveTheme().foreground.toARGB32() & 0xffffff,
+    )..setWidthPolicy(
+      legacy: terminalWidthPolicy.profile == WidthProfile.legacy,
+      ambiguousDoubleWidth: terminalWidthPolicy.ambiguousDoubleWidth,
     );
   }
 

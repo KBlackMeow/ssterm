@@ -8,6 +8,8 @@ use std::cmp::{max, min};
 use std::ffi::CString;
 use std::os::raw::c_char;
 
+mod generated_width_table;
+
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct TerminalUpdate {
@@ -167,6 +169,8 @@ pub struct TerminalCore {
     response: Vec<u8>,
     background_rgb: u32,
     foreground_rgb: u32,
+    width_legacy: bool,
+    ambiguous_double_width: bool,
     title: CString,
     working_directory: CString,
     bells: u32,
@@ -243,6 +247,8 @@ impl TerminalCore {
             response: Vec::with_capacity(128),
             background_rgb: 0x1e1e1e,
             foreground_rgb: 0xcccccc,
+            width_legacy: false,
+            ambiguous_double_width: false,
             title: CString::default(),
             working_directory: CString::default(),
             bells: 0,
@@ -343,10 +349,14 @@ impl TerminalCore {
 
     fn put_char(&mut self, value: char) {
         let value = self.translate_charset(value);
+        if matches!(value, '\u{fe0e}' | '\u{fe0f}') {
+            self.apply_variation_selector(value);
+            return;
+        }
         // Wide glyphs deliberately occupy two cells in this initial ABI. The
         // second cell is a space so Flutter can safely paint one scalar per
         // reported cell while the renderer integration is rolled out.
-        let character_width = char_width(value);
+        let character_width = char_width(value, self.width_legacy, self.ambiguous_double_width);
         if character_width == 0 {
             return;
         }
@@ -381,6 +391,62 @@ impl TerminalCore {
         }
         self.mark_dirty(self.cursor_row);
         self.cursor_col += width;
+    }
+
+    fn apply_variation_selector(&mut self, selector: char) {
+        if self.width_legacy || self.cursor_col == 0 {
+            return;
+        }
+        use generated_width_table::EXTENDED_PICTOGRAPHIC;
+        if selector == '\u{fe0f}' {
+            if self.cursor_col >= self.columns {
+                return;
+            }
+            let base_col = self.cursor_col - 1;
+            let base = self.index(self.cursor_row, base_col);
+            if self.cells[base].width != 1
+                || !in_width_ranges(self.cells[base].codepoint, EXTENDED_PICTOGRAPHIC)
+            {
+                return;
+            }
+            self.cells[base].width = 2;
+            let continuation = self.index(self.cursor_row, self.cursor_col);
+            self.cells[continuation] = self.styled_cell(0, 0);
+            self.cursor_col += 1;
+        } else {
+            let base_col = if self.cursor_col >= 2 {
+                let col = self.cursor_col - 2;
+                let index = self.index(self.cursor_row, col);
+                if self.cells[index].width == 2 {
+                    Some(col)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+            .or_else(|| {
+                if self.cursor_col == self.columns {
+                    Some(self.cursor_col - 1)
+                } else {
+                    None
+                }
+            });
+            let Some(base_col) = base_col else { return };
+            let base = self.index(self.cursor_row, base_col);
+            if self.cells[base].width != 2
+                || !in_width_ranges(self.cells[base].codepoint, EXTENDED_PICTOGRAPHIC)
+            {
+                return;
+            }
+            self.cells[base].width = 1;
+            if base_col + 1 < self.columns {
+                let continuation = self.index(self.cursor_row, base_col + 1);
+                self.cells[continuation] = self.styled_cell(0, 0);
+            }
+            self.cursor_col = base_col + 1;
+        }
+        self.mark_dirty(self.cursor_row);
     }
 
     fn translate_charset(&self, value: char) -> char {
@@ -1943,69 +2009,54 @@ impl TerminalCore {
     }
 }
 
-fn char_width(value: char) -> usize {
-    if is_modern_emoji_double_width(value as u32) {
-        return 2;
-    }
-    match value as u32 {
-        0x0300..=0x036f
-        | 0x1ab0..=0x1aff
-        | 0x1dc0..=0x1dff
-        | 0x20d0..=0x20ff
-        | 0xfe00..=0xfe0f
-        | 0xfe20..=0xfe2f
-        | 0x200d => 0,
-        0x1100..=0x115f
-        | 0x2329..=0x232a
-        | 0x2e80..=0xa4cf
-        | 0xac00..=0xd7a3
-        | 0xf900..=0xfaff
-        | 0xfe10..=0xfe19
-        | 0xfe30..=0xfe6f
-        | 0xff00..=0xff60
-        | 0xffe0..=0xffe6
-        | 0x1f300..=0x1faff
-        | 0x20000..=0x2fffd => 2,
-        _ => 1,
-    }
+fn in_width_ranges(codepoint: u32, ranges: &[(u32, u32)]) -> bool {
+    ranges
+        .binary_search_by(|&(start, end)| {
+            if codepoint < start {
+                std::cmp::Ordering::Greater
+            } else if codepoint > end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
-/// Mirrors xterm's modern Unicode width policy for BMP emoji whose East Asian
-/// width alone says "narrow". Keeping this table in lockstep with the Dart
-/// painter is essential: a one-cell disagreement shifts every later
-/// cursor-addressed TUI redraw and can leave an earlier frame visible.
-fn is_modern_emoji_double_width(codepoint: u32) -> bool {
-    const RANGES: &[(u32, u32)] = &[
-        (0x2194, 0x2199),
-        (0x231a, 0x231b),
-        (0x23ed, 0x23ef),
-        (0x23f1, 0x23f2),
-        (0x23f8, 0x23f9),
-        (0x25aa, 0x25ab),
-        (0x25fb, 0x25fc),
-        (0x2600, 0x2604),
-        (0x2638, 0x263a),
-        (0x2648, 0x2653),
-        (0x2694, 0x2697),
-        (0x26f0, 0x26f5),
-        (0x2b05, 0x2b07),
-    ];
-    const SINGLES: &[u32] = &[
-        0x00a9, 0x00ae, 0x203c, 0x2049, 0x2122, 0x2139, 0x21a9, 0x21aa, 0x2328, 0x23cf, 0x23f0,
-        0x24c2, 0x25b6, 0x25c0, 0x25fe, 0x260e, 0x2611, 0x2614, 0x2615, 0x2618, 0x2620, 0x2622,
-        0x2623, 0x2626, 0x262a, 0x262e, 0x262f, 0x2640, 0x2642, 0x265f, 0x2660, 0x2663, 0x2665,
-        0x2666, 0x2668, 0x267b, 0x267e, 0x267f, 0x2692, 0x2699, 0x269b, 0x269c, 0x26a0, 0x26a1,
-        0x26a7, 0x26aa, 0x26ab, 0x26b0, 0x26b1, 0x26bd, 0x26be, 0x26c4, 0x26c5, 0x26c8, 0x26ce,
-        0x26cf, 0x26d1, 0x26d3, 0x26d4, 0x26e9, 0x26ea, 0x26f7, 0x26f8, 0x26f9, 0x26fa, 0x26fd,
-        0x2702, 0x2705, 0x2708, 0x2709, 0x270f, 0x2712, 0x2714, 0x2716, 0x271d, 0x2721, 0x2728,
-        0x2733, 0x2734, 0x2744, 0x2747, 0x274c, 0x274e, 0x2753, 0x2754, 0x2755, 0x2757, 0x2763,
-        0x2764, 0x2795, 0x2796, 0x2797, 0x27a1, 0x27b0, 0x27bf, 0x2934, 0x2935, 0x2b1b, 0x2b1c,
-        0x2b50, 0x2b55, 0x3030, 0x303d, 0x3297, 0x3299,
-    ];
-    RANGES
-        .iter()
-        .any(|&(start, end)| start <= codepoint && codepoint <= end)
-        || SINGLES.contains(&codepoint)
+fn char_width(value: char, legacy: bool, ambiguous_double_width: bool) -> usize {
+    use generated_width_table as widths;
+    let codepoint = value as u32;
+    if codepoint < 0x7f {
+        return usize::from(codepoint >= 0x20);
+    }
+    let (zero, wide) = if legacy {
+        (widths::LEGACY_ZERO, widths::LEGACY_WIDE)
+    } else {
+        (widths::MODERN_ZERO, widths::MODERN_WIDE)
+    };
+    if in_width_ranges(codepoint, zero) {
+        return 0;
+    }
+    if in_width_ranges(codepoint, wide) {
+        return 2;
+    }
+    if !legacy && ambiguous_double_width && in_width_ranges(codepoint, widths::AMBIGUOUS) {
+        return 2;
+    }
+    1
+}
+
+/// Width query for verifying that the native parser and Dart width policy
+/// agree on every Unicode scalar. Invalid scalar values return `u32::MAX`.
+#[no_mangle]
+pub extern "C" fn ssterm_terminal_codepoint_width(
+    codepoint: u32,
+    profile: u32,
+    ambiguous_double_width: u32,
+) -> u32 {
+    char::from_u32(codepoint).map_or(u32::MAX, |value| {
+        char_width(value, profile == 1, ambiguous_double_width != 0) as u32
+    })
 }
 
 fn pack_xterm_cells(cells: &[TerminalCell], output: &mut [u32]) {
@@ -2045,6 +2096,22 @@ pub extern "C" fn ssterm_terminal_create_with_scrollback(
 pub unsafe extern "C" fn ssterm_terminal_destroy(terminal: *mut TerminalCore) {
     if !terminal.is_null() {
         drop(Box::from_raw(terminal));
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `terminal` must be null or point to a live terminal from this library.
+/// Profile 0 is modern; profile 1 is legacy. Existing cells keep their width.
+pub unsafe extern "C" fn ssterm_terminal_set_width_policy(
+    terminal: *mut TerminalCore,
+    profile: u32,
+    ambiguous_double_width: u32,
+) {
+    if let Some(terminal) = terminal.as_mut() {
+        terminal.width_legacy = profile == 1;
+        terminal.ambiguous_double_width = ambiguous_double_width != 0;
     }
 }
 #[no_mangle]
@@ -2517,6 +2584,48 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
         assert_eq!(terminal.cursor_col, 3);
         assert_eq!(terminal.cells[terminal.index(0, 0)].width, 2);
         assert_eq!(terminal.cells[terminal.index(0, 1)].width, 0);
+    }
+
+    #[test]
+    fn text_presentation_pause_symbol_does_not_leave_redraw_artifacts() {
+        let mut terminal = TerminalCore::new(12, 1);
+        terminal.feed("⏸\x1b[1Cabc)".as_bytes());
+        assert_eq!(terminal.cursor_col, 6);
+
+        terminal.feed(b"\r      ");
+        assert_eq!(terminal.row_text(0), "");
+    }
+
+    #[test]
+    fn bare_media_controls_follow_reference_terminal_widths() {
+        for symbol in ['⏭', '⏮', '⏯', '⏱', '⏲', '⏸', '⏹', '⏺'] {
+            let mut terminal = TerminalCore::new(4, 1);
+            terminal.feed(format!("{symbol}X").as_bytes());
+            assert_eq!(terminal.cursor_col, 2, "{symbol}");
+        }
+    }
+
+    #[test]
+    fn width_policy_and_variation_selectors_match_dart_semantics() {
+        let mut terminal = TerminalCore::new(10, 1);
+        terminal.feed("※".as_bytes());
+        assert_eq!(terminal.cursor_col, 1);
+        terminal.width_legacy = false;
+        terminal.ambiguous_double_width = true;
+        terminal.feed("\r※".as_bytes());
+        assert_eq!(terminal.cursor_col, 2);
+
+        terminal.feed("\r⏸\u{fe0f}X".as_bytes());
+        assert_eq!(terminal.cursor_col, 3);
+        assert_eq!(terminal.cells[terminal.index(0, 0)].width, 2);
+
+        terminal.feed("\r✔\u{fe0e}X".as_bytes());
+        assert_eq!(terminal.cursor_col, 2);
+        assert_eq!(terminal.cells[terminal.index(0, 0)].width, 1);
+
+        terminal.width_legacy = true;
+        terminal.feed("\r✔X".as_bytes());
+        assert_eq!(terminal.cursor_col, 2);
     }
 
     #[test]

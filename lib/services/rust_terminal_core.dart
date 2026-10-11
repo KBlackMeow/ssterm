@@ -263,6 +263,10 @@ class RustTerminalCore {
     _destroy = _library.lookupFunction<_DestroyNative, _DestroyDart>(
       'ssterm_terminal_destroy',
     );
+    _setWidthPolicy = _library
+        .lookupFunction<_SetWidthPolicyNative, _SetWidthPolicyDart>(
+          'ssterm_terminal_set_width_policy',
+        );
     _feed = _library.lookupFunction<_FeedNative, _FeedDart>(
       'ssterm_terminal_feed',
     );
@@ -310,6 +314,7 @@ class RustTerminalCore {
   final DynamicLibrary _library;
   final Pointer<Void> _handle;
   late final _DestroyDart _destroy;
+  late final _SetWidthPolicyDart _setWidthPolicy;
   late final _FeedDart _feed;
   late final _ResizeDart _resize;
   late final _RowTextDart _rowText;
@@ -327,6 +332,8 @@ class RustTerminalCore {
   Pointer<Uint8> _responseBuffer = nullptr.cast<Uint8>();
   var _responseCapacity = 0;
   var _closed = false;
+  var _legacyWidth = false;
+  var _ambiguousDoubleWidth = false;
 
   /// Opens a native terminal core already bundled by the host application.
   /// Tests may pass the absolute path of Cargo's built dynamic library.
@@ -360,6 +367,21 @@ class RustTerminalCore {
       _inputBuffer.asTypedList(bytes.length).setAll(0, bytes);
     }
     return RustTerminalCoreUpdate._(_feed(_handle, _inputBuffer, bytes.length));
+  }
+
+  /// Applies the same width model used by the Flutter terminal to new output.
+  void setWidthPolicy({
+    required bool legacy,
+    required bool ambiguousDoubleWidth,
+  }) {
+    _ensureOpen();
+    if (_legacyWidth == legacy &&
+        _ambiguousDoubleWidth == ambiguousDoubleWidth) {
+      return;
+    }
+    _setWidthPolicy(_handle, legacy ? 1 : 0, ambiguousDoubleWidth ? 1 : 0);
+    _legacyWidth = legacy;
+    _ambiguousDoubleWidth = ambiguousDoubleWidth;
   }
 
   /// Copies the current visible grid into a reusable caller-owned buffer.
@@ -558,6 +580,10 @@ typedef _CreateWithScrollbackDart =
     Pointer<Void> Function(int columns, int rows, int maxScrollbackRows);
 typedef _DestroyNative = Void Function(Pointer<Void> handle);
 typedef _DestroyDart = void Function(Pointer<Void> handle);
+typedef _SetWidthPolicyNative =
+    Void Function(Pointer<Void> handle, Uint32 profile, Uint32 ambiguous);
+typedef _SetWidthPolicyDart =
+    void Function(Pointer<Void> handle, int profile, int ambiguous);
 typedef _FeedNative =
     RustTerminalUpdate Function(
       Pointer<Void> handle,

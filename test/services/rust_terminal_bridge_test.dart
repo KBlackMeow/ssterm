@@ -19,6 +19,38 @@ void main() {
   final available = File(path).existsSync();
 
   test(
+    'bridge applies live width settings to the native parser',
+    () {
+      final terminal = Terminal()..resize(10, 1);
+      final core = RustTerminalCore.open(
+        columns: 10,
+        rows: 1,
+        maxScrollbackRows: 0,
+        libraryPath: path,
+      );
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      addTearDown(() {
+        bridge.close();
+        core.close();
+      });
+
+      bridge.write(utf8.encode('※'));
+      expect(core.cell(0, 0).width, 1);
+
+      terminal.widthPolicy.ambiguousDoubleWidth = true;
+      bridge.write(utf8.encode('\r※'));
+      expect(core.cell(0, 0).width, 2);
+      expect(terminal.buffer.lines[0].getWidth(0), 2);
+
+      terminal.widthPolicy.profile = WidthProfile.legacy;
+      bridge.write(utf8.encode('\r✔X'));
+      expect(core.cell(0, 0).width, 1);
+      expect(core.cell(0, 1).codepoint, 'X'.codeUnitAt(0));
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'bridge makes Rust screen, history, modes, and replies authoritative',
     () {
       final mouseReports = <String>[];
