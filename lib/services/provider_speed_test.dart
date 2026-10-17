@@ -2,8 +2,9 @@ import 'dart:async';
 
 import 'llm_service.dart';
 
-/// A bounded streaming benchmark. Includes connection and first-token latency
-/// in the average so slow-starting providers can be compared fairly.
+/// A bounded streaming benchmark. Waits for startup separately, then samples
+/// output for [ProviderSpeedTest.window]. Startup latency remains in the
+/// elapsed time so slow-starting providers can be compared fairly.
 class ProviderSpeedResult {
   const ProviderSpeedResult({
     required this.tokens,
@@ -25,9 +26,13 @@ class ProviderSpeedResult {
 }
 
 class ProviderSpeedTest {
-  ProviderSpeedTest({this.window = const Duration(seconds: 5)});
+  ProviderSpeedTest({
+    this.window = const Duration(seconds: 5),
+    this.startupTimeout = const Duration(seconds: 30),
+  });
 
   final Duration window;
+  final Duration startupTimeout;
   void Function()? _cancel;
 
   void cancel() => _cancel?.call();
@@ -72,14 +77,18 @@ class ProviderSpeedTest {
     }
 
     _cancel = () => finish(StateError('Speed test cancelled.'));
-    timer = Timer(window, finish);
+    timer = Timer(startupTimeout, finish);
     try {
       subscription = start().listen(
         (event) {
           if (finishing) return;
           if ((event.kind == 'text' || event.kind == 'reasoning') &&
               event.content.isNotEmpty) {
-            firstToken ??= clock.elapsed;
+            if (firstToken == null) {
+              firstToken = clock.elapsed;
+              timer?.cancel();
+              timer = Timer(window, finish);
+            }
             output.write(event.content);
           }
           if (event.completionTokenCount != null) {

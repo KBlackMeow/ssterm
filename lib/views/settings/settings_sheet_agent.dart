@@ -812,7 +812,7 @@ extension _AgentSettingsExt on _SettingsPageState {
             TextButton.icon(
               key: Key('settings-provider-speed-${provider.id}'),
               icon: Icon(running ? Icons.stop : Icons.speed, size: 16),
-              label: Text(running ? 'Stop test' : 'Speed test (5s)'),
+              label: Text(running ? 'Stop test' : 'Speed test'),
               onPressed: running
                   ? () => _providerSpeedTests[provider.id]?.cancel()
                   : model == null
@@ -823,7 +823,7 @@ extension _AgentSettingsExt on _SettingsPageState {
         ),
         Text(
           _providerSpeedLabels[provider.id] ??
-              'One model request; average includes startup latency. May incur API charges.',
+              'Waits up to 30s for output, then samples for 5s. Average includes startup latency. May incur API charges.',
           key: Key('settings-provider-speed-result-${provider.id}'),
           style: const TextStyle(color: _kFgMuted, fontSize: 11),
         ),
@@ -845,7 +845,7 @@ extension _AgentSettingsExt on _SettingsPageState {
     setState(() {
       _providerSpeedTests[provider.id] = test;
       _providerSpeedLabels[provider.id] =
-          '$model · Testing for up to 5 seconds…';
+          '$model · Waiting for output (up to ${test.startupTimeout.inSeconds}s), then sampling ${test.window.inSeconds}s…';
     });
     try {
       final result = await test.run(
@@ -872,7 +872,7 @@ extension _AgentSettingsExt on _SettingsPageState {
       final first = result.firstToken;
       setState(() {
         _providerSpeedLabels[provider.id] = first == null
-            ? '$model · No output within 5 seconds.'
+            ? '$model · No output within ${test.startupTimeout.inSeconds} seconds.'
             : '$model · ${result.exact ? '' : '≈ '}${result.tokensPerSecond.toStringAsFixed(1)} tokens/s'
                   ' · ${result.millisecondsPerToken.toStringAsFixed(1)} ms/token'
                   ' · First token ${(first.inMilliseconds / 1000).toStringAsFixed(2)}s'

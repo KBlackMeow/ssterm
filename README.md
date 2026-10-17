@@ -35,7 +35,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 | **File writes & edits** | Create or replace files, or make precise text replacements, with a diff preview and per-file Apply / Reject review |
 | **Bounded reads** | Read local or SSH files by byte range, search one file for matching lines, and retrieve stored command output by range when a result was shortened |
 | **Image support** | Attach images to prompts and let vision-capable models inspect local workspace images through the image tool |
-| **Provider speed test** | Benchmark a selected provider/model for up to 5 seconds; show average tokens/s, ms/token, and first-token latency, with estimated counts clearly labeled |
+| **Provider speed test** | Wait up to 30 seconds for a selected provider/model's first output, then sample for 5 seconds; show average tokens/s, ms/token, and first-token latency, with estimated counts clearly labeled |
 | **Context management** | Automatic conversation compaction, token usage display, and per-model context window and maximum output settings |
 | **Command results** | Structured command history and expandable result cards show command purpose, risk, output, and execution outcome |
 | **Web search** | Brave Search integration for current web results (configurable) |

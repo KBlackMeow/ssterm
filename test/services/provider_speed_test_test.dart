@@ -9,6 +9,7 @@ void main() {
     final stream = StreamController<LlmStreamEvent>();
     final benchmark = ProviderSpeedTest(
       window: const Duration(milliseconds: 10),
+      startupTimeout: const Duration(milliseconds: 10),
     );
     var aborts = 0;
     final result = await benchmark.run(
@@ -26,6 +27,7 @@ void main() {
   test('stream cancellation can synchronously re-enter finish', () async {
     final benchmark = ProviderSpeedTest(
       window: const Duration(milliseconds: 10),
+      startupTimeout: const Duration(milliseconds: 10),
     );
     var aborts = 0;
     var cancellations = 0;
@@ -68,11 +70,30 @@ void main() {
     var aborted = false;
     final result = await ProviderSpeedTest(
       window: const Duration(milliseconds: 20),
+      startupTimeout: const Duration(milliseconds: 20),
     ).run(start: () => stream.stream, abort: () => aborted = true);
     expect(aborted, isTrue);
     expect(result.firstToken, isNull);
     expect(result.tokensPerSecond, 0);
     await stream.close();
+  });
+
+  test('waits for a slow first token before sampling output', () async {
+    final result =
+        await ProviderSpeedTest(
+          window: const Duration(milliseconds: 10),
+          startupTimeout: const Duration(milliseconds: 150),
+        ).run(
+          start: () async* {
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+            yield LlmStreamEvent('text', 'Hello from a slow provider');
+          },
+          abort: () {},
+        );
+
+    expect(result.firstToken, isNotNull);
+    expect(result.firstToken!.inMilliseconds, greaterThanOrEqualTo(10));
+    expect(result.tokens, greaterThan(0));
   });
 
   test(
