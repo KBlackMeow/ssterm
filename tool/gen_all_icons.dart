@@ -4,7 +4,7 @@ import 'dart:math' as math;
 
 import 'package:image/image.dart' as img;
 
-const sourcePath = 'assets/icon/1.png';
+const sourcePath = 'assets/icon/发光磨砂终端提示符.png';
 
 void main() {
   final source = img.decodePng(File(sourcePath).readAsBytesSync());
