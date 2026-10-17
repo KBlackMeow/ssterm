@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:xterm/src/core/buffer/cell_offset.dart';
+import 'package:xterm/src/core/buffer/line.dart';
 import 'package:xterm/src/core/buffer/range.dart';
 import 'package:xterm/src/core/buffer/segment.dart';
 import 'package:xterm/src/core/mouse/button.dart';
@@ -61,6 +62,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     if (_terminal == terminal) return;
     if (attached) _terminal.removeListener(_onTerminalChange);
     _terminal = terminal;
+    _clearLineLayers();
     if (attached) _terminal.addListener(_onTerminalChange);
     _resizeTerminalIfNeeded();
     markNeedsLayout();
@@ -101,18 +103,21 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   set textStyle(TerminalStyle value) {
     if (value == _painter.textStyle) return;
     _painter.textStyle = value;
+    _clearLineLayers();
     markNeedsLayout();
   }
 
   set textScaler(TextScaler value) {
     if (value == _painter.textScaler) return;
     _painter.textScaler = value;
+    _clearLineLayers();
     markNeedsLayout();
   }
 
   set theme(TerminalTheme value) {
     if (value == _painter.theme) return;
     _painter.theme = value;
+    _clearLineLayers();
     markNeedsPaint();
   }
 
@@ -175,11 +180,71 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     if (value == _composingText) return;
     _composingText = value;
     markNeedsPaint();
+    if (value != null && value.isNotEmpty) {
+      _scheduleNotifyEditableRect();
+    }
   }
 
   TerminalSize? _viewportSize;
 
   final TerminalPainter _painter;
+
+  // Each row keeps its display list and composited layer. Moving a row while
+  // scrolling does not invoke TerminalPainter again.
+  static const _maxLineLayers = 192;
+  final _lineLayers = <BufferLine, LayerHandle<OffsetLayer>>{};
+  final _clipLayer = LayerHandle<ClipRectLayer>();
+
+  /// Number of rows recorded since this render object was created.
+  @visibleForTesting
+  int debugRecordedLineCount = 0;
+
+  @visibleForTesting
+  int debugPaintedLineCount = 0;
+
+  void _removeLineLayer(BufferLine line) {
+    final handle = _lineLayers.remove(line);
+    if (handle != null) handle.layer = null;
+  }
+
+  void _clearLineLayers() {
+    for (final handle in _lineLayers.values) {
+      handle.layer = null;
+    }
+    _lineLayers.clear();
+  }
+
+  void _invalidateScreenLineLayers() {
+    for (final buffer in [_terminal.mainBuffer, _terminal.altBuffer]) {
+      for (var i = buffer.scrollBack; i < buffer.lines.length; i++) {
+        _removeLineLayer(buffer.lines[i]);
+      }
+    }
+  }
+
+  OffsetLayer _layerForLine(BufferLine line) {
+    final cached = _lineLayers.remove(line);
+    if (cached != null) {
+      _lineLayers[line] = cached;
+      return cached.layer!;
+    }
+    final bounds = Rect.fromLTWH(
+        0, 0, line.length * _painter.cellSize.width, _painter.cellSize.height);
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder, bounds);
+    debugPaintedLineCount++;
+    _painter.paintLine(canvas, Offset.zero, line);
+    final pictureLayer = PictureLayer(bounds)
+      ..picture = recorder.endRecording()
+      ..isComplexHint = true;
+    final layer = OffsetLayer()..append(pictureLayer);
+    _lineLayers[line] = LayerHandle(layer);
+    debugRecordedLineCount++;
+    while (_lineLayers.length > _maxLineLayers) {
+      _removeLineLayer(_lineLayers.keys.first);
+    }
+    return layer;
+  }
 
   var _stickToBottom = true;
   bool _editableRectUpdateScheduled = false;
@@ -189,7 +254,9 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     final lineHeight = _painter.cellSize.height;
     _stickToBottom = (_maxScrollExtent - _offset.pixels).abs() < lineHeight / 2;
     markNeedsPaint();
-    _scheduleNotifyEditableRect();
+    // The caret does not need to follow history scrolling unless an IME is
+    // composing. Avoid two platform text-input messages on every scroll frame.
+    if (_isComposingText) _scheduleNotifyEditableRect();
   }
 
   void _onFocusChange() {
@@ -197,9 +264,11 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       _terminal.onOutput?.call(_focusNode.hasFocus ? '\x1b[I' : '\x1b[O');
     }
     markNeedsPaint();
+    if (_focusNode.hasFocus) _scheduleNotifyEditableRect();
   }
 
   void _onTerminalChange() {
+    _invalidateScreenLineLayers();
     final usingAlt = _terminal.isUsingAltBuffer;
     if (usingAlt != _wasUsingAltBuffer) {
       _wasUsingAltBuffer = usingAlt;
@@ -263,6 +332,13 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   @override
+  void dispose() {
+    _clearLineLayers();
+    _clipLayer.layer = null;
+    super.dispose();
+  }
+
+  @override
   bool hitTestSelf(Offset position) {
     return true;
   }
@@ -270,6 +346,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   @override
   void systemFontsDidChange() {
     _painter.clearFontCache();
+    _clearLineLayers();
     super.systemFontsDidChange();
   }
 
@@ -425,9 +502,9 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       return;
     }
     _editableRectUpdateScheduled = true;
-    SchedulerBinding.instance.scheduleFrameCallback((_) {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       _editableRectUpdateScheduled = false;
-      if (!attached) return;
+      if (!attached || !hasSize) return;
       _notifyEditableRect();
     });
   }
@@ -469,6 +546,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     _viewportSize = viewportSize;
 
     if (sizeChanged || forceResize) {
+      _clearLineLayers();
       _resizeTerminalIfNeeded();
     }
   }
@@ -539,15 +617,17 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    context.canvas.save();
-    context.canvas.clipRect(offset & size);
-    _paint(context, offset);
-    context.canvas.restore();
-    context.setWillChangeHint();
+    _clipLayer.layer = context.pushClipRect(
+      true,
+      offset,
+      Offset.zero & size,
+      _paint,
+      oldLayer: _clipLayer.layer,
+    );
   }
 
   void _paint(PaintingContext context, Offset offset) {
-    final canvas = context.canvas;
+    var canvas = context.canvas;
 
     // When the user has scrolled up from the alt-buffer bottom into main-buffer
     // history, render the main buffer at the current scroll position instead of
@@ -594,12 +674,11 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
     }
 
     for (var i = effectFirstLine; i <= effectLastLine; i++) {
-      _painter.paintLine(
-        canvas,
-        offset + _cellTopLeft(0, i),
-        lines[i],
-      );
+      final layer = _layerForLine(lines[i]);
+      layer.offset = offset + _cellTopLeft(0, i);
+      context.addLayer(layer);
     }
+    canvas = context.canvas;
 
     // Cursor and composing text only make sense when showing the active buffer.
     if (!isScrollingHistory) {

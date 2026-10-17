@@ -23,6 +23,29 @@ class MainFlutterWindow: NSWindow {
 
     super.awakeFromNib()
 
+    // Rapid terminal output stutters in macOS system full screen while the
+    // system title bar is hidden. Revealing the title bar or a notification
+    // makes the same output smooth without changing Flutter frame timings.
+    // A nearly opaque window keeps the smooth full-screen presentation path
+    // even after the system overlay disappears.
+    NotificationCenter.default.addObserver(
+      forName: NSWindow.didEnterFullScreenNotification,
+      object: self,
+      queue: .main
+    ) { [weak self] _ in
+      self?.alphaValue = 0.999
+    }
+    NotificationCenter.default.addObserver(
+      forName: NSWindow.didExitFullScreenNotification,
+      object: self,
+      queue: .main
+    ) { [weak self] _ in
+      self?.alphaValue = 1
+    }
+    if styleMask.contains(.fullScreen) {
+      alphaValue = 0.999
+    }
+
     // With TitleBarStyle.hidden the Flutter view fills the entire window
     // (including the title bar region), but NSWindow still delays mouse-up
     // events in that region while it decides whether the user is

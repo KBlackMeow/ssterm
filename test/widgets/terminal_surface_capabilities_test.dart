@@ -64,4 +64,26 @@ void main() {
       lessThan(scrollController.position.maxScrollExtent),
     );
   });
+
+  testWidgets('rebuilding unchanged settings retains terminal row layers', (
+    tester,
+  ) async {
+    final terminal = Terminal();
+    final settings = TerminalSettings();
+    Widget surface() => MaterialApp(
+      home: TerminalSurface(terminal: terminal, settings: settings),
+    );
+
+    await tester.pumpWidget(surface());
+    terminal.write('cached terminal row');
+    await tester.pump();
+    final renderer = tester
+        .state<TerminalViewState>(find.byType(TerminalView))
+        .renderTerminal;
+    final recorded = renderer.debugRecordedLineCount;
+    expect(recorded, greaterThan(0));
+
+    await tester.pumpWidget(surface());
+    expect(renderer.debugRecordedLineCount, recorded);
+  });
 }

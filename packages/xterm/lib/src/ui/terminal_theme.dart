@@ -54,4 +54,59 @@ class TerminalTheme {
   final Color searchHitBackground;
   final Color searchHitBackgroundCurrent;
   final Color searchHitForeground;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TerminalTheme &&
+          other.cursor == cursor &&
+          other.selection == selection &&
+          other.foreground == foreground &&
+          other.background == background &&
+          other.black == black &&
+          other.white == white &&
+          other.red == red &&
+          other.green == green &&
+          other.yellow == yellow &&
+          other.blue == blue &&
+          other.magenta == magenta &&
+          other.cyan == cyan &&
+          other.brightBlack == brightBlack &&
+          other.brightRed == brightRed &&
+          other.brightGreen == brightGreen &&
+          other.brightYellow == brightYellow &&
+          other.brightBlue == brightBlue &&
+          other.brightMagenta == brightMagenta &&
+          other.brightCyan == brightCyan &&
+          other.brightWhite == brightWhite &&
+          other.searchHitBackground == searchHitBackground &&
+          other.searchHitBackgroundCurrent == searchHitBackgroundCurrent &&
+          other.searchHitForeground == searchHitForeground;
+
+  @override
+  int get hashCode => Object.hashAll([
+        cursor,
+        selection,
+        foreground,
+        background,
+        black,
+        white,
+        red,
+        green,
+        yellow,
+        blue,
+        magenta,
+        cyan,
+        brightBlack,
+        brightRed,
+        brightGreen,
+        brightYellow,
+        brightBlue,
+        brightMagenta,
+        brightCyan,
+        brightWhite,
+        searchHitBackground,
+        searchHitBackgroundCurrent,
+        searchHitForeground,
+      ]);
 }

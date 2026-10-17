@@ -25,6 +25,9 @@ class TerminalPainter {
   /// cell no longer produces the same visual output. For example, when
   /// [_textStyle] is changed, or when the system font changes.
   final _paragraphCache = ParagraphCache(10240);
+  final _lineParagraphCache = ParagraphCache(512);
+
+  TextStyle? _plainAsciiStyle;
 
   TerminalStyle get textStyle => _textStyle;
   TerminalStyle _textStyle;
@@ -33,6 +36,8 @@ class TerminalPainter {
     _textStyle = value;
     _cellSize = _measureCharSize();
     _paragraphCache.clear();
+    _lineParagraphCache.clear();
+    _plainAsciiStyle = null;
   }
 
   TextScaler get textScaler => _textScaler;
@@ -42,6 +47,8 @@ class TerminalPainter {
     _textScaler = value;
     _cellSize = _measureCharSize();
     _paragraphCache.clear();
+    _lineParagraphCache.clear();
+    _plainAsciiStyle = null;
   }
 
   TerminalTheme get theme => _theme;
@@ -51,6 +58,8 @@ class TerminalPainter {
     _theme = value;
     _colorPalette = PaletteBuilder(value).build();
     _paragraphCache.clear();
+    _lineParagraphCache.clear();
+    _plainAsciiStyle = null;
   }
 
   Size _measureCharSize() {
@@ -65,6 +74,8 @@ class TerminalPainter {
   void clearFontCache() {
     _cellSize = _measureCharSize();
     _paragraphCache.clear();
+    _lineParagraphCache.clear();
+    _plainAsciiStyle = null;
   }
 
   /// Paints the cursor based on the current cursor type.
@@ -133,6 +144,8 @@ class TerminalPainter {
     Offset offset,
     BufferLine line,
   ) {
+    if (_paintPlainAsciiLine(canvas, offset, line)) return;
+
     final cellData = CellData.empty();
     final cellWidth = _cellSize.width;
 
@@ -148,6 +161,64 @@ class TerminalPainter {
         i++;
       }
     }
+  }
+
+  bool _paintPlainAsciiLine(Canvas canvas, Offset offset, BufferLine line) {
+    // Laying out a paragraph is only worthwhile once it replaces enough
+    // individual cell draws. Keep short text on the exact cell paint path.
+    final text = StringBuffer();
+    var lastContent = 0;
+    for (var i = 0; i < line.length; i++) {
+      if (line.getForeground(i) != 0 ||
+          line.getBackground(i) != 0 ||
+          line.getAttributes(i) != 0) {
+        return false;
+      }
+      final content = line.getContent(i);
+      final codepoint = content & CellContent.codepointMask;
+      if (codepoint == 0) {
+        text.write(' ');
+      } else if (codepoint >= 0x20 &&
+          codepoint <= 0x7e &&
+          content >> CellContent.widthShift == 1) {
+        text.writeCharCode(codepoint);
+        lastContent = i + 1;
+      } else {
+        return false;
+      }
+    }
+    if (lastContent < 16) return false;
+    final content = text.toString().substring(0, lastContent);
+    final style = _plainAsciiStyle ??= _makePlainAsciiStyle();
+    final key = ('plainAsciiLine', content, _textScaler);
+    final paragraph = _lineParagraphCache.getLayoutFromCache(key) ??
+        _lineParagraphCache.performAndCacheLayout(
+          content,
+          style,
+          _textScaler,
+          key,
+        );
+    canvas.drawParagraph(paragraph, offset);
+    return true;
+  }
+
+  TextStyle _makePlainAsciiStyle() {
+    final baseStyle = _textStyle.toTextStyle(
+      color: resolveForegroundColor(0),
+    );
+    final advance = _paragraphCache.performAndCacheLayout(
+      '0',
+      baseStyle,
+      _textScaler,
+      ('plainAsciiAdvance', _textScaler),
+    ).maxIntrinsicWidth;
+    return baseStyle.copyWith(
+      letterSpacing: _textStyle.letterSpacing + _cellSize.width - advance,
+      fontFeatures: const [
+        FontFeature.disable('liga'),
+        FontFeature.disable('calt'),
+      ],
+    );
   }
 
   @pragma('vm:prefer-inline')

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,6 +64,183 @@ void main() {
     },
     skip: !Platform.isMacOS,
   );
+
+  testWidgets(
+    'long ASCII history stays aligned while scrolling',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 180);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final terminal = Terminal(maxLines: 200);
+      final scrollController = ScrollController();
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          scrollController: scrollController,
+        ),
+      ));
+
+      terminal.write(List.generate(
+        40,
+        (index) => 'interface $index: flags=8863<UP,BROADCAST,RUNNING> '
+            'inet 192.0.2.$index',
+      ).join('\r\n'));
+      await tester.pump();
+      scrollController.jumpTo(scrollController.position.maxScrollExtent / 2);
+      await tester.pumpAndSettle();
+
+      await expectLater(
+        find.byType(TerminalView),
+        matchesGoldenFile('_goldens/long_ascii_history_scroll.png'),
+      );
+    },
+    skip: !Platform.isMacOS,
+  );
+
+  testWidgets('scrolling cached history reuses painted rows', (tester) async {
+    tester.view.physicalSize = const Size(800, 180);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final terminal = Terminal(maxLines: 200);
+    final scrollController = ScrollController();
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalView(terminal, scrollController: scrollController),
+    ));
+    terminal.write(List.generate(50, (i) => 'history row $i').join('\r\n'));
+    await tester.pump();
+    scrollController.jumpTo(scrollController.position.maxScrollExtent / 2);
+    await tester.pumpAndSettle();
+
+    final renderer = tester
+        .state<TerminalViewState>(find.byType(TerminalView))
+        .renderTerminal;
+    final painted = renderer.debugPaintedLineCount;
+    final recorded = renderer.debugRecordedLineCount;
+    expect(recorded, greaterThan(0));
+
+    scrollController.jumpTo(scrollController.offset + 1);
+    await tester.pump();
+    expect(renderer.debugPaintedLineCount, painted);
+
+    scrollController.jumpTo(scrollController.offset + renderer.lineHeight);
+    await tester.pump();
+    expect(renderer.debugPaintedLineCount - painted, lessThanOrEqualTo(2));
+
+    final beforeTheme = renderer.debugRecordedLineCount;
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalView(
+        terminal,
+        scrollController: scrollController,
+        theme: TerminalThemes.whiteOnBlack,
+      ),
+    ));
+    expect(renderer.debugRecordedLineCount, greaterThan(beforeTheme));
+
+    scrollController.jumpTo(scrollController.position.maxScrollExtent);
+    await tester.pump();
+    final beforeOutput = renderer.debugRecordedLineCount;
+    terminal.write('\rupdated screen row');
+    await tester.pump();
+    expect(renderer.debugRecordedLineCount, greaterThan(beforeOutput));
+  });
+
+  testWidgets('trackpad moves main-buffer history by sub-line deltas',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 180);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final terminal = Terminal(maxLines: 200);
+    final scrollController = ScrollController();
+    await tester.pumpWidget(MaterialApp(
+      home: TerminalView(terminal, scrollController: scrollController),
+    ));
+    terminal.write(List.generate(50, (i) => 'history row $i').join('\r\n'));
+    await tester.pump();
+    scrollController.jumpTo(scrollController.position.maxScrollExtent / 2);
+    await tester.pump();
+
+    final renderer = tester
+        .state<TerminalViewState>(find.byType(TerminalView))
+        .renderTerminal;
+    var caretUpdates = 0;
+    renderer.onEditableRect = (_, __) => caretUpdates++;
+    await tester.pump();
+
+    final start = scrollController.offset;
+    final pointer = TestPointer(1, PointerDeviceKind.trackpad);
+    const position = Offset(100, 100);
+    await tester.sendEventToBinding(pointer.panZoomStart(position));
+    for (var i = 1; i <= 5; i++) {
+      await tester.sendEventToBinding(
+        pointer.panZoomUpdate(position, pan: Offset(0, -i.toDouble())),
+      );
+      await tester.pump();
+      expect(scrollController.offset, closeTo(start + i, 0.1));
+    }
+    expect(caretUpdates, 0);
+    renderer.composingText = 'a';
+    await tester.pump();
+    expect(caretUpdates, 1);
+    await tester.sendEventToBinding(pointer.panZoomEnd());
+  });
+
+  testWidgets('macOS history scroll hides and restores the text input view',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      tester.view.physicalSize = const Size(800, 180);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final output = <String>[];
+      final terminal = Terminal(maxLines: 200, onOutput: output.add);
+      final scrollController = ScrollController();
+      await tester.pumpWidget(MaterialApp(
+        home: TerminalView(
+          terminal,
+          autofocus: true,
+          scrollController: scrollController,
+        ),
+      ));
+      await tester.pump();
+      expect(tester.testTextInput.hasAnyClients, isTrue);
+      expect(tester.testTextInput.isVisible, isTrue);
+
+      terminal.write(List.generate(50, (i) => 'history row $i').join('\r\n'));
+      await tester.pump();
+      scrollController.jumpTo(scrollController.position.maxScrollExtent / 2);
+      await tester.pump();
+      expect(tester.testTextInput.isVisible, isFalse);
+
+      await tester.pump(const Duration(milliseconds: 149));
+      expect(tester.testTextInput.isVisible, isFalse);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(tester.testTextInput.isVisible, isTrue);
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'x',
+        selection: TextSelection.collapsed(offset: 1),
+      ));
+      await tester.pump();
+      expect(output, contains('x'));
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(tester.testTextInput.isVisible, isTrue);
+
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'a',
+        selection: TextSelection.collapsed(offset: 1),
+        composing: TextRange(start: 0, end: 1),
+      ));
+      await tester.pump();
+      scrollController.jumpTo(scrollController.position.maxScrollExtent / 3);
+      await tester.pump();
+      expect(tester.testTextInput.isVisible, isTrue);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   group('TerminalView.readOnly', () {
     testWidgets('works', (tester) async {

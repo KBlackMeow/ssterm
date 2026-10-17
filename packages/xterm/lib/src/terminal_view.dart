@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -156,6 +159,10 @@ class TerminalView extends StatefulWidget {
 }
 
 class TerminalViewState extends State<TerminalView> {
+  static bool get _hideImeOnScroll =>
+      defaultTargetPlatform == TargetPlatform.macOS;
+
+  Timer? _showInputAfterScrollTimer;
   late FocusNode _focusNode;
 
   late final ShortcutManager _shortcutManager;
@@ -193,6 +200,9 @@ class TerminalViewState extends State<TerminalView> {
     _focusNode = widget.focusNode ?? FocusNode();
     _controller = widget.controller ?? TerminalController();
     _scrollController = widget.scrollController ?? ScrollController();
+    if (_hideImeOnScroll) {
+      _scrollController.addListener(_onScrollForInput);
+    }
     _shortcutManager = ShortcutManager(
       shortcuts: widget.shortcuts ?? defaultTerminalShortcuts,
     );
@@ -223,10 +233,16 @@ class TerminalViewState extends State<TerminalView> {
       _controller = widget.controller ?? TerminalController();
     }
     if (oldWidget.scrollController != widget.scrollController) {
+      if (_hideImeOnScroll) {
+        _scrollController.removeListener(_onScrollForInput);
+      }
       if (oldWidget.scrollController == null) {
         _scrollController.dispose();
       }
       _scrollController = widget.scrollController ?? ScrollController();
+      if (_hideImeOnScroll) {
+        _scrollController.addListener(_onScrollForInput);
+      }
     }
     if (oldWidget.terminal != widget.terminal) {
       oldWidget.terminal.removeListener(_onTerminalStateChange);
@@ -243,6 +259,10 @@ class TerminalViewState extends State<TerminalView> {
 
   @override
   void dispose() {
+    _showInputAfterScrollTimer?.cancel();
+    if (_hideImeOnScroll) {
+      _scrollController.removeListener(_onScrollForInput);
+    }
     _focusNode.removeListener(_onFocusChanged);
     widget.terminal.removeListener(_onTerminalStateChange);
     if (widget.focusNode == null) {
@@ -256,6 +276,21 @@ class TerminalViewState extends State<TerminalView> {
     }
     _shortcutManager.dispose();
     super.dispose();
+  }
+
+  void _onScrollForInput() {
+    if (widget.hardwareKeyboardOnly ||
+        widget.readOnly ||
+        _composingText != null) {
+      return;
+    }
+    final edit = _customTextEditKey.currentState;
+    if (edit == null || !edit.hasInputConnection) return;
+    edit.hideForScroll();
+    _showInputAfterScrollTimer?.cancel();
+    _showInputAfterScrollTimer = Timer(const Duration(milliseconds: 150), () {
+      if (mounted) _customTextEditKey.currentState?.showAfterScroll();
+    });
   }
 
   @override

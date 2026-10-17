@@ -55,6 +55,24 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   TextInputConnection? _connection;
   int? _viewId;
   bool _teardown = false;
+  bool _hiddenForScroll = false;
+
+  void hideForScroll() {
+    if (_hiddenForScroll || !hasInputConnection || _composingActive) return;
+    _hiddenForScroll = true;
+    // Flutter exposes show() on TextInputConnection but no matching hide().
+    // The platform text-input channel supports hiding its active native view
+    // without detaching the client, so composition state survives scrolling.
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide').ignore();
+  }
+
+  void showAfterScroll() {
+    if (!_hiddenForScroll) return;
+    _hiddenForScroll = false;
+    if (hasInputConnection && widget.focusNode.hasFocus) {
+      _connection!.show();
+    }
+  }
 
   @override
   void initState() {
@@ -101,6 +119,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
   bool get hasInputConnection => _connection != null && _connection!.attached;
 
   void requestKeyboard() {
+    showAfterScroll();
     if (widget.focusNode.hasFocus) {
       _openInputConnection();
     } else {
@@ -236,7 +255,8 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     if (widget.focusNode.hasFocus) {
       // Skip consumeKeyboardToken() — terminal always wants the keyboard when
       // focused, regardless of how focus was obtained (autofocus, tap, API call).
-      widget.focusNode.consumeKeyboardToken(); // consume to keep token state clean
+      widget.focusNode
+          .consumeKeyboardToken(); // consume to keep token state clean
       _openInputConnection();
     } else {
       _closeInputConnectionIfNeeded();
@@ -256,7 +276,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
     }
 
     if (hasInputConnection) {
-      _connection!.show();
+      if (!_hiddenForScroll) _connection!.show();
       return;
     }
 
@@ -272,7 +292,7 @@ class CustomTextEditState extends State<CustomTextEdit> with TextInputClient {
 
     try {
       _connection = TextInput.attach(this, config);
-      _connection!.show();
+      if (!_hiddenForScroll) _connection!.show();
       _safeSetEditingState(_initEditingState);
       _lastEditingState = _initEditingState.copyWith();
     } on PlatformException {
