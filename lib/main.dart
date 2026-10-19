@@ -95,7 +95,7 @@ void main() async {
   registerDefaultBundledSkills();
 
   // Read appearance concurrently with native window setup. macOS keeps its
-  // window hidden until the first Flutter frame has the saved wallpaper.
+  // window transparent until the first Flutter frame has the saved wallpaper.
   final startupConfigFuture = Platform.isMacOS ? AppConfig.load() : null;
   AppConfig? startupConfig;
 
@@ -175,6 +175,9 @@ void main() async {
       const Duration(seconds: 3),
       onTimeout: () {},
     );
+    // AppKit may have shown the nib window already; reveal its rendered frame.
+    await windowManager.setIgnoreMouseEvents(false);
+    await windowManager.setOpacity(1);
     await windowManager.show();
     await windowManager.focus();
   }

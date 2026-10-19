@@ -6,14 +6,29 @@ class MainFlutterWindow: NSWindow {
   private static let defaultContentSize = NSSize(width: 960, height: 720)
 
   override func awakeFromNib() {
-    // Flutter shows this window after its first wallpaper-backed frame is
-    // rasterized. Showing the nib window here exposes an empty black view.
+    // AppKit can show the nib window again after awakeFromNib. Keep it
+    // transparent while Flutter renders its first wallpaper-backed frame.
     setIsVisible(false)
+    alphaValue = 0
+    ignoresMouseEvents = true
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
     self.appearance = NSAppearance(named: .vibrantDark)
+    // Give the native window its final frame before AppKit makes the nib
+    // window visible. Dart applies the same title-bar style and size later.
+    titleVisibility = .hidden
+    titlebarAppearsTransparent = true
+    styleMask.insert(.fullSizeContentView)
     setContentSize(Self.defaultContentSize)
-    center()
+    let cursor = NSEvent.mouseLocation
+    let display = NSScreen.screens.first { $0.frame.contains(cursor) }
+      ?? NSScreen.screens.first
+    if let area = display?.visibleFrame {
+      setFrameOrigin(NSPoint(
+        x: area.midX - frame.width / 2,
+        y: area.midY - frame.height / 2
+      ))
+    }
 
     minSize = frameRect(
       forContentRect: NSRect(origin: .zero, size: NSSize(width: 640, height: 480))
@@ -33,17 +48,22 @@ class MainFlutterWindow: NSWindow {
       object: self,
       queue: .main
     ) { [weak self] _ in
-      self?.alphaValue = 0.999
+      if let self = self, self.alphaValue > 0 {
+        self.alphaValue = 0.999
+      }
     }
     NotificationCenter.default.addObserver(
       forName: NSWindow.didExitFullScreenNotification,
       object: self,
       queue: .main
     ) { [weak self] _ in
-      self?.alphaValue = 1
+      if let self = self, self.alphaValue > 0 {
+        self.alphaValue = 1
+      }
     }
     if styleMask.contains(.fullScreen) {
-      alphaValue = 0.999
+      // The first frame still controls when the startup window is revealed.
+      alphaValue = 0
     }
 
     // With TitleBarStyle.hidden the Flutter view fills the entire window
