@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,13 @@
 // reads drain full batches without extra round trips.
 #define PTY_READ_BUFFER_SIZE (128 * 1024)
 #define PTY_RUST_READ_WINDOW 32
+
+typedef struct PtyWriteRequest
+{
+    struct PtyWriteRequest *next;
+    size_t length;
+    uint8_t data[1];
+} PtyWriteRequest;
 
 typedef struct SstermPtyCore SstermPtyCore;
 typedef SstermPtyCore *(*RustPtyCreateFn)(const char *, const char *const *, size_t,
@@ -624,7 +632,87 @@ typedef struct PtyHandle
 
     BOOL rust_read_stopping;
 
+    CRITICAL_SECTION write_lock;
+    CONDITION_VARIABLE write_condition;
+    HANDLE write_thread;
+    PtyWriteRequest *write_head;
+    PtyWriteRequest *write_tail;
+    BOOL write_stopping;
+
 } PtyHandle;
+
+static DWORD WINAPI write_loop(LPVOID arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
+    for (;;)
+    {
+        EnterCriticalSection(&handle->write_lock);
+        while (handle->write_head == NULL && !handle->write_stopping)
+        {
+            SleepConditionVariableCS(&handle->write_condition, &handle->write_lock, INFINITE);
+        }
+        if (handle->write_stopping)
+        {
+            LeaveCriticalSection(&handle->write_lock);
+            break;
+        }
+        PtyWriteRequest *request = handle->write_head;
+        handle->write_head = request->next;
+        if (handle->write_head == NULL) handle->write_tail = NULL;
+        LeaveCriticalSection(&handle->write_lock);
+
+        if (handle->uses_rust)
+        {
+            rust_pty_api.write(handle->rust_pty, request->data, request->length);
+        }
+        else
+        {
+            size_t offset = 0;
+            while (offset < request->length)
+            {
+                DWORD written = 0;
+                DWORD count = (DWORD)((request->length - offset) > MAXDWORD
+                    ? MAXDWORD : request->length - offset);
+                if (!WriteFile(handle->inputWriteSide, request->data + offset,
+                               count, &written, NULL) || written == 0) break;
+                offset += written;
+            }
+            FlushFileBuffers(handle->inputWriteSide);
+        }
+        free(request);
+    }
+    return 0;
+}
+
+static BOOL start_write_thread(PtyHandle *handle)
+{
+    InitializeCriticalSection(&handle->write_lock);
+    InitializeConditionVariable(&handle->write_condition);
+    handle->write_thread = CreateThread(NULL, 0, write_loop, handle, 0, NULL);
+    if (handle->write_thread != NULL) return TRUE;
+    DeleteCriticalSection(&handle->write_lock);
+    return FALSE;
+}
+
+static void stop_write_thread(PtyHandle *handle)
+{
+    if (handle->write_thread == NULL) return;
+    EnterCriticalSection(&handle->write_lock);
+    handle->write_stopping = TRUE;
+    WakeConditionVariable(&handle->write_condition);
+    LeaveCriticalSection(&handle->write_lock);
+    CancelSynchronousIo(handle->write_thread);
+    WaitForSingleObject(handle->write_thread, INFINITE);
+    CloseHandle(handle->write_thread);
+    while (handle->write_head != NULL)
+    {
+        PtyWriteRequest *request = handle->write_head;
+        handle->write_head = request->next;
+        free(request);
+    }
+    DeleteCriticalSection(&handle->write_lock);
+    handle->write_thread = NULL;
+}
 
 static __declspec(thread) char error_buffer[1024];
 static __declspec(thread) BOOL has_error = FALSE;
@@ -775,7 +863,8 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
                                &handle->rust_ack_condition, &handle->rust_read_credits,
                                &handle->rust_read_stopping, &handle->rust_read_thread) ||
             !start_wait_exit_thread(NULL, rust_pty, TRUE, options->exit_port,
-                                    NULL, &handle->rust_wait_thread))
+                                    NULL, &handle->rust_wait_thread) ||
+            !start_write_thread(handle))
         {
             EnterCriticalSection(&handle->rust_ack_lock);
             handle->rust_read_stopping = TRUE;
@@ -783,6 +872,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
             LeaveCriticalSection(&handle->rust_ack_lock);
             rust_pty_api.kill(rust_pty);
             rust_pty_api.interrupt(rust_pty);
+            stop_write_thread(handle);
             if (handle->rust_read_thread != NULL)
             {
                 CancelSynchronousIo(handle->rust_read_thread);
@@ -934,7 +1024,7 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     CloseHandle(outputWriteSide);
     outputWriteSide = NULL;
 
-    pty = malloc(sizeof(PtyHandle));
+    pty = calloc(1, sizeof(PtyHandle));
 
     if (pty == NULL)
     {
@@ -946,6 +1036,19 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     if (mutex == NULL)
     {
         set_windows_error("CreateSemaphore failed", GetLastError());
+        goto cleanup;
+    }
+
+    pty->inputWriteSide = inputWriteSide;
+    pty->outputReadSide = outputReadSide;
+    pty->hPty = hPty;
+    pty->dwProcessId = processInfo.dwProcessId;
+    pty->ackRead = options->ackRead;
+    pty->hMutex = mutex;
+    pty->uses_rust = FALSE;
+    if (!start_write_thread(pty))
+    {
+        set_windows_error("Starting PTY writer failed", GetLastError());
         goto cleanup;
     }
 
@@ -966,14 +1069,6 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
     {
         CloseHandle(ignored_wait_thread);
     }
-
-    pty->inputWriteSide = inputWriteSide;
-    pty->outputReadSide = outputReadSide;
-    pty->hPty = hPty;
-    pty->dwProcessId = processInfo.dwProcessId;
-    pty->ackRead = options->ackRead;
-    pty->hMutex = mutex;
-    pty->uses_rust = FALSE;
 
     return pty;
 
@@ -1017,6 +1112,7 @@ static DWORD WINAPI destroy_rust_pty_thread(LPVOID arg)
     // retain this worker, never freeze tab close or application shutdown.
     WaitForSingleObject(handle->rust_read_thread, INFINITE);
     WaitForSingleObject(handle->rust_wait_thread, INFINITE);
+    stop_write_thread(handle);
     CloseHandle(handle->rust_read_thread);
     CloseHandle(handle->rust_wait_thread);
     rust_pty_api.destroy(handle->rust_pty);
@@ -1031,11 +1127,6 @@ static DWORD WINAPI destroy_thread(LPVOID arg)
 {
     PtyHandle *handle = (PtyHandle *)arg;
 
-    CloseHandle(handle->inputWriteSide);
-
-    // Unblock read_loop's ReadFile before tearing down the console.
-    CloseHandle(handle->outputReadSide);
-
     // Terminate the shell before ClosePseudoConsole.  Dart-side Pty.kill()
     // usually does this first, but if the process is still alive
     // ClosePseudoConsole blocks the calling thread until every attached
@@ -1047,6 +1138,11 @@ static DWORD WINAPI destroy_thread(LPVOID arg)
         WaitForSingleObject(hProcess, 5000);
         CloseHandle(hProcess);
     }
+    stop_write_thread(handle);
+    CloseHandle(handle->inputWriteSide);
+
+    // Unblock read_loop's ReadFile before tearing down the console.
+    CloseHandle(handle->outputReadSide);
 
     // For WSL-backed shells, dwProcessId is the `wsl.exe`/`ubuntu.exe`
     // launcher, not the process actually attached to the pseudoconsole (the
@@ -1118,27 +1214,39 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
     }
     else
     {
-        free(handle);
+        // The writer may still be using this handle. Kill the process and
+        // retain the allocation rather than freeing it underneath the thread.
+        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, handle->dwProcessId);
+        if (hProcess != NULL)
+        {
+            TerminateProcess(hProcess, 1);
+            CloseHandle(hProcess);
+        }
     }
 }
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)
 {
-    if (handle != NULL && handle->uses_rust)
+    if (handle == NULL || buffer == NULL || length <= 0 ||
+        (size_t)length > SIZE_MAX - sizeof(PtyWriteRequest)) return;
+    PtyWriteRequest *request = malloc(sizeof(PtyWriteRequest) + (size_t)length);
+    if (request == NULL) return;
+    request->next = NULL;
+    request->length = (size_t)length;
+    memcpy(request->data, buffer, (size_t)length);
+
+    EnterCriticalSection(&handle->write_lock);
+    if (handle->write_stopping)
     {
-        if (length >= 0)
-        {
-            rust_pty_api.write(handle->rust_pty, (const uint8_t *)buffer, (size_t)length);
-        }
+        LeaveCriticalSection(&handle->write_lock);
+        free(request);
         return;
     }
-    DWORD bytesWritten;
-
-    WriteFile(handle->inputWriteSide, buffer, length, &bytesWritten, NULL);
-
-    FlushFileBuffers(handle->inputWriteSide);
-
-    return;
+    if (handle->write_tail != NULL) handle->write_tail->next = request;
+    else handle->write_head = request;
+    handle->write_tail = request;
+    WakeConditionVariable(&handle->write_condition);
+    LeaveCriticalSection(&handle->write_lock);
 }
 
 FFI_PLUGIN_EXPORT void pty_ack_read(PtyHandle *handle)

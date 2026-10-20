@@ -1,5 +1,6 @@
 
 #include <stdint.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,13 @@ typedef struct RustPtyApi {
 
 static RustPtyApi rust_pty_api;
 static pthread_once_t rust_pty_api_once = PTHREAD_ONCE_INIT;
+
+typedef struct PtyWriteRequest
+{
+    struct PtyWriteRequest *next;
+    size_t length;
+    uint8_t data[1];
+} PtyWriteRequest;
 
 static void load_rust_pty_api(void)
 {
@@ -152,6 +160,16 @@ typedef struct PtyHandle
 
     bool rust_read_stopping;
 
+    // Writes can wait for a child that is itself waiting for Dart to ACK
+    // output. Keep that wait off the Dart/Flutter thread and preserve order.
+    pthread_mutex_t write_mutex;
+    pthread_cond_t write_condition;
+    pthread_t write_thread;
+    PtyWriteRequest *write_head;
+    PtyWriteRequest *write_tail;
+    bool write_stopping;
+    bool write_thread_started;
+
 } PtyHandle;
 
 typedef struct ReadLoopOptions
@@ -184,6 +202,80 @@ static void set_rust_error_message(const char *message)
     }
     snprintf(rust_error_message, sizeof(rust_error_message), "%s", message);
     error_message = rust_error_message;
+}
+
+static void *write_loop(void *arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
+    for (;;)
+    {
+        pthread_mutex_lock(&handle->write_mutex);
+        while (handle->write_head == NULL && !handle->write_stopping)
+        {
+            pthread_cond_wait(&handle->write_condition, &handle->write_mutex);
+        }
+        if (handle->write_stopping)
+        {
+            pthread_mutex_unlock(&handle->write_mutex);
+            break;
+        }
+        PtyWriteRequest *request = handle->write_head;
+        handle->write_head = request->next;
+        if (handle->write_head == NULL) handle->write_tail = NULL;
+        pthread_mutex_unlock(&handle->write_mutex);
+
+        if (handle->uses_rust)
+        {
+            rust_pty_api.write(handle->rust_pty, request->data, request->length);
+        }
+        else
+        {
+            size_t offset = 0;
+            while (offset < request->length)
+            {
+                ssize_t written = write(handle->ptm, request->data + offset,
+                                        request->length - offset);
+                if (written < 0 && errno == EINTR) continue;
+                if (written <= 0) break;
+                offset += (size_t)written;
+            }
+        }
+        free(request);
+    }
+    return NULL;
+}
+
+static bool start_write_thread(PtyHandle *handle)
+{
+    pthread_mutex_init(&handle->write_mutex, NULL);
+    pthread_cond_init(&handle->write_condition, NULL);
+    if (pthread_create(&handle->write_thread, NULL, write_loop, handle) == 0)
+    {
+        handle->write_thread_started = true;
+        return true;
+    }
+    pthread_cond_destroy(&handle->write_condition);
+    pthread_mutex_destroy(&handle->write_mutex);
+    return false;
+}
+
+static void stop_write_thread(PtyHandle *handle)
+{
+    if (!handle->write_thread_started) return;
+    pthread_mutex_lock(&handle->write_mutex);
+    handle->write_stopping = true;
+    pthread_cond_signal(&handle->write_condition);
+    pthread_mutex_unlock(&handle->write_mutex);
+    pthread_join(handle->write_thread, NULL);
+    while (handle->write_head != NULL)
+    {
+        PtyWriteRequest *request = handle->write_head;
+        handle->write_head = request->next;
+        free(request);
+    }
+    pthread_cond_destroy(&handle->write_condition);
+    pthread_mutex_destroy(&handle->write_mutex);
+    handle->write_thread_started = false;
 }
 
 static void *read_loop(void *arg)
@@ -410,18 +502,24 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
                               &handle->mutex, options->ackRead, handle,
                               &handle->rust_read_thread) != 0 ||
             start_wait_exit_thread(handle->pid, rust_pty, true, options->exit_port,
-                                   &handle->rust_wait_thread) != 0)
+                                   &handle->rust_wait_thread) != 0 ||
+            !start_write_thread(handle))
         {
             pthread_mutex_lock(&handle->rust_ack_mutex);
             handle->rust_read_stopping = true;
             pthread_cond_broadcast(&handle->rust_ack_condition);
             pthread_mutex_unlock(&handle->rust_ack_mutex);
             rust_pty_api.kill(rust_pty);
+            stop_write_thread(handle);
             // A successfully-started reader exits after kill; join it before
             // releasing the opaque Rust handle it is reading from.
             if (handle->rust_read_thread)
             {
                 pthread_join(handle->rust_read_thread, NULL);
+            }
+            if (handle->rust_wait_thread)
+            {
+                pthread_join(handle->rust_wait_thread, NULL);
             }
             rust_pty_api.destroy(rust_pty);
             pthread_cond_destroy(&handle->rust_ack_condition);
@@ -467,12 +565,28 @@ FFI_PLUGIN_EXPORT PtyHandle *pty_create(PtyOptions *options)
         }
     }
 
-    PtyHandle *handle = (PtyHandle *)malloc(sizeof(PtyHandle));
+    PtyHandle *handle = (PtyHandle *)calloc(1, sizeof(PtyHandle));
+    if (handle == NULL)
+    {
+        kill(pid, SIGKILL);
+        close(ptm);
+        error_message = "Unable to allocate PTY handle";
+        return NULL;
+    }
 
     handle->ptm = ptm;
     handle->pid = pid;
     pthread_mutex_init(&handle->mutex, NULL);
     handle->ackRead = options->ackRead;
+    if (!start_write_thread(handle))
+    {
+        kill(pid, SIGKILL);
+        close(ptm);
+        pthread_mutex_destroy(&handle->mutex);
+        free(handle);
+        error_message = "Unable to start PTY writer";
+        return NULL;
+    }
 
     pthread_t ignored_read_thread;
     start_read_thread(ptm, NULL, false, options->stdout_port, &handle->mutex,
@@ -494,9 +608,21 @@ static void *destroy_rust_pty(void *arg)
     // freeze the whole application while a tab is closing.
     pthread_join(handle->rust_read_thread, NULL);
     pthread_join(handle->rust_wait_thread, NULL);
+    stop_write_thread(handle);
     rust_pty_api.destroy(handle->rust_pty);
     pthread_cond_destroy(&handle->rust_ack_condition);
     pthread_mutex_destroy(&handle->rust_ack_mutex);
+    pthread_mutex_destroy(&handle->mutex);
+    free(handle);
+    return NULL;
+}
+
+static void *destroy_legacy_pty(void *arg)
+{
+    PtyHandle *handle = (PtyHandle *)arg;
+    kill(handle->pid, SIGKILL);
+    stop_write_thread(handle);
+    close(handle->ptm);
     pthread_mutex_destroy(&handle->mutex);
     free(handle);
     return NULL;
@@ -529,31 +655,41 @@ FFI_PLUGIN_EXPORT void pty_destroy(PtyHandle *handle)
         return;
     }
 
-    // Kill the shell process with SIGKILL before closing the PTY master.
-    // SIGTERM (sent by Dart-side Pty.kill()) is catchable/ignorable — if the
-    // shell ignores it, the PTY slave stays open, the read_loop thread stays
-    // blocked in read(), and the main-thread close() below would block forever
-    // waiting for that read to drain (macOS kernel behaviour).  SIGKILL cannot
-    // be caught; the slave closes immediately, read() returns EOF, and the
-    // close() completes without blocking.
-    kill(handle->pid, SIGKILL);
-
-    close(handle->ptm);
-    pthread_mutex_destroy(&handle->mutex);
-    free(handle);
+    // Joining a blocked write must also stay off the Flutter thread.
+    pthread_t destroy_thread;
+    if (pthread_create(&destroy_thread, NULL, destroy_legacy_pty, handle) == 0)
+    {
+        pthread_detach(destroy_thread);
+    }
+    else
+    {
+        kill(handle->pid, SIGKILL);
+        // Retain the handle rather than freeing memory used by its writer.
+    }
 }
 
 FFI_PLUGIN_EXPORT void pty_write(PtyHandle *handle, char *buffer, int length)
 {
-    if (handle != NULL && handle->uses_rust)
+    if (handle == NULL || buffer == NULL || length <= 0 ||
+        (size_t)length > SIZE_MAX - sizeof(PtyWriteRequest)) return;
+    PtyWriteRequest *request = malloc(sizeof(PtyWriteRequest) + (size_t)length);
+    if (request == NULL) return;
+    request->next = NULL;
+    request->length = (size_t)length;
+    memcpy(request->data, buffer, (size_t)length);
+
+    pthread_mutex_lock(&handle->write_mutex);
+    if (handle->write_stopping)
     {
-        if (length >= 0)
-        {
-            rust_pty_api.write(handle->rust_pty, (const uint8_t *)buffer, (size_t)length);
-        }
+        pthread_mutex_unlock(&handle->write_mutex);
+        free(request);
         return;
     }
-    write(handle->ptm, buffer, length);
+    if (handle->write_tail != NULL) handle->write_tail->next = request;
+    else handle->write_head = request;
+    handle->write_tail = request;
+    pthread_cond_signal(&handle->write_condition);
+    pthread_mutex_unlock(&handle->write_mutex);
 }
 
 FFI_PLUGIN_EXPORT void pty_ack_read(PtyHandle *handle)

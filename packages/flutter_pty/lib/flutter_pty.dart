@@ -353,8 +353,11 @@ class Pty {
   /// The process id of the process running in the pseudo-terminal.
   int get pid => _bindings.pty_getpid(_handle);
 
-  /// Write data to the pseudo-terminal.
+  /// Queue data for the pseudo-terminal's ordered native writer.
+  /// The child may block on input while its output needs a Dart read ACK, so
+  /// this call must never wait for the underlying OS write to finish.
   void write(Uint8List data) {
+    if (_disposed || data.isEmpty) return;
     final buf = malloc<Int8>(data.length);
     buf.asTypedList(data.length).setAll(0, data);
     _bindings.pty_write(_handle, buf.cast(), data.length);
@@ -363,6 +366,7 @@ class Pty {
 
   /// Resize the pseudo-terminal.
   void resize(int rows, int cols) {
+    if (_disposed) return;
     _bindings.pty_resize(_handle, rows, cols);
   }
 
@@ -410,6 +414,7 @@ class Pty {
   /// This is needed when ackRead is set to true as the pty will wait for this signal to happen
   /// before any additional data is sent.
   void ackRead() {
+    if (_disposed) return;
     _bindings.pty_ack_read(_handle);
   }
 
