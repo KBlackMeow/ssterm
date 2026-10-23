@@ -339,11 +339,23 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     final wordsPerRow = columns * wordsPerCell;
     for (var row = first; row <= last; row++) {
       final line = target.lines[visibleStart + row];
+      // A complete snapshot remains the authority. Compare every candidate
+      // row, including cleared cells and style-only changes, before copying.
+      // Never depend on the dirty interval from only the last PTY chunk.
+      final source = row * wordsPerRow;
+      var changed = false;
+      for (var word = 0; word < wordsPerRow; word++) {
+        if (line.data[word] != packedCells[source + word]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) continue;
       line.data.setRange(
         0,
         wordsPerRow,
         packedCells,
-        row * wordsPerRow,
+        source,
       );
       markDirtyRow(row);
     }

@@ -19,6 +19,47 @@ void main() {
   final available = File(path).existsSync();
 
   test(
+    'bridge matches full rebuild for every split of a synchronized redraw',
+    () {
+      final bytes = utf8.encode(
+        'old top\r\nold bottom'
+        '\x1b[?2026h\x1b[H\x1b[2J'
+        '\x1b[31m中😀\x1b[0m\x1b[2;1Hfresh'
+        '\x1b[?2026l',
+      );
+      for (var split = 0; split <= bytes.length; split++) {
+        final terminal = Terminal()..resize(12, 4);
+        final core = RustTerminalCore.open(
+          columns: 12,
+          rows: 4,
+          libraryPath: path,
+        );
+        final bridge = RustTerminalBridge(core: core, terminal: terminal);
+        final rebuilt = RustTerminalRenderBuffer();
+        try {
+          bridge.write(bytes.sublist(0, split));
+          bridge.write(bytes.sublist(split));
+          core.renderSnapshotInto(rebuilt, incremental: false);
+          for (var row = 0; row < 4; row++) {
+            final line =
+                terminal.buffer.lines[terminal.buffer.scrollBack + row];
+            expect(
+              line.data.take(12 * 5),
+              orderedEquals(rebuilt.rowWords(row)),
+              reason: 'split $split, row $row',
+            );
+          }
+        } finally {
+          rebuilt.close();
+          bridge.close();
+          core.close();
+        }
+      }
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'bridge applies live width settings to the native parser',
     () {
       final terminal = Terminal()..resize(10, 1);

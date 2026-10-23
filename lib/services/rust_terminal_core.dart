@@ -173,6 +173,9 @@ class RustTerminalRenderBuffer {
 
   final Pointer<RustTerminalSnapshotMetadata> _metadata;
   Pointer<Uint32> _words = nullptr.cast<Uint32>();
+  Pointer<Uint64> _rowRevisions = nullptr.cast<Uint64>();
+  var _revisionCapacity = 0;
+  RustTerminalCore? _source;
   var _capacity = 0;
   var _wordCount = 0;
   var _closed = false;
@@ -217,6 +220,19 @@ class RustTerminalRenderBuffer {
     if (_words != nullptr) calloc.free(_words);
     _words = replacement;
     _capacity = capacity;
+    // New storage contains no retained frame, even if dimensions are equal.
+    if (_revisionCapacity != 0) {
+      _rowRevisions
+          .asTypedList(_revisionCapacity)
+          .fillRange(0, _revisionCapacity, 0);
+    }
+  }
+
+  void _ensureRevisionCapacity(int rows) {
+    if (rows <= _revisionCapacity) return;
+    if (_rowRevisions != nullptr) calloc.free(_rowRevisions);
+    _rowRevisions = calloc<Uint64>(rows);
+    _revisionCapacity = rows;
   }
 
   void _ensureOpen() {
@@ -227,6 +243,7 @@ class RustTerminalRenderBuffer {
     if (_closed) return;
     _closed = true;
     if (_words != nullptr) calloc.free(_words);
+    if (_rowRevisions != nullptr) calloc.free(_rowRevisions);
     calloc.free(_metadata);
   }
 }
@@ -286,6 +303,16 @@ class RustTerminalCore {
         .lookupFunction<_RenderSnapshotNative, _RenderSnapshotDart>(
           'ssterm_terminal_snapshot_xterm_cells',
         );
+    // An older bundled library can still use the complete-snapshot path.
+    if (_library.providesSymbol(
+      'ssterm_terminal_snapshot_xterm_cells_incremental',
+    )) {
+      _incrementalRenderSnapshot = _library
+          .lookupFunction<
+            _IncrementalRenderSnapshotNative,
+            _IncrementalRenderSnapshotDart
+          >('ssterm_terminal_snapshot_xterm_cells_incremental');
+    }
     _historySnapshot = _library
         .lookupFunction<_HistorySnapshotNative, _HistorySnapshotDart>(
           'ssterm_terminal_history_xterm_cells',
@@ -321,6 +348,7 @@ class RustTerminalCore {
   late final _CellDart _cell;
   late final _SnapshotDart _snapshot;
   late final _RenderSnapshotDart _renderSnapshot;
+  _IncrementalRenderSnapshotDart? _incrementalRenderSnapshot;
   late final _HistorySnapshotDart _historySnapshot;
   late final _TakeResponseDart _takeResponse;
   late final _SetBackgroundRgbDart _setBackgroundRgb;
@@ -408,9 +436,49 @@ class RustTerminalCore {
     return destination.generation;
   }
 
-  int renderSnapshotInto(RustTerminalRenderBuffer destination) {
+  int renderSnapshotInto(
+    RustTerminalRenderBuffer destination, {
+    bool incremental = true,
+  }) {
     _ensureOpen();
     destination._ensureOpen();
+    final capture = incremental ? _incrementalRenderSnapshot : null;
+    if (capture != null) {
+      var required = capture(
+        _handle,
+        destination._metadata,
+        destination._words,
+        destination._capacity,
+        destination._rowRevisions,
+        destination._revisionCapacity,
+        identical(destination._source, this) ? 0 : 1,
+      );
+      if (required > destination._capacity ||
+          destination.rows > destination._revisionCapacity) {
+        destination._ensureCapacity(required);
+        destination._ensureRevisionCapacity(destination.rows);
+        required = capture(
+          _handle,
+          destination._metadata,
+          destination._words,
+          destination._capacity,
+          destination._rowRevisions,
+          destination._revisionCapacity,
+          1,
+        );
+      }
+      destination._wordCount = required;
+      destination._source = this;
+      return destination.generation;
+    }
+    // A full capture may follow history use or a diagnostic rebuild. Invalidate
+    // its revisions so switching back to incremental always refreshes safely.
+    if (destination._revisionCapacity != 0) {
+      destination._rowRevisions
+          .asTypedList(destination._revisionCapacity)
+          .fillRange(0, destination._revisionCapacity, 0);
+    }
+    destination._source = null;
     var required = _renderSnapshot(
       _handle,
       destination._metadata,
@@ -437,6 +505,7 @@ class RustTerminalCore {
   }) {
     _ensureOpen();
     destination._ensureOpen();
+    destination._source = null;
     var required = _historySnapshot(
       _handle,
       startRow,
@@ -682,3 +751,24 @@ typedef _SetForegroundRgbNative =
 typedef _SetForegroundRgbDart = void Function(Pointer<Void> handle, int rgb);
 typedef _StringValueNative = Pointer<Utf8> Function(Pointer<Void> handle);
 typedef _StringValueDart = Pointer<Utf8> Function(Pointer<Void> handle);
+
+typedef _IncrementalRenderSnapshotNative =
+    IntPtr Function(
+      Pointer<Void> handle,
+      Pointer<RustTerminalSnapshotMetadata> metadata,
+      Pointer<Uint32> destination,
+      IntPtr destinationWordCapacity,
+      Pointer<Uint64> rowRevisions,
+      IntPtr revisionCapacity,
+      Uint32 forceFull,
+    );
+typedef _IncrementalRenderSnapshotDart =
+    int Function(
+      Pointer<Void> handle,
+      Pointer<RustTerminalSnapshotMetadata> metadata,
+      Pointer<Uint32> destination,
+      int destinationWordCapacity,
+      Pointer<Uint64> rowRevisions,
+      int revisionCapacity,
+      int forceFull,
+    );

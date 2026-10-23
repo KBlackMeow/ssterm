@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' show max;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/rendering.dart';
@@ -192,7 +193,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   // Each row keeps its display list and composited layer. Moving a row while
   // scrolling does not invoke TerminalPainter again.
   static const _maxLineLayers = 192;
-  final _lineLayers = <BufferLine, LayerHandle<OffsetLayer>>{};
+  final _lineLayers = <BufferLine, _CachedLineLayer>{};
   final _clipLayer = LayerHandle<ClipRectLayer>();
 
   /// Number of rows recorded since this render object was created.
@@ -204,30 +205,23 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
 
   void _removeLineLayer(BufferLine line) {
     final handle = _lineLayers.remove(line);
-    if (handle != null) handle.layer = null;
+    if (handle != null) handle.handle.layer = null;
   }
 
   void _clearLineLayers() {
     for (final handle in _lineLayers.values) {
-      handle.layer = null;
+      handle.handle.layer = null;
     }
     _lineLayers.clear();
   }
 
-  void _invalidateScreenLineLayers() {
-    for (final buffer in [_terminal.mainBuffer, _terminal.altBuffer]) {
-      for (var i = buffer.scrollBack; i < buffer.lines.length; i++) {
-        _removeLineLayer(buffer.lines[i]);
-      }
-    }
-  }
-
   OffsetLayer _layerForLine(BufferLine line) {
     final cached = _lineLayers.remove(line);
-    if (cached != null) {
+    if (cached != null && cached.matches(line)) {
       _lineLayers[line] = cached;
-      return cached.layer!;
+      return cached.handle.layer!;
     }
+    if (cached != null) cached.handle.layer = null;
     final bounds = Rect.fromLTWH(
         0, 0, line.length * _painter.cellSize.width, _painter.cellSize.height);
     final recorder = PictureRecorder();
@@ -238,7 +232,7 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       ..picture = recorder.endRecording()
       ..isComplexHint = true;
     final layer = OffsetLayer()..append(pictureLayer);
-    _lineLayers[line] = LayerHandle(layer);
+    _lineLayers[line] = _CachedLineLayer(line, layer);
     debugRecordedLineCount++;
     while (_lineLayers.length > _maxLineLayers) {
       _removeLineLayer(_lineLayers.keys.first);
@@ -268,7 +262,6 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
   }
 
   void _onTerminalChange() {
-    _invalidateScreenLineLayers();
     final usingAlt = _terminal.isUsingAltBuffer;
     if (usingAlt != _wasUsingAltBuffer) {
       _wasUsingAltBuffer = usingAlt;
@@ -809,5 +802,28 @@ class RenderTerminal extends RenderBox with RelayoutWhenSystemFontsChangeMixin {
       end - start,
       color,
     );
+  }
+}
+
+/// Validate against the actual packed cells, including styles and blank cells.
+/// BufferLine.data is mutable and can be written by native imports as well as
+/// the Dart parser, so object identity or a consumed dirty-row set is not a
+/// sufficient cache key. This also works with multiple views of one terminal.
+class _CachedLineLayer {
+  _CachedLineLayer(BufferLine line, OffsetLayer layer)
+      : handle = LayerHandle(layer),
+        cells = Uint32List.fromList(
+            Uint32List.sublistView(line.data, 0, line.length * 5));
+
+  final LayerHandle<OffsetLayer> handle;
+  final Uint32List cells;
+
+  bool matches(BufferLine line) {
+    if (cells.length != line.length * 5) return false;
+    final current = line.data;
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i] != current[i]) return false;
+    }
+    return true;
   }
 }

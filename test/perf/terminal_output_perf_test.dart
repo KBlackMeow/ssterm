@@ -19,6 +19,58 @@ String _libraryPath() {
 void main() {
   final runPerf = Platform.environment['SSTERM_RUN_PERF'] == '1';
 
+  test('profiles incremental snapshots against full rebuilds', () {
+    final core = RustTerminalCore.open(
+      columns: 240,
+      rows: 80,
+      libraryPath: _libraryPath(),
+    );
+    final incremental = RustTerminalRenderBuffer();
+    final rebuilt = RustTerminalRenderBuffer();
+    addTearDown(() {
+      incremental.close();
+      rebuilt.close();
+      core.close();
+    });
+    core.renderSnapshotInto(incremental);
+    core.renderSnapshotInto(rebuilt, incremental: false);
+    final incrementalWatch = Stopwatch();
+    final rebuildWatch = Stopwatch();
+    for (var step = 0; step < 2000; step++) {
+      core.feed(
+        Uint8List.fromList(utf8.encode('\x1b[${step % 80 + 1};1H${step % 10}')),
+      );
+      // Alternate measurement order to reduce warm-cache ordering bias.
+      void captureIncremental() {
+        incrementalWatch.start();
+        core.renderSnapshotInto(incremental);
+        incrementalWatch.stop();
+      }
+
+      void captureRebuilt() {
+        rebuildWatch.start();
+        core.renderSnapshotInto(rebuilt, incremental: false);
+        rebuildWatch.stop();
+      }
+
+      if (step.isEven) {
+        captureIncremental();
+        captureRebuilt();
+      } else {
+        captureRebuilt();
+        captureIncremental();
+      }
+    }
+    expect(incremental.words, orderedEquals(rebuilt.words));
+    // Report a microbenchmark; CI does not assert machine-dependent ratios.
+    // ignore: avoid_print
+    print(
+      '240x80 single-row updates, 2000 snapshots: '
+      'incremental=${incrementalWatch.elapsedMicroseconds / 1000}ms '
+      'full=${rebuildWatch.elapsedMicroseconds / 1000}ms',
+    );
+  }, skip: runPerf ? false : 'Set SSTERM_RUN_PERF=1 to run perf guard.');
+
   test('large output flood drains without pathological delay', () async {
     final terminal = Terminal(maxLines: 400000);
     final accepted = <int>[];

@@ -88,6 +88,16 @@ size_t ssterm_terminal_snapshot_xterm_cells(
     SstermTerminalSnapshot *metadata,
     uint32_t *destination,
     size_t destination_word_capacity);
+// Retains a complete snapshot but packs only changed rows. Revisions are
+// caller-owned, initialized to zero, and retained with metadata/destination.
+// Each consumer must have its own revision array. A capacity probe updates
+// metadata but leaves cells/revisions untouched. Retry with force_full = 1
+// after growing storage; also force a rebuild when replacing destination data.
+size_t ssterm_terminal_snapshot_xterm_cells_incremental(
+    const SstermTerminalCore *terminal,
+    SstermTerminalSnapshot *metadata,
+    uint32_t *destination, size_t destination_word_capacity,
+    uint64_t *row_revisions, size_t revision_capacity, uint32_t force_full);
 // Copies a chronological slice of retained main-screen history in the same
 // packed layout. `start_row` is relative to the oldest retained row.
 size_t ssterm_terminal_history_xterm_cells(

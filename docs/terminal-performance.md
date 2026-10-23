@@ -24,9 +24,51 @@ Record local machine, date, and observed `seq 1 300000` behavior before changing
 - The perf guard is opt-in so normal test runs stay fast.
 - Scrollback trimming detaches removed entries so old lines are not retained by the circular buffer owner.
 - Dirty rows are tracked on buffer mutation through `Terminal.takeDirtyRows()`.
-- Terminal rows now retain their own composited picture layers. Scrolling repositions cached layers; newly exposed rows are recorded once. Active screen rows are invalidated on terminal output, and the cache clears on theme, font, or viewport size changes. The layer cache is capped at 192 rows.
+- Terminal rows now retain their own composited picture layers. Scrolling repositions cached layers; newly exposed rows are recorded once. Cached pictures are validated against their packed cell contents, including colors, attributes, and erased cells; unchanged rows survive terminal output. The cache clears on theme, font, or viewport size changes. The layer cache is capped at 192 rows.
 - Main-buffer history scrolling does not send caret geometry updates to the platform text input client unless an IME is composing. A newly focused client and active composition still receive an update. Equal terminal themes compare by color values so rebuilding an unchanged surface keeps its row layers.
 - Long, unstyled ASCII rows are painted as one paragraph. Short rows, styled text, and wide glyphs retain cell-by-cell painting.
+
+## Incremental render snapshots (2026-10-24)
+
+Rust now keeps per-row render revisions across `feed` calls. Every retained
+snapshot has its own acknowledged revisions, so skipped publications and multiple
+consumers do not lose pending changes. The incremental ABI repacks changed rows
+into a complete retained grid; the original full-snapshot ABI remains available
+as the comparison oracle and fallback for older bundled native libraries.
+Resizing, allocation growth, switching snapshot sources, and reuse for history
+capture force a complete refresh where needed.
+
+The Flutter bridge still imports the complete authoritative grid. It compares
+packed rows before copying, and the painter validates each retained picture
+against an exact copy of its cells. This deliberately avoids relying on a
+consumed dirty-row set or mutable line identity. Both native imports and Dart
+parser mutations are covered. Picture validation costs a linear cell comparison
+and retains up to 192 rows of extra cell data (20 bytes per cell); it saves
+paragraph/picture recording for unchanged rows.
+
+Verification:
+
+- Native incremental state is compared with full rebuilding across fragmented
+  UTF-8/ANSI, skipped publications, and 1024 deterministic mixed operations.
+- Every split of a synchronized redraw is checked against the full native grid.
+- Widget tests check zero new pictures for identical output or cursor-only
+  movement, one new picture for a single changed row or color, and pixel equality
+  between cached output and a newly created renderer after erase/replacement.
+- The mixed-operation test also exposed two existing edge cases: alternate-screen
+  height shrink could overrun the new grid, and clearing an already active
+  alternate screen did not mark its cells dirty. Both have regression coverage.
+
+Run `SSTERM_RUN_PERF=1 flutter test test/perf/terminal_output_perf_test.dart`
+for the snapshot microbenchmark and existing output-flood guards. On the local
+machine, 2000 single-row updates at 240x80 took about 2.5 ms cumulatively in
+incremental snapshot capture versus 64 ms in full capture. These are snapshot
+measurements in a Flutter test using the release native library, not end-to-end
+frame-rate measurements.
+
+The 16 ms output timer is unchanged. Frame-aligned publication is a separate
+experiment requiring live input-latency and macOS presentation measurements;
+the full-screen compositor observations below do not establish that this timer
+is the bottleneck.
 
 ## Full-screen history scroll verification (2026-10-17)
 

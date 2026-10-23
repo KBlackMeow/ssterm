@@ -179,6 +179,10 @@ pub struct TerminalCore {
     title_changed: bool,
     cwd_changed: bool,
     generation: u64,
+    // Per-row revisions survive feed() resetting its per-call update. Each
+    // renderer keeps its own acknowledged revisions in caller-owned memory.
+    render_revision: u64,
+    row_revisions: Vec<u64>,
     scrollback_sequence: u64,
     history_epoch: u64,
 }
@@ -257,6 +261,8 @@ impl TerminalCore {
             title_changed: false,
             cwd_changed: false,
             generation: 0,
+            render_revision: 1,
+            row_revisions: vec![1; rows],
             scrollback_sequence: 0,
             history_epoch: 0,
         }
@@ -268,6 +274,18 @@ impl TerminalCore {
         self.bells = 0;
         self.title_changed = false;
         self.cwd_changed = false;
+    }
+
+    fn commit_render_damage(&mut self) {
+        self.row_revisions.resize(self.rows, 0);
+        if self.dirty_start < self.rows {
+            self.render_revision = self.render_revision.wrapping_add(1);
+            // Zero means an uninitialized consumer row.
+            if self.render_revision == 0 {
+                self.render_revision = 1;
+            }
+            self.row_revisions[self.dirty_start..=self.dirty_end].fill(self.render_revision);
+        }
     }
 
     fn mark_dirty(&mut self, row: usize) {
@@ -1136,6 +1154,9 @@ impl TerminalCore {
             self.screen_head = 0;
             self.cursor_col = 0;
             self.cursor_row = 0;
+            // Re-entering an already active alternate screen clears cells
+            // without a buffer switch to invalidate its render revisions.
+            self.mark_all_dirty();
         } else {
             self.alt_cells.fill(TerminalCell::default());
             self.alt_screen_head = 0;
@@ -1678,6 +1699,7 @@ impl TerminalCore {
             }
         }
         self.emit_utf8(false);
+        self.commit_render_damage();
         TerminalUpdate {
             dirty_row_start: if self.dirty_start == self.rows {
                 u32::MAX
@@ -1732,8 +1754,13 @@ impl TerminalCore {
             0
         };
         let main_source_row_start = removed_main_rows;
-        let main_current_rows = old_rows - main_source_row_start - popped_main_rows;
         let main_destination_row_start = restored_history_rows;
+        // In the alternate screen no main-history rows are removed/restored,
+        // but the active grid still has to fit the shorter destination.
+        let main_current_rows = min(
+            old_rows - main_source_row_start - popped_main_rows,
+            rows - main_destination_row_start,
+        );
 
         // The alternate screen has no scrollback, but uses the same cursor
         // rule so height-only changes do not insert artificial blank rows.
@@ -1820,6 +1847,7 @@ impl TerminalCore {
         self.history_epoch = self.history_epoch.wrapping_add(1);
         self.mark_all_dirty();
         self.generation = self.generation.wrapping_add(1);
+        self.commit_render_damage();
     }
 
     /// Reflow the main screen and its history when the viewport width changes.
@@ -1959,6 +1987,7 @@ impl TerminalCore {
         self.history_epoch = self.history_epoch.wrapping_add(1);
         self.mark_all_dirty();
         self.generation = self.generation.wrapping_add(1);
+        self.commit_render_damage();
     }
 
     fn snapshot_metadata(&self) -> TerminalSnapshot {
@@ -2282,6 +2311,64 @@ pub unsafe extern "C" fn ssterm_terminal_snapshot_xterm_cells(
     required
 }
 
+/// Updates a retained complete render snapshot, packing only rows whose
+/// revisions changed. The revision array belongs to this destination, never
+/// to a global consumer, so skipped frames and multiple renderers are safe.
+///
+/// # Safety
+/// All non-null pointers must refer to disjoint, suitably sized allocations.
+/// Metadata, cells and revisions must be retained together between calls.
+/// Zero revisions whenever destination storage is replaced. Terminal access
+/// must be externally serialized, as for the complete snapshot API.
+#[no_mangle]
+pub unsafe extern "C" fn ssterm_terminal_snapshot_xterm_cells_incremental(
+    terminal: *const TerminalCore,
+    metadata: *mut TerminalSnapshot,
+    destination: *mut u32,
+    destination_word_capacity: usize,
+    row_revisions: *mut u64,
+    revision_capacity: usize,
+    force_full: u32,
+) -> usize {
+    let Some(terminal) = terminal.as_ref() else {
+        return 0;
+    };
+    let next = terminal.snapshot_metadata();
+    let Some(metadata) = metadata.as_mut() else {
+        return terminal.cells.len() * 5;
+    };
+    let shape_changed =
+        force_full != 0 || metadata.columns != next.columns || metadata.rows != next.rows;
+    let required = terminal.cells.len() * 5;
+    // Capacity probes never acknowledge revisions. The caller forces a full
+    // rebuild on retry, since storage or dimensions may have changed.
+    if destination.is_null()
+        || destination_word_capacity < required
+        || row_revisions.is_null()
+        || revision_capacity < terminal.rows
+    {
+        *metadata = next;
+        return required;
+    }
+    let output = std::slice::from_raw_parts_mut(destination, required);
+    let revisions = std::slice::from_raw_parts_mut(row_revisions, terminal.rows);
+    let words_per_row = terminal.columns * 5;
+    for (row, revision) in revisions.iter_mut().enumerate() {
+        let current = terminal.row_revisions[row];
+        if !shape_changed && *revision == current {
+            continue;
+        }
+        let source = terminal.index(row, 0);
+        pack_xterm_cells(
+            &terminal.cells[source..source + terminal.columns],
+            &mut output[row * words_per_row..(row + 1) * words_per_row],
+        );
+        *revision = current;
+    }
+    *metadata = next;
+    required
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ssterm_terminal_history_xterm_cells(
     terminal: *const TerminalCore,
@@ -2354,6 +2441,223 @@ pub unsafe extern "C" fn ssterm_terminal_working_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incremental_render_matches_full_rebuild_across_chunk_boundaries() {
+        let stream = concat!(
+            "old top\r\nold bottom\r\nthird",
+            "\x1b[?2026h\x1b[1;1H\x1b[2Kfresh",
+            "\x1b[2;1H\x1b[2K中😀\x1b[?2026l",
+            "\x1b[31m\x1b[1;1HRED\x1b[0m",
+            "\x1b[2;3H\x1b[@X\x1b[P\x1b[X",
+            "\x1b[2J\x1b[Hone\r\ntwo\r\nthree\r\nfour\r\nfive",
+            "\x1b[2;4r\x1b[S\x1b[T\x1b[r",
+            "\x1b[?1049hALT\x1b[2J\x1b[?1049l",
+            "\x1b[1;1H\x1b[J\x1b[3;1H\x1b[1J\x1bcEND"
+        )
+        .as_bytes();
+        for chunk_size in [1, 2, 3, 7, 31, stream.len()] {
+            let mut terminal = TerminalCore::new(12, 5);
+            let mut metadata = TerminalSnapshot::default();
+            let mut versions = vec![0; 8];
+            let mut actual = vec![0; 20 * 8 * 5];
+            let mut expected = actual.clone();
+            for (i, chunk) in stream.chunks(chunk_size).enumerate() {
+                terminal.feed(chunk);
+                // Skip intermediate publications, just as synchronized output
+                // and frame coalescing do. Versions must retain all damage.
+                if i % 3 != 0 && i + 1 != stream.chunks(chunk_size).len() {
+                    continue;
+                }
+                if i % 9 == 0 {
+                    terminal.resize(if i % 2 == 0 { 16 } else { 12 }, 5);
+                }
+                let required = unsafe {
+                    ssterm_terminal_snapshot_xterm_cells_incremental(
+                        &terminal,
+                        &mut metadata,
+                        actual.as_mut_ptr(),
+                        actual.len(),
+                        versions.as_mut_ptr(),
+                        versions.len(),
+                        0,
+                    )
+                };
+                let mut full_metadata = TerminalSnapshot::default();
+                unsafe {
+                    ssterm_terminal_snapshot_xterm_cells(
+                        &terminal,
+                        &mut full_metadata,
+                        expected.as_mut_ptr(),
+                        expected.len(),
+                    );
+                }
+                assert_eq!(metadata, full_metadata);
+                assert_eq!(
+                    &actual[..required],
+                    &expected[..required],
+                    "chunk size {chunk_size}, publication {i}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shrinking_alternate_screen_keeps_copies_within_the_new_grid() {
+        let mut terminal = TerminalCore::new(12, 5);
+        terminal.feed(b"main\x1b[?1049halt");
+        terminal.resize(12, 3);
+        assert_eq!(terminal.row_text(0), "alt");
+        terminal.feed(b"\x1b[?1049l");
+        assert_eq!(terminal.row_text(0), "main");
+    }
+
+    #[test]
+    fn incremental_render_matches_rebuild_during_mixed_terminal_operations() {
+        let operations: &[&[u8]] = &[
+            b"abc",
+            "中😀".as_bytes(),
+            b"\r\n",
+            b"\x1bM",
+            b"\x1b[H",
+            b"\x1b[2J",
+            b"\x1b[J",
+            b"\x1b[1J",
+            b"\x1b[K",
+            b"\x1b[1K",
+            b"\x1b[2K",
+            b"\x1b[2;3H",
+            b"\x1b[4;6H",
+            b"\x1b[2@",
+            b"\x1b[2P",
+            b"\x1b[2X",
+            b"\x1b[L",
+            b"\x1b[M",
+            b"\x1b[S",
+            b"\x1b[T",
+            b"\x1b[2;4r",
+            b"\x1b[r",
+            b"\x1b[?1049h",
+            b"\x1b[?1049l",
+            b"\x1bc",
+            b"\x1b[31;4m",
+            b"\x1b[0m",
+            b"\x1b[?7l",
+            b"\x1b[?7h",
+            b"\x1b[4h",
+            b"\x1b[4l",
+            "▶\u{fe0f}".as_bytes(),
+            "⏸\u{fe0e}".as_bytes(),
+            b"\x1b[!p",
+        ];
+        let mut terminal = TerminalCore::new(12, 5);
+        let mut metadata = TerminalSnapshot::default();
+        let mut versions = vec![0; 8];
+        let mut actual = vec![0; 20 * 8 * 5];
+        let mut expected = actual.clone();
+        let mut seed = 0x1234_abcd_u32;
+        for step in 0..1024 {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let operation = operations[seed as usize % operations.len()];
+            for chunk in operation.chunks(1 + (seed as usize % 4)) {
+                terminal.feed(chunk);
+            }
+            if step % 17 == 0 {
+                terminal.resize(8 + seed as usize % 12, 4 + seed as usize % 4);
+            }
+            if step % 3 == 0 {
+                continue;
+            }
+            let required = unsafe {
+                ssterm_terminal_snapshot_xterm_cells_incremental(
+                    &terminal,
+                    &mut metadata,
+                    actual.as_mut_ptr(),
+                    actual.len(),
+                    versions.as_mut_ptr(),
+                    versions.len(),
+                    0,
+                )
+            };
+            let mut full_metadata = TerminalSnapshot::default();
+            unsafe {
+                ssterm_terminal_snapshot_xterm_cells(
+                    &terminal,
+                    &mut full_metadata,
+                    expected.as_mut_ptr(),
+                    expected.len(),
+                );
+            }
+            assert_eq!(metadata, full_metadata);
+            assert_eq!(&actual[..required], &expected[..required], "step {step}");
+        }
+    }
+
+    #[test]
+    fn incremental_render_tracks_each_consumer_and_preserves_damage() {
+        let mut terminal = TerminalCore::new(8, 3);
+        let mut metadata = TerminalSnapshot::default();
+        let mut versions = vec![0; 3];
+        let mut words = vec![0; 8 * 3 * 5];
+        let capture = |terminal: &TerminalCore,
+                       metadata: &mut TerminalSnapshot,
+                       versions: &mut Vec<u64>,
+                       words: &mut Vec<u32>| unsafe {
+            ssterm_terminal_snapshot_xterm_cells_incremental(
+                terminal,
+                metadata,
+                words.as_mut_ptr(),
+                words.len(),
+                versions.as_mut_ptr(),
+                versions.len(),
+                0,
+            )
+        };
+        capture(&terminal, &mut metadata, &mut versions, &mut words);
+        let initial = versions.clone();
+        terminal.feed(b"\x1b[2;1HX");
+        terminal.feed(b"\x1b[3;1H"); // last feed changes only the cursor
+        capture(&terminal, &mut metadata, &mut versions, &mut words);
+        assert_eq!(initial[0], versions[0]);
+        assert_ne!(initial[1], versions[1]);
+        assert_eq!(initial[2], versions[2]);
+        assert_eq!(words[8 * 5 + 3] & 0x3fffff, b'X' as u32);
+        let mut other_metadata = TerminalSnapshot::default();
+        let mut other_versions = vec![0; 3];
+        let mut other_words = vec![0; words.len()];
+        capture(
+            &terminal,
+            &mut other_metadata,
+            &mut other_versions,
+            &mut other_words,
+        );
+        assert_eq!(other_words, words);
+        // Capacity probes must not acknowledge any pending changes.
+        terminal.feed(b"Y");
+        let before = versions.clone();
+        unsafe {
+            ssterm_terminal_snapshot_xterm_cells_incremental(
+                &terminal,
+                &mut metadata,
+                words.as_mut_ptr(),
+                1,
+                versions.as_mut_ptr(),
+                versions.len(),
+                0,
+            );
+        }
+        assert_eq!(versions, before);
+        capture(&terminal, &mut metadata, &mut versions, &mut words);
+        assert_ne!(versions[2], before[2]);
+        terminal.feed(b"\x1b[?1049hretained");
+        capture(&terminal, &mut metadata, &mut versions, &mut words);
+        terminal.feed(b"\x1b[?1049h");
+        capture(&terminal, &mut metadata, &mut versions, &mut words);
+        assert!(words.iter().all(|word| *word == 0));
+    }
+
     #[test]
     fn handles_text_controls_and_scroll() {
         let mut terminal = TerminalCore::new(4, 2);

@@ -20,6 +20,78 @@ void main() {
   final available = File(path).existsSync();
 
   test(
+    'incremental snapshots equal full rebuilds after resize and buffer reuse',
+    () {
+      expect(
+        DynamicLibrary.open(
+          path,
+        ).providesSymbol('ssterm_terminal_snapshot_xterm_cells_incremental'),
+        isTrue,
+        reason: 'Rebuild the native library to exercise the incremental ABI',
+      );
+      final core = RustTerminalCore.open(
+        columns: 12,
+        rows: 4,
+        libraryPath: path,
+      );
+      final other = RustTerminalCore.open(
+        columns: 12,
+        rows: 4,
+        libraryPath: path,
+      );
+      final retained = RustTerminalRenderBuffer();
+      final rebuilt = RustTerminalRenderBuffer();
+      addTearDown(() {
+        retained.close();
+        rebuilt.close();
+        core.close();
+        other.close();
+      });
+      void compare() {
+        core.renderSnapshotInto(retained);
+        core.renderSnapshotInto(rebuilt, incremental: false);
+        expect(retained.words, orderedEquals(rebuilt.words));
+        expect(retained.columns, rebuilt.columns);
+        expect(retained.rows, rebuilt.rows);
+        expect(retained.cursorColumn, rebuilt.cursorColumn);
+        expect(retained.cursorRow, rebuilt.cursorRow);
+        expect(retained.modeFlags, rebuilt.modeFlags);
+      }
+
+      compare();
+      for (final text in [
+        'old\r\nsecond',
+        '\x1b[H\x1b[2K',
+        '中😀',
+        '\x1b[?1049hALT',
+        '\x1b[?1049l',
+        '\x1b[2J',
+      ]) {
+        core.feed(Uint8List.fromList(utf8.encode(text)));
+        compare();
+      }
+      for (final size in [(80, 24), (9, 3), (12, 4), (12, 2), (12, 8)]) {
+        core.resize(size.$1, size.$2);
+        compare();
+      }
+      core.resize(12, 4);
+      compare();
+      other.feed(Uint8List.fromList(utf8.encode('other terminal')));
+      other.renderSnapshotInto(retained);
+      compare(); // The buffer must not acknowledge another core's revisions.
+      core.feed(
+        Uint8List.fromList(utf8.encode('one\r\ntwo\r\nthree\r\nfour\r\nfive')),
+      );
+      compare();
+      core.historySnapshotInto(retained, startRow: 0, rowCount: 1);
+      compare(); // A history snapshot overwrites the same retained allocation.
+      core.renderSnapshotInto(retained, incremental: false);
+      compare();
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'native and Dart widths agree for every Unicode scalar and width setting',
     () {
       final nativeWidth = DynamicLibrary.open(path)

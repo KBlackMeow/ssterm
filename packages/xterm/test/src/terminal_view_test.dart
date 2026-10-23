@@ -1,8 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/annotations.dart';
@@ -16,6 +19,75 @@ import 'terminal_view_test.mocks.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('packed updates retain unchanged rows and match a fresh render',
+      (tester) async {
+    final terminal = Terminal()..resize(12, 4);
+    final boundaryKey = GlobalKey();
+    Widget view(Key key) => MaterialApp(
+          home: RepaintBoundary(
+            key: boundaryKey,
+            child: TerminalView(terminal,
+                key: key, autoResize: false, cursorBlink: false),
+          ),
+        );
+    const viewKey = ValueKey('cached');
+    await tester.pumpWidget(view(viewKey));
+    final renderer = tester
+        .state<TerminalViewState>(find.byType(TerminalView))
+        .renderTerminal;
+    final cells = Uint32List(12 * 4 * 5);
+    void publish({int cursorColumn = 0}) => terminal.applyPackedScreen(
+          packedCells: cells,
+          columns: 12,
+          rows: 4,
+          cursorColumn: cursorColumn,
+          cursorRow: 0,
+          usingAlternateScreen: false,
+        );
+    publish();
+    await tester.pump();
+    var before = renderer.debugRecordedLineCount;
+    publish();
+    await tester.pump();
+    expect(renderer.debugRecordedLineCount, before);
+
+    cells[12 * 5 + 3] = 'X'.codeUnitAt(0) | (1 << 22);
+    publish();
+    await tester.pump();
+    expect(renderer.debugRecordedLineCount - before, 1);
+
+    before = renderer.debugRecordedLineCount;
+    publish(cursorColumn: 3);
+    await tester.pump();
+    expect(renderer.debugRecordedLineCount, before);
+
+    // Color/style-only changes also invalidate the retained picture.
+    cells[12 * 5] = (1 << 25) | 2;
+    publish();
+    await tester.pump();
+    expect(renderer.debugRecordedLineCount - before, 1);
+
+    Future<Uint8List> pixels() async {
+      final boundary = boundaryKey.currentContext!.findRenderObject()
+          as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      return Uint8List.fromList(bytes!.buffer.asUint8List());
+    }
+
+    // Clear the old glyph, update another row, and move the cursor without
+    // painting between publications. A retained picture must not survive it.
+    cells[12 * 5 + 3] = 0;
+    publish();
+    cells[24 * 5 + 3] = 'Y'.codeUnitAt(0) | (1 << 22);
+    publish();
+    await tester.pump();
+    final cached = await tester.runAsync(pixels);
+    await tester.pumpWidget(view(const ValueKey('fresh')));
+    expect(await tester.runAsync(pixels), orderedEquals(cached!));
+  });
 
   testWidgets(
     'htop golden test',

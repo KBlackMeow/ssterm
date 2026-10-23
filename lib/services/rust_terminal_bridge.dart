@@ -119,8 +119,9 @@ class RustTerminalBridge implements TerminalByteSink {
     _syncHistory(forceRebuild: forceHistoryRebuild);
     _syncModes();
 
-    // `renderSnapshotInto` above already materializes the complete native
-    // screen for every PTY write.  Import that same complete frame here.
+    // `renderSnapshotInto` retains a complete native screen, updating it by
+    // per-consumer row revisions. Import that same complete frame here; the
+    // Dart model compares rows before copying and keeps unchanged rows intact.
     //
     // Partial imports rely on one dirty-row interval from a single native
     // feed.  Full-screen TUIs (Claude included) often split one visual update
