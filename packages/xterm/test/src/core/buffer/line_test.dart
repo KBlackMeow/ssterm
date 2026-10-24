@@ -16,17 +16,16 @@ void main() {
       expect(terminal.buffer.lines[0].getText(), equals(text));
     });
 
-    test('uses ChatCode-compatible widths for status symbols and emoji', () {
+    test('uses Unicode default presentation for status symbols and emoji', () {
       final terminal = Terminal();
       terminal.write('✉⏺${String.fromCharCode(0x1fae8)}X');
 
       final line = terminal.buffer.lines[0];
-      expect(line.getWidth(0), equals(2));
-      expect(line.getCodePoint(1), equals(0));
-      expect(line.getWidth(2), equals(1));
-      expect(line.getWidth(3), equals(2));
-      expect(line.getCodePoint(4), equals(0));
-      expect(line.getCodePoint(5), equals('X'.codeUnitAt(0)));
+      expect(line.getWidth(0), equals(1)); // bare ✉ is text
+      expect(line.getWidth(1), equals(1)); // bare ⏺ is text
+      expect(line.getWidth(2), equals(2)); // default emoji
+      expect(line.getCodePoint(3), equals(0));
+      expect(line.getCodePoint(4), equals('X'.codeUnitAt(0)));
     });
 
     test('does not retain spinner text beside the ChatCode tool marker', () {

@@ -30,7 +30,7 @@ void main() {
 
     test('is a no-op after an already-wide base', () {
       final terminal = Terminal()..resize(10, 1);
-      terminal.write('✉\u{FE0F}X');
+      terminal.write('⌚\u{FE0F}X');
 
       final line = terminal.buffer.lines[0];
       expect(line.getWidth(0), equals(2));
@@ -60,10 +60,10 @@ void main() {
   group('VS15 (U+FE0E) text presentation', () {
     test('narrows a wide Extended_Pictographic base', () {
       final terminal = Terminal()..resize(10, 1);
-      terminal.write('✉\u{FE0E}X');
+      terminal.write('⌚\u{FE0E}X');
 
       final line = terminal.buffer.lines[0];
-      expect(line.getCodePoint(0), equals(0x2709));
+      expect(line.getCodePoint(0), equals(0x231a));
       expect(line.getWidth(0), equals(1));
       expect(line.getCodePoint(1), equals(0x58)); // X at the freed cell
       expect(line.getCodePoint(2), equals(0));
@@ -80,11 +80,11 @@ void main() {
 
     test('handles a wide base written on the last column', () {
       final terminal = Terminal()..resize(3, 1);
-      terminal.write('A✉');
+      terminal.write('A⌚');
       terminal.write('\u{FE0E}');
 
       final line = terminal.buffer.lines[0];
-      expect(line.getCodePoint(1), equals(0x2709));
+      expect(line.getCodePoint(1), equals(0x231a));
       expect(line.getWidth(1), equals(1));
       expect(terminal.buffer.cursorX, equals(2));
     });
@@ -97,12 +97,14 @@ void main() {
       expect(terminal.widthPolicy.ambiguousDoubleWidth, isFalse);
     });
 
-    test('legacy profile restores pre-emoji double width', () {
+    test('legacy profile retains historical default presentation', () {
       final policy = TerminalWidthPolicy(profile: WidthProfile.legacy);
-      expect(policy.widthOf(0x2709), equals(1)); // ✉ narrow again
+      expect(policy.widthOf(0x2709), equals(1)); // ✉ defaults to text
       expect(policy.widthOf(0x5F53), equals(2)); // 当 still wide (EAW W)
       final modern = TerminalWidthPolicy();
-      expect(modern.widthOf(0x2709), equals(2));
+      expect(modern.widthOf(0x2709), equals(1));
+      expect(policy.widthOf(0x1f1e6), equals(1)); // regional indicator
+      expect(modern.widthOf(0x1f1e6), equals(2));
     });
 
     test('ambiguousDoubleWidth widens EAW=A characters only on modern', () {

@@ -2882,9 +2882,13 @@ zsh: command not found: \xe8\x8f\x9c\xe5\x8d\x95\x0d\x0a";
     }
 
     #[test]
-    fn emoji_presentation_check_mark_is_double_width() {
+    fn text_check_mark_is_narrow_until_emoji_presentation_is_selected() {
         let mut terminal = TerminalCore::new(4, 1);
         terminal.feed("✔X".as_bytes());
+        assert_eq!(terminal.cursor_col, 2);
+        assert_eq!(terminal.cells[terminal.index(0, 0)].width, 1);
+
+        terminal.feed("\r✔\u{fe0f}X".as_bytes());
         assert_eq!(terminal.cursor_col, 3);
         assert_eq!(terminal.cells[terminal.index(0, 0)].width, 2);
         assert_eq!(terminal.cells[terminal.index(0, 1)].width, 0);

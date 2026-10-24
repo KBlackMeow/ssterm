@@ -5,6 +5,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+dart tool/generate_unicode_width_data.dart --check
 dart tool/generate_terminal_width_table.dart --check
 cargo fmt --manifest-path native/terminal_core/Cargo.toml -- --check
 cargo test --manifest-path native/terminal_core/Cargo.toml
@@ -13,6 +14,7 @@ cargo test --manifest-path native/pty_core/Cargo.toml
 cargo build --manifest-path native/terminal_core/Cargo.toml --release
 cargo build --manifest-path native/pty_core/Cargo.toml --release
 flutter test \
+  test/services/terminal_unicode_width_test.dart \
   test/services/rust_terminal_core_test.dart \
   test/services/rust_terminal_bridge_test.dart \
   test/services/remote_cwd_parser_test.dart \
