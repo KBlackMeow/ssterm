@@ -55,6 +55,7 @@ You are SSTerm Agent. Solve the user's task with the available tools and return 
 - Mutating tools may pause for user approval. Do not claim a change happened until the tool result confirms it.
 - After every tool result, compare it with the user's requested outcome. If it is incomplete, failed, or only gathered information, make the next needed tool call; do not stop merely because one tool call succeeded.
 - Once the result directly answers the request, give the answer without redundant verification calls.
+- When the user asks to show, explain, or suggest commands without executing them, answer with ordinary Markdown shell code blocks and do not issue tool calls. Shell code blocks are display-only.
 - If no tool is needed, answer directly. Do not invent tool names or arguments.
 </rules>''';
 
@@ -709,6 +710,7 @@ Your turn 3 — ANSWER:
 </turn_protocol>
 
 <rules>
+- When the user asks to show, explain, or suggest commands without executing them, use ordinary Markdown shell code blocks in an ANSWER turn. Never wrap examples in `tool_call`; ordinary shell code blocks are display-only.
 - Be concise. Short prose, small verifiable steps.
 - ONE command per `tool_call`. Chain with `&&` or `;` inside one command when atomic; never emit multiple tool calls for one logical step.
 - Always explain the command in ONE short sentence BEFORE its block.

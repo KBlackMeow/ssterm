@@ -359,18 +359,21 @@ query: "Beijing current weather"
     });
   });
 
+  test('display-only shell examples never become executable tool calls', () {
+    for (final language in ['bash', 'sh', 'shell', 'zsh', 'Bash', 'SH']) {
+      for (final suffix in ['', '\n[TASK_COMPLETE]']) {
+        final input = '仅展示命令，不要执行：\n\n```$language\npwd\n```$suffix';
+        expect(
+          LlmService.extractToolCalls(input),
+          isEmpty,
+          reason: 'A $language example must stay display-only',
+        );
+        expect(LlmService.extractCommands(input), isEmpty);
+      }
+    }
+  });
+
   group('LlmService.extractCommands', () {
-    test('extracts a single bash block', () {
-      const input = '''
-Here is the command:
-
-```bash
-ls -la
-```
-''';
-      expect(LlmService.extractCommands(input), equals(['ls -la']));
-    });
-
     test('exposes structured command risk arguments', () {
       const input = '''```tool_call
 {"id":"call_risk","name":"bash","arguments":{"command":"rm old.log","risk_level":"warning","risk_reason":"deletes a file"}}
@@ -380,167 +383,30 @@ ls -la
       expect(call.riskReason, 'deletes a file');
     });
 
-    test(
-      'IGNORES untagged code blocks (regression — previous regex used `?`)',
-      () {
-        // The LLM might emit a plain ``` block for warnings, JSON, diff
-        // output, etc.  Executing those as shell commands would be a
-        // foot-gun (`command not found: warning`).
-        const input = '''
-Here is some output:
-
+    test('preserves explicit command text and deduplicates calls', () {
+      const input = r'''```tool_call
+{"id":"first","name":"bash","arguments":{"command":"echo $HOME"}}
 ```
-WARNING: file not found
+```tool_call
+{"id":"second","name":"bash","arguments":{"command":"echo $HOME"}}
 ```
-
-And the actual command:
-
-```bash
-ls /tmp
-```
-''';
-        expect(LlmService.extractCommands(input), equals(['ls /tmp']));
-      },
-    );
-
-    test('case-insensitive language tags (Bash, SH, ZSH all valid)', () {
-      const input = '''
-```Bash
-echo a
-```
-
-```SH
-echo b
-```
-
-```ZSH
-echo c
-```
-''';
-      expect(
-        LlmService.extractCommands(input),
-        equals(['echo a', 'echo b', 'echo c']),
-      );
+```tool_call
+{"id":"third","name":"bash","arguments":{"command":"echo $(date)"}}
+```''';
+      expect(LlmService.extractCommands(input), [
+        r'echo $HOME',
+        r'echo $(date)',
+      ]);
     });
 
-    test('strips pseudo-prompt prefixes (\$ , # , > )', () {
-      const input = '''
+    test('invalid explicit call never falls back to a shell example', () {
+      const input = '''```tool_call
+{invalid json}
+```
 ```bash
-\$ ls -la
-# whoami
-> echo continuation
-```
-''';
-      expect(
-        LlmService.extractCommands(input),
-        equals(['ls -la\nwhoami\necho continuation']),
-      );
-    });
-
-    test('preserves \$VAR expansions and \$() substitutions', () {
-      // `\$ ` (dollar + space) is a prompt; `\$HOME` (dollar + identifier)
-      // is a variable expansion — must not be touched.
-      const input = '''
-```bash
-echo \$HOME
-echo "\$(date)"
-```
-''';
-      expect(
-        LlmService.extractCommands(input),
-        equals(['echo \$HOME\necho "\$(date)"']),
-      );
-    });
-
-    test('skips empty bodies', () {
-      const input = '''
-```bash
-```
-
-```bash
-real cmd
-```
-''';
-      expect(LlmService.extractCommands(input), equals(['real cmd']));
-    });
-
-    test('strips OUR injected hint suffix when LLM echoes it back', () {
-      // Defensive: the LLM might echo prompt fragments verbatim.  Make
-      // sure that doesn't somehow show up as a runnable command.
-      const input = '''
-Working on it.
-
-```bash
-true
-```
-
-[TASK_COMPLETE]
-''';
-      expect(LlmService.extractCommands(input), equals(['true']));
-    });
-
-    test('EXACT duplicate commands across two blocks are deduplicated '
-        '(REGRESSION: ifconfig ran twice)', () {
-      // Real-world failure: model emitted the same command in two
-      // separate ```bash``` fences (an "explanation" block and a "let
-      // me run this" block), and the auto-execute loop ran it twice
-      // back-to-back.  Dedupe by exact string, preserve first-seen
-      // order.
-      const input = '''
-First, let me show you the command:
-
-```bash
-ifconfig | grep "inet "
-```
-
-Now I'll run it:
-
-```bash
-ifconfig | grep "inet "
-```
-''';
-      expect(
-        LlmService.extractCommands(input),
-        equals(['ifconfig | grep "inet "']),
-      );
-    });
-
-    test(
-      'NEAR-duplicates (different whitespace / args) are NOT deduplicated',
-      () {
-        // Distinct commands stay distinct — only EXACT post-strip matches
-        // collapse, otherwise we'd mask legitimate "almost the same but
-        // not quite" pairs (e.g. `ls` and `ls -la`).
-        const input = '''
-```bash
-ls
-```
-
-```bash
-ls -la
-```
-''';
-        expect(LlmService.extractCommands(input), equals(['ls', 'ls -la']));
-      },
-    );
-
-    test('untagged ``` block with `rm -rf /tmp` is NOT executed', () {
-      // Real-world worst case: LLM puts a destructive example inside a
-      // generic ``` block as illustration.  We must NOT execute it.
-      const input = '''
-For example, you could run:
-
-```
-rm -rf /tmp/some-dir
-```
-
-But instead, do this safely:
-
-```bash
-ls /tmp/some-dir
-```
-''';
-      expect(LlmService.extractCommands(input), equals(['ls /tmp/some-dir']));
+pwd
+```''';
+      expect(LlmService.extractToolCalls(input), isEmpty);
     });
   });
 
@@ -558,12 +424,13 @@ I'll list files.
       expect(calls.first.id, equals('call_ls'));
       expect(calls.first.name, equals('bash'));
       expect(calls.first.command, equals('ls -la'));
-      expect(calls.first.legacyMarkdown, isFalse);
       expect(LlmService.extractCommands(input), equals(['ls -la']));
     });
 
-    test('prefers structured calls over legacy bash fences', () {
-      const input = '''
+    test(
+      'extracts explicit calls without executing accompanying shell examples',
+      () {
+        const input = '''
 Example only:
 
 ```bash
@@ -576,8 +443,9 @@ Now the real call:
 {"id":"call_real","name":"bash","arguments":{"command":"echo new"}}
 ```
 ''';
-      expect(LlmService.extractCommands(input), equals(['echo new']));
-    });
+        expect(LlmService.extractCommands(input), equals(['echo new']));
+      },
+    );
 
     test('accepts OpenAI function-style arguments as a JSON string', () {
       const input = r'''
@@ -817,15 +685,14 @@ Now the real call:
       expect(LlmService.extractCommands(input), equals(['pwd']));
     });
 
-    test('falls back to legacy bash fences as legacy tool calls', () {
+    test('shell fences without explicit tool calls are display-only', () {
       const input = '''
 ```bash
 date
 ```
 ''';
       final calls = LlmService.extractToolCalls(input);
-      expect(calls.single.command, equals('date'));
-      expect(calls.single.legacyMarkdown, isTrue);
+      expect(calls, isEmpty);
     });
   });
 
@@ -911,7 +778,7 @@ curl -s "wttr.in?lang=zh&format=%l:+%c+%t+%h+%w"
       expect(stripped.contains('[Command executed]'), isFalse);
       expect(stripped.contains('上海'), isFalse);
       expect(stripped.contains('TASK_COMPLETE'), isFalse);
-      expect(LlmService.extractCommands(stripped), hasLength(1));
+      expect(LlmService.extractCommands(stripped), isEmpty);
       expect(LlmService.hasTaskCompleteMarker(stripped), isFalse);
     });
 

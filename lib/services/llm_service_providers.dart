@@ -299,25 +299,6 @@ String _extractError(String responseBody) {
   }
 }
 
-/// Removes shell-prompt-looking prefixes that LLMs often emit at the
-/// start of code-block lines (`$ ls -la`, `# apt update`, `> cd /foo`).
-/// Keep `$` followed by a non-space character (variable expansions like
-/// `$HOME`, `$()` substitutions) intact.
-String _stripPseudoPrompts(String body) {
-  final out = StringBuffer();
-  final lines = body.split('\n');
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
-    final m = RegExp(r'^(\s*)([\$#>])\s(.+)$').firstMatch(line);
-    if (m != null) {
-      line = '${m.group(1)}${m.group(3)}';
-    }
-    out.write(line);
-    if (i < lines.length - 1) out.write('\n');
-  }
-  return out.toString();
-}
-
 // ── Streaming providers ────────────────────────────────────────────────
 //
 // Each stream yields LlmStreamEvent('reasoning' | 'text', chunk).
