@@ -286,27 +286,28 @@ class _CommandResultCardState extends State<_CommandResultCard> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Expanded(
-                  child: SelectableText(
-                    '\$ ${widget.command}',
-                    style: TextStyle(
-                      color: fg,
-                      fontSize: 12,
-                      fontFamily: 'JetBrainsMono',
-                      height: 1.3,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
                 _RiskBadge(assessment: widget.risk),
-                const SizedBox(width: 6),
                 widget.running
                     ? Text('运行中', style: TextStyle(color: dim, fontSize: 11))
                     : _ExitBadge(exitCode: widget.exitCode),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+            child: SelectableText(
+              '\$ ${widget.command}',
+              style: TextStyle(
+                color: fg,
+                fontSize: 12,
+                fontFamily: 'JetBrainsMono',
+                height: 1.3,
+              ),
             ),
           ),
           Padding(
