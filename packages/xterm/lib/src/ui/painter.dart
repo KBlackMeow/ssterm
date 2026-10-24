@@ -155,7 +155,21 @@ class TerminalPainter {
       final charWidth = cellData.content >> CellContent.widthShift;
       final cellOffset = offset.translate(i * cellWidth, 0);
 
-      paintCell(canvas, cellOffset, cellData);
+      paintCellBackground(canvas, cellOffset, cellData);
+
+      if (charWidth == 2) {
+        i++;
+      }
+    }
+
+    // Finish all backgrounds before drawing ink that can overhang into the
+    // next column. Otherwise that column's background erases italic strokes.
+    for (var i = 0; i < line.length; i++) {
+      line.getCellData(i, cellData);
+      final charWidth = cellData.content >> CellContent.widthShift;
+      final cellOffset = offset.translate(i * cellWidth, 0);
+      paintCellForeground(canvas, cellOffset, cellData);
+      paintCellUnderline(canvas, cellOffset, cellData);
 
       if (charWidth == 2) {
         i++;
@@ -295,34 +309,28 @@ class TerminalPainter {
       );
     }
 
-    // Clip to the cell bounds so bold / fallback glyphs never widen the grid
-    // or bleed into adjacent columns — *unless* the glyph's natural ink is
-    // wider than the cell (common when a single-width Unicode symbol like
-    // ➜ U+279C falls back from a narrow primary font to a wider face).
-    // In that case, expand the clip to the glyph's intrinsic width so the
-    // arrow tip / right edge is preserved. The next cell's content may
-    // visually overlap by a fraction of a pixel, which is acceptable since
-    // the common pattern is `➜ ` (symbol + space).
-    final isItalic = cellData.flags & CellFlags.italic != 0;
+    // Italic ink can extend beyond either side of its advance width (for
+    // example JetBrains Mono `%`). Paragraph intrinsic width measures advance,
+    // not ink bounds, so a fixed per-cell bleed still cuts off strokes. Keep
+    // italic ink intact; the terminal viewport supplies the outer clip.
+    if (cellData.flags & CellFlags.italic != 0) {
+      canvas.drawParagraph(paragraph, offset);
+      return;
+    }
+
+    // Preserve the existing allowance for upright fallback glyphs wider than
+    // the grid, and antialiased leading edges after device-pixel snapping.
     final cellClip = _cellSize.width * (charWidth >= 2 ? 2 : 1);
     final glyphWidth = paragraph.maxIntrinsicWidth;
-    // Skia can place the antialiased edge of an otherwise upright glyph just
-    // outside the paragraph origin after device-pixel snapping (noticeable on
-    // the left stem of Consolas `d` on Windows). Keep a one-pixel allowance
-    // on the leading edge instead of cutting that coverage off at the cell.
     const glyphBleedLeft = 1.0;
-    final italicBleedX =
-        isItalic ? (_cellSize.width * 0.20).ceilToDouble() : 0.0;
-    final italicBleedTop = isItalic ? 1.0 : 0.0;
-    final clipWidth =
-        (glyphWidth > cellClip ? glyphWidth : cellClip) + italicBleedX;
+    final clipWidth = glyphWidth > cellClip ? glyphWidth : cellClip;
     canvas.save();
     canvas.clipRect(
       Rect.fromLTWH(
         offset.dx - glyphBleedLeft,
-        offset.dy - italicBleedTop,
+        offset.dy,
         clipWidth + glyphBleedLeft,
-        _cellSize.height + italicBleedTop,
+        _cellSize.height,
       ),
     );
     canvas.drawParagraph(paragraph, offset);
