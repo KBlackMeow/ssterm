@@ -630,6 +630,59 @@ void main() {
           : false,
     );
 
+    for (final locale in <String, Map<String, String>>{
+      'C locale': {'LANG': 'C', 'LC_ALL': 'C', 'LC_CTYPE': 'C'},
+      'missing locale': {'LANG': '', 'LC_ALL': '', 'LC_CTYPE': ''},
+      'C character category': {
+        'LANG': 'en_US.UTF-8',
+        'LC_ALL': '',
+        'LC_CTYPE': 'C',
+      },
+      'UTF-8 locale': {
+        'LANG': 'en_US.UTF-8',
+        'LC_ALL': 'en_US.UTF-8',
+        'LC_CTYPE': '',
+      },
+    }.entries) {
+      test('bash tool preserves Chinese filenames with ${locale.key}', () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'ssterm-locale-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        await File('${directory.path}/中文.txt').writeAsString('');
+        final updates = <CommandExecutionUpdate>[];
+        final executor = BackgroundCommandExecutor(
+          loginEnvironmentResolver: LoginShellEnvironmentResolver(
+            readPath: (_) async => null,
+          ),
+        );
+        final result = await executor.executeLocal(
+          BackgroundCommandTarget.local(
+            shell: LocalShellOption(
+              id: 'bash',
+              displayName: 'Bash',
+              executable: '/bin/bash',
+              environment: locale.value,
+            ),
+            cwd: directory.path,
+            platform: BackgroundCommandTarget.hostPlatform,
+          ),
+          r'/bin/ls -1q; printf "\nlocale:%s" "${LC_ALL:-${LC_CTYPE:-$LANG}}"',
+          onUpdate: updates.add,
+        );
+
+        expect(result.exitCode, 0, reason: result.output);
+        expect(result.output, contains('中文.txt'));
+        expect(
+          updates.expand((update) => update.lastThreeLines),
+          contains('中文.txt'),
+        );
+        if (locale.key == 'UTF-8 locale') {
+          expect(result.output, contains('locale:en_US.UTF-8'));
+        }
+      }, skip: !Platform.isMacOS && !Platform.isLinux);
+    }
+
     test('live output preserves UTF-8 split into single-byte chunks', () async {
       final process = _FakeProcess();
       final updates = <CommandExecutionUpdate>[];

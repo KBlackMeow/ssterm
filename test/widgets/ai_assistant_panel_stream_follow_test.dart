@@ -414,6 +414,74 @@ should not be written
     expect(http.requestBodies, hasLength(2));
   });
 
+  for (final width in [320.0, 540.0]) {
+    testWidgets('command badges sit above full-width text at $width px', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final completion = Completer<CommandResult>();
+      HttpOverrides.global = _QueuedHttpOverrides([
+        _sseForToolCalls([
+          _nativeCall('layout', 'bash', {
+            'command':
+                'printf "a command long enough to wrap in a narrow panel"',
+            'reason': 'Check command card layout',
+            'risk_level': 'normal',
+            'risk_reason': 'Read only',
+          }),
+        ]),
+        _sseForText('Done.'),
+      ]);
+      addTearDown(() => HttpOverrides.global = null);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AiAssistantOverlay(
+              visible: true,
+              initialPosition: AiPanelPosition.right,
+              initialSize: width,
+              agentConfig: _fakeAgentConfig(),
+              onExecuteAsync: (cmd, {isCancelled, onUpdate, onSilence}) =>
+                  completion.future,
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      );
+      await _sendTask(tester, 'Check layout');
+
+      void expectHeaderAboveCommand(String status) {
+        final risk = tester.getRect(find.text('普通'));
+        final state = tester.getRect(find.text(status));
+        final command = tester.getRect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is SelectableText &&
+                (widget.data?.startsWith(r'$ printf') ?? false),
+          ),
+        );
+        final purpose = tester.getRect(
+          find.text('执行目的：Check command card layout'),
+        );
+        expect(risk.center.dy, closeTo(state.center.dy, 1));
+        expect(command.top, greaterThanOrEqualTo(risk.bottom));
+        expect(command.top, greaterThanOrEqualTo(state.bottom));
+        expect(command.left, closeTo(risk.left - 6, 1));
+        expect(command.width, closeTo(purpose.width, 1));
+        expect(command.right, greaterThan(state.right));
+        expect(tester.takeException(), isNull);
+      }
+
+      expectHeaderAboveCommand('运行中');
+      completion.complete(
+        CommandResult(output: 'layout verified', exitCode: 0),
+      );
+      await _drainAgent(tester);
+      expectHeaderAboveCommand('exit 0');
+    });
+  }
+
   testWidgets('mixed shell and file search both execute in one tool turn', (
     tester,
   ) async {

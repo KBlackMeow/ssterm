@@ -221,6 +221,7 @@ class BackgroundCommandExecutor {
         );
       }
       environment.addAll(loginEnvironment);
+      _ensureUtf8Locale(environment, target.platform);
     }
     final cwdResultDirectory = await Directory.systemTemp.createTemp(
       'ssterm-agent-cwd-',
@@ -536,6 +537,27 @@ class BackgroundCommandExecutor {
     environment.remove('COLORTERM');
     environment.remove('TERM_PROGRAM');
     return environment;
+  }
+
+  void _ensureUtf8Locale(
+    Map<String, String> environment,
+    BackgroundCommandPlatform platform,
+  ) {
+    // GUI launches may have no locale, or inherit C/POSIX. Tools such as ls
+    // then replace Chinese filenames with literal '?' before we decode them.
+    // Respect locale precedence and retain an already configured UTF-8 locale.
+    final category = ['LC_ALL', 'LC_CTYPE', 'LANG'].firstWhere(
+      (key) => environment[key]?.isNotEmpty == true,
+      orElse: () => 'LANG',
+    );
+    if (RegExp(
+      r'utf-?8',
+      caseSensitive: false,
+    ).hasMatch(environment[category] ?? '')) {
+      return;
+    }
+    environment[category == 'LC_ALL' ? 'LC_ALL' : 'LC_CTYPE'] =
+        platform == BackgroundCommandPlatform.macos ? 'en_US.UTF-8' : 'C.UTF-8';
   }
 
   String _formatOutput(
