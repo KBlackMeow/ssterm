@@ -27,11 +27,10 @@ import 'bundled_skills.dart';
 ///     init; for bundled dynamic skills it's produced on demand (and
 ///     memoised per-process) so it can include runtime data like the
 ///     current shell environment.
-///   • [buildListingForInjection] formats the catalogue for the model
-///     within a token budget — descriptions are truncated to
+///   • [buildPromptCatalogue] formats the catalogue for the model
+///     within a character budget — descriptions are truncated to
 ///     [_maxListingDescChars] and the whole table is capped at
-///     [_listingBudgetChars] (matches the Claude Code pattern, which
-///     reserves ~1% of context for skill listings).
+///     [_listingBudgetChars].
 ///
 /// Re-init: [init] is idempotent; calling it again forces a re-scan.
 /// Useful for tests and (eventually) for a "reload skills" debug action.
@@ -73,11 +72,9 @@ class SkillService {
   /// they hit the wire.
   static const int _maxListingDescChars = 250;
 
-  /// Overall catalogue budget. Claude Code defaults to ~1% of the context
-  /// window (8KB on a 200K-token Sonnet); we hard-code 4KB because the
-  /// ssterm bundled set is short and we don't have model-aware sizing yet.
-  /// Skills that don't fit are listed name-only at the end.
-  static const int _listingBudgetChars = 4 * 1024;
+  /// Overall catalogue budget of 16K characters. Skills that don't fit are
+  /// omitted, with their count reported at the end of the catalogue.
+  static const int _listingBudgetChars = 16 * 1024;
 
   /// Test-only hook: override the on-disk user-skills directory so unit
   /// tests can point at a temp folder instead of the real `~/.ssterm/skills/`.

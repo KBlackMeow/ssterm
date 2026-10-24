@@ -30,13 +30,13 @@ void main() {
     );
   });
 
-  test('rejects mixed batches before execution', () {
+  test('accepts mixed tools for serial execution', () {
     expect(
       AgentToolBatch.rejectionReason([
         call('one', 'bash', bashArguments),
         call('two', 'web_search', {'query': 'test'}),
       ], registry),
-      contains('one tool call at a time'),
+      isNull,
     );
   });
 
@@ -86,7 +86,7 @@ void main() {
         for (var index = 0; index < 9; index++)
           call('read_$index', 'read_file', {'path': 'a.txt', 'offset': 0}),
       ], registry),
-      contains('one tool call at a time'),
+      contains('At most 8'),
     );
   });
 
@@ -110,8 +110,41 @@ void main() {
         }),
         call('search_web', 'web_search', {'query': 'x'}),
       ], registry),
-      contains('one tool call at a time'),
+      isNull,
     );
+  });
+
+  test('all tool types share the eight-call limit', () {
+    for (final name in ['bash', 'web_search']) {
+      final args = name == 'bash' ? bashArguments : {'query': 'x'};
+      expect(
+        AgentToolBatch.rejectionReason([
+          for (var i = 0; i < 8; i++) call('$i', name, args),
+        ], registry),
+        isNull,
+      );
+      expect(
+        AgentToolBatch.rejectionReason([
+          for (var i = 0; i < 9; i++) call('$i', name, args),
+        ], registry),
+        contains('At most 8'),
+      );
+    }
+  });
+
+  test('skill loading is standalone regardless of its position in a batch', () {
+    final skillRegistry = AgentToolRegistry.build(skillsEnabled: true);
+    final skill = call('skill', 'use_skill', {'skill_id': 'inspect'});
+    final shell = call('shell', 'bash', bashArguments);
+    for (final batch in [
+      [skill, shell],
+      [shell, skill],
+    ]) {
+      expect(
+        AgentToolBatch.rejectionReason(batch, skillRegistry),
+        contains('use_skill must be issued alone'),
+      );
+    }
   });
 
   test('each native call receives one result in original order', () {

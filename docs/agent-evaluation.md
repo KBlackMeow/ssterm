@@ -12,9 +12,10 @@ not total provider tokens or task success.
 
 The live 20-case, three-run comparison and SSH fixture cases remain open.
 Their acceptance thresholds below must be measured before claiming an
-accuracy or stability improvement. The panel loop still owns
-model requests and user approval UI; the new headless modules cover tool
-batch validation, bounded reads, and compaction decisions.
+accuracy or stability improvement. At that point the panel loop still owned
+model requests and user approval UI. The 2026-10-24 [runner refactor](agent-runner.md)
+moves model scheduling, retry, compaction and tool-result pairing into a headless
+runner; the panel retains host execution and approval UI.
 
 The selected SSTerm provider/model was checked on 2026-10-11. Its model-list
 endpoint returned the selected `DeepSeek-V4-Flash`, but a minimal chat request

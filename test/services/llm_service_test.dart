@@ -657,6 +657,13 @@ Done.
       );
       expect(prompt, contains("compare it with the user's requested outcome"));
       expect(prompt, contains('<native_mutating_tools>'));
+      expect(prompt, contains('up to 8 independent tool calls'));
+      expect(prompt, contains('sequentially in the exact order returned'));
+      expect(prompt, contains('issue the dependent call in the next response'));
+      expect(prompt, isNot(contains('one call per response')));
+      expect(prompt, isNot(contains('Make one mutating call per response')));
+      expect(prompt, isNot(contains('Never invent or emit `bash`')));
+      expect(prompt, contains('Use `bash` only through its advertised schema'));
       for (final legacy in [
         '```tool_call',
         '<turn_protocol>',
@@ -767,6 +774,30 @@ Done.
         expect(prompt.contains('<system-reminder>'), isFalse);
       },
     );
+
+    test('skill catalogue follows the enabled set across prompt changes', () {
+      final alphaOnly = LlmService.systemPromptFor(enabledSkillIds: {'alpha'});
+      expect(alphaOnly, contains('<agent_skill id="alpha"'));
+      expect(alphaOnly, isNot(contains('<agent_skill id="beta"')));
+      expect(alphaOnly, isNot(contains('do the beta thing')));
+
+      final betaOnly = LlmService.systemPromptFor(enabledSkillIds: {'beta'});
+      expect(betaOnly, contains('<agent_skill id="beta"'));
+      expect(betaOnly, isNot(contains('<agent_skill id="alpha"')));
+
+      final all = LlmService.systemPromptFor(enabledSkillIds: null);
+      expect(all, contains('<agent_skill id="alpha"'));
+      expect(all, contains('<agent_skill id="beta"'));
+
+      for (final enabled in [
+        <String>{},
+        {'not-installed'},
+      ]) {
+        final none = LlmService.systemPromptFor(enabledSkillIds: enabled);
+        expect(none, isNot(contains('<agent_skills>')));
+        expect(none, isNot(contains('<agent_skill id=')));
+      }
+    });
 
     test('escapes `"` inside path attribute', () {
       // Defensive: a wildly-named user skill folder must not be able to

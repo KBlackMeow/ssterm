@@ -130,6 +130,290 @@ should not be written
     );
   });
 
+  testWidgets('approved native edit resumes its original tool call', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('edit', 'edit_file', {
+          'path': '/fixture/sample.txt',
+          'old_string': 'target',
+          'new_string': 'updated',
+        }),
+      ]),
+      _sseForText('Edited.'),
+    ]);
+    final files = _MemoryFileSystemAdapter();
+    await _mountAgent(tester, http, files);
+    await _sendTask(tester, 'Edit the marker');
+    expect(find.text('Apply'), findsOneWidget);
+    await tester.ensureVisible(find.text('Apply'));
+    await tester.tap(find.text('Apply'));
+    await _drainAgent(tester);
+    expect(files.writtenContent, 'updated marker\n');
+    expect(_lastToolResult(http)['tool_call_id'], 'edit');
+    expect(http.requestBodies, hasLength(2));
+  });
+
+  testWidgets(
+    'mixed batch resumes after each approval without reordering tools',
+    (tester) async {
+      final http = _QueuedHttpOverrides([
+        _sseForToolCalls([
+          _nativeCall('read', 'read_file', {
+            'path': '/fixture/sample.txt',
+            'offset': 0,
+          }),
+          _nativeCall('write_one', 'write_file', {
+            'path': '/fixture/one',
+            'content': 'one',
+          }, index: 1),
+          _nativeCall('write_two', 'write_file', {
+            'path': '/fixture/two',
+            'content': 'two',
+          }, index: 2),
+          _nativeCall('shell', 'bash', {
+            'command': 'pwd',
+            'reason': 'Inspect',
+            'risk_level': 'normal',
+            'risk_reason': 'Read only',
+          }, index: 3),
+        ]),
+        _sseForText('Batch finished.'),
+      ]);
+      final files = _MemoryFileSystemAdapter();
+      final executed = <String>[];
+      await _mountAgent(tester, http, files, executed: executed);
+      await _sendTask(
+        tester,
+        'Read the sample, write the supplied files and run pwd',
+      );
+      expect(files.writtenContents, isEmpty);
+      expect(executed, isEmpty);
+      expect(http.requestBodies, hasLength(1));
+      await tester.ensureVisible(find.text('Apply'));
+      await tester.tap(find.text('Apply'));
+      await _drainAgent(tester);
+      expect(files.writtenContents, ['one']);
+      expect(executed, isEmpty);
+      expect(http.requestBodies, hasLength(1));
+      expect(find.text('Apply'), findsOneWidget);
+      await tester.ensureVisible(find.text('Apply'));
+      await tester.tap(find.text('Apply'));
+      await _drainAgent(tester);
+      expect(files.writtenContents, ['one', 'two']);
+      expect(executed, ['pwd']);
+      expect(http.requestBodies, hasLength(2));
+      final body = jsonDecode(http.requestBodies.last) as Map;
+      final results = (body['messages'] as List).where(
+        (m) => m['role'] == 'tool',
+      );
+      expect(results.map((r) => r['tool_call_id']), [
+        'read',
+        'write_one',
+        'write_two',
+        'shell',
+      ]);
+      expect(find.textContaining('Batch finished.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'rejecting a file stops the remaining mixed batch and preserves results',
+    (tester) async {
+      final http = _QueuedHttpOverrides([
+        _sseForToolCalls([
+          _nativeCall('read', 'read_file', {
+            'path': '/fixture/sample.txt',
+            'offset': 0,
+          }),
+          _nativeCall('write', 'write_file', {
+            'path': '/fixture/a',
+            'content': 'a',
+          }, index: 1),
+          _nativeCall('later', 'bash', {
+            'command': 'pwd',
+            'reason': 'Inspect',
+            'risk_level': 'normal',
+            'risk_reason': 'Read only',
+          }, index: 2),
+        ]),
+        _sseForText('New task.'),
+      ]);
+      final files = _MemoryFileSystemAdapter();
+      final executed = <String>[];
+      await _mountAgent(tester, http, files, executed: executed);
+      await _sendTask(tester, 'Inspect and propose the supplied file');
+      await tester.ensureVisible(find.text('Reject'));
+      await tester.tap(find.text('Reject'));
+      await tester.pumpAndSettle();
+      await Scrollable.ensureVisible(
+        tester.element(find.text('Send rejection')),
+        alignment: 0.5,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Send rejection'));
+      await _drainAgent(tester);
+      expect(files.writtenContents, isEmpty);
+      expect(executed, isEmpty);
+      expect(http.requestBodies, hasLength(1));
+      await _sendTask(tester, 'Start a new task');
+      final body = jsonDecode(http.requestBodies.last) as Map;
+      final results = (body['messages'] as List)
+          .where((m) => m['role'] == 'tool')
+          .toList();
+      expect(results.map((r) => r['tool_call_id']), ['read', 'write', 'later']);
+      expect(results.first['content'], contains('target marker'));
+      expect(results[1]['content'], contains('rejected'));
+      expect(results.last['content'], contains('not executed'));
+      expect(executed, isEmpty);
+    },
+  );
+
+  testWidgets('rejected native write returns rejection without writing', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('write', 'write_file', {
+          'path': '/fixture/a',
+          'content': 'a',
+        }),
+      ]),
+      _sseForText('Write rejected.'),
+    ]);
+    final files = _MemoryFileSystemAdapter();
+    await _mountAgent(tester, http, files);
+    await _sendTask(tester, 'Write a file');
+    await tester.ensureVisible(find.text('Reject'));
+    await tester.tap(find.text('Reject'));
+    await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(
+      tester.element(find.text('Send rejection')),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send rejection'));
+    await _drainAgent(tester);
+    expect(files.writtenContent, isNull);
+    expect(http.requestBodies, hasLength(1));
+    await _sendTask(tester, 'Continue with a new task');
+    expect(_lastToolResult(http)['tool_call_id'], 'write');
+    expect(_lastToolResult(http)['content'], contains('rejected'));
+  });
+
+  testWidgets('clearing a paused write discards its task before new input', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('old_write', 'write_file', {
+          'path': '/fixture/a',
+          'content': 'a',
+        }),
+      ]),
+      _sseForText('Fresh conversation.'),
+    ]);
+    final files = _MemoryFileSystemAdapter();
+    await _mountAgent(tester, http, files);
+    await _sendTask(tester, 'Write a file');
+    expect(find.text('Apply'), findsOneWidget);
+    await tester.tap(find.byTooltip('Clear conversation'));
+    await tester.pumpAndSettle();
+    expect(find.text('Apply'), findsNothing);
+    await _sendTask(tester, 'Start again');
+    expect(files.writtenContent, isNull);
+    expect(http.requestBodies, hasLength(2));
+    expect(http.requestBodies.last, isNot(contains('old_write')));
+    expect(find.textContaining('Fresh conversation.'), findsOneWidget);
+  });
+
+  testWidgets('late preview after clearing cannot create an approval card', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('write', 'write_file', {
+          'path': '/fixture/a',
+          'content': 'a',
+        }),
+      ]),
+    ]);
+    final preview = Completer<void>();
+    final files = _MemoryFileSystemAdapter()..previewWaiter = preview.future;
+    await _mountAgent(tester, http, files);
+    await _sendTask(tester, 'Write a file');
+    await tester.tap(find.byTooltip('Clear conversation'));
+    await tester.pumpAndSettle();
+    preview.complete();
+    await _drainAgent(tester);
+    expect(find.text('Apply'), findsNothing);
+    expect(files.writtenContent, isNull);
+    expect(http.requestBodies, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rejecting a dangerous command stops the whole batch', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('danger', 'bash', {
+          'command': 'rm -rf /fixture/work',
+          'reason': 'Remove files',
+          'risk_level': 'dangerous',
+          'risk_reason': 'Deletes files',
+        }),
+        _nativeCall('later', 'bash', {
+          'command': 'pwd',
+          'reason': 'Inspect',
+          'risk_level': 'normal',
+          'risk_reason': 'Read only',
+        }, index: 1),
+      ]),
+    ]);
+    final executed = <String>[];
+    await _mountAgent(
+      tester,
+      http,
+      _MemoryFileSystemAdapter(),
+      executed: executed,
+    );
+    await _sendTask(tester, 'Remove the directory');
+    await tester.ensureVisible(find.text('Reject'));
+    await tester.tap(find.text('Reject'));
+    await _drainAgent(tester);
+    expect(executed, isEmpty);
+    expect(http.requestBodies, hasLength(1));
+    expect(find.byIcon(Icons.stop_rounded), findsNothing);
+  });
+
+  testWidgets('question answer returns to runner as paired tool result', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('question', 'ask_user_question', {
+          'question': 'Where should I run?',
+          'header': 'Target',
+          'options': [
+            {'label': 'Use local', 'description': 'This workspace'},
+            {'label': 'Use remote', 'description': 'SSH workspace'},
+          ],
+        }),
+      ]),
+      _sseForText('Using local.'),
+    ]);
+    await _mountAgent(tester, http, _MemoryFileSystemAdapter());
+    await _sendTask(tester, 'Choose a target');
+    await tester.ensureVisible(find.text('Use local'));
+    await tester.tap(find.text('Use local'));
+    await _drainAgent(tester);
+    expect(_lastToolResult(http)['tool_call_id'], 'question');
+    expect(_lastToolResult(http)['content'], contains('Use local'));
+    expect(http.requestBodies, hasLength(2));
+  });
+
   testWidgets('mixed shell and file search both execute in one tool turn', (
     tester,
   ) async {
@@ -298,6 +582,66 @@ query: "Beijing current weather"
       reason: 'the transcript must stay pinned to the latest content',
     );
   });
+}
+
+Map<String, Object?> _nativeCall(
+  String id,
+  String name,
+  Map<String, Object?> arguments, {
+  int index = 0,
+}) => {
+  'index': index,
+  'id': id,
+  'function': {'name': name, 'arguments': jsonEncode(arguments)},
+};
+
+Future<void> _mountAgent(
+  WidgetTester tester,
+  _QueuedHttpOverrides http,
+  _MemoryFileSystemAdapter files, {
+  List<String>? executed,
+}) async {
+  await tester.binding.setSurfaceSize(const Size(1000, 900));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  HttpOverrides.global = http;
+  addTearDown(() => HttpOverrides.global = null);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: AiAssistantOverlay(
+          visible: true,
+          initialPosition: AiPanelPosition.bottom,
+          initialSize: 540,
+          agentConfig: _fakeAgentConfig().copyWith(fileWriteEnabled: true),
+          fileSystemAdapter: files,
+          onExecuteAsync: (cmd, {isCancelled, onUpdate, onSilence}) async {
+            executed?.add(cmd);
+            return CommandResult(output: '', exitCode: 0);
+          },
+          child: const SizedBox.expand(),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _sendTask(WidgetTester tester, String text) async {
+  await tester.enterText(find.byType(TextField), text);
+  await tester.tap(find.byIcon(Icons.send_rounded));
+  await _drainAgent(tester);
+}
+
+Future<void> _drainAgent(WidgetTester tester) async {
+  for (var i = 0; i < 80; i++) {
+    await tester.pump(const Duration(milliseconds: 10));
+  }
+}
+
+Map<String, dynamic> _lastToolResult(_QueuedHttpOverrides http) {
+  final body = jsonDecode(http.requestBodies.last) as Map;
+  return Map<String, dynamic>.from(
+    (body['messages'] as List).lastWhere((m) => m['role'] == 'tool') as Map,
+  );
 }
 
 List<String> _sseForText(String text) => [
@@ -492,6 +836,8 @@ class _MockResponse implements HttpClientResponse {
 
 class _MemoryFileSystemAdapter implements FileSystemAdapter {
   String? writtenContent;
+  final writtenContents = <String>[];
+  Future<void>? previewWaiter;
 
   @override
   String get label => 'fixture';
@@ -503,8 +849,13 @@ class _MemoryFileSystemAdapter implements FileSystemAdapter {
   String? get currentDirectory => '/fixture';
 
   @override
-  Future<FileWritePreview> preview(String path) async =>
-      FileWritePreview(resolvedPath: path, exists: false, existingSize: 0);
+  Future<FileWritePreview> preview(String path) async {
+    await previewWaiter;
+    return FileWritePreview(resolvedPath: path, exists: false, existingSize: 0);
+  }
+
+  @override
+  Future<String> readContent(String path) async => 'target marker\n';
 
   @override
   Future<FileWriteResult> commit(
@@ -513,6 +864,7 @@ class _MemoryFileSystemAdapter implements FileSystemAdapter {
     DateTime? expectedMtime,
   }) async {
     writtenContent = content;
+    writtenContents.add(content);
     return FileWriteResult(
       resolvedPath: path,
       bytesWritten: utf8.encode(content).length,

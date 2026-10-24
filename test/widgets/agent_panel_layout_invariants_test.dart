@@ -61,7 +61,7 @@ void main() {
 
   test('command risk gate and result card expose all three levels', () {
     final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
+      'lib/widgets/ai_assistant_panel_execution.dart',
     ).readAsStringSync();
     final widgets = File(
       'lib/widgets/ai_assistant_panel_widgets.dart',
@@ -79,30 +79,16 @@ void main() {
     expect(content, contains('审慎模式：普通命令直接执行，警告和危险命令需要确认'));
   });
 
-  test('agent loop reuses one stream client session and hardens retries', () {
-    final loop = File(
+  test('panel delegates scheduling to a UI-independent runner', () {
+    final adapter = File(
       'lib/widgets/ai_assistant_panel_loop.dart',
     ).readAsStringSync();
-    final tooling = File(
-      'lib/widgets/ai_assistant_panel_tooling.dart',
-    ).readAsStringSync();
-
-    expect(loop, contains('_streamSession = AgentStreamClientSession();'));
-    expect(loop, contains('streamSession: streamSession'));
-    expect(loop, contains('streamSession.close();'));
-    expect(loop, contains('_streamSessionPausedGeneration = gen'));
-    expect(
-      tooling,
-      contains('required AgentStreamClientSession streamSession'),
-    );
-    expect(tooling, contains('session: streamSession'));
-    expect(tooling, contains('streamSession.reset();'));
-    expect(tooling, contains('hasToolCalls: nativeToolCalls.isNotEmpty'));
-    expect(tooling, contains('identical(_cancelStream, cancelAttempt)'));
-    expect(tooling, contains(r'backoff_ms=${retryDelay.inMilliseconds}'));
-    expect(tooling, contains('AgentStreamLogSanitizer.message(e)'));
-    expect(tooling, contains('_isRateLimitError(e)'));
-    expect(tooling, contains('Rate limited. Retrying in 3 seconds…'));
+    final runner = File('lib/services/agent_runner.dart').readAsStringSync();
+    expect(adapter, contains('AgentRunner('));
+    expect(adapter, contains('runner.subscribe('));
+    expect(adapter, isNot(contains('while (')));
+    expect(runner, isNot(contains('package:flutter/')));
+    expect(runner, isNot(contains('setState')));
   });
 
   test('panel disposal invalidates command cancellation generation', () {
@@ -122,7 +108,7 @@ void main() {
       'lib/widgets/ai_assistant_panel_models.dart',
     ).readAsStringSync();
     final loop = File(
-      'lib/widgets/ai_assistant_panel_loop.dart',
+      'lib/widgets/ai_assistant_panel_execution.dart',
     ).readAsStringSync();
     final content = File(
       'lib/widgets/ai_assistant_panel_content.dart',

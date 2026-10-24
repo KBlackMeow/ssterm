@@ -39,20 +39,6 @@ void main() {
     expect(content, contains("'/\${skill.id}'"));
   });
 
-  test(
-    'agent loop bounds model and shell work with a visible terminal event',
-    () {
-      final source = File(
-        'lib/widgets/ai_assistant_panel_loop.dart',
-      ).readAsStringSync();
-
-      expect(source, contains('final budget = AgentExecutionBudget();'));
-      expect(source, contains('budget.consumeModelRequest(DateTime.now())'));
-      expect(source, contains('budget.consumeShellCall(DateTime.now())'));
-      expect(source, contains('[Agent run stopped]'));
-    },
-  );
-
   test('new input during a busy agent is queued instead of interrupting', () {
     final source = File(
       'lib/widgets/ai_assistant_panel.dart',
@@ -92,7 +78,7 @@ void main() {
       source.indexOf('void _clearChat()'),
     );
     final cancel = source.indexOf(
-      'if (_agentBusy) _cancelAgent();',
+      'if (_agentBusy || _agentRunner?.state == AgentRunState.paused)',
       clearQueue,
     );
     expect(clearQueue, isNot(-1));
@@ -184,25 +170,13 @@ void main() {
     'command feedback references bounded output artifacts when available',
     () {
       final source = File(
-        'lib/widgets/ai_assistant_panel_loop.dart',
+        'lib/widgets/ai_assistant_panel_execution.dart',
       ).readAsStringSync();
 
       expect(source, contains('_outputStore.save(result.output)'));
-      expect(source, contains('artifact: outputArtifact'));
+      expect(source, contains('artifact: artifact'));
     },
   );
-
-  test('context-length failures compact and retry at most once', () {
-    final source = File(
-      'lib/widgets/ai_assistant_panel_tooling.dart',
-    ).readAsStringSync();
-
-    expect(source, contains('didContextRecovery'));
-    expect(
-      source,
-      contains('_compactHistoryIfNeeded(gen, config, force: true)'),
-    );
-  });
 
   testWidgets('populated agent transcript is inside a selection area', (
     tester,

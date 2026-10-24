@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io'
-    show stdout, Directory, HttpException, Platform, SocketException;
+import 'dart:io' show stdout, Directory, Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -18,8 +17,8 @@ import '../services/command_feedback_formatter.dart';
 import '../services/background_command_executor.dart'
     show CommandExecutionUpdateListener, CommandSilenceDecider;
 import '../services/agent_context_budget.dart';
-import '../services/agent_conversation_manager.dart';
-import '../services/agent_execution_budget.dart';
+import '../services/agent_model.dart';
+import '../services/agent_runner.dart';
 import '../services/agent_session_store.dart';
 import '../services/agent_session_registry.dart';
 import '../services/agent_output_store.dart';
@@ -28,7 +27,6 @@ import '../services/command_safety.dart';
 import '../services/command_risk.dart';
 import '../services/llm_service.dart';
 import '../services/agent_tool_contract.dart';
-import '../services/agent_tool_batch.dart';
 import '../services/agent_tool_registry.dart';
 import '../services/agent_image_attachment.dart';
 import '../services/agent_read_tools.dart';
@@ -59,6 +57,7 @@ part 'ai_assistant_panel_question_card.dart';
 part 'ai_assistant_panel_edit_card.dart';
 part 'ai_assistant_panel_tooling.dart';
 part 'ai_assistant_panel_loop.dart';
+part 'ai_assistant_panel_execution.dart';
 
 const _kFgActive = Color(0xFFD4D4D4);
 const _kFgInactive = Color(0xFF8E8E8E);
@@ -214,10 +213,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   var _agentBusy = false;
   var _autoExecute = false;
   String? _agentLoopStatus;
-  void Function()? _cancelStream;
-  AgentStreamClientSession? _streamSession;
-  int? _streamSessionGeneration;
-  int? _streamSessionPausedGeneration;
+  AgentRunner? _agentRunner;
   int _generation = 0;
 
   /// The `_QuestionProposal` currently awaiting an answer (option tap OR
@@ -231,8 +227,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   /// Pending write/edit proposals, kept so `_agentEngaged` can treat the
   /// "paused for Apply/Reject" state as still busy.  These two are NOT
-  /// awaited in place (unlike danger/question proposals) — the loop returns
-  /// `waitingForUser`, so `_agentBusy` drops to false while the card is up.
+  /// awaited in place (unlike danger/question proposals). The runner pauses,
+  /// so `_agentBusy` drops to false while the card is up.
   _WriteProposal? _pendingWriteProposal;
   _EditProposal? _pendingEditProposal;
 
@@ -257,7 +253,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   final _agentInputFocusNode = FocusNode();
 
   /// Monotonic counter for the user-message-driven agent turns within
-  /// this process.  Used as the `t=N` prefix on every `[agent] iter=…`
+  /// this process. Used as the `t=N` prefix on every `[agent] iter=…`
   /// log line so consecutive turns are visually distinguishable in
   /// `flutter run` output (each new user message bumps the counter,
   /// while each LLM iteration WITHIN that turn shares it).  Without
@@ -282,10 +278,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   @override
   void dispose() {
     _generation++;
-    _cancelStream?.call();
+    _agentRunner?.cancel();
+    _agentRunner = null;
     _cancelPendingAgentPrompts();
-    _streamSession?.close(force: true);
-    _streamSession = null;
     _agentController.dispose();
     _scrollController.dispose();
     _agentInputFocusNode.dispose();
@@ -366,7 +361,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingImages.clear();
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
-    if (_agentBusy) _cancelAgent();
+    if (_agentBusy || _agentRunner?.state == AgentRunState.paused) {
+      _cancelAgent();
+    }
     _sessionLease = lease;
     _sessionStore = AgentSessionStore(sessionId: sessionId);
     _outputStore = AgentOutputStore(sessionId: sessionId);
@@ -384,8 +381,8 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
 
   void _cancelAgent() {
     _generation++;
-    _cancelStream?.call();
-    _cancelStream = null;
+    _agentRunner?.cancel();
+    _agentRunner = null;
     _cancelPendingAgentPrompts();
     // If the turn was interrupted between the model emitting a native tool
     // call and the loop recording its result, the conversation history ends
@@ -394,10 +391,7 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     // a tool_result" (Anthropic) / "assistant tool_calls requires a tool
     // message" (OpenAI).
     _completeInterruptedToolCalls();
-    _streamSession?.close(force: true);
-    _streamSession = null;
-    _streamSessionGeneration = null;
-    _streamSessionPausedGeneration = null;
+
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
     setState(() {
@@ -663,7 +657,9 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingImages.clear();
     _pendingWriteProposal = null;
     _pendingEditProposal = null;
-    if (_agentBusy) _cancelAgent();
+    if (_agentBusy || _agentRunner?.state == AgentRunState.paused) {
+      _cancelAgent();
+    }
     setState(() {
       _messages.clear();
       _textController.clear();
@@ -1308,20 +1304,6 @@ class _SessionPickerCardState extends State<_SessionPickerCard> {
 /// Emit one structured `[agent] …` line.
 void _logAgent(String event) {
   stdout.writeln('[agent] $event');
-}
-
-/// Emit a `[agent] iter=N stop reason=R` record at loop termination.
-/// Centralised so every break path uses the same vocabulary (`task_complete`,
-/// `ask_user`, `no_commands`, `auto_execute_off`, `no_executor`,
-/// `max_iterations`, `stream_error_or_cancelled`).
-///
-/// [turnId] is the optional per-user-message counter that prefixes every
-/// in-turn log line (`t=N`).  We accept null so the centralised helper
-/// stays usable from any future caller that isn't inside the agent
-/// loop's own `_continueAgentLoopBody` scope.
-void _logAgentStop(int iter, String reason, {int? turnId}) {
-  final prefix = turnId == null ? '' : 't=$turnId ';
-  _logAgent('${prefix}iter=$iter stop reason=$reason');
 }
 
 /// Emit one structured `[safety] …` line for dangerous-command events.

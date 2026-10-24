@@ -53,7 +53,6 @@ Future<LlmResponse> _callOpenAiCompatible(
         'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
         if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
         if (tools.isNotEmpty) 'tool_choice': 'auto',
-        if (tools.isNotEmpty) 'parallel_tool_calls': false,
         if (withJsonMode) 'response_format': const {'type': 'json_object'},
         if (provider.id == 'deepseek' && reasoningLevel != null)
           'thinking': {
@@ -161,8 +160,7 @@ Future<LlmResponse> _callAnthropic(
     'messages': apiMessages,
     'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
-    if (tools.isNotEmpty)
-      'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
+    if (tools.isNotEmpty) 'tool_choice': {'type': 'auto'},
   };
   final thinkingBudget = switch (reasoningLevel) {
     AgentReasoningLevel.low => 512,
@@ -465,7 +463,6 @@ Stream<LlmStreamEvent> _streamOpenAi(
         'stream_options': {'include_usage': true},
       if (tools.isNotEmpty) 'tools': AgentProviderTools.openAiTools(tools),
       if (tools.isNotEmpty) 'tool_choice': 'auto',
-      if (tools.isNotEmpty) 'parallel_tool_calls': false,
       // GLM's OpenAI-compatible stream omits function-call deltas unless this
       // vendor extension is enabled (GLM-4.6 and newer).
       if (provider.id == 'glm' && tools.isNotEmpty) 'tool_stream': true,
@@ -564,8 +561,7 @@ Stream<LlmStreamEvent> _streamAnthropic(
     'max_tokens': maxOutputTokens ?? provider.maxOutputTokensFor(model),
     'stream': true,
     if (tools.isNotEmpty) 'tools': AgentProviderTools.anthropicTools(tools),
-    if (tools.isNotEmpty)
-      'tool_choice': {'type': 'auto', 'disable_parallel_tool_use': true},
+    if (tools.isNotEmpty) 'tool_choice': {'type': 'auto'},
   };
   // Extended thinking is only supported on Claude Sonnet 3.7+ and the v4+
   // Sonnet / Opus families (see _anthropicSupportsThinking) — and it is

@@ -1,16 +1,13 @@
 import 'agent_tool_contract.dart';
 import 'agent_tool_registry.dart';
 
-/// Checks a provider's complete tool batch before any side effect starts.
-/// The panel supports batches of shell commands, MCP calls, or independent
-/// bounded reads. Shell commands may share a batch with bounded reads; each
-/// shell command still passes through its normal confirmation gate.
-/// Tools that pause or replace the turn cannot share a batch.
+/// Validates a complete batch before execution. The runner executes up to
+/// eight calls serially in provider order, pausing for host approvals as needed.
+/// Skill loading stays standalone so its instructions inform the next plan.
 class AgentToolBatch {
   AgentToolBatch._();
 
-  static const readOnlyNames = {'read_output', 'read_file', 'grep_file'};
-  static const maxReadOnlyCalls = 8;
+  static const maxCalls = 8;
 
   static List<AgentToolResult> completeResults(
     Iterable<AgentToolCall> calls,
@@ -38,6 +35,9 @@ class AgentToolBatch {
     String? finishReason,
   }) {
     if (calls.isEmpty) return null;
+    if (calls.length > maxCalls) {
+      return 'At most $maxCalls tool calls are allowed per response. Split the batch.';
+    }
     if (const {
       'length',
       'max_tokens',
@@ -59,21 +59,9 @@ class AgentToolBatch {
       );
       if (error != null) return '${call.name}: $error';
     }
-    if (calls.length > 1) {
-      final names = calls.map((call) => call.name).toSet();
-      final readOnlyBatch =
-          calls.length <= maxReadOnlyCalls &&
-          names.every(readOnlyNames.contains);
-      final shellAndReadBatch =
-          calls.length <= maxReadOnlyCalls &&
-          names.every((name) => name == 'bash' || readOnlyNames.contains(name));
-      if (!readOnlyBatch &&
-          !shellAndReadBatch &&
-          (names.length != 1 ||
-              (names.single != 'bash' && names.single != 'mcp'))) {
-        return 'This combination of tools cannot execute in one turn. '
-            'Issue one tool call at a time.';
-      }
+    if (calls.length > 1 && calls.any((call) => call.name == 'use_skill')) {
+      return 'use_skill must be issued alone. Load the skill and wait for its '
+          'result before proposing other tools.';
     }
     return null;
   }

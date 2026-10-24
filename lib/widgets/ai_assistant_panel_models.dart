@@ -9,26 +9,6 @@ part of 'ai_assistant_panel.dart';
 // the only public surface is [AiAssistantOverlay] in the main file.
 // ───────────────────────────────────────────────────────────────────────────
 
-// ── File-write proposal outcome (agent loop disposition) ──────────────────
-
-/// Disposition the agent loop should take after `_proposeFileWrite`
-/// processes a `[WRITE_FILE_BEGIN]` marker.  See `_proposeFileWrite`
-/// for full semantics — kept in its own enum so the `switch` in the
-/// agent loop is exhaustive and adding a third disposition later (e.g.
-/// "auto-apply because path is in trusted-dirs") is a single point of
-/// extension.
-enum _WriteProposalOutcome {
-  /// A failure / disabled envelope is already in conversation history.
-  /// Loop should keep iterating so the model can react.
-  injectedAndContinue,
-
-  /// Preview succeeded; a chat card is displayed; loop should pause
-  /// (return from the body so the wrapper's finally clears
-  /// `_agentBusy`). Resume happens on
-  /// Apply / Reject via `_decideWriteProposal`.
-  waitingForUser,
-}
-
 // ── Chat message model ─────────────────────────────────────────────────────
 
 class _ChatMessage {
@@ -335,21 +315,6 @@ class _WriteProposal {
 }
 
 // ── File-edit proposal (Apply/Reject card state machine) ──────────────────
-
-/// Disposition the agent loop should take after `_proposeFileEdit`
-/// processes an `edit_file` tool call.  Mirrors [_WriteProposalOutcome]
-/// one-for-one but kept as its own enum so the two proposal kinds never
-/// get mixed up at a call site.
-enum _EditProposalOutcome {
-  /// A failure / disabled / no-match / ambiguous-match envelope is
-  /// already in conversation history.  Loop should keep iterating so
-  /// the model can react.
-  injectedAndContinue,
-
-  /// Match succeeded; a diff card is displayed; loop should pause.
-  /// Resume happens on Apply / Reject via `_decideEditProposal`.
-  waitingForUser,
-}
 
 /// Lifecycle states for an [_EditProposal].  Mirrors
 /// [_WriteProposalState] one-for-one.

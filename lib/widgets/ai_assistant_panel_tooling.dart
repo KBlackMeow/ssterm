@@ -2,20 +2,7 @@
 
 part of 'ai_assistant_panel.dart';
 
-typedef _AgentStreamResult = ({
-  String text,
-  String reasoning,
-  List<AgentThinkingBlock> thinkingBlocks,
-  bool hasReasoning,
-  List<AgentToolCall> toolCalls,
-  String? finishReason,
-  int malformedEventCount,
-  int? promptTokenCount,
-  int? completionTokenCount,
-  int? reasoningTokenCount,
-});
-
-/// Streaming and tool-approval implementation used by the agent loop.
+/// Host tool previews and approval UI. Model streaming belongs to AgentRunner.
 extension _AiAgentToolingExt on _AiAssistantOverlayState {
   /// Makes an isolated, constrained decision while a command has produced no
   /// output. It deliberately uses a fresh HTTP session: the main agent loop is
@@ -59,284 +46,6 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         setState(() => _agentLoopStatus = 'Executing: $command');
       }
     }
-  }
-
-  bool _isTransientStreamError(Object e) {
-    if (e is HttpException) return true;
-    if (e is SocketException) return true;
-    // Match-by-string for exceptions whose classes we don't import.
-    // `dart:io`'s `HandshakeException` and `TlsException` extend
-    // `IOException` and surface via `chatStream`'s underlying HttpClient.
-    final s = e.toString();
-    return s.contains('HandshakeException') ||
-        s.contains('TlsException') ||
-        s.contains('Connection closed');
-  }
-
-  bool _isRateLimitError(Object e) {
-    if (e is LlmHttpException) return e.statusCode == 429;
-    final message = e.toString().toLowerCase();
-    return RegExp(r'\bhttp\s*429\b').hasMatch(message) ||
-        RegExp(r'\bstatus(?:\s+code)?[=: ]+429\b').hasMatch(message) ||
-        message.contains('rate limit') ||
-        message.contains('too many requests') ||
-        message.contains('resource_exhausted');
-  }
-
-  Future<_AgentStreamResult?> _streamAiResponse(
-    int gen,
-    int historyLenBefore,
-    _ChatMessage aiMsg,
-    AgentConfig config, {
-    required AgentStreamClientSession streamSession,
-    AgentRequestProfile? profile,
-  }) async {
-    String fullText = '';
-    String reasoningText = '';
-    final thinkingBlocks = <AgentThinkingBlock>[];
-    final nativeToolCalls = <AgentToolCall>[];
-    String? finishReason;
-    var malformedEventCount = 0;
-    int? exactReasoningTokenCount;
-    int? promptTokenCount;
-    int? completionTokenCount;
-    var didContextRecovery = false;
-
-    // Retry only when an attempt yielded zero content or tool calls and
-    // failed with a transient network error. Anything more aggressive
-    // would risk duplicating
-    // half-streamed answers.
-    const maxAttempts = AgentStreamRetryPolicy.maxRateLimitRetries + 1;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      final ({Stream<LlmStreamEvent> stream, void Function() cancel}) result;
-      try {
-        result = LlmService.chatStream(
-          config: config,
-          messages: _conversationHistory,
-          session: streamSession,
-          profile: profile,
-        );
-      } catch (e) {
-        // Catch EVERYTHING — Error subclasses (StateError, etc.) must not escape.
-        _logAgent(
-          'error scope=setup_stream type=${e.runtimeType} '
-          'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
-        );
-        while (_conversationHistory.length > historyLenBefore) {
-          _conversationHistory.removeLast();
-        }
-        if (mounted && gen == _generation) {
-          setState(() {
-            _messages.removeLast();
-            _messages.add(_ChatMessage.ai(text: '', error: '$e'));
-          });
-        }
-        return null;
-      }
-
-      final cancelAttempt = result.cancel;
-      _cancelStream = cancelAttempt;
-
-      fullText = '';
-      reasoningText = '';
-      thinkingBlocks.clear();
-      nativeToolCalls.clear();
-      finishReason = null;
-      malformedEventCount = 0;
-      exactReasoningTokenCount = null;
-      promptTokenCount = null;
-      completionTokenCount = null;
-      var scheduled = false;
-      // Once the stream completes (success OR error), block all pending
-      // post-frame callbacks from clobbering `aiMsg.text` with the
-      // half-processed `stripStreamingMarkers` view AFTER the agent
-      // loop has applied the final `stripCompletionMarkers` view.
-      // Without this guard, the very last in-flight callback can race
-      // the stream-end `setState` and reintroduce trailing blank lines
-      // or partial markers into the rendered card.
-      var streamDone = false;
-      try {
-        await for (final event in result.stream) {
-          if (event.kind == 'reasoning') {
-            reasoningText += event.content;
-          } else if (event.kind == 'thinking_state' &&
-              event.thinkingBlock != null) {
-            thinkingBlocks.add(event.thinkingBlock!);
-          } else if (event.kind == 'tool_call' && event.toolCall != null) {
-            nativeToolCalls.add(event.toolCall!);
-          } else if (event.kind == 'diagnostics') {
-            finishReason = event.finishReason;
-            malformedEventCount += event.malformedEventCount;
-            if (event.reasoningTokenCount != null) {
-              exactReasoningTokenCount = event.reasoningTokenCount;
-            }
-            if (event.promptTokenCount != null) {
-              promptTokenCount = event.promptTokenCount;
-            }
-            if (event.completionTokenCount != null) {
-              completionTokenCount = event.completionTokenCount;
-            }
-          } else {
-            fullText += event.content;
-          }
-          if (mounted && !scheduled) {
-            scheduled = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              scheduled = false;
-              if (!mounted || streamDone || gen != _generation) return;
-              setState(() {
-                // Hide markers during streaming — without this the user
-                // briefly sees `[`, `[TASK`, `[TASK_COMPLETE]` flicker
-                // before the post-stream strip runs.  See
-                // LlmService.stripStreamingMarkers for partial-marker
-                // handling.
-                aiMsg.text = LlmService.stripStreamingMarkers(fullText);
-                aiMsg.reasoning = reasoningText.isNotEmpty
-                    ? reasoningText
-                    : null;
-                aiMsg.reasoningTokenCount = reasoningText.isEmpty
-                    ? null
-                    : exactReasoningTokenCount ??
-                          LlmService.estimateReasoningTokenCount(reasoningText);
-                aiMsg.hasExactReasoningTokenCount =
-                    exactReasoningTokenCount != null;
-              });
-              _scrollToBottom();
-            });
-          }
-        }
-        streamDone = true;
-        if (mounted) {
-          setState(() {
-            aiMsg.text = LlmService.stripStreamingMarkers(fullText);
-            aiMsg.reasoning = reasoningText.isNotEmpty ? reasoningText : null;
-            aiMsg.reasoningTokenCount = reasoningText.isEmpty
-                ? null
-                : exactReasoningTokenCount ??
-                      LlmService.estimateReasoningTokenCount(reasoningText);
-            aiMsg.hasExactReasoningTokenCount =
-                exactReasoningTokenCount != null;
-          });
-        }
-        // Stream finished cleanly — break out of the retry loop.
-        break;
-      } catch (e) {
-        streamDone = true;
-        final canRecoverContext =
-            !didContextRecovery &&
-            fullText.isEmpty &&
-            reasoningText.isEmpty &&
-            nativeToolCalls.isEmpty &&
-            _isContextLengthError(e) &&
-            mounted &&
-            gen == _generation;
-        if (canRecoverContext) {
-          didContextRecovery = true;
-          _logAgent('context_length_recovery attempt=1');
-          await _compactHistoryIfNeeded(gen, config, force: true);
-          if (!mounted || gen != _generation) return null;
-          streamSession.reset();
-          continue;
-        }
-        // Catch EVERYTHING — stream errors, SSE parse failures, etc.
-        final isRateLimited = _isRateLimitError(e);
-        final retryDelay = AgentStreamRetryPolicy.delayAfterAttempt(
-          attempt,
-          isRateLimited: isRateLimited,
-        );
-        final canRetry = AgentStreamRetryPolicy.canRetry(
-          attempt: attempt,
-          hasText: fullText.isNotEmpty,
-          hasReasoning: reasoningText.isNotEmpty,
-          hasToolCalls: nativeToolCalls.isNotEmpty,
-          isActive: mounted && gen == _generation,
-          isTransient: _isTransientStreamError(e),
-          isRateLimited: isRateLimited,
-        );
-        if (canRetry && retryDelay != null) {
-          final provider = config.current;
-          final endpoint = _streamEndpoint(provider?.baseUrl);
-          _logAgent(
-            'stream_retry attempt=$attempt/$maxAttempts '
-            'provider=${_logQuote(provider?.id ?? 'unavailable')} '
-            'endpoint=${_logQuote(endpoint)} '
-            'backoff_ms=${retryDelay.inMilliseconds} '
-            'type=${e.runtimeType} '
-            'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
-          );
-          if (identical(_cancelStream, cancelAttempt)) {
-            _cancelStream = null;
-          }
-          streamSession.reset();
-          if (isRateLimited && mounted && gen == _generation) {
-            setState(() {
-              _agentLoopStatus = 'Rate limited. Retrying in 3 seconds…';
-            });
-          }
-          await Future<void>.delayed(retryDelay);
-          if (!mounted || gen != _generation) return null;
-          if (isRateLimited) {
-            setState(() => _agentLoopStatus = 'Retrying after rate limit…');
-          }
-          continue;
-        }
-        _logAgent(
-          'error scope=stream type=${e.runtimeType} '
-          'msg=${_logQuote(AgentStreamLogSanitizer.message(e))}',
-        );
-        while (_conversationHistory.length > historyLenBefore) {
-          _conversationHistory.removeLast();
-        }
-        if (mounted) {
-          if (gen == _generation) {
-            setState(() {
-              _messages.removeLast();
-              _messages.add(
-                _ChatMessage.ai(text: '', error: 'Stream error: $e'),
-              );
-            });
-          } else {
-            setState(() => _messages.removeLast());
-          }
-        }
-        return null;
-      } finally {
-        if (identical(_cancelStream, cancelAttempt)) {
-          _cancelStream = null;
-        }
-      }
-    }
-
-    if (!mounted || gen != _generation) return null;
-    return (
-      text: fullText,
-      reasoning: reasoningText,
-      thinkingBlocks: List<AgentThinkingBlock>.unmodifiable(thinkingBlocks),
-      hasReasoning: reasoningText.isNotEmpty,
-      toolCalls: List<AgentToolCall>.unmodifiable(nativeToolCalls),
-      finishReason: finishReason,
-      malformedEventCount: malformedEventCount,
-      promptTokenCount: promptTokenCount,
-      completionTokenCount: completionTokenCount,
-      reasoningTokenCount: exactReasoningTokenCount,
-    );
-  }
-
-  String _streamEndpoint(String? baseUrl) {
-    final uri = baseUrl == null ? null : Uri.tryParse(baseUrl);
-    if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
-      return 'unavailable';
-    }
-    final port = uri.hasPort ? ':${uri.port}' : '';
-    return '${uri.scheme}://${uri.host}$port';
-  }
-
-  bool _isContextLengthError(Object error) {
-    final message = AgentStreamLogSanitizer.message(error).toLowerCase();
-    return message.contains('context length') ||
-        message.contains('context_length') ||
-        message.contains('maximum context') ||
-        message.contains('too many tokens');
   }
 
   Future<String?> _runWebSearch({
@@ -418,7 +127,8 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     }
   }
 
-  Future<_WriteProposalOutcome> _proposeFileWrite({
+  Future<AgentToolExecution> _proposeFileWrite({
+    required ToolCall call,
     required int gen,
     required int iter,
     required String path,
@@ -438,33 +148,32 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       _logAgent(
         '${tp}iter=$iter file_write_skip reason=disabled path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content':
-            '[File write failed]\n'
-            'path: $path\n'
-            'reason: disabled\n'
-            'message: File write tool is disabled in Settings.\n\n'
-            'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without write_file. Do NOT retry the same write_file tool call.',
-      });
-      return _WriteProposalOutcome.injectedAndContinue;
+      return _toolResult(
+        call,
+        '[File write failed]\n'
+        'path: $path\n'
+        'reason: disabled\n'
+        'message: File write tool is disabled in Settings.\n\n'
+        'Tell the user to open Settings → Agent → File write to enable the tool. Proceed without write_file. Do NOT retry the same write_file tool call.',
+        isError: true,
+      );
     }
     final adapter = widget.fileSystemAdapter;
     if (adapter == null || !adapter.isAvailable) {
       _logAgent(
         '${tp}iter=$iter file_write_skip reason=no_adapter path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(
+      return _toolResult(
+        call,
+        FileWriteService.formatErrorForLlm(
           path,
           const FileWriteException(
             FileWriteErrorKind.notSupported,
             'No filesystem adapter is available for this tab (likely a non-terminal tab or an SSH session that hasn\'t finished handshaking yet).',
           ),
         ),
-      });
-      return _WriteProposalOutcome.injectedAndContinue;
+        isError: true,
+      );
     }
 
     setState(
@@ -477,35 +186,38 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       preview = await adapter.preview(path);
     } on FileWriteException catch (e) {
       if (!mounted || gen != _generation) {
-        return _WriteProposalOutcome.injectedAndContinue;
+        return const AgentToolExecution.stopped();
       }
       _logAgent(
         '${tp}iter=$iter file_write_preview_err kind=${e.kind.name} '
         'path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(path, e),
-      });
-      return _WriteProposalOutcome.injectedAndContinue;
+      return _toolResult(
+        call,
+        FileWriteService.formatErrorForLlm(path, e),
+        isError: true,
+      );
     } catch (e) {
       if (!mounted || gen != _generation) {
-        return _WriteProposalOutcome.injectedAndContinue;
+        return const AgentToolExecution.stopped();
       }
       _logAgent(
         '${tp}iter=$iter file_write_preview_crash type=${e.runtimeType} '
         'path=${_logQuote(path)} msg=${_logQuote('$e')}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileWriteService.formatErrorForLlm(
+      return _toolResult(
+        call,
+        FileWriteService.formatErrorForLlm(
           path,
           FileWriteException(FileWriteErrorKind.io, '$e'),
         ),
-      });
-      return _WriteProposalOutcome.injectedAndContinue;
+        isError: true,
+      );
     }
 
+    if (!mounted || gen != _generation) {
+      return const AgentToolExecution.stopped();
+    }
     final proposal = _WriteProposal(
       requestedPath: path,
       resolvedPath: preview.resolvedPath,
@@ -527,7 +239,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       '${tp}iter=$iter file_write_proposed exists=${preview.exists} '
       'bytes=${content.length} path=${_logQuote(preview.resolvedPath)}',
     );
-    return _WriteProposalOutcome.waitingForUser;
+    return const AgentToolExecution.paused();
   }
 
   Future<void> _decideWriteProposal(
@@ -656,15 +368,16 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // `_agentRespond` that would bump `_generation` and collide with the
     // resume below.
     _pendingWriteProposal = null;
-    // Inject the envelope and resume the loop where it left off.
-    // The loop's generation hasn't changed (we checked above), so
-    // _continueAgentLoop will pick up from this synthetic user turn.
-    _conversationHistory.add({'role': 'user', 'content': envelope});
-    _markAgentBusy();
-    await _continueAgentLoop(_generation, config);
+    // Return the decision to the same paused task and original tool call.
+    await _resumeAgentTool(
+      envelope,
+      isError: proposal.state != _WriteProposalState.applied,
+      stop: !apply,
+    );
   }
 
-  Future<_EditProposalOutcome> _proposeFileEdit({
+  Future<AgentToolExecution> _proposeFileEdit({
+    required ToolCall call,
     required int gen,
     required int iter,
     required String path,
@@ -679,28 +392,28 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       _logAgent(
         '${tp}iter=$iter file_edit_skip reason=disabled path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileEditService.formatDisabledForLlm(path),
-      });
-      return _EditProposalOutcome.injectedAndContinue;
+      return _toolResult(
+        call,
+        FileEditService.formatDisabledForLlm(path),
+        isError: true,
+      );
     }
     final adapter = widget.fileSystemAdapter;
     if (adapter == null || !adapter.isAvailable) {
       _logAgent(
         '${tp}iter=$iter file_edit_skip reason=no_adapter path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileEditService.formatAdapterErrorForLlm(
+      return _toolResult(
+        call,
+        FileEditService.formatAdapterErrorForLlm(
           path,
           const FileWriteException(
             FileWriteErrorKind.notSupported,
             'No filesystem adapter is available for this tab (likely a non-terminal tab or an SSH session that hasn\'t finished handshaking yet).',
           ),
         ),
-      });
-      return _EditProposalOutcome.injectedAndContinue;
+        isError: true,
+      );
     }
 
     setState(() => _agentLoopStatus = 'Reading: $path (${adapter.label})');
@@ -713,31 +426,31 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       current = await adapter.readContent(path);
     } on FileWriteException catch (e) {
       if (!mounted || gen != _generation) {
-        return _EditProposalOutcome.injectedAndContinue;
+        return const AgentToolExecution.stopped();
       }
       _logAgent(
         '${tp}iter=$iter file_edit_read_err kind=${e.kind.name} path=${_logQuote(path)}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileEditService.formatAdapterErrorForLlm(path, e),
-      });
-      return _EditProposalOutcome.injectedAndContinue;
+      return _toolResult(
+        call,
+        FileEditService.formatAdapterErrorForLlm(path, e),
+        isError: true,
+      );
     } catch (e) {
       if (!mounted || gen != _generation) {
-        return _EditProposalOutcome.injectedAndContinue;
+        return const AgentToolExecution.stopped();
       }
       _logAgent(
         '${tp}iter=$iter file_edit_read_crash type=${e.runtimeType} path=${_logQuote(path)} msg=${_logQuote('$e')}',
       );
-      _conversationHistory.add({
-        'role': 'user',
-        'content': FileEditService.formatAdapterErrorForLlm(
+      return _toolResult(
+        call,
+        FileEditService.formatAdapterErrorForLlm(
           path,
           FileWriteException(FileWriteErrorKind.io, '$e'),
         ),
-      });
-      return _EditProposalOutcome.injectedAndContinue;
+        isError: true,
+      );
     }
 
     final EditMatchResult matchResult;
@@ -750,7 +463,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       );
     } on EditMatchException catch (e) {
       if (!mounted || gen != _generation) {
-        return _EditProposalOutcome.injectedAndContinue;
+        return const AgentToolExecution.stopped();
       }
       final envelope = e.kind == EditMatchErrorKind.noMatch
           ? FileEditService.formatNoMatchForLlm(path, oldString)
@@ -763,10 +476,12 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
         '${tp}iter=$iter file_edit_match_err kind=${e.kind.name} '
         'count=${e.matchCount} path=${_logQuote(path)}',
       );
-      _conversationHistory.add({'role': 'user', 'content': envelope});
-      return _EditProposalOutcome.injectedAndContinue;
+      return _toolResult(call, envelope, isError: true);
     }
 
+    if (!mounted || gen != _generation) {
+      return const AgentToolExecution.stopped();
+    }
     final proposal = _EditProposal(
       requestedPath: path,
       resolvedPath: preview.resolvedPath,
@@ -790,7 +505,7 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       '${tp}iter=$iter file_edit_proposed matches=${matchResult.matchCount} '
       'path=${_logQuote(preview.resolvedPath)}',
     );
-    return _EditProposalOutcome.waitingForUser;
+    return const AgentToolExecution.paused();
   }
 
   Future<void> _decideEditProposal(
@@ -911,9 +626,11 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
     // `_decideWriteProposal`): keep `_agentEngaged` true across the commit
     // await so mid-commit input queues rather than racing the resume.
     _pendingEditProposal = null;
-    _conversationHistory.add({'role': 'user', 'content': envelope});
-    _markAgentBusy();
-    await _continueAgentLoop(_generation, config);
+    await _resumeAgentTool(
+      envelope,
+      isError: proposal.state != _EditProposalState.applied,
+      stop: !apply,
+    );
   }
 
   /// Resolve a dangerous-command [_DangerProposal] when the user

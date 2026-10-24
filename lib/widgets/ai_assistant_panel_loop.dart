@@ -1,105 +1,35 @@
-// `setState` is `@protected` on the [State] class; calling it from an
-// extension method counts as outside an instance member to the analyzer.
-// This pattern is safe because the extension is library-scoped to
-// part-of `ai_assistant_panel.dart` and only mixed into the private
-// `_AiAssistantOverlayState`.
 // ignore_for_file: invalid_use_of_protected_member
 
 part of 'ai_assistant_panel.dart';
 
-// ───────────────────────────────────────────────────────────────────────────
-// Agent conversation and command-execution loop.
-//
-// Extracted from `ai_assistant_panel.dart` as an extension on the
-// (private) `_AiAssistantOverlayState` so it keeps direct access to the
-// state's controllers, conversation history, generation counter, and
-// notification helpers without widening any visibility.
-//
-// What lives here:
-//   • Command feedback envelope formatters (LLM-facing).
-//   • The user-typed `_agentRespond` entry point.
-//   • `_continueAgentLoop`/`_continueAgentLoopBody` — the actual loop,
-//     including the per-command confirm/execute gate every proposed
-//     command goes through (dangerous or not, auto-execute or manual).
-//
-// What stays in the main file:
-//   • Panel widget construction and small UI helpers.
-//   • `_cancelAgent`, `_send`, slash-command dispatcher, `_clearChat`,
-//     `_showHelp` — all keyboard / input-side glue.
-// ───────────────────────────────────────────────────────────────────────────
-
+/// Flutter adapter for the headless runner. Rendering never schedules a model
+/// turn; user decisions are returned to the runner that requested them.
 extension _AiAgentLoopExt on _AiAssistantOverlayState {
-  String _formatCommandFeedback(
-    String cmd,
-    CommandResult? result, {
-    String? toolCallId,
-    String toolName = 'bash',
-    CommandRiskAssessment? risk,
-    AgentOutputReference? artifact,
-  }) {
-    return _commandFeedbackFormatter.format(
-      cmd,
-      result,
-      toolCallId: toolCallId,
-      toolName: toolName,
-      risk: risk,
-      artifact: artifact,
-    );
-  }
-
-  /// Transient stream errors that we'll retry if nothing has been
-  /// yielded yet.  Keeps the agent loop alive across DeepSeek's frequent
-  /// "connection closed while receiving data" hiccups (and similar TLS /
-  /// socket flakiness on the other providers) without retrying after the
-  /// model has already started speaking — partial chunks aren't safe to
-  /// replay because re-streaming would duplicate the head of the reply.
-
   Future<void> _agentRespond(
     String userText, {
     List<AgentImageAttachment> images = const [],
   }) async {
-    final int gen = ++_generation;
+    final gen = ++_generation;
     final config = widget.agentConfig;
     if (config == null) {
-      if (!mounted || gen != _generation) return;
-      setState(() {
-        _messages.add(
+      setState(
+        () => _messages.add(
           _ChatMessage.ai(
             text: '',
             error:
                 'Agent is not configured. Go to Settings → Agent to set it up.',
           ),
-        );
-      });
+        ),
+      );
       return;
     }
-
     _markAgentBusy();
-
-    // The agent loop receives direct stdout/stderr from the independent
-    // background executor. Visible-terminal scrollback is never included.
-    //
-    // Skill catalogue: lives inside the system prompt (see
-    // [LlmService._buildSkillsBlock]) — Cursor-style.  No per-turn
-    // injection needed here, the model already sees every enabled skill
-    // listed in `<available_skills>` at the top of every call.
-    //
-    // Session context (<session_context> block): injected ONLY on the
-    // first user turn of a fresh conversation.  Carries the active
-    // tab's working directory + HOME so the model can emit absolute
-    // file-write paths from turn 1 instead of having to guess and then
-    // recover from a `[File write failed]` envelope.  Subsequent turns
-    // skip the block — `cd`s the agent itself runs are tracked via the
-    // `[Command executed]` feedback the loop already produces.
     final String body;
     if (_conversationHistory.isEmpty) {
       final ctx = await _buildSessionContext();
+      if (!mounted || gen != _generation) return;
       body = ctx == null ? userText : '$ctx\n\n$userText';
     } else {
-      // The system prompt describes the Flutter host, which can be Windows
-      // even when this panel executes commands inside WSL. Repeat the compact
-      // per-tab override on later turns so an already-open WSL conversation
-      // corrects its command dialect without requiring a new chat.
       final environment = widget.executionEnvironment;
       body = environment == null || environment.isEmpty
           ? userText
@@ -108,27 +38,45 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     _conversationHistory.add(
       AgentConversationItem.text(role: 'user', content: body, images: images),
     );
-
-    await _continueAgentLoop(gen, config);
+    await SkillService.startupReady;
+    if (!mounted || gen != _generation) return;
+    final turnId = ++_agentTurnSeq;
+    final runner = AgentRunner(
+      history: _conversationHistory,
+      model: LlmAgentModel(config),
+      contextBudget: AgentContextBudget.forContextWindow(
+        config.resolvedModel == null
+            ? null
+            : config.current?.modelContextWindows[config.resolvedModel],
+      ),
+      lastPromptTokenCount: _lastAgentPromptTokenCount,
+      registry: () => AgentToolRegistry.build(
+        webSearchEnabled: config.webSearchEnabled,
+        fileWriteEnabled: config.fileWriteEnabled,
+        skillsEnabled: SkillService.filterEnabled(
+          config.enabledSkills,
+        ).isNotEmpty,
+        mcpTools: config.mcpEnabled ? McpService.allTools : const [],
+      ),
+      skills: {
+        for (final skill in SkillService.filterEnabled(config.enabledSkills))
+          skill.id: skill.description,
+      },
+      loadSkill: SkillService.loadBody,
+      executeTool: (call, runner) => _executeAgentTool(
+        call,
+        runner,
+        gen: gen,
+        config: config,
+        turnId: turnId,
+      ),
+      log: (message) => _logAgent('t=$turnId $message'),
+    );
+    _agentRunner = runner;
+    _subscribeToRunner(runner, gen);
+    await _driveAgentRunner(runner, gen);
   }
 
-  // Kept temporarily as a migration reader for old persisted run-state
-  // shapes. There is no UI or request path that can start this controller.
-  // ignore: unused_element
-  /// Build a small `<session_context>` block describing the active
-  /// tab's environment so the LLM can emit absolute file-write paths
-  /// AND reason about relative dates from turn 1.
-  ///
-  /// Delegates the actual string formatting to [SessionContext.build]
-  /// so the format is pure-Dart unit-testable (see
-  /// `test/services/session_context_test.dart`).  This wrapper exists
-  /// only to gather the inputs from the active tab's adapter +
-  /// system clock.
-  ///
-  /// Always returns a non-null string today — the date/time line alone
-  /// is worth the few tokens even when the adapter is missing.  The
-  /// caller still tolerates null for backwards safety in case a future
-  /// build path decides to suppress the block entirely.
   Future<String?> _buildSessionContext() async {
     final adapter = widget.fileSystemAdapter;
     String? home;
@@ -148,1029 +96,157 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     );
   }
 
-  void _markAgentBusy() {
-    setState(() {
-      _agentBusy = true;
-    });
-  }
+  void _markAgentBusy() => setState(() => _agentBusy = true);
 
-  Future<void> _continueAgentLoop(int gen, AgentConfig config) async {
-    if (_streamSessionGeneration != gen || _streamSession == null) {
-      _streamSession?.close(force: true);
-      _streamSession = AgentStreamClientSession();
-      _streamSessionGeneration = gen;
-    }
-    final streamSession = _streamSession!;
-    _streamSessionPausedGeneration = null;
+  Future<void> _driveAgentRunner(
+    AgentRunner runner,
+    int gen, {
+    AgentToolResult? result,
+    bool stopAfterResume = false,
+  }) async {
     try {
-      await _continueAgentLoopBody(gen, config, streamSession: streamSession);
-    } catch (e, st) {
-      _logAgent(
-        'error scope=loop type=${e.runtimeType} msg=${_logQuote('$e')}',
-      );
-      stdout.writeln(st);
-      if (mounted && gen == _generation) {
-        setState(() {
-          _messages.add(
-            _ChatMessage.ai(text: '', error: 'Agent loop crashed: $e'),
-          );
-        });
+      if (result == null) {
+        await runner.run();
+      } else {
+        await runner.resume(result, stop: stopAfterResume);
       }
     } finally {
-      if (_streamSessionPausedGeneration != gen) {
-        streamSession.close();
-        if (identical(_streamSession, streamSession)) {
-          _streamSession = null;
-          _streamSessionGeneration = null;
-        }
-      }
-      if (mounted && gen == _generation) {
+      if (mounted && gen == _generation && identical(_agentRunner, runner)) {
+        _lastAgentPromptTokenCount = runner.lastPromptTokenCount;
         setState(() {
           _agentBusy = false;
           _agentLoopStatus = null;
         });
         _queueSessionSave();
-        // Hand off any user input queued while this turn was running.  The
-        // drain no-ops when a write/edit proposal is still pending
-        // (`_agentEngaged` is true), so queued text waits for the user to
-        // resolve the card before it runs.
         _drainQueuedUserInput();
       }
     }
   }
 
-  Future<void> _continueAgentLoopBody(
-    int gen,
-    AgentConfig config, {
-    required AgentStreamClientSession streamSession,
+  Future<void> _resumeAgentTool(
+    String content, {
+    required bool isError,
+    bool stop = false,
   }) async {
-    // Per-process turn counter — bumps once per `_continueAgentLoopBody`
-    // invocation (i.e. once per user message that drives an agent
-    // loop).  Captured in the two closures below so every log line in
-    // THIS turn starts with `t=N` and is greppable as a unit, while
-    // adjacent turns get distinct ids.
-    final turnId = ++_agentTurnSeq;
-    void logIter(String body) => _logAgent('t=$turnId $body');
-    void stopIter(int iter, String reason) =>
-        _logAgentStop(iter, reason, turnId: turnId);
+    final runner = _agentRunner;
+    final call = runner?.pendingTool;
+    if (runner == null ||
+        call == null ||
+        runner.state != AgentRunState.paused) {
+      return;
+    }
+    _markAgentBusy();
+    await _driveAgentRunner(
+      runner,
+      _generation,
+      stopAfterResume: stop,
+      result: AgentToolResult(
+        toolCallId: call.id,
+        content: content,
+        isError: isError,
+      ),
+    );
+  }
 
-    final budget = AgentExecutionBudget();
-    var loopIterations = 0;
-    agentLoop:
-    while (gen == _generation) {
-      loopIterations++;
-
-      final historyLenBefore = _conversationHistory.length;
-
-      // Compact history while retaining the user's goal so the agent
-      // never forgets WHAT
-      // it was asked to do. Native tool calls and results form one atomic
-      // transcript group, so trimming must not split them.
-      await _compactHistoryIfNeeded(gen, config);
-      if (gen != _generation) break;
-
-      final contextBudget = AgentContextBudget.forContextWindow(
-        config.resolvedModel == null
-            ? null
-            : config.current?.modelContextWindows[config.resolvedModel],
-      );
-      if (contextBudget.isHardLimitExceeded(
-        estimatedTokens: AgentContextBudget.estimateHistoryTokens(
-          _conversationHistory,
-        ),
-        exactUsageTokens: _lastAgentPromptTokenCount,
-      )) {
-        _recordAgentContextLimit();
-        stopIter(loopIterations, 'context_hard_limit');
-        break;
+  void _subscribeToRunner(AgentRunner runner, int gen) {
+    _ChatMessage? response;
+    AgentModelReply? latest;
+    var scheduled = false;
+    var revision = 0;
+    runner.subscribe((event) {
+      if (!mounted || gen != _generation || !identical(_agentRunner, runner)) {
+        return;
       }
-      final modelBudgetStop = budget.consumeModelRequest(DateTime.now());
-      if (modelBudgetStop != null) {
-        _recordAgentRunStopped(modelBudgetStop);
-        stopIter(loopIterations, 'budget_${modelBudgetStop.limit.name}');
-        break;
-      }
-      final aiMsg = _ChatMessage.ai(text: '');
-      setState(() {
-        _messages.add(aiMsg);
-      });
-
-      // --- AI call ---
-      // Structured one-line logs, greppable; see `_logAgent` /
-      // `_logAgentStop` at the bottom of this file for the schema.  We
-      // intentionally DO NOT emit a separate `iter=N start …` line per
-      // iteration any more — the post-call `iter=N reply …` line now
-      // carries `history=` too, so a missing `reply` line for the
-      // latest iter is itself the "LLM call in flight" signal.  Cuts
-      // one line of pure heartbeat noise from every iteration on the
-      // happy path.
-      final historyLenAtCall = _conversationHistory.length;
-      final streamResult = await _streamAiResponse(
-        gen,
-        historyLenBefore,
-        aiMsg,
-        config,
-        streamSession: streamSession,
-      );
-      if (streamResult == null) {
-        stopIter(loopIterations, 'stream_error_or_cancelled');
-        break;
-      }
-
-      final resolvedStreamResult = streamResult;
-      _lastAgentPromptTokenCount = resolvedStreamResult.promptTokenCount;
-      final fullText = resolvedStreamResult.text;
-      final protocolText = LlmService.stripForgedCommandFeedback(fullText);
-      final toolCalls = resolvedStreamResult.toolCalls
-          .map(
-            (call) => ToolCall(
-              id: call.id,
-              name: call.name,
-              arguments: call.arguments,
-            ),
-          )
-          .toList(growable: false);
-      const droppedToolCallCount = 0;
-      final incompleteError = LlmService.incompleteStreamError(
-        text: protocolText,
-        hasReasoning: resolvedStreamResult.hasReasoning,
-        toolCallCount: toolCalls.length,
-        finishReason: resolvedStreamResult.finishReason,
-        malformedEventCount: resolvedStreamResult.malformedEventCount,
-      );
-      if (incompleteError != null) {
-        logIter(
-          'iter=$loopIterations error incomplete_reply '
-          'finish_reason=${_logQuote(resolvedStreamResult.finishReason ?? 'unavailable')} '
-          'malformed_events=${resolvedStreamResult.malformedEventCount}',
-        );
-        setState(() {
-          _messages.add(_ChatMessage.ai(text: '', error: incompleteError));
-        });
-        _scrollToBottom();
-        break;
-      }
-      if (toolCalls.isEmpty &&
-          LlmService.isRawWebSearchEnvelope(protocolText)) {
-        // Search envelopes are host-to-model context, not an answer. Some
-        // providers occasionally echo the entire envelope verbatim; hide it
-        // and give the model one constrained chance to synthesize a reply.
-        logIter('iter=$loopIterations web_search_envelope_echoed');
-        _conversationHistory.add({
-          'role': 'assistant',
-          'content': protocolText,
-        });
-        _conversationHistory.add({
-          'role': 'user',
-          'content':
-              'You echoed the raw web-search results instead of answering. '
-              'Use the search results already provided to answer the user directly now. '
-              'Do not repeat the envelope or call web_search again.',
-        });
-        setState(() {
-          _messages.remove(aiMsg);
-          _agentLoopStatus = 'Search results received; preparing answer…';
-        });
-        _scrollToBottom();
-        continue;
-      }
-      final shellToolCalls = toolCalls.where((call) => call.isShell).toList();
-      final commands = shellToolCalls
-          .map((call) => call.command?.trim())
-          .whereType<String>()
-          .where((cmd) => cmd.isNotEmpty)
-          .toList();
-      if (resolvedStreamResult.toolCalls.isEmpty) {
-        _conversationHistory.add({
-          'role': 'assistant',
-          'content': protocolText,
-        });
-      } else {
-        _conversationHistory.add(
-          AgentConversationItem.assistantToolCalls(
-            resolvedStreamResult.toolCalls,
-            content: protocolText.isEmpty ? null : protocolText,
-            reasoningContent: resolvedStreamResult.reasoning.isEmpty
-                ? null
-                : resolvedStreamResult.reasoning,
-            thinkingBlocks: resolvedStreamResult.thinkingBlocks,
-          ),
-        );
-      }
-      final displayText = LlmService.stripCompletionMarkers(protocolText);
-      aiMsg.text = displayText;
-      setState(() {
-        if (toolCalls.isNotEmpty) {
-          _messages.add(_ChatMessage.toolCalls(toolCalls));
-        }
-      });
-      _scrollToBottom();
-
-      if (resolvedStreamResult.toolCalls.isNotEmpty) {
-        final registry = AgentToolRegistry.build(
-          webSearchEnabled: config.webSearchEnabled,
-          fileWriteEnabled: config.fileWriteEnabled,
-          skillsEnabled: SkillService.filterEnabled(
-            config.enabledSkills,
-          ).isNotEmpty,
-          mcpTools: config.mcpEnabled ? McpService.allTools : const [],
-        );
-        final rejection = AgentToolBatch.rejectionReason(
-          resolvedStreamResult.toolCalls,
-          registry,
-          finishReason: resolvedStreamResult.finishReason,
-        );
-        if (rejection != null) {
-          _conversationHistory.add(
-            AgentConversationItem.toolResults([
-              for (final call in resolvedStreamResult.toolCalls)
-                AgentToolResult(
-                  toolCallId: call.id,
-                  content: '[Tool call was not executed] $rejection',
-                  isError: true,
-                ),
-            ]),
-          );
-          setState(() => _messages.add(_ChatMessage.notice(rejection)));
-          logIter(
-            'iter=$loopIterations tools_rejected reason=${_logQuote(rejection)}',
-          );
-          continue;
-        }
-      }
-      ToolCall? useSkillTool;
-      ToolCall? webSearchTool;
-      ToolCall? writeFileTool;
-      ToolCall? editFileTool;
-      ToolCall? askUserQuestionTool;
-      ToolCall? readImageTool;
-      final readToolCalls = <ToolCall>[];
-      final mcpToolCalls = <ToolCall>[];
-      for (final call in toolCalls) {
-        if (useSkillTool == null && call.isUseSkill && call.skillId != null) {
-          useSkillTool = call;
-        }
-        if (webSearchTool == null && call.isWebSearch && call.query != null) {
-          webSearchTool = call;
-        }
-        if (writeFileTool == null &&
-            call.isWriteFile &&
-            call.path != null &&
-            call.content != null) {
-          writeFileTool = call;
-        }
-        if (editFileTool == null &&
-            call.isEditFile &&
-            call.path != null &&
-            call.oldString != null &&
-            call.newString != null &&
-            call.oldString != call.newString) {
-          editFileTool = call;
-        }
-        if (askUserQuestionTool == null &&
-            call.isAskUserQuestion &&
-            call.question != null &&
-            call.header != null &&
-            call.options.length >= 2) {
-          askUserQuestionTool = call;
-        }
-        if (readImageTool == null && call.isReadImage && call.path != null) {
-          readImageTool = call;
-        }
-        if (call.isReadOutput || call.isReadFile || call.isGrepFile) {
-          readToolCalls.add(call);
-        }
-        if (call.isMcp &&
-            call.mcpServerId != null &&
-            call.mcpToolName != null) {
-          mcpToolCalls.add(call);
-        }
-      }
-      final useSkill = useSkillTool?.skillId;
-      final webQuery = webSearchTool?.query;
-      final writeFile = writeFileTool == null
-          ? null
-          : (path: writeFileTool.path!, content: writeFileTool.content!);
-      final markerLabel = toolCalls.isEmpty ? 'answer' : toolCalls.first.name;
-      logIter(
-        'iter=$loopIterations reply history=$historyLenAtCall '
-        'chars=${fullText.length} '
-        'protocol_chars=${protocolText.length} '
-        'prompt_tokens=${resolvedStreamResult.promptTokenCount ?? -1} '
-        'completion_tokens=${resolvedStreamResult.completionTokenCount ?? -1} '
-        'tools=${toolCalls.length} dropped_tools=$droppedToolCallCount '
-        'shell_tools=${shellToolCalls.length} '
-        'cmds=${commands.length} marker=$markerLabel '
-        'finish_reason=${_logQuote(resolvedStreamResult.finishReason ?? 'unavailable')} '
-        'malformed_events=${resolvedStreamResult.malformedEventCount}',
-      );
-
-      if (fullText.isEmpty) {
-        // Empty replies usually mean the provider returned no content blocks
-        // (rate limit fallback, content-policy refusal, etc.).  Surface as a
-        // warning so users can spot it in `flutter run` output.
-        logIter('iter=$loopIterations warn empty_reply');
-      }
-
-      // Load the selected skill and return its body as the paired tool result.
-      if (useSkill != null) {
-        // Defence in depth: even though disabled skills are filtered out
-        // of the announced catalogue, the model might USE_SKILL one
-        // anyway — pulled from training data or from an earlier session
-        // it remembers.  Treat that as a miss so the agent loop gives a
-        // clean "skill not available" notice instead of silently loading
-        // something the user disabled.
-        final enabledWhitelist = config.enabledSkills;
-        final isAllowed =
-            enabledWhitelist == null || enabledWhitelist.contains(useSkill);
-        // loadBody is async because BUNDLED dynamic skills produce their
-        // body via a Dart function that may embed runtime values (e.g.
-        // feature flags, probe output).  None ship by default today, but
-        // the path stays async so adding one later doesn't require
-        // touching every caller.  Asset-backed skills are pre-cached at
-        // init() so the await is a microtask hop, not real I/O.
-        final body = isAllowed ? await SkillService.loadBody(useSkill) : null;
-        if (!mounted || gen != _generation) return;
-        final String injected;
-        if (body == null) {
-          injected =
-              '[Skill not found: $useSkill]\n\nNo skill with this id is installed. Available ids: '
-              '${SkillService.skills.map((s) => s.id).join(', ')}. '
-              'Proceed without a skill — DO NOT retry the same use_skill tool call.';
-          logIter('iter=$loopIterations skill_miss id=$useSkill');
-        } else {
-          injected = '[Skill loaded: $useSkill]\n\n$body';
-          logIter(
-            'iter=$loopIterations skill_hit id=$useSkill '
-            'body_chars=${body.length}',
-          );
-        }
-        _conversationHistory.add(
-          AgentConversationItem.toolResults([
-            AgentToolResult(
-              toolCallId: useSkillTool!.id,
-              content: injected,
-              isError: body == null,
-            ),
-          ]),
-        );
-        setState(() {
-          // Transient bottom-of-chat status: cleared once the next AI
-          // reply starts streaming.
-          _agentLoopStatus = body == null
-              ? 'Skill not found: $useSkill'
-              : 'Loaded skill: $useSkill';
-          // Persistent transcript notice: stays visible after the loop
-          // moves on so users can see WHICH skill the model consulted.
-          _messages.add(
-            _ChatMessage.notice(
-              body == null
-                  ? '**Skill not found**: `$useSkill`'
-                  : '**Loaded skill**: `$useSkill` — ${SkillService.skills.firstWhere(
-                      (s) => s.id == useSkill,
-                      orElse: () => Skill(id: useSkill, name: useSkill, description: '', assetPath: ''),
-                    ).description}',
-            ),
-          );
-        });
-        _scrollToBottom();
-        // Loop continues so the model immediately gets to read the
-        // playbook on the next turn.  We deliberately do NOT count this
-        // against the iteration budget cap — but it's already incremented
-        // above, which is fine for MVP (a small bias toward shorter runs
-        // when many skills are loaded, prevents runaway skill chains).
-        continue;
-      }
-
-      // Search results are returned through the native tool transcript.
-      if (webQuery != null) {
-        final injected = await _runWebSearch(
-          gen: gen,
-          iter: loopIterations,
-          turnId: turnId,
-          query: webQuery,
-          enabled: config.webSearchEnabled,
-        );
-        if (!mounted || gen != _generation) return;
-        if (injected == null) {
-          // Cancelled or generation flipped during the fetch — bail
-          // without touching history (the cancel path already cleared
-          // the transient status).
-          return;
-        }
-        _conversationHistory.add(
-          AgentConversationItem.toolResults([
-            AgentToolResult(toolCallId: webSearchTool!.id, content: injected),
-          ]),
-        );
-        setState(() => _agentLoopStatus = null);
-        continue;
-      }
-
-      if (readImageTool != null) {
-        final root =
-            widget.fileSystemAdapter?.currentDirectory ??
-            Directory.current.path;
-        final requestedPath = readImageTool.path!;
-        final nativeCall = resolvedStreamResult.toolCalls
-            .where((call) => call.id == readImageTool!.id)
-            .firstOrNull;
-        try {
-          final image = await AgentImageAttachmentReader.read(
-            path: requestedPath,
-            workspaceRoot: root,
-          );
-          if (nativeCall != null) {
-            _conversationHistory.add(
-              AgentConversationItem.toolResults([
-                AgentToolResult(
-                  toolCallId: nativeCall.id,
-                  content: 'Loaded image: ${image.displayName}',
-                  images: [image],
-                ),
-              ]),
-            );
-          }
-          setState(
-            () => _agentLoopStatus = 'Image loaded: ${image.displayName}',
-          );
-        } on AgentImageAttachmentException catch (e) {
-          if (nativeCall != null) {
-            _conversationHistory.add(
-              AgentConversationItem.toolResults([
-                AgentToolResult(
-                  toolCallId: nativeCall.id,
-                  content: '[Image read failed] ${e.message}',
-                  isError: true,
-                ),
-              ]),
-            );
-          } else {
-            _conversationHistory.add({
-              'role': 'user',
-              'content': '[Image read failed] ${e.message}',
-            });
-          }
-        }
-        continue;
-      }
-
-      if (readToolCalls.isNotEmpty && shellToolCalls.isEmpty) {
-        final reader = AgentReadTools(
-          outputStore: _outputStore,
-          fileSystem: widget.fileSystemAdapter,
-        );
-        final nativeResults = <AgentToolResult>[];
-        for (final call in readToolCalls) {
-          final result = await reader.execute(call.name, call.arguments);
-          if (!mounted || gen != _generation) return;
-          nativeResults.add(
-            AgentToolResult(
-              toolCallId: call.id,
-              content: result.content,
-              isError: result.isError,
-            ),
-          );
-          setState(() => _messages.add(_ChatMessage.notice(result.content)));
-        }
-        _conversationHistory.add(
-          AgentConversationItem.toolResults(
-            AgentToolBatch.completeResults(
-              resolvedStreamResult.toolCalls,
-              nativeResults,
-            ),
-          ),
-        );
-        continue;
-      }
-
-      // ── MCP tool calls ──────────────────────────────────────────────
-      // MCP tools are structured API calls (not shell commands), so they
-      // bypass the auto-execute confirmation gate — same as web_search
-      // and use_skill.  The user already approved the server by adding it
-      // in Settings.  Errors are surfaced in the chat card and as a
-      // feedback envelope so the model can pivot.
-      if (mcpToolCalls.isNotEmpty) {
-        final nativeResults = <AgentToolResult>[];
-        for (final call in mcpToolCalls) {
-          final serverId = call.mcpServerId!;
-          final toolName = call.mcpToolName!;
-          final startedAt = DateTime.now().millisecondsSinceEpoch;
-          logIter(
-            'iter=$loopIterations mcp_call '
-            'id=${_logQuote(call.id)} server=${_logQuote(serverId)} '
-            'tool=${_logQuote(toolName)} arg_count=${call.mcpParams.length}',
-          );
-
-          setState(() => _agentLoopStatus = 'Calling MCP: $toolName');
-          _scrollToBottom();
-
-          final result = await _executeMcpCall(gen, call);
-          if (!mounted || gen != _generation) return;
-          final elapsed = DateTime.now().millisecondsSinceEpoch - startedAt;
-          logIter(
-            'iter=$loopIterations mcp_result '
-            'id=${_logQuote(call.id)} server=${_logQuote(serverId)} '
-            'tool=${_logQuote(toolName)} '
-            'status=${result.isError ? 'error' : 'ok'} '
-            'blocks=${result.content.length} elapsed_ms=$elapsed',
-          );
-
+      switch (event) {
+        case AgentResponseStarted():
+          revision++;
+          scheduled = false;
+          response = _ChatMessage.ai(text: '');
           setState(() {
-            _messages.add(
-              _ChatMessage.mcpResult(
-                serverId: serverId,
-                toolName: toolName,
-                result: result,
-              ),
-            );
+            _agentLoopStatus = null;
+            _messages.add(response!);
           });
-          _scrollToBottom();
-
-          nativeResults.add(
-            AgentToolResult(
-              toolCallId: call.id,
-              content: result.textContent.isEmpty
-                  ? 'MCP tool returned ${result.content.length} content block(s).'
-                  : result.textContent,
-              isError: result.isError,
-            ),
-          );
-        }
-        _conversationHistory.add(
-          AgentConversationItem.toolResults(
-            AgentToolBatch.completeResults(
-              resolvedStreamResult.toolCalls,
-              nativeResults,
-            ),
-          ),
-        );
-        setState(() => _agentLoopStatus = 'MCP results sent, AI thinking…');
-        continue;
-      }
-
-      // File writes pause for the existing Apply / Reject proposal flow.
-      if (writeFile != null) {
-        final pauseOutcome = await _proposeFileWrite(
-          gen: gen,
-          iter: loopIterations,
-          turnId: turnId,
-          path: writeFile.path,
-          content: writeFile.content,
-          enabled: config.fileWriteEnabled,
-        );
-        if (!mounted || gen != _generation) return;
-        switch (pauseOutcome) {
-          case _WriteProposalOutcome.injectedAndContinue:
-            // Disabled / preview-failed / adapter-missing case — we
-            // already pushed a rejection envelope into history; resume
-            // the loop normally on the next iteration.
-            setState(() => _agentLoopStatus = null);
-            continue;
-          case _WriteProposalOutcome.waitingForUser:
-            // Card is shown, loop is paused.  Return so the outer
-            // `_continueAgentLoop`'s finally fires and unlocks the
-            // terminal / clears _agentBusy; the Apply / Reject click
-            // will call _continueAgentLoop again to resume.
-            _streamSessionPausedGeneration = gen;
-            return;
-        }
-      }
-
-      // ── File-edit proposal ─────────────────────────────────────────
-      // Same intercept-before-execute, pause-for-Apply pattern as
-      // write_file — see that section's comment above for the
-      // rationale. Match validation (no_match / ambiguous_match)
-      // happens INSIDE `_proposeFileEdit`, before any card is shown, so
-      // the user never sees a diff card for an edit that's already
-      // known to fail.
-      if (editFileTool != null) {
-        final pauseOutcome = await _proposeFileEdit(
-          gen: gen,
-          iter: loopIterations,
-          turnId: turnId,
-          path: editFileTool.path!,
-          oldString: editFileTool.oldString!,
-          newString: editFileTool.newString!,
-          replaceAll: editFileTool.replaceAll,
-          enabled: config.fileWriteEnabled,
-        );
-        if (!mounted || gen != _generation) return;
-        switch (pauseOutcome) {
-          case _EditProposalOutcome.injectedAndContinue:
-            setState(() => _agentLoopStatus = null);
-            continue;
-          case _EditProposalOutcome.waitingForUser:
-            _streamSessionPausedGeneration = gen;
-            return;
-        }
-      }
-
-      // ── Ask-user question (multiple-choice) ─────────────────────────
-      // Structured sibling of the bare [ASK_USER] marker: the model
-      // supplies concrete candidate answers, we show them as a card,
-      // and — unlike write_file/web_search/use_skill — we do NOT end
-      // the turn.  We await the user's answer in place (mirrors how
-      // `_DangerProposal.decision` is awaited inside the command loop
-      // below) so the whole exchange stays inside ONE `turnId`: no
-      // `_agentBusy` flicker, no terminal unlock/relock, and the loop
-      // calls the LLM again automatically the instant an answer lands.
-      if (askUserQuestionTool != null) {
-        final proposal = _QuestionProposal(
-          question: askUserQuestionTool.question!,
-          header: askUserQuestionTool.header!,
-          options: askUserQuestionTool.options
-              .map(
-                (o) =>
-                    _QuestionOption(label: o.label, description: o.description),
-              )
-              .toList(),
-          agentGeneration: gen,
-        );
-        setState(() {
-          _messages.add(_ChatMessage.questionProposal(proposal));
-          _pendingQuestionProposal = proposal;
-          _agentLoopStatus = 'Awaiting answer: ${proposal.header}';
-        });
-        _scrollToBottom();
-        logIter(
-          'iter=$loopIterations ask_user_question_shown '
-          'header=${_logQuote(proposal.header)} '
-          'options=${proposal.options.length}',
-        );
-        final answer = await proposal.decision.future;
-        if (!mounted || gen != _generation) {
-          logIter('iter=$loopIterations exit stale_generation');
-          return;
-        }
-        if (answer == null) {
-          // Cancelled while awaiting — bail without touching history,
-          // mirrors the `webQuery` cancellation-during-fetch path above.
-          return;
-        }
-        setState(() {
-          _messages.add(_ChatMessage.user(answer));
-          _agentLoopStatus = null;
-        });
-        _conversationHistory.add(
-          AgentConversationItem.toolResults([
-            AgentToolResult(
-              toolCallId: askUserQuestionTool.id,
-              content: answer,
-            ),
-          ]),
-        );
-        logIter(
-          'iter=$loopIterations ask_user_question_answered chars=${answer.length}',
-        );
-        _scrollToBottom();
-        continue;
-      }
-
-      // A response without tool calls is the final answer or a plain question.
-      if (commands.isEmpty) break;
-      if (widget.onExecuteAsync == null) {
-        if (resolvedStreamResult.toolCalls.isNotEmpty) {
-          _conversationHistory.add(
-            AgentConversationItem.toolResults(
-              AgentToolBatch.completeResults(
-                resolvedStreamResult.toolCalls,
-                const [],
-                missingReason: 'the active tab has no command executor',
-              ),
-            ),
-          );
-        }
-        stopIter(loopIterations, 'no_executor');
-        break;
-      }
-
-      // --- Execute proposed commands ---
-      // Runs every proposed command through the same per-command gate
-      // regardless of `_autoExecute` — the toggle no longer decides
-      // WHETHER this loop runs, only whether an ORDINARY (non-dangerous)
-      // command pauses for confirmation.  Dangerous commands always
-      // pause; with auto-execute off, EVERY command pauses (this is
-      // what replaced the old direct-execution affordance — see the
-      // [_DangerProposal] section comment in ai_assistant_panel_models.dart).
-      //
-      // Collect every command's structured feedback into ONE user-role
-      // message so we never emit consecutive 'user' messages — Anthropic's
-      // /v1/messages rejects that with `messages must alternate`.
-      //
-      // We deliberately don't add duplicate chat-log lines here. Structured
-      // feedback and command history already retain the final result.
-      final feedbacks = <String>[];
-      final nativeResults = <AgentToolResult>[];
-      final shellAndReadCalls = toolCalls
-          .where(
-            (call) =>
-                call.isShell ||
-                call.isReadOutput ||
-                call.isReadFile ||
-                call.isGrepFile,
-          )
-          .toList();
-      final mixedReader = readToolCalls.isEmpty
-          ? null
-          : AgentReadTools(
-              outputStore: _outputStore,
-              fileSystem: widget.fileSystemAdapter,
-            );
-      for (final toolCall in shellAndReadCalls) {
-        if (!toolCall.isShell) {
-          final read = await mixedReader!.execute(
-            toolCall.name,
-            toolCall.arguments,
-          );
-          if (!mounted || gen != _generation) return;
-          feedbacks.add(read.content);
-          nativeResults.add(
-            AgentToolResult(
-              toolCallId: toolCall.id,
-              content: read.content,
-              isError: read.isError,
-            ),
-          );
-          setState(() => _messages.add(_ChatMessage.notice(read.content)));
-          _scrollToBottom();
-          continue;
-        }
-        final command = toolCall.command!.trim();
-        // ── Confirmation gate ────────────────────────────────────────
-        //
-        // Runs BEFORE `onExecuteAsync` so a rejected command never
-        // touches the shell.  Pauses (shows a card, awaits a decision)
-        // when EITHER is true:
-        //   • `CommandSafety.danger(...)` flagged the command (only
-        //     checked when the policy enables agent confirmation), OR
-        //   • auto-execute is off — every manual command gets an
-        //     explicit confirm now, not just the dangerous ones.
-        //
-        // On pause we await a Completer attached to the proposal — much
-        // simpler than the file-write pattern of "tear down loop /
-        // re-enter on click" because we're mid-for-loop with N
-        // remaining commands to process.  When the user clicks
-        // Approve/Reject, [_decideDangerProposal] completes the future
-        // and the loop resumes in place.
-        //
-        // Skipping a rejected command synthesises a structured
-        // rejection feedback line — the LLM sees it on the next turn
-        // and can decide what to do (typically pick a different
-        // approach or ask the user).
-        final dangerPolicy = config.dangerousPolicy;
-        final operationalRejection = CommandSafety.reason(command);
-        final assessment = CommandRisk.assess(
-          command: command,
-          aiLevel: toolCall.riskLevel,
-          aiReason: toolCall.riskReason,
-          policy: dangerPolicy,
-        );
-        final needsConfirm =
-            operationalRejection == null &&
-            CommandRisk.needsConfirmation(
-              assessment.level,
-              autoExecute: _autoExecute,
-            );
-
-        bool approved = true;
-        _DangerProposal? proposal;
-        if (needsConfirm) {
-          proposal = _DangerProposal(
-            command: command,
-            reason: toolCall.reason,
-            assessment: assessment,
-            agentGeneration: gen,
-          );
-          _pendingDangerProposal = proposal;
-          setState(() {
-            _messages.add(_ChatMessage.dangerProposal(proposal!));
-            _agentLoopStatus = assessment.level != CommandRiskLevel.normal
-                ? 'Awaiting approval: ${assessment.reason}'
-                : 'Awaiting confirmation to run command';
-          });
-          _scrollToBottom();
-          if (assessment.level == CommandRiskLevel.dangerous) {
-            _logSafety(
-              't=$turnId danger_detected side=agent iter=$loopIterations '
-              'rule=${assessment.hostPatternId ?? 'ai'} '
-              'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
-            );
-          } else {
-            logIter(
-              'iter=$loopIterations confirm_pending cmd=${_logQuote(command)}',
-            );
-          }
-          approved = await proposal.decision.future;
-          if (identical(_pendingDangerProposal, proposal)) {
-            _pendingDangerProposal = null;
-          }
-          // Generation may have flipped while the user was deciding —
-          // bail out exactly like the post-execute staleness check
-          // below.
-          if (!mounted || gen != _generation) {
-            logIter('iter=$loopIterations exit stale_generation');
-            return;
-          }
-        }
-
-        if (!approved) {
-          // No shell call.  The proposal card stays in the transcript,
-          // flipped to its rejected state — that's the visible record
-          // of what happened; no separate "system" card is added.
-          if (assessment.level == CommandRiskLevel.dangerous) {
-            _logSafety(
-              't=$turnId danger_rejected side=agent iter=$loopIterations '
-              'rule=${assessment.hostPatternId ?? 'ai'} '
-              'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
-            );
-          } else {
-            logIter(
-              'iter=$loopIterations confirm_rejected cmd=${_logQuote(command)}',
-            );
-          }
-          // A rejection is terminal for this agent task.  In particular,
-          // don't aggregate a rejection envelope below: doing so would
-          // trigger another LLM request with the rejected command as input.
-          break agentLoop;
-        }
-        if (assessment.level == CommandRiskLevel.dangerous) {
-          _logSafety(
-            't=$turnId danger_approved side=agent iter=$loopIterations '
-            'rule=${assessment.hostPatternId ?? 'ai'} '
-            'source=${assessment.hostRuleSource?.name ?? assessment.source.name}',
-          );
-        }
-
-        if (proposal != null &&
-            (proposal.command != command ||
-                proposal.agentGeneration != _generation)) {
-          logIter('iter=$loopIterations exit stale_or_changed_command');
-          return;
-        }
-
-        final shellBudgetStop = budget.consumeShellCall(DateTime.now());
-        if (shellBudgetStop != null) {
-          _recordAgentRunStopped(shellBudgetStop);
-          stopIter(loopIterations, 'budget_${shellBudgetStop.limit.name}');
-          break agentLoop;
-        }
-
-        setState(() => _agentLoopStatus = 'Executing: $command');
-        final commandMessage = _ChatMessage.system(
-          text: '',
-          commandRun: command,
-          commandPurpose: toolCall.reason,
-          commandExitCode: null,
-          commandRisk: assessment,
-          commandLastThreeLines: const [],
-          commandRunning: true,
-        );
-        setState(() => _messages.add(commandMessage));
-        _scrollToBottom();
-
-        final result = await widget.onExecuteAsync!(
-          command,
-          isCancelled: () => gen != _generation,
-          onUpdate: (update) {
-            if (!mounted || gen != _generation) return;
-            setState(() {
-              commandMessage.commandLastThreeLines = update.lastThreeLines;
-            });
+        case AgentResponseUpdated(:final reply):
+          latest = reply;
+          if (scheduled) return;
+          scheduled = true;
+          final currentRevision = revision;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            scheduled = false;
+            if (!mounted || gen != _generation || currentRevision != revision) {
+              return;
+            }
+            final snapshot = latest;
+            if (snapshot == null || response == null) return;
+            setState(() => _renderAgentReply(response!, snapshot));
             _scrollToBottom();
-          },
-          onSilence: (lastThreeLines) => _decideSilentCommand(
-            gen: gen,
-            config: config,
-            command: command,
-            lastThreeLines: lastThreeLines,
-          ),
-        );
-        if (!mounted || gen != _generation) {
-          logIter('iter=$loopIterations exit stale_generation');
-          return;
-        }
-
-        // Flip the proposal card to its terminal `ran` state so the
-        // chat-card hierarchy shows: card (approved) → system card
-        // (output) → next.  Without this the card would visually
-        // remain in `running` forever even though the command has
-        // long finished.
-        if (proposal != null) {
-          setState(() => proposal!.state = _DangerProposalState.ran);
-        }
-
-        setState(() {
-          commandMessage.text = result?.output ?? '';
-          commandMessage.commandExitCode = result?.exitCode;
-          commandMessage.commandRunning = false;
-        });
-        _scrollToBottom();
-
-        AgentOutputReference? outputArtifact;
-        if (result != null && result.output.isNotEmpty) {
-          try {
-            outputArtifact = await _outputStore.save(result.output);
-          } catch (error) {
-            _logAgent('output_artifact_save_failed type=${error.runtimeType}');
+          });
+        case AgentResponseCompleted(:final reply, :final displayText):
+          revision++;
+          if (response != null) {
+            setState(() {
+              _renderAgentReply(response!, reply);
+              response!.text = displayText;
+              if (reply.toolCalls.isNotEmpty) {
+                _messages.add(
+                  _ChatMessage.toolCalls([
+                    for (final call in reply.toolCalls)
+                      ToolCall(
+                        id: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                      ),
+                  ]),
+                );
+              }
+            });
           }
-        }
-
-        final feedback = _formatCommandFeedback(
-          command,
-          result,
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          risk: assessment,
-          artifact: outputArtifact,
-        );
-        feedbacks.add(feedback);
-        nativeResults.add(
-          AgentToolResult(
-            toolCallId: toolCall.id,
-            content: feedback,
-            isError: result?.exitCode != null && result!.exitCode != 0,
-          ),
-        );
+        case AgentResponseDiscarded():
+          revision++;
+          setState(() => _messages.remove(response));
+          response = null;
+        case AgentStatusChanged(:final text):
+          setState(() => _agentLoopStatus = text);
+        case AgentNotice(:final text):
+          setState(() => _messages.add(_ChatMessage.notice(text)));
+        case AgentSkillLoaded(:final id, :final description, :final loaded):
+          setState(() {
+            _agentLoopStatus = loaded
+                ? 'Loaded skill: $id'
+                : 'Skill not found: $id';
+            _messages.add(
+              _ChatMessage.notice(
+                loaded
+                    ? '**Loaded skill**: `$id` — $description'
+                    : '**Skill not found**: `$id`',
+              ),
+            );
+          });
+        case AgentRunFailed(:final message):
+          revision++;
+          setState(
+            () => _messages.add(
+              _ChatMessage.ai(text: '', error: 'Agent error: $message'),
+            ),
+          );
+        case AgentRunEnded():
+          revision++;
+        case AgentRunStarted():
+        case AgentToolStarted():
+        case AgentToolCompleted():
+          break;
       }
-
-      _conversationHistory.add(
-        AgentConversationItem.toolResults(
-          AgentToolBatch.completeResults(
-            resolvedStreamResult.toolCalls,
-            nativeResults,
-          ),
-        ),
-      );
-      logIter(
-        'iter=$loopIterations feedback +${feedbacks.length} '
-        'history=${_conversationHistory.length}',
-      );
-      setState(() => _agentLoopStatus = 'Feedback sent, AI thinking…');
-    }
-    // Lock release lives in _continueAgentLoop's finally — DON'T duplicate
-    // it here, otherwise an early `return` from the inner loop would skip
-    // it and the outer wrapper's finally would still need to fire anyway.
-  }
-
-  Future<void> _compactHistoryIfNeeded(
-    int gen,
-    AgentConfig config, {
-    bool force = false,
-  }) async {
-    final provider = config.current;
-    final model = config.resolvedModel;
-    final budget = AgentContextBudget.forContextWindow(
-      model == null ? null : provider?.modelContextWindows[model],
-    );
-    final outcome = await const AgentConversationManager().compactIfNeeded(
-      history: _conversationHistory,
-      budget: budget,
-      lastPromptTokenCount: _lastAgentPromptTokenCount,
-      force: force,
-      isCurrent: () => gen == _generation,
-      onStart: () {
-        if (mounted) setState(() => _agentLoopStatus = 'Compressing context…');
-      },
-      summarize: (prompt) =>
-          LlmService.compactConversation(config: config, prompt: prompt),
-    );
-    if (mounted && gen == _generation) {
-      setState(() => _agentLoopStatus = null);
-    }
-    if (outcome == AgentCompactionOutcome.summarized ||
-        outcome == AgentCompactionOutcome.trimmed) {
-      // Provider usage from before compaction cannot measure the new context.
-      _lastAgentPromptTokenCount = null;
-      _logAgent('context_compaction result=${outcome.name}');
-    }
-  }
-
-  void _recordAgentRunStopped(AgentBudgetStop stop) {
-    final reason = switch (stop.limit) {
-      AgentBudgetLimit.modelRequests => 'model request limit reached',
-      AgentBudgetLimit.shellCalls => 'shell command limit reached',
-      AgentBudgetLimit.elapsed => 'time limit reached',
-    };
-    final text = '[Agent run stopped] $reason.';
-    _conversationHistory.add({'role': 'assistant', 'content': text});
-    if (!mounted) return;
-    setState(() {
-      _messages.add(_ChatMessage.notice(text));
-      _agentLoopStatus = null;
+      _scrollToBottom();
     });
-    _scrollToBottom();
   }
 
-  void _recordAgentContextLimit() {
-    const text =
-        '[Agent run stopped] Context remains above the safe model limit after compaction.';
-    _conversationHistory.add({'role': 'assistant', 'content': text});
-    if (!mounted) return;
-    setState(() {
-      _messages.add(_ChatMessage.notice(text));
-      _agentLoopStatus = null;
-    });
-    _scrollToBottom();
+  void _renderAgentReply(_ChatMessage message, AgentModelReply reply) {
+    message.text = LlmService.stripStreamingMarkers(reply.text);
+    message.reasoning = reply.reasoning.isEmpty ? null : reply.reasoning;
+    message.reasoningTokenCount = reply.reasoning.isEmpty
+        ? null
+        : reply.reasoningTokenCount ??
+              LlmService.estimateReasoningTokenCount(reply.reasoning);
+    message.hasExactReasoningTokenCount = reply.reasoningTokenCount != null;
   }
 }
