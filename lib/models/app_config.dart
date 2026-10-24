@@ -1,5 +1,6 @@
 /// 应用设置文件的读取与写入入口。界面位置、缓存的 Shell 列表和 Agent
 /// 配置由此聚合；缺失或无法读取配置时使用默认值，以保证首次启动可用。
+library;
 
 import 'dart:convert';
 import 'dart:io';
@@ -30,16 +31,22 @@ class AppConfig {
 
   /// 终端字体、主题、光标和壁纸等显示设置。
   TerminalSettings terminal;
+
   /// SFTP 浏览面板相对终端的停靠边；没有配置时默认停靠底部。
   SftpPanelPosition sftpPosition;
+
   /// SFTP 面板沿停靠方向的尺寸；`null` 表示由布局使用默认尺寸。
   double? sftpSize;
+
   /// Agent 面板的停靠边；没有配置时默认停靠底部。
   AiPanelPosition agentPosition;
+
   /// Agent 面板沿停靠方向的尺寸；`null` 表示使用默认尺寸。
   double? agentSize;
+
   /// 最近发现的本地 Shell 列表缓存，用于快速构建新终端菜单。
   List<LocalShellOption> cachedShells;
+
   /// Agent、provider、工具和安全策略配置；首次启动时可为空。
   AgentConfig? agent;
 
@@ -55,6 +62,20 @@ class AppConfig {
     try {
       final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
       return AppConfig.fromJson(json);
+    } catch (_) {
+      return AppConfig();
+    }
+  }
+
+  /// Read the small, local macOS startup snapshot without yielding before
+  /// runApp. The native runner has already read this file for its backdrop.
+  /// Async filesystem completions can otherwise delay creation of all Flutter
+  /// controls. Normal loads and writes retain their asynchronous path.
+  static AppConfig loadStartupSnapshot(File file) {
+    try {
+      return AppConfig.fromJson(
+        jsonDecode(file.readAsStringSync()) as Map<String, dynamic>,
+      );
     } catch (_) {
       return AppConfig();
     }

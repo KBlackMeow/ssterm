@@ -1,18 +1,24 @@
 import Cocoa
+import CoreImage
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   // 4:3 content area (960×720)
   private static let defaultContentSize = NSSize(width: 960, height: 720)
+  private var startupWallpaper: StartupWallpaperView?
+  private var startupAppearanceChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
-    // AppKit can show the nib window again after awakeFromNib. Keep it
-    // transparent while Flutter renders its first wallpaper-backed frame.
-    setIsVisible(false)
-    alphaValue = 0
-    ignoresMouseEvents = true
+    // AppKit displays the saved wallpaper before Flutter's first frame.
+    // Neither window visibility nor this backdrop waits for the login shell.
+    let wallpaper = StartupWallpaperView.loadSavedWallpaper()
+    backgroundColor = NSColor(calibratedWhite: 30.0 / 255.0, alpha: 1)
     let flutterViewController = FlutterViewController()
-    self.contentViewController = flutterViewController
+    flutterViewController.backgroundColor = wallpaper == nil ? backgroundColor : .clear
+    self.contentViewController = TerminalContentViewController(
+      terminal: flutterViewController, wallpaper: wallpaper
+    )
+    startupWallpaper = wallpaper
     self.appearance = NSAppearance(named: .vibrantDark)
     // Give the native window its final frame before AppKit makes the nib
     // window visible. Dart applies the same title-bar style and size later.
@@ -61,10 +67,6 @@ class MainFlutterWindow: NSWindow {
         self.alphaValue = 1
       }
     }
-    if styleMask.contains(.fullScreen) {
-      // The first frame still controls when the startup window is revealed.
-      alphaValue = 0
-    }
 
     // With TitleBarStyle.hidden the Flutter view fills the entire window
     // (including the title bar region), but NSWindow still delays mouse-up
@@ -92,6 +94,21 @@ class MainFlutterWindow: NSWindow {
     // drag.  NSWindow does not participate in hitTest, so mouse events
     // are unaffected.
     setupDesktopDrop(for: flutterViewController)
+    startupAppearanceChannel = FlutterMethodChannel(
+      name: "ssterm/startup_appearance",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    startupAppearanceChannel?.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "ready" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      // Only the background is replaced. Flutter's controls are already visible.
+      self?.startupWallpaper?.removeFromSuperview()
+      self?.startupWallpaper = nil
+      result(nil)
+    }
+    makeKeyAndOrderFront(nil)
   }
 
   // MARK: - Swizzle mouseDownCanMoveWindow
@@ -224,6 +241,130 @@ class MainFlutterWindow: NSWindow {
     return [p.x, h - p.y]
   }
 
+}
+
+/// Keep the startup image below the Flutter surface so it never masks controls.
+final class TerminalContentViewController: NSViewController {
+  init(terminal: NSViewController, wallpaper: NSView?) {
+    super.init(nibName: nil, bundle: nil)
+    view = NSView()
+    addChild(terminal)
+    if let wallpaper = wallpaper {
+      wallpaper.frame = view.bounds
+      wallpaper.autoresizingMask = [.width, .height]
+      view.addSubview(wallpaper)
+    }
+    terminal.view.frame = view.bounds
+    terminal.view.autoresizingMask = [.width, .height]
+    view.addSubview(terminal.view)
+  }
+
+  required init?(coder: NSCoder) { return nil }
+}
+
+/// An AppKit view of the original wallpaper, used only during engine startup.
+/// It passes input through and is removed once Flutter has painted that image.
+final class StartupWallpaperView: NSView {
+  private let image: NSImage
+  private let opacity: CGFloat
+  private let blur: CGFloat
+  private let backgroundOpacity: CGFloat
+  private let surfaceColor: NSColor
+  private var renderedImage: NSImage?
+  private var renderedSize = NSSize.zero
+  private let background = NSColor(calibratedWhite: 30.0 / 255.0, alpha: 1)
+
+  private static var appDataDirectory: URL {
+    let home = ProcessInfo.processInfo.environment["HOME"]
+    return URL(fileURLWithPath: home?.isEmpty == false ? home! : NSHomeDirectory())
+      .appendingPathComponent(".ssterm", isDirectory: true)
+  }
+
+  static func loadSavedWallpaper(from directory: URL? = nil) -> StartupWallpaperView? {
+    let base = directory ?? appDataDirectory
+    guard
+      let data = try? Data(contentsOf: base.appendingPathComponent("config.json")),
+      let config = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+      let settings = config["terminal"] as? [String: Any],
+      let id = settings["wallpaperId"] as? String, !id.isEmpty,
+      (settings["wallpaperEnabled"] as? Bool ?? true),
+      let image = NSImage(contentsOf: base.appendingPathComponent("wallpapers")
+        .appendingPathComponent(id)),
+      image.isValid
+    else { return nil }
+    return StartupWallpaperView(image: image, settings: settings)
+  }
+
+  init(image: NSImage, settings: [String: Any]) {
+    self.image = image
+    opacity = CGFloat(min(1, max(0, settings["wallpaperOpacity"] as? Double ?? 1)))
+    blur = CGFloat(min(64, max(0, settings["wallpaperBlur"] as? Double ?? 12)))
+    backgroundOpacity = CGFloat(min(1, max(0, settings["backgroundOpacity"] as? Double ?? 0.88)))
+    // Match the background colors in TerminalThemePresets, including custom
+    // themes, so the first native image has the final terminal brightness.
+    let presets: [String: UInt32] = [
+      "vscodeDark": 0x1E1E1E, "vscodeLight": 0xFFFFFF,
+      "campbell": 0x0C0C0C, "campbellPowershell": 0x012456,
+      "macTerminalBasic": 0xFFFFFF, "macTerminalPro": 0x000000,
+      "iterm2Default": 0x000000, "ubuntu": 0x300A24, "gnomeTango": 0x2E3436,
+    ]
+    var rgb = presets[settings["themePreset"] as? String ?? "vscodeDark"] ?? 0x1E1E1E
+    if settings["themePreset"] as? String == "custom",
+      let custom = settings["customTheme"] as? [String: Any],
+      let hex = custom["background"] as? String,
+      let value = UInt32(hex.replacingOccurrences(of: "#", with: ""), radix: 16)
+    { rgb = value & 0xFFFFFF }
+    surfaceColor = NSColor(
+      srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+      green: CGFloat((rgb >> 8) & 255) / 255,
+      blue: CGFloat(rgb & 255) / 255, alpha: 1
+    )
+    super.init(frame: .zero)
+  }
+
+  required init?(coder: NSCoder) { return nil }
+
+  override var isOpaque: Bool { true }
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func draw(_ dirtyRect: NSRect) {
+    background.setFill()
+    bounds.fill()
+    guard bounds.width > 0, bounds.height > 0 else { return }
+
+    if renderedSize != bounds.size {
+      renderedSize = bounds.size
+      renderedImage = makeRenderedImage()
+    }
+    (renderedImage ?? image).draw(
+      in: bounds, from: .zero, operation: .sourceOver, fraction: opacity,
+      respectFlipped: true, hints: [.interpolation: NSImageInterpolation.medium]
+    )
+    surfaceColor.withAlphaComponent(backgroundOpacity).setFill()
+    bounds.fill()
+  }
+
+  private func makeRenderedImage() -> NSImage? {
+    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    else { return nil }
+    let scale = window?.backingScaleFactor ?? 1
+    let target = CGRect(origin: .zero, size: NSSize(
+      width: bounds.width * scale, height: bounds.height * scale
+    ))
+    let cover = max(target.width / CGFloat(cgImage.width), target.height / CGFloat(cgImage.height))
+    var output = CIImage(cgImage: cgImage).transformed(by: CGAffineTransform(
+      a: cover, b: 0, c: 0, d: cover,
+      tx: (target.width - CGFloat(cgImage.width) * cover) / 2,
+      ty: (target.height - CGFloat(cgImage.height) * cover) / 2
+    ))
+    if blur > 0 {
+      output = output.clampedToExtent().applyingFilter(
+        "CIGaussianBlur", parameters: [kCIInputRadiusKey: blur * scale]
+      )
+    }
+    guard let rendered = CIContext().createCGImage(output, from: target) else { return nil }
+    return NSImage(cgImage: rendered, size: bounds.size)
+  }
 }
 
 // MARK: - NSView swizzled getter

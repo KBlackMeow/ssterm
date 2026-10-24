@@ -16,6 +16,12 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
   // its tab wiring; see _wireDeferredLocalPty.
   final _localPtySpawnInFlight = <({_Tab tab, int pane})>{};
   AppConfig _config = AppConfig();
+  bool _startupWallpaperPending = false;
+
+  TerminalSettings get _displayTerminalSettings => terminalSettingsForBackdrop(
+    _config.terminal,
+    nativeWallpaperVisible: _startupWallpaperPending,
+  );
   int _mobileTabIndex = 0; // 0=terminal 1=files 2=commands 3=settings
 
   // ── Abstract stubs (implemented in _TerminalHomeSshMethods) ───────────────
@@ -318,6 +324,13 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     // stale size would desynchronize the PTY and the native core from the
     // painted screen.
     if (terminal.viewWidth < 1 || terminal.viewHeight < 1) return;
+
+    if (Platform.isMacOS) {
+      // Layout creates the real terminal and cursor in the first frame. Native
+      // core/PTY startup can wait until that frame has actually been painted.
+      await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+      if (!mounted || _paneIndexOf(tab, terminal) != pane) return;
+    }
 
     final isSplit = pane == 1;
     final home = userHomeDir();

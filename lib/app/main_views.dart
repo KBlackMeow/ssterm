@@ -66,7 +66,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   // ── Desktop layout ─────────────────────────────────────────────────────────
 
   Widget _buildChrome() {
-    final ts = _config.terminal;
+    final ts = _displayTerminalSettings;
     final hasWallpaper = ts.hasWallpaper;
     final wallpaperFile = hasWallpaper
         ? WallpaperStorage.resolveFile(ts.wallpaperId)
@@ -160,6 +160,9 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
                 file: wallpaperFile,
                 opacity: ts.wallpaperOpacity,
                 blur: ts.wallpaperBlur,
+                backdropColor: Platform.isMacOS
+                    ? const Color(0xFF1E1E1E)
+                    : null,
               ),
               chrome,
             ],
@@ -179,7 +182,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   // ── Mobile layout ──────────────────────────────────────────────────────────
 
   Widget _buildMobileChrome() {
-    final ts = _config.terminal;
+    final ts = _displayTerminalSettings;
     final activeTab = _tabs.isNotEmpty && _active < _tabs.length
         ? _tabs[_active]
         : null;
@@ -342,7 +345,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
 
   Widget _buildChromeBackgroundFill() {
     return ColoredBox(
-      color: _config.terminal.chromeBackground,
+      color: _displayTerminalSettings.chromeBackground,
       child: const SizedBox.expand(),
     );
   }
@@ -427,7 +430,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
             ),
           ),
       agentConfig: _config.agent,
-      terminalBackground: _config.terminal.chromeBackground,
+      terminalBackground: _displayTerminalSettings.chromeBackground,
       terminalLineHeight: _config.terminal.lineHeight,
       fileSystemAdapter: switch (tab.kind) {
         _TabKind.local => _localFileAdapter(tab, () => tab.agentCwd),
@@ -498,7 +501,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
   Widget _buildConnectingBody(_Tab tab) {
     final alias = tab.sshProfile?.alias ?? tab.title;
     return Container(
-      color: _config.terminal.chromeBackground,
+      color: _displayTerminalSettings.chromeBackground,
       alignment: Alignment.center,
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -533,7 +536,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     final alias = tab.sshProfile?.alias ?? tab.title;
     return Builder(
       builder: (innerCtx) => Container(
-        color: _config.terminal.chromeBackground,
+        color: _displayTerminalSettings.chromeBackground,
         alignment: Alignment.center,
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -619,7 +622,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
     Widget surface = TerminalSurface(
       key: ValueKey(terminal),
       terminal: terminal,
-      settings: _config.terminal,
+      settings: _displayTerminalSettings,
       viewKey: viewKey,
       contextMenu: contextMenu,
       includeWallpaper: false,

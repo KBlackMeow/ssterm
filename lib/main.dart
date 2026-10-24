@@ -94,10 +94,23 @@ void main() async {
   // init() is async + reads the asset manifest.
   registerDefaultBundledSkills();
 
-  // Read appearance concurrently with native window setup. macOS keeps its
-  // window transparent until the first Flutter frame has the saved wallpaper.
-  final startupConfigFuture = Platform.isMacOS ? AppConfig.load() : null;
-  AppConfig? startupConfig;
+  // Flutter renders controls immediately over the native wallpaper. Loading
+  // Flutter's copy of that image must never delay the terminal's first frame.
+  if (Platform.isMacOS) {
+    final config = AppConfig.loadStartupSnapshot(
+      File('${appBasePath()}/.ssterm/config.json'),
+    );
+    final wallpaperReady = _prepareMacWallpaper(config);
+    runApp(
+      SsTermApp(
+        initialConfig: config,
+        startupWallpaperReady: config.terminal.hasWallpaper
+            ? wallpaperReady
+            : null,
+      ),
+    );
+    unawaited(_finishMacStartup(wallpaperReady));
+  }
 
   // Custom title bar: hide the OS-drawn caption strip and let the tab bar take
   // its place (Chrome / Edge / Windows Terminal style). On macOS the native
@@ -105,6 +118,12 @@ void main() async {
   // min/max/close controls inside the tab bar.
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
+    if (Platform.isMacOS) {
+      // The native runner already established the visible window. Keep plugin
+      // registration early (the tab bar queries it), but apply the remaining
+      // window settings and start auxiliary services after controls are painted.
+      await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+    }
     // Pin a default size and `center: true` here on purpose:
     //   • macOS's `applicationSupportsSecureRestorableState = true` (see
     //     AppDelegate.swift) makes the OS restore the previous frame on
@@ -133,12 +152,6 @@ void main() async {
     }
     if (Platform.isMacOS) {
       await windowManager.waitUntilReadyToShow(windowOptions);
-      startupConfig = await startupConfigFuture;
-      final settings = startupConfig!.terminal;
-      if (settings.hasWallpaper) {
-        final file = WallpaperStorage.resolveFile(settings.wallpaperId);
-        if (file != null) await preloadStartupWallpaper(file);
-      }
     } else if (Platform.isWindows) {
       // The Windows runner already supplies the initial size and position.
       // Keep the plugin's native taskbar setup, then configure only the
@@ -160,7 +173,9 @@ void main() async {
     }
   }
 
-  runApp(SsTermApp(initialConfig: startupConfig));
+  if (!Platform.isMacOS) {
+    runApp(const SsTermApp());
+  }
 
   // Terminal startup does not use Skills. Agent requests await startupReady,
   // so even a request made before the scan completes gets the full catalogue.
@@ -169,26 +184,36 @@ void main() async {
       LlmService.refreshSystemPrompt();
     }),
   );
+}
 
-  if (Platform.isMacOS) {
-    await WidgetsBinding.instance.waitUntilFirstFrameRasterized.timeout(
-      const Duration(seconds: 3),
-      onTimeout: () {},
-    );
-    // AppKit may have shown the nib window already; reveal its rendered frame.
-    await windowManager.setIgnoreMouseEvents(false);
-    await windowManager.setOpacity(1);
-    await windowManager.show();
-    await windowManager.focus();
+Future<void> _prepareMacWallpaper(AppConfig config) async {
+  try {
+    final settings = config.terminal;
+    if (settings.hasWallpaper) {
+      final file = WallpaperStorage.resolveFile(settings.wallpaperId);
+      if (file != null) await preloadStartupWallpaper(file);
+    }
+  } catch (_) {
+    // An unavailable wallpaper must not keep the native backdrop in place.
   }
+}
+
+Future<void> _finishMacStartup(Future<void> wallpaperReady) async {
+  final binding = WidgetsBinding.instance;
+  await wallpaperReady;
+  await waitForStartupWallpaperFrame(binding);
+  await const MethodChannel(
+    'ssterm/startup_appearance',
+  ).invokeMethod<void>('ready');
 }
 
 /// 构建全局 `MaterialApp`，统一设置应用标题、深色 Material 3 主题和首页。
 /// 平台窗口初始化在 `main()` 中完成，不放在 widget 生命周期里。
 class SsTermApp extends StatelessWidget {
-  const SsTermApp({super.key, this.initialConfig});
+  const SsTermApp({super.key, this.initialConfig, this.startupWallpaperReady});
 
   final AppConfig? initialConfig;
+  final Future<void>? startupWallpaperReady;
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +229,10 @@ class SsTermApp extends StatelessWidget {
             : null,
       ),
       themeMode: ThemeMode.dark,
-      home: TerminalHome(initialConfig: initialConfig),
+      home: TerminalHome(
+        initialConfig: initialConfig,
+        startupWallpaperReady: startupWallpaperReady,
+      ),
     );
   }
 }
@@ -222,9 +250,14 @@ typedef _TabKind = AppTabKind;
 /// 桌面和移动端共享的主应用状态入口。负责初始化配置、创建首个标签、加载 SSH
 /// 主机，并在销毁时关闭 Agent 服务及标签持有的会话资源。
 class TerminalHome extends StatefulWidget {
-  const TerminalHome({super.key, this.initialConfig});
+  const TerminalHome({
+    super.key,
+    this.initialConfig,
+    this.startupWallpaperReady,
+  });
 
   final AppConfig? initialConfig;
+  final Future<void>? startupWallpaperReady;
 
   @override
   State<TerminalHome> createState() => _TerminalHomeState();
@@ -248,6 +281,15 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
   @override
   void initState() {
     super.initState();
+    final wallpaperReady = widget.startupWallpaperReady;
+    if (wallpaperReady != null) {
+      _startupWallpaperPending = true;
+      unawaited(
+        wallpaperReady.then((_) {
+          if (mounted) setState(() => _startupWallpaperPending = false);
+        }),
+      );
+    }
     final initialConfig = widget.initialConfig;
     if (initialConfig != null) {
       _config = initialConfig;
@@ -260,6 +302,18 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
     if (!Platform.isIOS) {
       _newLocalTab(LocalShellDiscovery.defaultShell(_localShells));
     }
+    if (Platform.isMacOS) {
+      unawaited(
+        WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
+          if (mounted) _loadHomeServices(initialConfig);
+        }),
+      );
+    } else {
+      _loadHomeServices(initialConfig);
+    }
+  }
+
+  void _loadHomeServices(AppConfig? initialConfig) {
     _loadSshHosts();
     if (initialConfig != null) {
       _onConfigReady(initialConfig);

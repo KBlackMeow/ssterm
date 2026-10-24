@@ -5,6 +5,46 @@ import 'package:ssterm/models/app_config.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
 void main() {
+  late Directory startupDirectory;
+  late File startupFile;
+
+  setUp(() {
+    startupDirectory = Directory.systemTemp.createTempSync('ssterm-config-');
+    startupFile = File('${startupDirectory.path}/config.json');
+  });
+
+  tearDown(() => startupDirectory.deleteSync(recursive: true));
+
+  test(
+    'startup snapshot restores settings before returning to the event loop',
+    () {
+      startupFile.writeAsStringSync(
+        '{"terminal":{"fontSize":19},"agentPosition":"right","agentSize":420}',
+      );
+
+      final config = AppConfig.loadStartupSnapshot(startupFile);
+
+      expect(config.terminal.fontSize, 19);
+      expect(config.agentPosition, AiPanelPosition.right);
+      expect(config.agentSize, 420);
+    },
+  );
+
+  test('missing startup snapshot uses defaults without creating a file', () {
+    final config = AppConfig.loadStartupSnapshot(startupFile);
+
+    expect(config.terminal.fontSize, AppConfig().terminal.fontSize);
+    expect(startupFile.existsSync(), isFalse);
+  });
+
+  test('invalid startup snapshot uses defaults', () {
+    for (final content in ['{broken', '[]', '{"terminal":42}']) {
+      startupFile.writeAsStringSync(content);
+      final config = AppConfig.loadStartupSnapshot(startupFile);
+      expect(config.terminal.fontSize, AppConfig().terminal.fontSize);
+    }
+  });
+
   test('promotes the newest legacy layout to the Agent layout', () {
     final config = AppConfig.fromJson({
       'agent2Position': 'right',
