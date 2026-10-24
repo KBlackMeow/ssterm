@@ -32,36 +32,10 @@ class AgentToolBatch {
     ];
   }
 
-  static String? legacyRejectionReason(
-    Iterable<String> names, {
-    bool hasCompletionMarker = false,
-  }) {
-    final batch = names.toList(growable: false);
-    if (batch.isEmpty) return null;
-    if (hasCompletionMarker) {
-      return 'A completion marker cannot accompany tool calls. Reissue the '
-          'required tool call or finish without tools.';
-    }
-    if (batch.length > 1 &&
-        !(batch.every((name) => name == 'bash') ||
-            batch.every((name) => name == 'mcp') ||
-            (batch.length <= maxReadOnlyCalls &&
-                batch.every(readOnlyNames.contains)) ||
-            (batch.length <= maxReadOnlyCalls &&
-                batch.every(
-                  (name) => name == 'bash' || readOnlyNames.contains(name),
-                )))) {
-      return 'This combination of tools cannot execute in one turn. '
-          'Issue one tool call at a time.';
-    }
-    return null;
-  }
-
   static String? rejectionReason(
     List<AgentToolCall> calls,
     AgentToolRegistry registry, {
     String? finishReason,
-    bool hasCompletionMarker = false,
   }) {
     if (calls.isEmpty) return null;
     if (const {
@@ -71,10 +45,6 @@ class AgentToolBatch {
     }.contains(finishReason?.toLowerCase())) {
       return 'The model response reached its output limit. Reissue the tool '
           'call with complete arguments.';
-    }
-    if (hasCompletionMarker) {
-      return 'A completion marker cannot accompany tool calls. Reissue the '
-          'required tool call or finish without tools.';
     }
     final ids = <String>{};
     for (final call in calls) {

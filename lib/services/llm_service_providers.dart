@@ -844,6 +844,7 @@ Future<LlmResponse> _callOllama(
   String model,
   List<AgentConversationItem> messages,
   String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
   bool jsonMode = false,
@@ -861,6 +862,7 @@ Future<LlmResponse> _callOllama(
   final body = {
     'model': model,
     'messages': apiMessages,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.ollamaTools(tools),
     'stream': false,
     if (reasoningLevel != null)
       'think': _ollamaThinkValue(model, reasoningLevel),
@@ -891,6 +893,7 @@ Future<LlmResponse> _callOllama(
     final text = message?['content'] as String? ?? '';
     return LlmResponse(
       text: text,
+      toolCalls: AgentProviderTools.parseOllamaToolCalls(message ?? const {}),
       usage: ProviderTokenUsage(
         promptTokenCount: data['prompt_eval_count'] as int?,
         completionTokenCount: data['eval_count'] as int?,
@@ -907,6 +910,7 @@ Stream<LlmStreamEvent> _streamOllama(
   List<AgentConversationItem> messages,
   HttpClient client,
   String systemPrompt, {
+  List<AgentToolDefinition> tools = const [],
   int? maxOutputTokens,
   AgentReasoningLevel? reasoningLevel,
   bool jsonMode = false,
@@ -922,6 +926,7 @@ Stream<LlmStreamEvent> _streamOllama(
   final body = {
     'model': model,
     'messages': apiMessages,
+    if (tools.isNotEmpty) 'tools': AgentProviderTools.ollamaTools(tools),
     'stream': true,
     if (reasoningLevel != null)
       'think': _ollamaThinkValue(model, reasoningLevel),
@@ -946,14 +951,41 @@ Stream<LlmStreamEvent> _streamOllama(
   // sentinel.  The terminating object carries `done: true` (we don't
   // need to look at it — the stream just ends).  `LineSplitter` is
   // safe here because Ollama emits a literal `\n` between objects.
+  var callCount = 0;
+  var malformedEventCount = 0;
   await for (final line
       in response.transform(utf8.decoder).transform(const LineSplitter())) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
     try {
       final json = jsonDecode(trimmed) as Map<String, dynamic>;
+      if (json['error'] != null) {
+        throw LlmHttpException(200, json['error'].toString());
+      }
+      yield LlmStreamEvent.diagnostics(
+        finishReason: json['done_reason'] as String?,
+        malformedEventCount: malformedEventCount,
+        promptTokenCount: json['prompt_eval_count'] as int?,
+        completionTokenCount: json['eval_count'] as int?,
+      );
       final message = json['message'] as Map<String, dynamic>?;
       if (message == null) continue;
+      final calls = AgentProviderTools.parseOllamaToolCalls(
+        message,
+        startIndex: callCount,
+      );
+      callCount += (message['tool_calls'] as List?)?.length ?? 0;
+      final invalidCalls =
+          ((message['tool_calls'] as List?)?.length ?? 0) - calls.length;
+      if (invalidCalls > 0) {
+        malformedEventCount += invalidCalls;
+        yield LlmStreamEvent.diagnostics(
+          malformedEventCount: malformedEventCount,
+        );
+      }
+      for (final call in calls) {
+        yield LlmStreamEvent('tool_call', '', toolCall: call);
+      }
       // Reasoning-model thinking channel: only present on r1/qwq/etc.
       // Yield BEFORE text so the order matches the wire order (Ollama
       // sometimes packs both into the same delta on completion).
@@ -965,10 +997,11 @@ Stream<LlmStreamEvent> _streamOllama(
       if (content != null && content.isNotEmpty) {
         yield LlmStreamEvent('text', content);
       }
-    } catch (_) {
-      // Skip malformed lines — Ollama is well-behaved but a network
-      // hiccup could chunk a line in half; the next valid object
-      // resumes the stream.
+    } on FormatException {
+      malformedEventCount++;
+      yield LlmStreamEvent.diagnostics(
+        malformedEventCount: malformedEventCount,
+      );
     }
   }
 }

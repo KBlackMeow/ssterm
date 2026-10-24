@@ -281,7 +281,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       _lastAgentPromptTokenCount = resolvedStreamResult.promptTokenCount;
       final fullText = resolvedStreamResult.text;
       final protocolText = LlmService.stripForgedCommandFeedback(fullText);
-      final nativeToolCalls = resolvedStreamResult.toolCalls
+      final toolCalls = resolvedStreamResult.toolCalls
           .map(
             (call) => ToolCall(
               id: call.id,
@@ -290,9 +290,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             ),
           )
           .toList(growable: false);
-      final toolCalls = nativeToolCalls.isNotEmpty
-          ? nativeToolCalls
-          : LlmService.extractToolCalls(protocolText);
       const droppedToolCallCount = 0;
       final incompleteError = LlmService.incompleteStreamError(
         text: protocolText,
@@ -369,19 +366,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       });
       _scrollToBottom();
 
-      final taskComplete = LlmService.hasTaskCompleteMarker(protocolText);
-      final askUser = LlmService.hasAskUserMarker(protocolText);
-      if (resolvedStreamResult.toolCalls.isEmpty) {
-        final rejection = AgentToolBatch.legacyRejectionReason(
-          toolCalls.map((call) => call.name),
-          hasCompletionMarker: taskComplete || askUser,
-        );
-        if (rejection != null) {
-          _conversationHistory.add({'role': 'user', 'content': rejection});
-          setState(() => _messages.add(_ChatMessage.notice(rejection)));
-          continue;
-        }
-      }
       if (resolvedStreamResult.toolCalls.isNotEmpty) {
         final registry = AgentToolRegistry.build(
           webSearchEnabled: config.webSearchEnabled,
@@ -395,7 +379,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           resolvedStreamResult.toolCalls,
           registry,
           finishReason: resolvedStreamResult.finishReason,
-          hasCompletionMarker: taskComplete || askUser,
         );
         if (rejection != null) {
           _conversationHistory.add(
@@ -463,31 +446,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           mcpToolCalls.add(call);
         }
       }
-      final useSkill =
-          useSkillTool?.skillId ??
-          LlmService.extractUseSkillMarker(protocolText);
-      final webQuery =
-          webSearchTool?.query ??
-          LlmService.extractWebSearchQuery(protocolText);
-      final markerWriteFile = LlmService.extractWriteFile(protocolText);
+      final useSkill = useSkillTool?.skillId;
+      final webQuery = webSearchTool?.query;
       final writeFile = writeFileTool == null
-          ? markerWriteFile
+          ? null
           : (path: writeFileTool.path!, content: writeFileTool.content!);
-      final markerLabel = taskComplete
-          ? 'task_complete'
-          : (askUser
-                ? 'ask_user'
-                : (askUserQuestionTool != null
-                      ? 'ask_user_question'
-                      : (useSkill != null
-                            ? 'use_skill:$useSkill'
-                            : (webQuery != null
-                                  ? 'web_search'
-                                  : (writeFile != null
-                                        ? 'write_file'
-                                        : (editFileTool != null
-                                              ? 'edit_file'
-                                              : 'none'))))));
+      final markerLabel = toolCalls.isEmpty ? 'answer' : toolCalls.first.name;
       logIter(
         'iter=$loopIterations reply history=$historyLenAtCall '
         'chars=${fullText.length} '
@@ -508,15 +472,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         logIter('iter=$loopIterations warn empty_reply');
       }
 
-      // ── Skill activation ─────────────────────────────────────────────
-      // USE_SKILL is intercepted BEFORE the auto-execute checks so it
-      // works in BOTH manual and auto modes — the model can pull in a
-      // playbook even when the user hasn't ticked auto-execute, because
-      // loading a skill doesn't run any shell commands.  When a USE_SKILL
-      // turn also (incorrectly) contained a shell tool call, the marker
-      // wins and the commands are dropped, matching how TASK_COMPLETE /
-      // ASK_USER behave today — and matching what the system prompt
-      // tells the model to expect.
+      // Load the selected skill and return its body as the paired tool result.
       if (useSkill != null) {
         // Defence in depth: even though disabled skills are filtered out
         // of the announced catalogue, the model might USE_SKILL one
@@ -549,7 +505,15 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
             'body_chars=${body.length}',
           );
         }
-        _conversationHistory.add({'role': 'user', 'content': injected});
+        _conversationHistory.add(
+          AgentConversationItem.toolResults([
+            AgentToolResult(
+              toolCallId: useSkillTool!.id,
+              content: injected,
+              isError: body == null,
+            ),
+          ]),
+        );
         setState(() {
           // Transient bottom-of-chat status: cleared once the next AI
           // reply starts streaming.
@@ -578,18 +542,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         continue;
       }
 
-      // ── Web search ──────────────────────────────────────────────────
-      // Same intercept-before-execute pattern as USE_SKILL: when the
-      // model emits a `web_search` tool call we call Brave, format the
-      // results, and inject them as the next user message so the model
-      // can read them on its NEXT turn.  Bash blocks in the same turn
-      // are dropped (system prompt warns about this); we match the
-      // marker-wins behaviour of all other meta turns.
-      //
-      // Runs in both MANUAL and AUTO modes — same rationale as
-      // USE_SKILL: fetching information doesn't run any shell commands
-      // on the user's machine, so requiring auto-execute would be
-      // surprising.
+      // Search results are returned through the native tool transcript.
       if (webQuery != null) {
         final injected = await _runWebSearch(
           gen: gen,
@@ -605,7 +558,11 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           // the transient status).
           return;
         }
-        _conversationHistory.add({'role': 'user', 'content': injected});
+        _conversationHistory.add(
+          AgentConversationItem.toolResults([
+            AgentToolResult(toolCallId: webSearchTool!.id, content: injected),
+          ]),
+        );
         setState(() => _agentLoopStatus = null);
         continue;
       }
@@ -663,12 +620,10 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           outputStore: _outputStore,
           fileSystem: widget.fileSystemAdapter,
         );
-        final feedbacks = <String>[];
         final nativeResults = <AgentToolResult>[];
         for (final call in readToolCalls) {
           final result = await reader.execute(call.name, call.arguments);
           if (!mounted || gen != _generation) return;
-          feedbacks.add(result.content);
           nativeResults.add(
             AgentToolResult(
               toolCallId: call.id,
@@ -679,17 +634,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           setState(() => _messages.add(_ChatMessage.notice(result.content)));
         }
         _conversationHistory.add(
-          resolvedStreamResult.toolCalls.isEmpty
-              ? AgentConversationItem.text(
-                  role: 'user',
-                  content: feedbacks.join('\n\n'),
-                )
-              : AgentConversationItem.toolResults(
-                  AgentToolBatch.completeResults(
-                    resolvedStreamResult.toolCalls,
-                    nativeResults,
-                  ),
-                ),
+          AgentConversationItem.toolResults(
+            AgentToolBatch.completeResults(
+              resolvedStreamResult.toolCalls,
+              nativeResults,
+            ),
+          ),
         );
         continue;
       }
@@ -701,7 +651,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       // in Settings.  Errors are surfaced in the chat card and as a
       // feedback envelope so the model can pivot.
       if (mcpToolCalls.isNotEmpty) {
-        final feedbacks = <String>[];
         final nativeResults = <AgentToolResult>[];
         for (final call in mcpToolCalls) {
           final serverId = call.mcpServerId!;
@@ -738,7 +687,6 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           });
           _scrollToBottom();
 
-          feedbacks.add(_formatMcpResult(call, result));
           nativeResults.add(
             AgentToolResult(
               toolCallId: call.id,
@@ -750,30 +698,18 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           );
         }
         _conversationHistory.add(
-          resolvedStreamResult.toolCalls.isEmpty
-              ? AgentConversationItem.text(
-                  role: 'user',
-                  content: feedbacks.join('\n\n'),
-                )
-              : AgentConversationItem.toolResults(
-                  AgentToolBatch.completeResults(
-                    resolvedStreamResult.toolCalls,
-                    nativeResults,
-                  ),
-                ),
+          AgentConversationItem.toolResults(
+            AgentToolBatch.completeResults(
+              resolvedStreamResult.toolCalls,
+              nativeResults,
+            ),
+          ),
         );
         setState(() => _agentLoopStatus = 'MCP results sent, AI thinking…');
         continue;
       }
 
-      // ── File-write proposal ─────────────────────────────────────────
-      // The marker is intercepted BEFORE we look at shell tool calls,
-      // [TASK_COMPLETE], or auto-execute — same precedence as
-      // USE_SKILL / WEB_SEARCH.  Unlike those two, the write does NOT
-      // run automatically: per the user-ratified design (always-Apply
-      // policy) we PAUSE the loop, surface a chat card, and resume
-      // only when the user clicks Apply or Reject in
-      // [_decideWriteProposal].
+      // File writes pause for the existing Apply / Reject proposal flow.
       if (writeFile != null) {
         final pauseOutcome = await _proposeFileWrite(
           gen: gen,
@@ -876,7 +812,14 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           _messages.add(_ChatMessage.user(answer));
           _agentLoopStatus = null;
         });
-        _conversationHistory.add({'role': 'user', 'content': answer});
+        _conversationHistory.add(
+          AgentConversationItem.toolResults([
+            AgentToolResult(
+              toolCallId: askUserQuestionTool.id,
+              content: answer,
+            ),
+          ]),
+        );
         logIter(
           'iter=$loopIterations ask_user_question_answered chars=${answer.length}',
         );
@@ -884,18 +827,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
         continue;
       }
 
-      // Terminus handling.  Model-driven termini (`task_complete`,
-      // `ask_user`, `no_commands`) are intentionally NOT re-logged
-      // here — the `reply … marker=…` line emitted moments earlier
-      // already carries the reason on its `marker=` field, so a
-      // separate `stop reason=task_complete` is pure duplication.  We
-      // DO still emit a `stop` line for the abnormal terminus below
-      // (`no_executor`), because it doesn't appear in the marker — it's
-      // an environment fact the user needs in the log to make sense of
-      // why the loop halted with runnable commands sitting on the chat
-      // card.
-      if (taskComplete) break;
-      if (askUser) break;
+      // A response without tool calls is the final answer or a plain question.
       if (commands.isEmpty) break;
       if (widget.onExecuteAsync == null) {
         if (resolvedStreamResult.toolCalls.isNotEmpty) {
@@ -1163,17 +1095,12 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
       }
 
       _conversationHistory.add(
-        resolvedStreamResult.toolCalls.isEmpty
-            ? AgentConversationItem.text(
-                role: 'user',
-                content: feedbacks.join('\n\n'),
-              )
-            : AgentConversationItem.toolResults(
-                AgentToolBatch.completeResults(
-                  resolvedStreamResult.toolCalls,
-                  nativeResults,
-                ),
-              ),
+        AgentConversationItem.toolResults(
+          AgentToolBatch.completeResults(
+            resolvedStreamResult.toolCalls,
+            nativeResults,
+          ),
+        ),
       );
       logIter(
         'iter=$loopIterations feedback +${feedbacks.length} '

@@ -1,0 +1,10 @@
+version: 1
+name: Ollama native tools
+slug: ollama-native-tools
+protocol: http
+port: 4962
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

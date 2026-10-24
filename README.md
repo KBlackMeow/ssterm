@@ -25,7 +25,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 | Capability | Description |
 |---|---|
 | **Multi-provider** | ChatGPT (OpenAI), Claude (Anthropic), Gemini (Google), DeepSeek, Ollama (local), plus a compatible-provider catalog (OpenRouter, Kimi, Qwen, GLM, Mistral, MiniMax, SiliconFlow) and custom OpenAI/Anthropic-compatible endpoints |
-| **Native tool calling** | OpenAI-compatible providers, Claude, and Gemini receive typed tool schemas and return structured tool calls; Ollama keeps the compatible text protocol fallback |
+| **Native tool calling** | OpenAI-compatible providers, Claude, Gemini, and Ollama receive typed tool schemas and return structured tool calls; the selected model must support tool calling |
 | **Session context** | A tab-scoped session context sends the active tab, working directory, and date/time on the first turn; verified command cwd carries forward to later commands and relative file operations |
 | **Saved sessions** | Create, resume, and delete conversations; sessions are saved after the first message |
 | **Task controls** | Stop a running task, queue follow-up input, and use slash command completion for session actions and skills |
@@ -45,7 +45,7 @@ The tab-scoped agent panel is the standout feature — converse with an AI assis
 
 ### Tool calling
 
-SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, local image inspection, enabled custom skills, and configured MCP tools. For providers with native support, calls and results remain structured through the provider's conversation format; the agent executes at most one actionable call per turn. Ollama uses the existing fenced-JSON/text protocol so local models continue to work.
+SSTerm advertises only the tools enabled for the current agent session: shell commands, questions, web search, file writes/edits, local image inspection, enabled custom skills, and configured MCP tools. Calls and results remain structured through each provider's native conversation format, including Ollama. The agent supports batches of independent reads and shell commands; tools that pause or replace the turn are issued individually. Text code blocks and markers never trigger tool execution. Ollama models must support native tool calling; there is no text protocol fallback.
 
 Native calls use the same safeguards as the compatibility path: dangerous commands stop for review, file changes are presented as apply/reject proposals, and MCP calls go through SSTerm's existing tool executor. Tool-call cards redact sensitive argument values and truncate unusually long values before displaying them.
 

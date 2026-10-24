@@ -322,66 +322,93 @@ class AgentProviderTools {
     return contents;
   }
 
-  /// Text-only compatibility transcript for providers without native tools.
-  static List<Map<String, String>> legacyMessages(
-    Iterable<AgentConversationItem> transcript,
-  ) => [
-    for (final item in transcript)
-      if (item.role != null)
-        {'role': item.role!, 'content': item.content ?? ''}
-      else if (item.toolCalls.isNotEmpty)
-        {
-          'role': 'assistant',
-          'content': jsonEncode(<Object?>[
-            if (item.content != null && item.content!.isNotEmpty) item.content,
-            ...item.toolCalls.map((call) => call.toLegacyJson()),
-          ]),
-        }
-      else if (item.toolResults.isNotEmpty)
-        {
-          'role': 'user',
-          'content': item.toolResults
-              .map((result) => result.content)
-              .join('\n\n'),
-        },
-  ];
-
   /// Native Ollama chat messages. Ollama expects base64 image payloads in an
   /// `images` array on the message rather than OpenAI's content parts.
+  static List<Map<String, Object?>> ollamaTools(
+    Iterable<AgentToolDefinition> definitions,
+  ) => [
+    for (final definition in definitions)
+      {
+        'type': 'function',
+        'function': {
+          'name': definition.name,
+          'description': definition.description,
+          'parameters': definition.toJsonSchema(),
+        },
+      },
+  ];
+
   static List<Map<String, Object?>> ollamaMessages(
     Iterable<AgentConversationItem> transcript,
-  ) => [
-    for (final item in transcript)
-      if (item.role != null)
-        {
+  ) {
+    final namesById = <String, String>{};
+    final messages = <Map<String, Object?>>[];
+    for (final item in answeredTranscript(transcript)) {
+      if (item.role != null) {
+        messages.add({
           'role': item.role!,
           'content': item.content ?? '',
           if (item.images.isNotEmpty)
             'images': [for (final image in item.images) image.base64Data],
+        });
+      } else if (item.toolCalls.isNotEmpty) {
+        for (final call in item.toolCalls) {
+          namesById[call.id] = call.providerName ?? call.name;
         }
-      else if (item.toolCalls.isNotEmpty)
-        {
+        messages.add({
           'role': 'assistant',
-          'content': jsonEncode(<Object?>[
-            if (item.content != null && item.content!.isNotEmpty) item.content,
-            ...item.toolCalls.map((call) => call.toLegacyJson()),
-          ]),
+          'content': item.content ?? '',
+          if (item.reasoningContent != null) 'thinking': item.reasoningContent,
+          'tool_calls': [
+            for (final call in item.toolCalls)
+              {
+                'type': 'function',
+                'function': {
+                  'name': call.providerName ?? call.name,
+                  'arguments': call.providerArguments ?? call.arguments,
+                },
+              },
+          ],
+        });
+      } else {
+        for (final result in item.toolResults) {
+          messages.add({
+            'role': 'tool',
+            'tool_name': namesById[result.toolCallId] ?? 'unknown_tool',
+            'content': result.content,
+            if (result.images.isNotEmpty)
+              'images': [for (final image in result.images) image.base64Data],
+          });
         }
-      else if (item.toolResults.isNotEmpty)
-        {
-          'role': 'user',
-          'content': item.toolResults
-              .map((result) => result.content)
-              .join('\n\n'),
-          if (item.toolResults.any((result) => result.images.isNotEmpty))
-            'images': [
-              for (final image in item.toolResults.expand(
-                (result) => result.images,
-              ))
-                image.base64Data,
-            ],
-        },
-  ];
+      }
+    }
+    return messages;
+  }
+
+  /// Ollama emits complete function calls with object arguments, including
+  /// during streaming. Its wire protocol does not require call ids.
+  static List<AgentToolCall> parseOllamaToolCalls(
+    Map<String, dynamic> message, {
+    int startIndex = 0,
+  }) {
+    final rawCalls = message['tool_calls'];
+    if (rawCalls is! List) return const [];
+    final calls = <AgentToolCall>[];
+    for (var index = 0; index < rawCalls.length; index++) {
+      final raw = rawCalls[index];
+      if (raw is! Map || raw['function'] is! Map) continue;
+      final function = raw['function'] as Map;
+      final call = AgentToolCall.fromRaw(
+        id: raw['id'] is String
+            ? raw['id'] as String
+            : 'call_ollama_${startIndex + index + 1}',
+        name: function['name'] is String ? function['name'] as String : '',
+        arguments: function['arguments'],
+      );
+      if (call != null) calls.add(call);
+    }
+    return calls;
+  }
 
   static List<AgentToolCall> parseOpenAiToolCalls(
     Map<String, dynamic> response,

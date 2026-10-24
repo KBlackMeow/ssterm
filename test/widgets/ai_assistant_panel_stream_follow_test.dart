@@ -20,6 +20,53 @@ import 'package:ssterm/widgets/ai_assistant_panel.dart';
 /// following for the rest of the turn — and every turn after it.  Following
 /// must instead be paused ONLY by a genuine user scroll.
 void main() {
+  testWidgets('text tool fences and action markers never execute', (
+    tester,
+  ) async {
+    final http = _QueuedHttpOverrides([
+      _sseForText('''```tool_call
+{"id":"text_shell","name":"bash","arguments":{"command":"pwd","reason":"Inspect","risk_level":"normal","risk_reason":"Read only"}}
+```
+[USE_SKILL: nonexistent]
+[WEB_SEARCH: example]
+[WRITE_FILE_BEGIN: /fixture/result.txt]
+should not be written
+[WRITE_FILE_END]
+'''),
+    ]);
+    HttpOverrides.global = http;
+    addTearDown(() => HttpOverrides.global = null);
+    final files = _MemoryFileSystemAdapter();
+    final executed = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.bottom,
+            agentConfig: _fakeAgentConfig().copyWith(fileWriteEnabled: true),
+            fileSystemAdapter: files,
+            onExecuteAsync: (cmd, {isCancelled, onUpdate, onSilence}) async {
+              executed.add(cmd);
+              return CommandResult(output: '', exitCode: 0);
+            },
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'Inspect the directory');
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    for (var i = 0; i < 80; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await tester.pumpAndSettle();
+    expect(executed, isEmpty);
+    expect(files.writtenContent, isNull);
+    expect(find.text('Apply'), findsNothing);
+    expect(http.requestBodies, hasLength(1));
+  });
+
   testWidgets('approved native write resumes with a paired tool result', (
     tester,
   ) async {

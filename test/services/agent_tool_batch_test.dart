@@ -73,15 +73,6 @@ void main() {
     );
   });
 
-  test('legacy batches reject conflicting tool shapes', () {
-    expect(AgentToolBatch.legacyRejectionReason(['bash', 'read_file']), isNull);
-    expect(AgentToolBatch.legacyRejectionReason(['bash', 'bash']), isNull);
-    expect(
-      AgentToolBatch.legacyRejectionReason(['read_file', 'grep_file']),
-      isNull,
-    );
-  });
-
   test('accepts a bounded mixed read-only batch', () {
     expect(
       AgentToolBatch.rejectionReason([

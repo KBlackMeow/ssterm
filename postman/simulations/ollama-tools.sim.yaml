@@ -1,0 +1,5 @@
+simulation: ollama-tools
+routing: path
+mocks:
+  - routeKey: ollama
+    path: ../mocks/ollama/config.yaml

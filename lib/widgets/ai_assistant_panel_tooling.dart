@@ -1017,27 +1017,4 @@ extension _AiAgentToolingExt on _AiAssistantOverlayState {
       arguments: call.mcpParams,
     );
   }
-
-  /// Format an MCP tool result as a feedback envelope for the LLM.
-  /// Format an MCP tool result as a feedback envelope for the LLM.
-  /// Uses the same `[Tool result]` shape as bash commands so the LLM
-  /// processes both uniformly — only the metadata fields differ.
-  String _formatMcpResult(ToolCall call, McpToolResult result) {
-    final buf = StringBuffer();
-    buf.writeln('[Tool result]');
-    buf.writeln('[tool_call_id=${call.id}]');
-    buf.writeln('[tool_name=mcp]');
-    buf.writeln('server: ${result.serverId}');
-    buf.writeln('tool: ${result.toolName}');
-    buf.writeln('[exit_code=${result.isError ? 1 : 0}]');
-    buf.writeln('[output]');
-    for (final block in result.content) {
-      if (block.type == 'text') {
-        buf.writeln(block.text ?? '');
-      } else {
-        buf.writeln('[$block.type content, ${block.mimeType ?? "no mime"}]');
-      }
-    }
-    return buf.toString();
-  }
 }
