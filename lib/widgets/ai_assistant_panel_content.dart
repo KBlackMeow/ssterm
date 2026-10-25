@@ -86,9 +86,7 @@ class _AiPanelContent extends StatelessWidget {
   /// `Theme(...)` wrap in `_buildAgentMessage` for why this matters.
   final Color? terminalBackground;
 
-  /// User's configured terminal line-height — mirrored on markdown body
-  /// and on `bodyMedium` (which `gpt_markdown.CodeField` reads from) so
-  /// prose + code lines pack at the same density as the terminal pane.
+  /// User's configured terminal line-height, used for markdown code blocks.
   final double? terminalLineHeight;
 
   /// Handler the [_WriteProposalCard] calls when the user clicks Apply
@@ -572,17 +570,8 @@ class _AiPanelContent extends StatelessWidget {
     // chat panel's own frosted bg bleed through, which softens the edge.
     final codeBg = terminalBackground ?? Colors.black.withValues(alpha: 0.35);
 
-    // Line-height is mirrored from the user's terminal setting so the AI
-    // chat reads at the SAME density as the terminal pane next to it.  The
-    // previous fixed value of 1.5 was visibly airier than the terminal
-    // (which defaults to 1.2 in `TerminalSettings`), making code blocks
-    // look gappy compared to identical text shown in the terminal itself.
-    //
-    // We apply the same height in TWO places:
-    //   • `bodyMedium` — `gpt_markdown.CodeField` reads font metrics from
-    //     this textTheme slot, so this is what controls fenced ```code```
-    //     line spacing.
-    //   • outer `GptMarkdown.style` — controls inline / prose lines.
+    // Keep code blocks at the terminal's density. Prose uses a separate
+    // line-height to leave room for inline-code backgrounds and borders.
     final lh = terminalLineHeight ?? 1.2;
 
     final bodyMedium = (base.textTheme.bodyMedium ?? const TextStyle())
@@ -601,10 +590,14 @@ class _AiPanelContent extends StatelessWidget {
       ),
       child: GptMarkdown(
         text,
+        inlineCodeStyle: const InlineCodeStyle(
+          padding: EdgeInsets.zero,
+          borderWidth: 0,
+        ),
         style: TextStyle(
           color: fg,
           fontSize: 13,
-          height: lh,
+          height: 1.5,
           fontFamily: _agentBodyFontFamily,
           fontFamilyFallback: _agentBodyFontFallback,
           fontWeight: FontWeight.w400,
