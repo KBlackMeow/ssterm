@@ -56,6 +56,57 @@ void main() {
     });
 
     test(
+      'system login preserves cwd and environment and starts a login shell',
+      () async {
+        final directory = await Directory.systemTemp.createTemp(
+          'ssterm-login-',
+        );
+        addTearDown(() => directory.delete(recursive: true));
+        await File(
+          '${directory.path}/.zprofile',
+        ).writeAsString('export SSTERM_LOGIN_PROFILE=loaded\n');
+        // Avoid loading the developer's interactive plugins in the test.
+        await File('${directory.path}/.zshrc').writeAsString('');
+        final account = await Process.run('/usr/bin/id', ['-un']);
+        expect(account.exitCode, 0);
+        final process = await Process.start(
+          '/usr/bin/script',
+          [
+            '-q',
+            '/dev/null',
+            '/usr/bin/login',
+            ...macOsLoginArguments(
+              '/bin/zsh',
+              user: (account.stdout as String).trim(),
+            ),
+            '-i',
+            '-c',
+            r'''[[ -o login ]] || exit 41
+[[ "$PWD" -ef "$ZDOTDIR" ]] || exit 42
+[[ "$SSTERM_LOGIN_PROFILE" = loaded ]] || exit 43
+[[ "$SSTERM_LOGIN_TEST" = preserved ]] || exit 44
+printf 'SSTERM_LOGIN_OK\n'
+''',
+          ],
+          workingDirectory: directory.path,
+          environment: {
+            'ZDOTDIR': directory.path,
+            'SSTERM_LOGIN_TEST': 'preserved',
+            'TERM': 'xterm-256color',
+          },
+        );
+        addTearDown(() => process.kill());
+        await process.stdin.close();
+        final output = utf8.decoder.bind(process.stdout).join();
+        final errors = utf8.decoder.bind(process.stderr).join();
+        expect(await process.exitCode.timeout(const Duration(seconds: 15)), 0);
+        expect(await output, contains('SSTERM_LOGIN_OK'));
+        expect(await errors, isEmpty);
+      },
+      skip: !Platform.isMacOS,
+    );
+
+    test(
       'rejects unknown shells instead of launching without cwd metadata',
       () {
         expect(script, isNot(contains(r'exec "$shell" -i')));

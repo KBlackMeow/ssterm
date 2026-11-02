@@ -81,7 +81,7 @@ void main() async {
   raiseFileDescriptorLimit();
 
   // Linux's first PTY reuses this login PATH probe. On macOS the visible
-  // shell itself starts in login mode, matching Terminal.app.
+  // shell starts through system login in login mode, matching Terminal.app.
   if (Platform.isLinux) {
     final shell = LocalShellDiscovery.defaultShell(_initialLocalShells);
     unawaited(_localShellLoginEnvironmentResolver.resolvePath(shell));

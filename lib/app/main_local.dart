@@ -373,16 +373,24 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     var columns = terminal.viewWidth;
     var rows = terminal.viewHeight;
     try {
+      var executable = shell.executable;
+      var arguments = shell.isWsl
+          ? shell.arguments
+          : localShellStartupArguments(shell.executable);
+      if (Platform.isMacOS && !shell.isWsl) {
+        // Resolve the actual account rather than trusting inherited USER or
+        // LOGNAME: login -f only accepts the current user without a password.
+        final account = await Process.run('/usr/bin/id', const ['-un']);
+        final user = (account.stdout as String).trim();
+        if (account.exitCode != 0 || user.isEmpty) {
+          throw StateError('Could not resolve the current login user');
+        }
+        executable = '/usr/bin/login';
+        arguments = macOsLoginArguments(shell.executable, user: user);
+      }
       pty = await Pty.start(
-        shell.executable,
-        // WSL keeps only its distribution selector. Supported macOS shells
-        // start in login mode so they load PATH as Terminal.app does.
-        arguments: shell.isWsl
-            ? shell.arguments
-            : localShellStartupArguments(
-                shell.executable,
-                login: Platform.isMacOS,
-              ),
+        executable,
+        arguments: arguments,
         columns: columns,
         rows: rows,
         environment: env,

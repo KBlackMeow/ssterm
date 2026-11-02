@@ -1,8 +1,6 @@
 import 'local_shell_discovery.dart';
 
-/// Arguments for a visible local shell. macOS uses the same login mode as
-/// Terminal.app for supported POSIX shells; other platforms keep their
-/// existing direct interactive launch.
+/// Arguments for a visible local shell, optionally in login mode.
 List<String> localShellStartupArguments(
   String executable, {
   bool login = false,
@@ -14,6 +12,19 @@ List<String> localShellStartupArguments(
       ? const ['-l']
       : const [];
 }
+
+/// macOS login records the session and prints its standard login banner.
+/// `-f` authenticates the already logged-in user, `-p` preserves the terminal
+/// environment, and `-l` keeps the PTY's requested working directory. Since
+/// login's `-l` also disables login-shell argv[0], pass the shell's own `-l`.
+List<String> macOsLoginArguments(String executable, {required String user}) => [
+  '-f',
+  '-l',
+  '-p',
+  user,
+  executable,
+  ...localShellStartupArguments(executable, login: true),
+];
 
 /// Returns a POSIX shell script that launches the user's login shell inside
 /// a clean environment with OSC 7 working-directory reporting wired up.
