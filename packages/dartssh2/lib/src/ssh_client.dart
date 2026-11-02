@@ -69,12 +69,16 @@ class SSHPtyConfig {
   /// Height of the terminal in pixels. 0 if unknown.
   final int pixelHeight;
 
+  /// Encoded terminal modes from RFC 4254 section 8, including the end opcode.
+  final Uint8List? terminalModes;
+
   const SSHPtyConfig({
     this.type = 'xterm-256color',
     this.width = 80,
     this.height = 24,
     this.pixelWidth = 0,
     this.pixelHeight = 0,
+    this.terminalModes,
   });
 }
 
@@ -463,6 +467,7 @@ class SSHClient {
         terminalHeight: pty.height,
         terminalPixelWidth: pty.pixelWidth,
         terminalPixelHeight: pty.pixelHeight,
+        terminalModes: pty.terminalModes,
       );
       if (!ptyOk) {
         channelController.close();
@@ -498,6 +503,7 @@ class SSHClient {
     SSHPtyConfig? pty = const SSHPtyConfig(),
     SSHX11Config? x11,
     Map<String, String>? environment,
+    StreamTransformer<Uint8List, Uint8List>? stdoutTransformer,
   }) async {
     await _authenticated.future;
 
@@ -530,6 +536,7 @@ class SSHClient {
         terminalHeight: pty.height,
         terminalPixelWidth: pty.pixelWidth,
         terminalPixelHeight: pty.pixelHeight,
+        terminalModes: pty.terminalModes,
       );
       if (!ok) {
         channelController.close();
@@ -555,7 +562,10 @@ class SSHClient {
       throw SSHChannelRequestError('Failed to start shell');
     }
 
-    return SSHSession(channelController.channel);
+    return SSHSession(
+      channelController.channel,
+      stdoutTransformer: stdoutTransformer,
+    );
   }
 
   Future<void> subsystem(String subsystem) async {

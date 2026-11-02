@@ -8,6 +8,9 @@ import '../models/ssh_host.dart';
 import '../utils/app_dir.dart';
 import 'host_key_verifier.dart';
 import 'no_delay_socket.dart';
+import 'ssh_shell_integration.dart';
+
+export 'ssh_shell_integration.dart' show openSshLoginShell;
 
 /// 使用主机档案完成跳板/直连、主机密钥校验、认证和会话初始化。
 /// 成功时返回 `ConnectResult`；任一步骤失败都会先清理已建立的
@@ -143,16 +146,9 @@ Future<ConnectResult> connectSshHost(
     SftpClient? sftp;
 
     if (mode == ConnectMode.terminal) {
-      session = await client
-          .execute(
-            interactiveShellWrapperCommand(),
-            pty: const SSHPtyConfig(
-              width: 80,
-              height: 24,
-              type: 'xterm-256color',
-            ),
-          )
-          .timeout(const Duration(seconds: 15));
+      session = await openSshLoginShell(
+        client,
+      ).timeout(const Duration(seconds: 15));
     } else {
       sftp = await client.sftp().timeout(const Duration(seconds: 15));
     }
@@ -173,91 +169,6 @@ Future<ConnectResult> connectSshHost(
     jumpClient?.close();
     rethrow;
   }
-}
-
-/// Shell bootstrap that emits OSC 7 cwd updates for SFTP path sync.
-String interactiveShellWrapperCommand() {
-  return r'''
-shell="${SHELL:-/bin/sh}"
-shell_name="${shell##*/}"
-
-case "$shell_name" in
-  zsh)
-    tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ssterm-zsh.XXXXXX")"
-    cat >"$tmpdir/.zshenv" <<'EOF'
-if [ -f "$HOME/.zshenv" ]; then
-  . "$HOME/.zshenv"
-fi
-EOF
-    cat >"$tmpdir/.zprofile" <<'EOF'
-if [ -f "$HOME/.zprofile" ]; then
-  . "$HOME/.zprofile"
-fi
-EOF
-    cat >"$tmpdir/.zshrc" <<'EOF'
-__ssterm_cwd() {
-  printf '\033]7;file://%s\033\\' "$PWD"
-}
-HISTFILE="$HOME/.zsh_history"
-if [ -f "$HOME/.zshrc" ]; then
-  . "$HOME/.zshrc"
-fi
-case " ${precmd_functions[*]} " in
-  *" __ssterm_cwd "*) : ;;
-  *) precmd_functions+=(__ssterm_cwd) ;;
-esac
-__ssterm_cwd
-EOF
-    cat >"$tmpdir/.zlogin" <<'EOF'
-if [ -f "$HOME/.zlogin" ]; then
-  . "$HOME/.zlogin"
-fi
-zshexit() { rm -rf "$ZDOTDIR"; }
-EOF
-    exec env ZDOTDIR="$tmpdir" "$shell" -il
-    ;;
-  bash)
-    ENV=/dev/fd/3 exec "$shell" --posix --noprofile -i 3<<'RCEOF'
-set +o posix
-__ssterm_cwd() {
-  printf '\033]7;file://%s\033\\' "$PWD"
-}
-if [ -f /etc/profile ]; then
-  . /etc/profile
-fi
-if [ -f "$HOME/.bash_profile" ]; then
-  . "$HOME/.bash_profile"
-elif [ -f "$HOME/.bash_login" ]; then
-  . "$HOME/.bash_login"
-elif [ -f "$HOME/.profile" ]; then
-  . "$HOME/.profile"
-elif [ -f "$HOME/.bashrc" ]; then
-  . "$HOME/.bashrc"
-fi
-case ";${PROMPT_COMMAND:-};" in
-  *";__ssterm_cwd;"*) : ;;
-  *) PROMPT_COMMAND="__ssterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
-esac
-__ssterm_cwd
-# Workaround for Tencent Cloud's custom bash (mupan build): it miscounts the
-# visible width of \u/\h/\w when they appear inside the \[\e]0;...\a\] window
-# title group, which makes readline redraw long input at the wrong column.
-case "$PS1" in
-  *'\[\e]0;'*'\a\]'*)
-    __ssterm_ps1_before="${PS1%%'\[\e]0;'*}"
-    __ssterm_ps1_after="${PS1#*'\a\]'}"
-    PS1="${__ssterm_ps1_before}${__ssterm_ps1_after}"
-    unset __ssterm_ps1_before __ssterm_ps1_after
-    ;;
-esac
-RCEOF
-    ;;
-  *)
-    printf '%s\n' "ssterm: OSC 7 integration supports only bash and zsh (got $shell_name)." >&2
-    exit 64
-    ;;
-esac
-''';
 }
 
 /// Connect from dialog fields.

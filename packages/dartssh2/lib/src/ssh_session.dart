@@ -11,7 +11,9 @@ class SSHSession {
   StreamSink<Uint8List> get stdin => _stdinController.sink;
 
   /// Stdout of the remote process.
-  Stream<Uint8List> get stdout => _stdoutController.stream;
+  late final Stream<Uint8List> stdout = _stdoutTransformer == null
+      ? _stdoutController.stream
+      : _stdoutController.stream.transform(_stdoutTransformer!);
 
   /// Stderr of the remote process. May be empty if the remote process is
   /// started in pseudo terminal or remote ssh implementation does not support
@@ -32,7 +34,10 @@ class SSHSession {
   /// be available on the [stdout] and [stderr] streams at this time.
   Future<void> get done => _channel.done;
 
-  SSHSession(this._channel) {
+  SSHSession(
+    this._channel, {
+    StreamTransformer<Uint8List, Uint8List>? stdoutTransformer,
+  }) : _stdoutTransformer = stdoutTransformer {
     _channel.setRequestHandler(_handleRequest);
 
     _channelDataSubscription = _channel.stream.listen(
@@ -46,6 +51,8 @@ class SSHSession {
   }
 
   final SSHChannel _channel;
+
+  final StreamTransformer<Uint8List, Uint8List>? _stdoutTransformer;
 
   int? _exitCode;
 

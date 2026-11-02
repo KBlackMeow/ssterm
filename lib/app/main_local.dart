@@ -630,16 +630,11 @@ abstract class _TerminalHomeLocalMethods extends State<TerminalHome> {
     }
 
     try {
-      final session = await client
-          .execute(
-            interactiveShellWrapperCommand(),
-            pty: SSHPtyConfig(
-              width: terminal.viewWidth,
-              height: terminal.viewHeight,
-              type: 'xterm-256color',
-            ),
-          )
-          .timeout(const Duration(seconds: 15));
+      final session = await openSshLoginShell(
+        client,
+        width: terminal.viewWidth,
+        height: terminal.viewHeight,
+      ).timeout(const Duration(seconds: 15));
 
       final rustTerminalBridge = _openRustTerminalBridge(
         terminal: terminal,

@@ -89,6 +89,7 @@ Configure MCP servers in **Settings → Agent → MCP**. SSTerm supports local `
 | **Port forwarding** | Local (`-L`), remote (`-R`), and dynamic SOCKS5 (`-D`) with per-rule toggles |
 | **Keepalive** | Configurable heartbeat interval (15s / 30s / 60s) |
 | **Auto-reconnect** | Transparent reconnection on connection drop |
+| **Login shell** | Standard SSH login with server-provided welcome messages/MOTD; automatic cwd tracking for bash and zsh |
 | **Session logging** | Raw stream to `~/.ssterm/logs/`, replayable with `cat` |
 
 ---

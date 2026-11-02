@@ -353,16 +353,11 @@ abstract class _TerminalHomeSshMethods extends _TerminalHomeLocalMethods {
     final splitTerminal = _createTerminal(reflowEnabled: false);
     SSHSession session;
     try {
-      session = await tab.sshClient!
-          .execute(
-            interactiveShellWrapperCommand(),
-            pty: SSHPtyConfig(
-              width: splitTerminal.viewWidth,
-              height: splitTerminal.viewHeight,
-              type: 'xterm-256color',
-            ),
-          )
-          .timeout(const Duration(seconds: 10));
+      session = await openSshLoginShell(
+        tab.sshClient!,
+        width: splitTerminal.viewWidth,
+        height: splitTerminal.viewHeight,
+      ).timeout(const Duration(seconds: 10));
     } catch (_) {
       return;
     }
