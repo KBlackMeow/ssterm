@@ -95,6 +95,11 @@ class _ChatMessage {
   /// host dispatches them. Nullable for hot-reload compatibility.
   _ToolCallData? toolCallData;
 
+  /// Output of a built-in read tool (read_file, grep_file, read_output),
+  /// rendered as a one-line collapsible card. Nullable for hot-reload
+  /// compatibility.
+  _ToolOutputData? toolOutputData;
+
   _ChatMessage._({
     required this.text,
     this.reasoning,
@@ -117,6 +122,7 @@ class _ChatMessage {
     this.questionProposal,
     this.mcpResultData,
     this.toolCallData,
+    this.toolOutputData,
   });
 
   factory _ChatMessage.user(
@@ -210,6 +216,20 @@ class _ChatMessage {
     ),
   );
 
+  factory _ChatMessage.toolOutput({
+    required String toolName,
+    required String content,
+    bool isError = false,
+  }) => _ChatMessage._(
+    text: '',
+    isUser: false,
+    toolOutputData: _ToolOutputData(
+      toolName: toolName,
+      content: content,
+      isError: isError,
+    ),
+  );
+
   factory _ChatMessage.toolCalls(Iterable<ToolCall> calls) => _ChatMessage._(
     text: '',
     isUser: false,
@@ -229,6 +249,31 @@ class _ToolCallData {
 
   String formattedArgumentsFor(ToolCall call) =>
       ToolCallDisplayFormatter.formatArguments(call.arguments);
+}
+
+/// Display payload for a built-in read tool's result. The first line of the
+/// content is the tool's own header (path and byte range) and doubles as the
+/// collapsed title.
+class _ToolOutputData {
+  final String toolName;
+  final String content;
+  final bool isError;
+  const _ToolOutputData({
+    required this.toolName,
+    required this.content,
+    this.isError = false,
+  });
+
+  String get title {
+    final firstLine = content.split('\n').first.trim();
+    return firstLine.isEmpty ? toolName : firstLine;
+  }
+
+  /// Everything after the header line.
+  String get body {
+    final newline = content.indexOf('\n');
+    return newline < 0 ? '' : content.substring(newline + 1).trimRight();
+  }
 }
 
 /// Lightweight payload for an MCP tool call result chat card.

@@ -80,7 +80,15 @@ extension _AiAgentExecutionExt on _AiAssistantOverlayState {
       if (!mounted || gen != _generation) {
         return const AgentToolExecution.stopped();
       }
-      setState(() => _messages.add(_ChatMessage.notice(result.content)));
+      setState(
+        () => _messages.add(
+          _ChatMessage.toolOutput(
+            toolName: call.name,
+            content: result.content,
+            isError: result.isError,
+          ),
+        ),
+      );
       return _toolResult(call, result.content, isError: result.isError);
     }
     if (call.isMcp && call.mcpServerId != null && call.mcpToolName != null) {

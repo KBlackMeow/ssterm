@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssterm/io/output_pipe.dart';
 import 'package:ssterm/models/agent_config.dart';
+import 'package:ssterm/services/background_command_executor.dart';
 import 'package:ssterm/services/file_write_service.dart';
 import 'package:ssterm/widgets/ai_assistant_panel.dart';
 
@@ -19,6 +20,11 @@ import 'package:ssterm/widgets/ai_assistant_panel.dart';
 /// path used to see a >24px gap, decide "the user scrolled away", and disable
 /// following for the rest of the turn — and every turn after it.  Following
 /// must instead be paused ONLY by a genuine user scroll.
+/// Card header icons only; the panel chrome reuses the same glyphs.
+Finder _cardIcon(IconData icon, double size) => find.byWidgetPredicate(
+  (widget) => widget is Icon && widget.icon == icon && widget.size == size,
+);
+
 void main() {
   testWidgets('text tool fences and action markers never execute', (
     tester,
@@ -473,6 +479,13 @@ should not be written
         expect(tester.takeException(), isNull);
       }
 
+      // Collapsed by default: one header row, no purpose/output body.
+      expect(find.text('执行目的：Check command card layout'), findsNothing);
+      final collapsed = tester.getRect(_cardIcon(Icons.expand_more, 16));
+      final collapsedRisk = tester.getRect(find.text('普通'));
+      expect(collapsed.center.dy, closeTo(collapsedRisk.center.dy, 1));
+      await tester.tap(_cardIcon(Icons.expand_more, 16));
+      await tester.pump();
       expectHeaderAboveCommand('运行中');
       completion.complete(
         CommandResult(output: 'layout verified', exitCode: 0),
@@ -481,6 +494,71 @@ should not be written
       expectHeaderAboveCommand('exit 0');
     });
   }
+
+  testWidgets('command output keeps one 3-line tail with view-all after exit', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final completion = Completer<CommandResult>();
+    HttpOverrides.global = _QueuedHttpOverrides([
+      _sseForToolCalls([
+        _nativeCall('tail', 'bash', {
+          'command': 'seq 1 5',
+          'reason': 'Tail preview',
+          'risk_level': 'normal',
+          'risk_reason': 'Read only',
+        }),
+      ]),
+      _sseForText('Done.'),
+    ]);
+    addTearDown(() => HttpOverrides.global = null);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AiAssistantOverlay(
+            visible: true,
+            initialPosition: AiPanelPosition.right,
+            initialSize: 540,
+            agentConfig: _fakeAgentConfig(),
+            onExecuteAsync: (cmd, {isCancelled, onUpdate, onSilence}) {
+              onUpdate?.call(
+                const CommandExecutionUpdate(['line 3', 'line 4', 'line 5']),
+              );
+              return completion.future;
+            },
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await _sendTask(tester, 'Tail');
+    await tester.tap(_cardIcon(Icons.expand_more, 16));
+    await tester.pump();
+
+    // Running: the live 3-line tail, no second tier yet.
+    expect(find.text('line 5'), findsOneWidget);
+    expect(find.textContaining('查看全部'), findsNothing);
+
+    completion.complete(
+      CommandResult(
+        output: 'line 1\nline 2\nline 3\nline 4\nline 5\n',
+        exitCode: 0,
+      ),
+    );
+    await _drainAgent(tester);
+
+    // Finished: same 3-line tail, plus the only second tier.
+    expect(find.text('line 1'), findsNothing);
+    expect(find.text('line 3'), findsOneWidget);
+    expect(find.text('line 5'), findsOneWidget);
+    expect(find.text('查看全部 (5 行)'), findsOneWidget);
+
+    await tester.tap(find.text('查看全部 (5 行)'));
+    await tester.pump();
+    expect(find.textContaining('line 1'), findsOneWidget);
+    expect(find.text('收起'), findsOneWidget);
+  });
 
   testWidgets('mixed shell and file search both execute in one tool turn', (
     tester,
@@ -540,8 +618,12 @@ should not be written
     await tester.pumpAndSettle();
 
     expect(executed, ['pwd']);
-    expect(find.textContaining('1: target marker'), findsOneWidget);
     expect(find.textContaining('Found the target marker'), findsOneWidget);
+    // Read-tool output stays folded until its header row is opened.
+    expect(find.textContaining('1: target marker'), findsNothing);
+    await tester.tap(_cardIcon(Icons.search, 14));
+    await tester.pump();
+    expect(find.textContaining('1: target marker'), findsOneWidget);
   });
 
   testWidgets(

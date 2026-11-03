@@ -770,6 +770,14 @@ class _AiPanelContent extends StatelessWidget {
       );
     }
 
+    final toolOutput = msg.toolOutputData;
+    if (toolOutput != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: _ToolOutputCard(data: toolOutput),
+      );
+    }
+
     final toolCalls = msg.toolCallData;
     if (toolCalls != null) {
       return Padding(
@@ -1317,6 +1325,8 @@ class _McpResultCardState extends State<_McpResultCard> {
   static const _kCollapsedLines = 4;
 
   var _expanded = false;
+  // The whole card starts as a one-line header; the body is opt-in.
+  var _cardExpanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1337,7 +1347,6 @@ class _McpResultCardState extends State<_McpResultCard> {
         : lines.join('\n');
 
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: surface.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
@@ -1351,74 +1360,82 @@ class _McpResultCardState extends State<_McpResultCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
+          _CollapsibleHeader(
+            expanded: _cardExpanded,
+            onToggle: () => setState(() => _cardExpanded = !_cardExpanded),
+            dim: dim,
+            leading: [
               Icon(
                 isError ? Icons.error_outline : Icons.handyman_outlined,
                 size: 14,
                 color: isError ? Colors.red.shade300 : Colors.green.shade300,
               ),
-              const SizedBox(width: 6),
-              Text(
-                'MCP: ${widget.data.serverId}/${widget.data.toolName}',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: fg,
-                ),
-              ),
             ],
+            title: 'MCP: ${widget.data.serverId}/${widget.data.toolName}',
+            titleStyle: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: fg,
+            ),
           ),
-          if (lines.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            if (_expanded)
-              for (final block in result.content)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: _buildContentBlock(block, dim, fg),
-                )
-            else
-              SelectableText(
-                preview,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: fg,
-                  fontFamily: 'monospace',
-                ),
+          if (_cardExpanded && lines.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  if (_expanded)
+                    for (final block in result.content)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: _buildContentBlock(block, dim, fg),
+                      )
+                  else
+                    SelectableText(
+                      preview,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: fg,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  if (overflow) ...[
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => setState(() => _expanded = true),
+                      child: Text(
+                        '+ ${lines.length - _kCollapsedLines} more lines',
+                        style: TextStyle(
+                          color: dim,
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          decoration: TextDecoration.underline,
+                          decorationColor: dim.withValues(alpha: 0.4),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_expanded && lines.length > _kCollapsedLines) ...[
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => setState(() => _expanded = false),
+                      child: Text(
+                        'Collapse',
+                        style: TextStyle(
+                          color: dim,
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          decoration: TextDecoration.underline,
+                          decorationColor: dim.withValues(alpha: 0.4),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            if (overflow) ...[
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: () => setState(() => _expanded = true),
-                child: Text(
-                  '+ ${lines.length - _kCollapsedLines} more lines',
-                  style: TextStyle(
-                    color: dim,
-                    fontSize: 11,
-                    fontStyle: FontStyle.italic,
-                    decoration: TextDecoration.underline,
-                    decorationColor: dim.withValues(alpha: 0.4),
-                  ),
-                ),
-              ),
-            ],
-            if (_expanded && lines.length > _kCollapsedLines) ...[
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: () => setState(() => _expanded = false),
-                child: Text(
-                  'Collapse',
-                  style: TextStyle(
-                    color: dim,
-                    fontSize: 11,
-                    fontStyle: FontStyle.italic,
-                    decoration: TextDecoration.underline,
-                    decorationColor: dim.withValues(alpha: 0.4),
-                  ),
-                ),
-              ),
-            ],
-          ],
+            ),
         ],
       ),
     );

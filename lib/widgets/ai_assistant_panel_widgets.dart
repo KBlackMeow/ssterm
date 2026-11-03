@@ -257,7 +257,11 @@ class _CommandResultCardState extends State<_CommandResultCard> {
   // Nested scrollables break drag-selection inside the chat's SelectionArea,
   // so long output is truncated by line count instead of scrolled.
   static const _kExpandedOutputMaxLines = 200;
+  // Running and finished commands share one preview: the last few lines.
+  static const _kTailLines = 3;
 
+  // The whole card starts as a one-line header; the body is opt-in.
+  bool _cardExpanded = false;
   bool _expanded = false;
   bool _commandExpanded = false;
 
@@ -275,14 +279,23 @@ class _CommandResultCardState extends State<_CommandResultCard> {
     final out = widget.running
         ? widget.lastThreeLines.join('\n')
         : widget.output;
+    final outputStyle = TextStyle(
+      color: dim,
+      fontSize: 11,
+      fontFamily: 'JetBrainsMono',
+      height: 1.35,
+    );
     final purpose = widget.purpose?.trim();
     final displayPurpose = purpose == null || purpose.isEmpty
         ? 'AI 未提供'
         : purpose;
-    final lines = out.isEmpty ? const <String>[] : out.split('\n');
-    // Finished output stays hidden until the user asks for it; a running
-    // command still streams its last few lines so progress is visible.
-    final hidden = !widget.running && !_expanded;
+    final lines = out.isEmpty ? const <String>[] : out.trimRight().split('\n');
+    final tail = lines.length > _kTailLines
+        ? lines.sublist(lines.length - _kTailLines)
+        : lines;
+    // The preview is always the tail; "view all" is the only second tier and
+    // exists only once the command has finished.
+    final showAll = !widget.running && _expanded;
     final truncated = lines.length > _kExpandedOutputMaxLines
         ? lines.length - _kExpandedOutputMaxLines
         : 0;
@@ -299,49 +312,108 @@ class _CommandResultCardState extends State<_CommandResultCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _RiskBadge(assessment: widget.risk),
-                widget.running
-                    ? Text('运行中', style: TextStyle(color: dim, fontSize: 11))
-                    : _ExitBadge(exitCode: widget.exitCode),
-              ],
-            ),
+          _CollapsibleHeader(
+            expanded: _cardExpanded,
+            onToggle: () => setState(() => _cardExpanded = !_cardExpanded),
+            dim: dim,
+            leading: [
+              _RiskBadge(assessment: widget.risk),
+              widget.running
+                  ? Text('运行中', style: TextStyle(color: dim, fontSize: 11))
+                  : _ExitBadge(exitCode: widget.exitCode),
+            ],
+            title: '\$ ${widget.command}',
+            titleStyle: commandStyle,
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final text = '\$ ${widget.command}';
-                final painter = TextPainter(
-                  text: TextSpan(text: text, style: commandStyle),
-                  textDirection: TextDirection.ltr,
-                  maxLines: _kCommandCollapsedLines,
-                )..layout(maxWidth: constraints.maxWidth);
-                final commandOverflow = painter.didExceedMaxLines;
-                painter.dispose();
-                final collapsed = commandOverflow && !_commandExpanded;
-                return Column(
+          if (_cardExpanded) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final text = '\$ ${widget.command}';
+                  final painter = TextPainter(
+                    text: TextSpan(text: text, style: commandStyle),
+                    textDirection: TextDirection.ltr,
+                    maxLines: _kCommandCollapsedLines,
+                  )..layout(maxWidth: constraints.maxWidth);
+                  final commandOverflow = painter.didExceedMaxLines;
+                  painter.dispose();
+                  final collapsed = commandOverflow && !_commandExpanded;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SelectableText(
+                        text,
+                        maxLines: collapsed ? _kCommandCollapsedLines : null,
+                        style: commandStyle,
+                      ),
+                      if (commandOverflow) ...[
+                        const SizedBox(height: 4),
+                        GestureDetector(
+                          onTap: () => setState(
+                            () => _commandExpanded = !_commandExpanded,
+                          ),
+                          child: Text(
+                            _commandExpanded
+                                ? 'Collapse'
+                                : '… show full command',
+                            style: TextStyle(
+                              color: dim,
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                              decoration: TextDecoration.underline,
+                              decorationColor: dim.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              child: SelectableText(
+                '执行目的：$displayPurpose',
+                style: TextStyle(color: dim, fontSize: 11, height: 1.35),
+              ),
+            ),
+            if (out.isNotEmpty) ...[
+              Container(height: 1, color: dim.withValues(alpha: 0.12)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SelectableText(
-                      text,
-                      maxLines: collapsed ? _kCommandCollapsedLines : null,
-                      style: commandStyle,
-                    ),
-                    if (commandOverflow) ...[
+                    if (showAll)
+                      SelectableText(visible, style: outputStyle)
+                    else
+                      for (final line in tail)
+                        Text(
+                          line,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: outputStyle,
+                        ),
+                    if (showAll && truncated > 0) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '… $truncated more lines truncated',
+                        style: TextStyle(
+                          color: dim,
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                    if (!widget.running && lines.length > _kTailLines) ...[
                       const SizedBox(height: 4),
                       GestureDetector(
-                        onTap: () => setState(
-                          () => _commandExpanded = !_commandExpanded,
-                        ),
+                        onTap: () => setState(() => _expanded = !_expanded),
                         child: Text(
-                          _commandExpanded ? 'Collapse' : '… show full command',
+                          _expanded ? '收起' : '查看全部 (${lines.length} 行)',
                           style: TextStyle(
                             color: dim,
                             fontSize: 11,
@@ -353,35 +425,154 @@ class _CommandResultCardState extends State<_CommandResultCard> {
                       ),
                     ],
                   ],
-                );
-              },
-            ),
+                ),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One-line card header: leading badges, a single-line ellipsized title
+/// (hidden while expanded, where the body shows it in full) and a chevron.
+class _CollapsibleHeader extends StatelessWidget {
+  const _CollapsibleHeader({
+    required this.expanded,
+    required this.onToggle,
+    required this.dim,
+    required this.leading,
+    required this.title,
+    required this.titleStyle,
+  });
+
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Color dim;
+  final List<Widget> leading;
+  final String title;
+  final TextStyle titleStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
+          child: Row(
+            children: [
+              for (final widget in leading) ...[
+                widget,
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: expanded
+                    ? const SizedBox.shrink()
+                    : Text(
+                        title.replaceAll(RegExp(r'\s*\n\s*'), ' '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: titleStyle,
+                      ),
+              ),
+              Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 16,
+                color: dim,
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-            child: SelectableText(
-              '执行目的：$displayPurpose',
-              style: TextStyle(color: dim, fontSize: 11, height: 1.35),
-            ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Result of a built-in read tool: a one-line header (the tool's own
+/// path/range line) that expands to the returned text.
+class _ToolOutputCard extends StatefulWidget {
+  const _ToolOutputCard({required this.data});
+
+  final _ToolOutputData data;
+
+  @override
+  State<_ToolOutputCard> createState() => _ToolOutputCardState();
+}
+
+class _ToolOutputCardState extends State<_ToolOutputCard> {
+  // Nested scrollables break drag-selection inside the chat's SelectionArea,
+  // so long output is truncated by line count instead of scrolled.
+  static const _kMaxLines = 200;
+
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
+    final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
+        .withValues(alpha: 0.6);
+    final data = widget.data;
+    final icon = switch (data.toolName) {
+      'grep_file' => Icons.search,
+      'read_output' => Icons.terminal,
+      _ => Icons.description_outlined,
+    };
+    final lines = data.body.isEmpty ? const <String>[] : data.body.split('\n');
+    final truncated = lines.length > _kMaxLines ? lines.length - _kMaxLines : 0;
+    final visible = truncated > 0
+        ? lines.sublist(0, _kMaxLines).join('\n')
+        : data.body;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: dim.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: data.isError
+              ? const Color(0xFFFF6E67).withValues(alpha: 0.35)
+              : dim.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _CollapsibleHeader(
+            expanded: _expanded,
+            onToggle: () => setState(() => _expanded = !_expanded),
+            dim: dim,
+            leading: [
+              Icon(
+                data.isError ? Icons.error_outline : icon,
+                size: 14,
+                color: data.isError ? const Color(0xFFFF6E67) : dim,
+              ),
+            ],
+            title: data.title,
+            titleStyle: TextStyle(color: fg, fontSize: 12),
           ),
-          if (out.isNotEmpty) ...[
+          if (_expanded) ...[
             Container(height: 1, color: dim.withValues(alpha: 0.12)),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (!hidden)
-                    SelectableText(
-                      visible,
-                      style: TextStyle(
-                        color: dim,
-                        fontSize: 11,
-                        fontFamily: 'JetBrainsMono',
-                        height: 1.35,
-                      ),
+                  SelectableText(
+                    data.isError && data.body.isEmpty
+                        ? data.content
+                        : (data.body.isEmpty ? data.title : visible),
+                    style: TextStyle(
+                      color: dim,
+                      fontSize: 11,
+                      fontFamily: 'JetBrainsMono',
+                      height: 1.35,
                     ),
-                  if (!hidden && truncated > 0) ...[
+                  ),
+                  if (truncated > 0) ...[
                     const SizedBox(height: 4),
                     Text(
                       '… $truncated more lines truncated',
@@ -389,24 +580,6 @@ class _CommandResultCardState extends State<_CommandResultCard> {
                         color: dim,
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
-                  if (!widget.running) ...[
-                    if (!hidden) const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: () => setState(() => _expanded = !_expanded),
-                      child: Text(
-                        hidden
-                            ? 'Show output (${lines.length} lines)'
-                            : 'Hide output',
-                        style: TextStyle(
-                          color: dim,
-                          fontSize: 11,
-                          fontStyle: FontStyle.italic,
-                          decoration: TextDecoration.underline,
-                          decorationColor: dim.withValues(alpha: 0.4),
-                        ),
                       ),
                     ),
                   ],
