@@ -583,9 +583,24 @@ class _AiPanelContent extends StatelessWidget {
           color: fg,
           height: lh,
         );
+    // gpt_markdown maps `#`..`######` to Material headline/title styles
+    // (32/28/24/22/16/14), which dwarf the 13px body. Pin them near body size.
+    TextStyle heading(double size) => bodyMedium.copyWith(
+      fontSize: size,
+      fontWeight: FontWeight.w600,
+      height: 1.4,
+    );
     return Theme(
       data: base.copyWith(
-        textTheme: base.textTheme.copyWith(bodyMedium: bodyMedium),
+        textTheme: base.textTheme.copyWith(
+          bodyMedium: bodyMedium,
+          headlineLarge: heading(18),
+          headlineMedium: heading(16),
+          headlineSmall: heading(15),
+          titleLarge: heading(14),
+          titleMedium: heading(13),
+          titleSmall: heading(13),
+        ),
         colorScheme: base.colorScheme.copyWith(onInverseSurface: codeBg),
       ),
       child: GptMarkdown(

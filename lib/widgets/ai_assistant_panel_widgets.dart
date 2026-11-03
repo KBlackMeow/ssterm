@@ -253,15 +253,25 @@ class _CommandResultCard extends StatefulWidget {
 }
 
 class _CommandResultCardState extends State<_CommandResultCard> {
-  static const _kCollapsedLines = 4;
+  static const _kCommandCollapsedLines = 3;
+  // Nested scrollables break drag-selection inside the chat's SelectionArea,
+  // so long output is truncated by line count instead of scrolled.
+  static const _kExpandedOutputMaxLines = 200;
 
   bool _expanded = false;
+  bool _commandExpanded = false;
 
   @override
   Widget build(BuildContext context) {
     final fg = AppColors.maybeOf(context)?.foreground ?? _kFgActive;
     final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
         .withValues(alpha: 0.6);
+    final commandStyle = TextStyle(
+      color: fg,
+      fontSize: 12,
+      fontFamily: 'JetBrainsMono',
+      height: 1.3,
+    );
     final out = widget.running
         ? widget.lastThreeLines.join('\n')
         : widget.output;
@@ -270,9 +280,14 @@ class _CommandResultCardState extends State<_CommandResultCard> {
         ? 'AI 未提供'
         : purpose;
     final lines = out.isEmpty ? const <String>[] : out.split('\n');
-    final overflow = !_expanded && lines.length > _kCollapsedLines;
-    final visible = overflow
-        ? lines.sublist(0, _kCollapsedLines).join('\n')
+    // Finished output stays hidden until the user asks for it; a running
+    // command still streams its last few lines so progress is visible.
+    final hidden = !widget.running && !_expanded;
+    final truncated = lines.length > _kExpandedOutputMaxLines
+        ? lines.length - _kExpandedOutputMaxLines
+        : 0;
+    final visible = truncated > 0
+        ? lines.sublist(0, _kExpandedOutputMaxLines).join('\n')
         : out;
 
     return Container(
@@ -300,14 +315,46 @@ class _CommandResultCardState extends State<_CommandResultCard> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-            child: SelectableText(
-              '\$ ${widget.command}',
-              style: TextStyle(
-                color: fg,
-                fontSize: 12,
-                fontFamily: 'JetBrainsMono',
-                height: 1.3,
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final text = '\$ ${widget.command}';
+                final painter = TextPainter(
+                  text: TextSpan(text: text, style: commandStyle),
+                  textDirection: TextDirection.ltr,
+                  maxLines: _kCommandCollapsedLines,
+                )..layout(maxWidth: constraints.maxWidth);
+                final commandOverflow = painter.didExceedMaxLines;
+                painter.dispose();
+                final collapsed = commandOverflow && !_commandExpanded;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(
+                      text,
+                      maxLines: collapsed ? _kCommandCollapsedLines : null,
+                      style: commandStyle,
+                    ),
+                    if (commandOverflow) ...[
+                      const SizedBox(height: 4),
+                      GestureDetector(
+                        onTap: () => setState(
+                          () => _commandExpanded = !_commandExpanded,
+                        ),
+                        child: Text(
+                          _commandExpanded ? 'Collapse' : '… show full command',
+                          style: TextStyle(
+                            color: dim,
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            decoration: TextDecoration.underline,
+                            decorationColor: dim.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
           ),
           Padding(
@@ -324,37 +371,35 @@ class _CommandResultCardState extends State<_CommandResultCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectableText(
-                    visible,
-                    style: TextStyle(
-                      color: dim,
-                      fontSize: 11,
-                      fontFamily: 'JetBrainsMono',
-                      height: 1.35,
+                  if (!hidden)
+                    SelectableText(
+                      visible,
+                      style: TextStyle(
+                        color: dim,
+                        fontSize: 11,
+                        fontFamily: 'JetBrainsMono',
+                        height: 1.35,
+                      ),
                     ),
-                  ),
-                  if (overflow) ...[
+                  if (!hidden && truncated > 0) ...[
                     const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: () => setState(() => _expanded = true),
-                      child: Text(
-                        '+ ${lines.length - _kCollapsedLines} more lines',
-                        style: TextStyle(
-                          color: dim,
-                          fontSize: 11,
-                          fontStyle: FontStyle.italic,
-                          decoration: TextDecoration.underline,
-                          decorationColor: dim.withValues(alpha: 0.4),
-                        ),
+                    Text(
+                      '… $truncated more lines truncated',
+                      style: TextStyle(
+                        color: dim,
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
                       ),
                     ),
                   ],
-                  if (_expanded && lines.length > _kCollapsedLines) ...[
-                    const SizedBox(height: 4),
+                  if (!widget.running) ...[
+                    if (!hidden) const SizedBox(height: 4),
                     GestureDetector(
-                      onTap: () => setState(() => _expanded = false),
+                      onTap: () => setState(() => _expanded = !_expanded),
                       child: Text(
-                        'Collapse',
+                        hidden
+                            ? 'Show output (${lines.length} lines)'
+                            : 'Hide output',
                         style: TextStyle(
                           color: dim,
                           fontSize: 11,
