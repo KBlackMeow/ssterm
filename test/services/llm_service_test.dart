@@ -323,6 +323,19 @@ query: "Beijing current weather"
       );
     });
 
+    test(
+      'allows DeepSeek Flash, which the first-party API serves with vision',
+      () {
+        expect(
+          LlmService.supportsImageInput(
+            ProviderConfig.deepseek(),
+            'deepseek-v4-flash',
+          ),
+          isTrue,
+        );
+      },
+    );
+
     test('allows image-capable built-in provider models', () {
       expect(
         LlmService.supportsImageInput(

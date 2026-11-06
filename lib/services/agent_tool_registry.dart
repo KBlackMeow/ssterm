@@ -61,6 +61,7 @@ class AgentToolRegistry {
     bool webSearchEnabled = false,
     bool fileWriteEnabled = false,
     bool skillsEnabled = false,
+    bool imageInputEnabled = true,
     Iterable<McpTool> mcpTools = const [],
   }) {
     final mcpToolsByNativeName = <String, McpTool>{};
@@ -114,20 +115,21 @@ class AgentToolRegistry {
           ),
         },
       ),
-      const AgentToolDefinition(
-        name: 'read_image',
-        description:
-            'Read one local image from the current workspace and inspect it '
-            'visually. Supports PNG, JPEG, GIF, WebP, and BMP. Never use it '
-            'for text, source code, SQL, or other non-image files; use bash '
-            'instead.',
-        parameters: {
-          'path': AgentToolParameter.string(
-            required: true,
-            description: 'Absolute or workspace-relative path to the image.',
-          ),
-        },
-      ),
+      if (imageInputEnabled)
+        const AgentToolDefinition(
+          name: 'read_image',
+          description:
+              'Read one local image from the current workspace and inspect it '
+              'visually. Supports PNG, JPEG, GIF, WebP, and BMP. Never use it '
+              'for text, source code, SQL, or other non-image files; use bash '
+              'instead.',
+          parameters: {
+            'path': AgentToolParameter.string(
+              required: true,
+              description: 'Absolute or workspace-relative path to the image.',
+            ),
+          },
+        ),
       const AgentToolDefinition(
         name: 'read_file',
         description:

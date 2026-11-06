@@ -591,6 +591,58 @@ void main() {
     );
   });
 
+  test('keeps all tool messages contiguous when one result has an image', () {
+    const image = AgentImageAttachment(
+      mimeType: 'image/png',
+      base64Data: 'aGVsbG8=',
+      displayName: 'diagram.png',
+    );
+    final calls = [
+      for (final id in ['call_img', 'call_cmd'])
+        AgentToolCall.fromRaw(
+          id: id,
+          name: 'bash',
+          arguments: const {'command': 'pwd'},
+        )!,
+    ];
+    final messages = AgentProviderTools.openAiMessages([
+      AgentConversationItem.assistantToolCalls(calls),
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(
+          toolCallId: 'call_img',
+          content: 'Loaded image',
+          images: [image],
+        ),
+        AgentToolResult(toolCallId: 'call_cmd', content: '/workspace'),
+      ]),
+    ]);
+    expect(messages.map((m) => m['role']).toList(), [
+      'assistant',
+      'tool',
+      'tool',
+      'user',
+    ]);
+  });
+
+  test('does not duplicate a partially answered tool-result item', () {
+    final calls = [
+      for (final id in ['a', 'b'])
+        AgentToolCall.fromRaw(
+          id: id,
+          name: 'bash',
+          arguments: const {'command': 'pwd'},
+        )!,
+    ];
+    final out = AgentProviderTools.answeredTranscript([
+      AgentConversationItem.assistantToolCalls(calls),
+      AgentConversationItem.toolResults(const [
+        AgentToolResult(toolCallId: 'a', content: 'ok'),
+      ]),
+    ]);
+    expect(out, hasLength(2));
+    expect(out[1].toolResults.map((r) => r.toolCallId), ['a', 'b']);
+  });
+
   test('preserves every tool call from one assistant turn', () {
     final calls = [
       AgentToolCall.fromRaw(

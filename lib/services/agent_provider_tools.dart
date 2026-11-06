@@ -97,6 +97,9 @@ class AgentProviderTools {
           .toList(growable: false);
       if (missing.isEmpty) continue;
       changed = true;
+      // The merged item below replaces a partially-answering `next`; skip it
+      // so its results are not sent twice.
+      if (next != null && next.toolResults.isNotEmpty) i++;
       out.add(
         AgentConversationItem.toolResults([
           ...answered,
@@ -157,18 +160,22 @@ class AgentProviderTools {
               },
           ],
         }
-      else if (item.toolResults.isNotEmpty)
-        for (final result in item.toolResults) ...[
+      else if (item.toolResults.isNotEmpty) ...[
+        // Every `tool` message must directly follow the assistant tool_calls
+        // message, so images (which can only ride in a `user` message) are
+        // gathered into a single user message after the last tool result.
+        for (final result in item.toolResults)
           {
             'role': 'tool',
             'tool_call_id': result.toolCallId,
             'content': result.content,
           },
-          if (result.images.isNotEmpty)
-            {
-              'role': 'user',
-              'content': [
-                {'type': 'text', 'text': 'Inspect the attached image.'},
+        if (item.toolResults.any((result) => result.images.isNotEmpty))
+          {
+            'role': 'user',
+            'content': [
+              {'type': 'text', 'text': 'Inspect the attached image.'},
+              for (final result in item.toolResults)
                 for (final image in result.images)
                   {
                     'type': 'image_url',
@@ -177,9 +184,9 @@ class AgentProviderTools {
                           'data:${image.mimeType};base64,${image.base64Data}',
                     },
                   },
-              ],
-            },
-        ],
+            ],
+          },
+      ],
   ];
 
   /// Serializes the shared transcript to Anthropic Messages content blocks.

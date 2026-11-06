@@ -442,9 +442,34 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
     _pendingDangerProposal = null;
   }
 
+  /// True when the selected model can take image input (or none is selected
+  /// yet, in which case the request path reports the real problem).
+  bool get _modelSupportsImages {
+    final config = widget.agentConfig;
+    final provider = config?.current;
+    final model = config?.resolvedModel;
+    if (provider == null || model == null) return true;
+    return LlmService.supportsImageInput(provider, model);
+  }
+
+  void _showNoImageSupport() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'The selected model does not support image input. '
+          'Switch to a vision-capable model to attach images.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _send() async {
     final text = _textController.text.trim();
     if (text.isEmpty && _pendingImages.isEmpty) return;
+    if (_pendingImages.isNotEmpty && !_modelSupportsImages) {
+      _showNoImageSupport();
+      return;
+    }
     final images = List<AgentImageAttachment>.unmodifiable(_pendingImages);
 
     // If a question-proposal card is waiting on an answer (option tap
@@ -493,6 +518,10 @@ class _AiAssistantOverlayState extends State<AiAssistantOverlay> {
   }
 
   Future<void> _addImageAttachment() async {
+    if (!_modelSupportsImages) {
+      _showNoImageSupport();
+      return;
+    }
     final path = await FilePickerService.pickImageFile();
     if (path == null || !mounted) return;
     try {

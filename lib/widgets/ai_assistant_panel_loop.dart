@@ -57,6 +57,13 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
           config.enabledSkills,
         ).isNotEmpty,
         mcpTools: config.mcpEnabled ? McpService.allTools : const [],
+        imageInputEnabled:
+            config.current == null ||
+            config.resolvedModel == null ||
+            LlmService.supportsImageInput(
+              config.current!,
+              config.resolvedModel!,
+            ),
       ),
       skills: {
         for (final skill in SkillService.filterEnabled(config.enabledSkills))
