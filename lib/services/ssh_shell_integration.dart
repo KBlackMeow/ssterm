@@ -85,8 +85,7 @@ class SshShellIntegration {
 
   String command({bool trackCwd = true}) {
     // A single input line avoids secondary prompts and canonical-input limits.
-    // Leading space respects ignorespace/ignoreboth; bash is also told to drop
-    // this line explicitly, since e.g. OpenWrt leaves HISTCONTROL unset.
+    // Leading space respects the usual ignorespace/ignoreboth history policy.
     final script =
         '''
 __ssterm_cwd() { printf '\\033]7;file://%s\\033\\\\' "\$PWD"; };
@@ -96,7 +95,6 @@ if [ -n "\${ZSH_VERSION-}" ]; then
     *) precmd_functions+=(__ssterm_cwd) ;;
   esac;
 elif [ -n "\${BASH_VERSION-}" ]; then
-  history -d \$HISTCMD 2>/dev/null;
   case "\$(declare -p PROMPT_COMMAND 2>/dev/null)" in
     'declare -a'*)
       case " \${PROMPT_COMMAND[*]} " in
