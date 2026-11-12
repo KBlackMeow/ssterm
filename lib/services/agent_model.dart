@@ -13,8 +13,12 @@ abstract interface class AgentModel {
 
 /// Keeps one HTTP pool across model turns, including approval pauses.
 class LlmAgentModel implements AgentModel {
-  LlmAgentModel(this.config, {AgentStreamClientSession? session})
-    : _session = session ?? AgentStreamClientSession();
+  LlmAgentModel(
+    this.config, {
+    AgentStreamClientSession? session,
+    String? conversationId,
+  }) : _session =
+           session ?? AgentStreamClientSession(conversationId: conversationId);
 
   final AgentConfig config;
   final AgentStreamClientSession _session;

@@ -17,8 +17,10 @@ class _OpenSshKeyLine {
 
   /// 此 known_hosts 行对应的一个或多个主机模式。
   final List<String> hostPatterns;
+
   /// OpenSSH 行中公钥使用的算法名称。
   final String keyType;
+
   /// 从公钥字节计算出的规范化指纹。
   final String fingerprint;
 }

@@ -198,6 +198,7 @@ class Skill {
 class SkillParseResult {
   /// 解析出的技能元数据，例如 ID、名称、来源和描述。
   final Skill skill;
+
   /// 去除头部元数据后的 Markdown 技能说明正文。
   final String body;
   const SkillParseResult({required this.skill, required this.body});

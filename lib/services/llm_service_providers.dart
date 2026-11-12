@@ -66,6 +66,7 @@ Future<LlmResponse> _callOpenAiCompatible(
           'reasoning_effort': reasoningLevel.name,
       };
       final request = await client.postUrl(Uri.parse(url));
+      _applyGatewayHeaders(request, client, url);
       request.headers.set('Content-Type', 'application/json; charset=utf-8');
       request.headers.set('Authorization', 'Bearer $apiKey');
       request.add(utf8.encode(jsonEncode(body)));
@@ -180,6 +181,7 @@ Future<LlmResponse> _callAnthropic(
   final client = HttpClient();
   try {
     final request = await client.postUrl(Uri.parse(url));
+    _applyGatewayHeaders(request, client, url);
     request.headers.set('Content-Type', 'application/json; charset=utf-8');
     request.headers.set('x-api-key', apiKey);
     request.headers.set('anthropic-version', '2023-06-01');
@@ -251,6 +253,7 @@ Future<LlmResponse> _callGemini(
   final client = HttpClient();
   try {
     final request = await client.postUrl(Uri.parse(url));
+    _applyGatewayHeaders(request, client, url);
     request.headers.set('Content-Type', 'application/json; charset=utf-8');
     request.add(utf8.encode(jsonEncode(body)));
     final response = await request.close();
@@ -484,6 +487,7 @@ Stream<LlmStreamEvent> _streamOpenAi(
       if (withJsonMode) 'response_format': const {'type': 'json_object'},
     };
     final request = await client.postUrl(Uri.parse(url));
+    _applyGatewayHeaders(request, client, url);
     request.headers.set('Content-Type', 'application/json; charset=utf-8');
     request.headers.set('Authorization', 'Bearer $apiKey');
     request.add(utf8.encode(jsonEncode(body)));
@@ -580,6 +584,8 @@ Stream<LlmStreamEvent> _streamAnthropic(
   }
 
   final request = await client.postUrl(Uri.parse(url));
+
+  _applyGatewayHeaders(request, client, url);
   request.headers.set('Content-Type', 'application/json; charset=utf-8');
   request.headers.set('x-api-key', apiKey);
   request.headers.set('anthropic-version', '2023-06-01');
@@ -736,6 +742,8 @@ Stream<LlmStreamEvent> _streamGemini(
   };
 
   final request = await client.postUrl(Uri.parse(url));
+
+  _applyGatewayHeaders(request, client, url);
   request.headers.set('Content-Type', 'application/json; charset=utf-8');
   request.add(utf8.encode(jsonEncode(body)));
   final response = await request.close();
@@ -872,6 +880,7 @@ Future<LlmResponse> _callOllama(
   final client = HttpClient();
   try {
     final request = await client.postUrl(Uri.parse(url));
+    _applyGatewayHeaders(request, client, url);
     request.headers.set('Content-Type', 'application/json; charset=utf-8');
     request.add(utf8.encode(jsonEncode(body)));
     final response = await request.close();
@@ -934,6 +943,8 @@ Stream<LlmStreamEvent> _streamOllama(
   };
 
   final request = await client.postUrl(Uri.parse(url));
+
+  _applyGatewayHeaders(request, client, url);
   request.headers.set('Content-Type', 'application/json; charset=utf-8');
   request.add(utf8.encode(jsonEncode(body)));
   final response = await request.close();
@@ -999,5 +1010,32 @@ Stream<LlmStreamEvent> _streamOllama(
         malformedEventCount: malformedEventCount,
       );
     }
+  }
+}
+
+// ── Gateway routing headers ─────────────────────────────────────────────
+
+/// Fallback per-process session id (used when the caller has no conversation).
+///  OpenCode's gateway (opencode.ai) rejects
+/// requests without `x-opencode-session` ("cannot be routed efficiently"),
+/// and a stable id per app run lets it keep a conversation on one backend.
+final String _gatewaySessionId = () {
+  final rnd = Random.secure();
+  final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
+  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+}();
+
+/// Adds provider-gateway specific headers; a no-op for other hosts.
+void _applyGatewayHeaders(
+  HttpClientRequest request,
+  HttpClient client,
+  String url,
+) {
+  final host = (Uri.tryParse(url)?.host ?? '').toLowerCase();
+  if (host == 'opencode.ai' || host.endsWith('.opencode.ai')) {
+    request.headers.set(
+      'x-opencode-session',
+      agentClientSessionIds[client] ?? _gatewaySessionId,
+    );
   }
 }

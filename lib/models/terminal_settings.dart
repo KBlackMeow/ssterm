@@ -320,10 +320,13 @@ class TerminalSettings {
 
   /// 非 Windows 平台默认前景色提亮幅度。
   static const _kTextLift = 0.06;
+
   /// 非 Windows 平台 ANSI 色提亮幅度。
   static const _kAnsiLift = 0.04;
+
   /// Windows 平台默认前景色提亮幅度。
   static const _kWindowsTextLift = 0.02;
+
   /// Windows 平台 ANSI 色提亮幅度。
   static const _kWindowsAnsiLift = 0.015;
 

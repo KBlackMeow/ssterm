@@ -9,10 +9,13 @@ import '../utils/ssh_fingerprint.dart';
 class KnownHostEntry {
   /// SSH 握手中报告的主机名；与端口一起作为查找键。
   final String hostname;
+
   /// SSH 监听端口，默认端口 22 也会显式记录。
   final int port;
+
   /// 主机公钥算法名称，例如 `ssh-ed25519`。
   final String keyType;
+
   /// 规范化后的公钥指纹，用于后续连接时比对身份。
   final String fingerprint;
 

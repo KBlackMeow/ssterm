@@ -58,6 +58,7 @@ extension _AgentSettingsExt on _SettingsPageState {
     final name = TextEditingController();
     final url = TextEditingController();
     final model = TextEditingController();
+    final apiKey = TextEditingController();
     ProviderProtocol? protocol;
     final provider = await showDialog<ProviderConfig>(
       context: context,
@@ -95,8 +96,17 @@ extension _AgentSettingsExt on _SettingsPageState {
                   decoration: const InputDecoration(labelText: 'Base URL'),
                 ),
                 TextField(
+                  controller: apiKey,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key (optional, can be added later)',
+                  ),
+                ),
+                TextField(
                   controller: model,
-                  decoration: const InputDecoration(labelText: 'Model'),
+                  decoration: const InputDecoration(
+                    labelText: 'Model (optional, can be added later)',
+                  ),
                 ),
               ],
             ),
@@ -111,7 +121,6 @@ extension _AgentSettingsExt on _SettingsPageState {
                 final parsed = Uri.tryParse(url.text.trim());
                 if (protocol == null ||
                     name.text.trim().isEmpty ||
-                    model.text.trim().isEmpty ||
                     parsed == null ||
                     !(parsed.isScheme('https') || parsed.isScheme('http'))) {
                   return;
@@ -133,7 +142,9 @@ extension _AgentSettingsExt on _SettingsPageState {
                     displayName: name.text.trim(),
                     protocol: protocol!,
                     baseUrl: url.text.trim(),
-                    models: [model.text.trim()],
+                    models: model.text.trim().isEmpty
+                        ? const []
+                        : [model.text.trim()],
                   ),
                 );
               },
@@ -146,7 +157,14 @@ extension _AgentSettingsExt on _SettingsPageState {
     name.dispose();
     url.dispose();
     model.dispose();
-    if (provider != null) _registerProvider(provider);
+    final key = apiKey.text.trim();
+    apiKey.dispose();
+    if (provider != null) {
+      if (key.isNotEmpty) await ApiKeyStorage.store(provider.id, key);
+      if (!mounted) return;
+      _registerProvider(provider);
+      _apiKeyControllers[provider.id]?.text = key;
+    }
   }
 
   Widget _buildSkillsTab() {

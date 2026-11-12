@@ -210,10 +210,13 @@ class McpTool {
 class McpToolResult {
   /// 返回结果的服务器 ID，便于界面标注来源。
   final String serverId;
+
   /// 被调用的 MCP 工具名称。
   final String toolName;
+
   /// 按 MCP 内容块形式保留的文本、图片或资源结果。
   final List<McpContentBlock> content;
+
   /// 是否为工具执行错误；错误结果仍会传回 Agent 作为工具反馈。
   final bool isError;
 
@@ -303,8 +306,10 @@ enum McpServiceEventKind {
 class McpServiceEvent {
   /// 当前变化的类别，例如正在连接、已连接、工具更新或发生错误。
   final McpServiceEventKind kind;
+
   /// 产生此事件的服务器 ID。
   final String serverId;
+
   /// 连接或发现工具失败时的附加说明；正常状态事件可为空。
   final String? message;
 

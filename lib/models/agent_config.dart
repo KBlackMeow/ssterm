@@ -99,18 +99,25 @@ enum LlmProvider {
 class ProviderConfig {
   /// 稳定的 provider 标识，用于查找配置和对应的 API 密钥。
   final String id;
+
   /// 设置界面和 Agent 状态栏显示的服务商名称。
   String displayName;
+
   /// 请求协议类型，决定调用哪个 provider 适配器。
   final ProviderProtocol protocol;
+
   /// 是否允许该服务商出现在模型选择和请求路由中。
   bool enabled;
+
   /// API 根地址；内置 provider 有默认值，自定义 provider 需填写。
   String? baseUrl;
+
   /// 此服务商可供选择的模型 ID 列表。
   List<String> models;
+
   /// 模型 ID 到上下文窗口 token 上限的映射。
   Map<String, int> modelContextWindows;
+
   /// 模型 ID 到单次回复最大输出 token 数的映射。
   Map<String, int> modelMaxOutputTokens;
 
@@ -314,6 +321,25 @@ class ProviderConfig {
     modelContextWindows: {'anthropic/claude-sonnet-4.6': 200000},
   );
 
+  /// OpenCode Zen gateway (https://opencode.ai/zen). Model list is left empty
+  /// on purpose: the catalogue changes often, so users add the model IDs they
+  /// have access to after saving the API key.
+  factory ProviderConfig.opencode() => ProviderConfig(
+    id: 'opencode',
+    displayName: 'OpenCode Zen',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://opencode.ai/zen/v1',
+  );
+
+  /// OpenCode Go subscription gateway. Same empty-model rationale as
+  /// [ProviderConfig.opencode].
+  factory ProviderConfig.opencodego() => ProviderConfig(
+    id: 'opencodego',
+    displayName: 'OpenCode Go',
+    protocol: ProviderProtocol.openAiCompatible,
+    baseUrl: 'https://opencode.ai/zen/go/v1',
+  );
+
   factory ProviderConfig.custom({
     required String id,
     required String displayName,
@@ -327,7 +353,6 @@ class ProviderConfig {
           protocol == ProviderProtocol.anthropicCompatible,
     );
     assert(baseUrl.isNotEmpty);
-    assert(models.isNotEmpty);
     return ProviderConfig(
       id: id,
       displayName: displayName,
@@ -352,6 +377,8 @@ class ProviderConfig {
     ProviderConfig.siliconflow(),
     ProviderConfig.minimax(),
     ProviderConfig.openrouterAnthropic(),
+    ProviderConfig.opencode(),
+    ProviderConfig.opencodego(),
   ];
 
   static ProviderConfig fromId(String id) {
@@ -382,6 +409,10 @@ class ProviderConfig {
         return ProviderConfig.minimax();
       case 'openrouter-anthropic':
         return ProviderConfig.openrouterAnthropic();
+      case 'opencode':
+        return ProviderConfig.opencode();
+      case 'opencodego':
+        return ProviderConfig.opencodego();
       default:
         throw ArgumentError('Unknown provider: $id');
     }
@@ -639,8 +670,10 @@ class AgentConfig {
 
   /// 默认模型服务商 ID；为空时由当前可用 provider 选择默认值。
   String? defaultProvider;
+
   /// 默认模型 ID；为空时使用所选 provider 的首个可用模型。
   String? defaultModel;
+
   /// 已配置服务商列表，包含内置服务商和用户自定义端点。
   List<ProviderConfig> providers;
 

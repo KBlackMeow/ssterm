@@ -22,31 +22,40 @@ class TransferTask extends ChangeNotifier {
 
   /// 队列中显示的文件名，不保证包含完整本地或远程路径。
   final String name;
+
   /// 上传或下载方向，决定任务控制和数据通路。
   final TransferType type;
+
   /// 任务开始时探测到的文件总字节数；未知大小按 0 处理。
   final int total;
+
   /// 已成功传输的字节数，用于计算进度。
   int bytes = 0;
+
   /// 当前任务状态；变化时通过 `ChangeNotifier` 通知队列界面。
   TransferStatus status = TransferStatus.running;
+
   /// 任务失败时用于展示的错误文本，成功或仍在运行时为空。
   String? error;
 
   /// 上传取消回调；关闭远端句柄由实际上传协程负责收尾。
   Future<void> Function()? _abortUpload;
+
   /// 上传协程的完成 future，取消任务时等待其完成清理。
   Future<void>? _uploadDone;
+
   /// 暂停上传时阻塞数据源的门闩，恢复或取消时释放。
   Completer<void>? _uploadResumeGate;
   // Used only by isolated downloads for cancellation.
   /// 下载任务使用的后台 isolate，取消时立即终止。
   Isolate? _downloadIsolate;
+
   /// 接收后台下载进度、完成和错误消息的端口。
   ReceivePort? _downloadReceivePort;
 
   /// 上次通知 UI 的时间，用于限制高频进度重绘。
   DateTime? _lastProgressNotify;
+
   /// 进度通知的最小间隔，避免每个数据块都触发界面重建。
   static const _progressNotifyInterval = Duration(milliseconds: 100);
 
@@ -159,6 +168,7 @@ class TransferManager extends ChangeNotifier {
 
   /// 上传时每次提交给 SFTP writer 的字节块大小。
   static const _uploadWriteChunkSize = 32 * 1024;
+
   /// 上传最多同时等待确认的写请求数，用于限制内存和远端队列积压。
   static const _uploadMaxPendingWrites = 64;
 
@@ -543,8 +553,10 @@ class _UploadWriteResult {
 
   /// 本次写入成功确认的字节数。
   final int length;
+
   /// 写请求失败时保存的原始异常；成功时为空。
   final Object? error;
+
   /// 写请求失败时对应的堆栈，用于保留诊断信息。
   final StackTrace? stackTrace;
 }

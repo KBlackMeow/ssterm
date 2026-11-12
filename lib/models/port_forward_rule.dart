@@ -8,14 +8,18 @@ enum ForwardType { local, remote, dynamic_ }
 class PortForwardRule {
   /// 转发方向和类型，决定监听端以及其他端口字段的解释方式。
   final ForwardType type;
+
   /// 转发本地端口：本地/动态转发时为监听端口，远程转发时为 SSH
   /// 服务端连接的本机目标端口。
   final int localPort;
+
   /// 本地转发的目标主机，由本机发起连接；远程和动态转发不使用此字段。
   final String remoteHost;
+
   /// 转发目标端口：本地转发时为远端目标端口，远程转发时为 SSH 服务端监听端口；
   /// 动态转发不使用。
   final int remotePort;
+
   /// 是否在下次 SSH 连接时启用该规则；关闭规则仍保留在配置中。
   final bool enabled;
 

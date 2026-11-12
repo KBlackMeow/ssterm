@@ -4,8 +4,10 @@
 class Command {
   /// 命令选择器中显示的短名称。
   final String name;
+
   /// 对命令用途的补充说明，不会被发送到 Shell。
   final String description;
+
   /// 选择该条目时插入终端的原始命令文本。
   final String command;
   const Command({

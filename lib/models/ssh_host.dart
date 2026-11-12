@@ -8,14 +8,19 @@ import 'port_forward_rule.dart';
 class SshHost {
   /// 用户自定义别名；用于标签、保存列表和连接提示。
   final String alias;
+
   /// 连接目标的 DNS 名称或 IP 地址。
   final String hostname;
+
   /// SSH 服务端口；未指定时使用标准端口 22。
   final int port;
+
   /// 登录用户名；为空时回退到当前平台的默认用户名。
   final String? user;
+
   /// 私钥文件路径；为空时由 SSH 客户端尝试默认身份文件。
   final String? identityFile;
+
   /// 密码认证凭据。持久化时由凭据存储单独保存，不应明文写入主机 JSON。
   final String? password;
 

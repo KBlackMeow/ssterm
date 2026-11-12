@@ -5,16 +5,24 @@ import 'dart:io';
 typedef AgentHttpClientCloser =
     void Function(HttpClient client, {required bool force});
 
+/// Conversation id attached to each pooled [HttpClient], read by provider
+/// request builders to set gateway routing headers (e.g. `x-opencode-session`).
+final Expando<String> agentClientSessionIds = Expando<String>();
+
 /// Owns the reusable HTTP connection pool for one agent-loop invocation.
 class AgentStreamClientSession {
   AgentStreamClientSession({
     HttpClient Function()? clientFactory,
     AgentHttpClientCloser? clientCloser,
+    this.conversationId,
   }) : _clientFactory = clientFactory ?? HttpClient.new,
        _clientCloser = clientCloser ?? _closeClient;
 
   final HttpClient Function() _clientFactory;
   final AgentHttpClientCloser _clientCloser;
+
+  /// Stable id of the conversation this session serves (cache-affinity key).
+  final String? conversationId;
 
   HttpClient? _client;
   bool _closed = false;
@@ -23,7 +31,9 @@ class AgentStreamClientSession {
     if (_closed) {
       throw StateError('Agent stream client session is closed.');
     }
-    return _client ??= _clientFactory();
+    final client = _client ??= _clientFactory();
+    if (conversationId != null) agentClientSessionIds[client] = conversationId;
+    return client;
   }
 
   /// Discards a potentially unhealthy pool while keeping this session usable.

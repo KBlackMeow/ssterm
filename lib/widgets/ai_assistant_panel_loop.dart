@@ -43,7 +43,7 @@ extension _AiAgentLoopExt on _AiAssistantOverlayState {
     final turnId = ++_agentTurnSeq;
     final runner = AgentRunner(
       history: _conversationHistory,
-      model: LlmAgentModel(config),
+      model: LlmAgentModel(config, conversationId: _sessionStore.sessionId),
       contextBudget: AgentContextBudget.forContextWindow(
         config.resolvedModel == null
             ? null
