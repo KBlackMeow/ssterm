@@ -220,6 +220,23 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  void _unregisterProvider(String id) {
+    _apiKeyControllers.remove(id)?.dispose();
+    _baseUrlControllers.remove(id)?.dispose();
+    _apiKeyVisible.remove(id);
+    _providerSpeedTests.remove(id)?.cancel();
+    _providerSpeedLabels.remove(id);
+    _providerSpeedModels.remove(id);
+    final next = _agentConfig.copyWith(
+      providers: _agentConfig.providers.where((p) => p.id != id).toList(),
+    );
+    if (next.defaultProvider == id) {
+      next.defaultProvider = null;
+      next.defaultModel = null;
+    }
+    _agentApply(next);
+  }
+
   Future<void> _loadCommands() async {
     final cmds = await CommandsStore.load();
     if (!mounted) return;

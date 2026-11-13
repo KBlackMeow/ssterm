@@ -665,6 +665,15 @@ extension _AgentSettingsExt on _SettingsPageState {
                   ),
                 ),
               ),
+              if (_isCustomProvider(provider))
+                IconButton(
+                  key: Key('settings-provider-delete-${provider.id}'),
+                  tooltip: 'Delete provider',
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  color: _kFgMuted,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _confirmDeleteProvider(provider),
+                ),
               Switch(
                 key: Key('settings-provider-enabled-${provider.id}'),
                 value: provider.enabled,
@@ -751,6 +760,35 @@ extension _AgentSettingsExt on _SettingsPageState {
         ],
       ),
     );
+  }
+
+  bool _isCustomProvider(ProviderConfig provider) =>
+      !ProviderConfig.builtIns.any((b) => b.id == provider.id);
+
+  Future<void> _confirmDeleteProvider(ProviderConfig provider) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete provider'),
+        content: Text(
+          'Delete "${provider.displayName}" and its saved API key?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await ApiKeyStorage.delete(provider.id);
+    if (!mounted) return;
+    _unregisterProvider(provider.id);
   }
 
   Widget _buildProviderSpeedTest(ProviderConfig provider) {
