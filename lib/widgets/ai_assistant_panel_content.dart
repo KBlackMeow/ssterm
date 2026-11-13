@@ -905,13 +905,39 @@ class _AiPanelContent extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (msg.error != null)
-                  Text(
-                    msg.error!,
-                    style: const TextStyle(
-                      color: Color(0xFFFF6E67),
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
+                  // Explicit SelectableText + copy button: the bare Text relied
+                  // on the transcript's SelectionArea, which is unreliable
+                  // for this card (selection is dropped on list rebuilds and
+                  // on touch platforms), leaving the error uncopyable.
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: SelectableText(
+                          msg.error!,
+                          style: const TextStyle(
+                            color: Color(0xFFFF6E67),
+                            fontSize: 13,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Copy',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 14,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        padding: EdgeInsets.zero,
+                        color: const Color(0xFFFF6E67),
+                        icon: const Icon(Icons.copy_rounded),
+                        onPressed: () => Clipboard.setData(
+                          ClipboardData(text: msg.error!),
+                        ),
+                      ),
+                    ],
                   )
                 else ...[
                   if (msg.reasoning != null)
