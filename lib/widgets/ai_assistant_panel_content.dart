@@ -1003,6 +1003,13 @@ class _SlashCommandMenu extends StatelessWidget {
     final dim = (AppColors.maybeOf(context)?.foregroundDim ?? _kFgInactive)
         .withValues(alpha: 0.75);
     final visibleRows = matches.length < 5 ? matches.length : 5;
+    // Size the command column to the longest command (monospace ≈ 6.8 px per
+    // char at 11 px) so long skill ids aren't clipped by a fixed width.
+    final longest = matches.fold<int>(
+      0,
+      (m, item) => item.$1.length > m ? item.$1.length : m,
+    );
+    final commandWidth = (longest * 6.8 + 10).clamp(78.0, 260.0).toDouble();
     return PopupSurface(
       key: const ValueKey('slash-command-menu'),
       color: panelSurface ?? AppColors.maybeOf(context)?.popup,
@@ -1029,9 +1036,12 @@ class _SlashCommandMenu extends StatelessWidget {
                 child: Row(
                   children: [
                     SizedBox(
-                      width: 78,
+                      width: commandWidth,
                       child: Text(
                         item.$1,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: fg,
                           fontSize: 11,

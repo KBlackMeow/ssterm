@@ -379,21 +379,21 @@ extension _AgentSettingsExt on _SettingsPageState {
       dense: true,
       value: enabled,
       activeThumbColor: _kAccent,
-      title: Row(
+      // Wrap (not Row + ellipsis) so long skill ids are shown in full,
+      // flowing onto a second line with the source badge when needed.
+      title: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 6,
+        runSpacing: 2,
         children: [
-          Flexible(
-            child: Text(
-              skill.id,
-              style: TextStyle(
-                color: enabled ? _kFg : _kFgMuted,
-                fontSize: 12.5,
-                fontFamily: 'JetBrainsMono',
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          Text(
+            skill.id,
+            style: TextStyle(
+              color: enabled ? _kFg : _kFgMuted,
+              fontSize: 12.5,
+              fontFamily: 'JetBrainsMono',
             ),
           ),
-          const SizedBox(width: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             decoration: BoxDecoration(
