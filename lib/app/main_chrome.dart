@@ -12,7 +12,6 @@ class _TabBar extends StatefulWidget {
     required this.onClose,
     required this.onNewLocal,
     required this.localShells,
-    required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.onSettings,
     required this.savedHosts,
@@ -41,7 +40,6 @@ class _TabBar extends StatefulWidget {
   final ValueChanged<int> onClose;
   final ValueChanged<LocalShellOption> onNewLocal;
   final List<LocalShellOption> localShells;
-  final Future<void> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final VoidCallback onSettings;
   final List<SshHost> savedHosts;
@@ -196,7 +194,6 @@ class _TabBarState extends State<_TabBar> with WindowListener {
             _PlusMenu(
               onNewLocal: widget.onNewLocal,
               shells: widget.localShells,
-              onRefreshLocalShells: widget.onRefreshLocalShells,
               onNewSsh: widget.onNewSsh,
               savedHosts: widget.savedHosts,
               configHosts: widget.configHosts,
@@ -769,21 +766,18 @@ class _PlusMenu extends StatelessWidget {
   const _PlusMenu({
     required this.onNewLocal,
     required this.shells,
-    required this.onRefreshLocalShells,
     required this.onNewSsh,
     required this.savedHosts,
     required this.configHosts,
     required this.onConnectHost,
   });
 
-  static const _refreshShellsValue = '__refresh_shells__';
 
   final ValueChanged<LocalShellOption> onNewLocal;
 
   /// Cached list rendered synchronously. Updated by the host via
-  /// [onRefreshLocalShells] (background diff; no per-open work).
+  /// the background refresh (no per-open work).
   final List<LocalShellOption> shells;
-  final Future<void> Function() onRefreshLocalShells;
   final VoidCallback onNewSsh;
   final List<SshHost> savedHosts;
   final List<SshHost> configHosts;
@@ -940,27 +934,6 @@ class _PlusMenu extends StatelessWidget {
           _sectionHeader('Shells'),
           for (final shell in shells) _shellItem(shell),
         ],
-        if (!Platform.isIOS)
-          PopupMenuItem<String>(
-            value: _refreshShellsValue,
-            height: 32,
-            child: Builder(
-              builder: (ctx) {
-                final dim =
-                    AppColors.maybeOf(ctx)?.foregroundDim ?? _kFgInactive;
-                return Row(
-                  children: [
-                    Icon(Icons.refresh, size: 13, color: dim),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Refresh shells',
-                      style: TextStyle(color: dim, fontSize: 12),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
         if (savedHosts.isNotEmpty) ...[
           const PopupMenuDivider(height: 1),
           _sectionHeader('Saved'),
@@ -992,10 +965,6 @@ class _PlusMenu extends StatelessWidget {
       ],
     ).then((v) {
       if (v == null) return;
-      if (v == _refreshShellsValue) {
-        unawaited(onRefreshLocalShells());
-        return;
-      }
       if (v.startsWith('shell:')) {
         final id = v.substring('shell:'.length);
         for (final shell in shells) {

@@ -86,7 +86,6 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
               onClose: _requestCloseTab,
               onNewLocal: _newLocalTab,
               localShells: _localShells,
-              onRefreshLocalShells: _refreshLocalShellsIfChanged,
               onNewSsh: () => _showConnectDialog(ctx: innerCtx),
               onSettings: _openSettings,
               savedHosts: _savedHosts,
