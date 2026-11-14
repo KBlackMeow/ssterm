@@ -8,6 +8,7 @@ import 'package:dartssh2/dartssh2.dart';
 import '../io/output_pipe.dart';
 import 'command_safety.dart';
 import 'login_shell_environment.dart';
+import 'terminal_text_emulator.dart';
 import 'local_shell_discovery.dart';
 
 const _maxCwdResultBytes = 16 * 1024;
@@ -1050,8 +1051,9 @@ class _LiveOutputTail {
   }
 
   final CommandExecutionUpdateListener? onUpdate;
-  final List<String> _lines = [];
-  String _partial = '';
+  // Interprets \r / ESC[K / cursor-up redraws so a progress line shows its
+  // latest state instead of every repaint concatenated.
+  final _emulator = TerminalTextEmulator(maxRows: 64);
   late final ByteConversionSink _stdoutDecoder;
   late final ByteConversionSink _stderrDecoder;
   final _decodedText = _TakeableStringSink();
@@ -1073,18 +1075,13 @@ class _LiveOutputTail {
     // An incomplete UTF-8 scalar is intentionally retained by the decoder
     // until its continuation bytes arrive in a later process-stream chunk.
     if (text.isEmpty) return;
-    final parts = ('$_partial$text').split('\n');
-    _partial = parts.removeLast();
-    _lines.addAll(parts.map((line) => line.replaceFirst(RegExp(r'\r$'), '')));
-    while (_lines.length > 3) {
-      _lines.removeAt(0);
-    }
+    _emulator.write(text);
     onUpdate!(CommandExecutionUpdate(List.unmodifiable(_visibleLines())));
   }
 
   List<String> _visibleLines() {
-    final visible = <String>[..._lines, if (_partial.isNotEmpty) _partial];
-    return visible.length <= 3 ? visible : visible.sublist(visible.length - 3);
+    final lines = _emulator.lines;
+    return lines.length <= 3 ? lines : lines.sublist(lines.length - 3);
   }
 }
 
@@ -1137,12 +1134,14 @@ class _BoundedOutput {
     // Windows PowerShell 5 writes redirected error records as UTF-16LE with a
     // BOM. The normal UTF-8 decode path turns Chinese error text into mojibake.
     if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
-      return _decodeUtf16Le(bytes.sublist(2));
+      return TerminalTextEmulator.render(_decodeUtf16Le(bytes.sublist(2)));
     }
     if (bytes.length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
-      return _decodeUtf16Be(bytes.sublist(2));
+      return TerminalTextEmulator.render(_decodeUtf16Be(bytes.sublist(2)));
     }
-    return utf8.decode(bytes, allowMalformed: true);
+    return TerminalTextEmulator.render(
+      utf8.decode(bytes, allowMalformed: true),
+    );
   }
 
   String _decodeUtf16Le(List<int> bytes) => String.fromCharCodes([
