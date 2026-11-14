@@ -1,5 +1,6 @@
 /// SSH 认证被服务器拒绝后用于重新输入密码。此对话框禁止点击遮罩关闭，
 /// 确认后同时返回密码和是否保存到凭据库的选择。
+library;
 
 import 'package:flutter/material.dart';
 

@@ -1,5 +1,6 @@
 /// 统一检查和维护各 Shell 的 SSTerm 集成区块。写入前保留用户配置文件其余内容，
 /// 并识别缺失、重复或损坏的管理标记。
+library;
 
 import 'dart:async';
 import 'dart:convert';

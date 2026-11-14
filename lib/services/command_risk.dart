@@ -1,5 +1,6 @@
 /// 按优先级合并模型给出的风险和主机侧安全规则，产出最终等级及命中来源。
 /// 主机规则可提升风险，不能把危险命令降级。
+library;
 
 import '../models/agent_config.dart';
 import 'command_safety.dart';

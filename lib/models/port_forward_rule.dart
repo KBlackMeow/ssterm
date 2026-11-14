@@ -1,5 +1,6 @@
 /// 表示一种 SSH 转发规则的类型。本地转发由本机监听，远程转发由 SSH 服务端监听，
 /// 动态转发在本机提供 SOCKS5 代理。
+library;
 
 enum ForwardType { local, remote, dynamic_ }
 

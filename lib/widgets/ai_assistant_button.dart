@@ -1,4 +1,5 @@
 /// Agent 面板的工具栏切换控件。
+library;
 
 import 'package:flutter/material.dart';
 

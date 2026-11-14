@@ -1,6 +1,7 @@
 /// 将连接表单中的原始字符串转换为 `SshHost`。端口、
 /// 必填字段和认证信息在此处统一校验，失败时返回可展示的错误，
 /// 不抛出表单校验异常。
+library;
 
 import '../models/port_forward_rule.dart';
 import '../models/ssh_host.dart';
@@ -49,8 +50,9 @@ SshHostFormResult buildSshHostResult({
 
   if (host.isEmpty) return SshHostFormError('Enter IP or hostname');
   if (user.isEmpty) return SshHostFormError('Username is required');
-  if (port < 1 || port > 65535)
+  if (port < 1 || port > 65535) {
     return SshHostFormError('Invalid port (1–65535)');
+  }
 
   final alias = aliasText.trim();
   final autoAlias = '$user@$host${port != 22 ? ":$port" : ""}';

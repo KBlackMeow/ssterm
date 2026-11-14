@@ -336,8 +336,9 @@ class BackgroundCommandExecutor {
                 stalled = true;
                 cancelled = true;
                 termination = terminate(ProcessSignal.sigterm);
-                if (!cancellationRequested.isCompleted)
+                if (!cancellationRequested.isCompleted) {
                   cancellationRequested.complete();
+                }
                 timer.cancel();
               })
               .whenComplete(() => checkingSilence = false),

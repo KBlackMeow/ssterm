@@ -1,5 +1,6 @@
 /// 根据主机配置启动并释放 SSH 端口转发。启动失败会逐条收集错误，
 /// 调用方可选择在保留其他成功转发的同时向用户报告失败项。
+library;
 
 import 'dart:async';
 import 'dart:io';

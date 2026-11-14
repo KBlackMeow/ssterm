@@ -2,6 +2,7 @@
 /// `queuedBytes` 与 `pendingAcceptedBytes` 描述不同阶段的积压；
 /// `streamsPaused` 和 `holdOutputUntilRelease` 表示背压是否正在阻止
 /// 继续接收或发布输出。
+library;
 
 class OutputPipeMetrics {
   const OutputPipeMetrics({

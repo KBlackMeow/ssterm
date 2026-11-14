@@ -1,5 +1,6 @@
 /// SSH 握手和认证完成后交给标签层的资源包。`mode` 决定是否创建交互终端或 SFTP
 /// 客户端；使用完毕后资源由接收它的标签生命周期关闭。
+library;
 
 import 'package:dartssh2/dartssh2.dart';
 

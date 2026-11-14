@@ -33,8 +33,9 @@ const _kTransferMenuWidth = 280.0;
 String _fmtBytes(int b) {
   if (b < 1024) return '${b}B';
   if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)}K';
-  if (b < 1024 * 1024 * 1024)
+  if (b < 1024 * 1024 * 1024) {
     return '${(b / (1024 * 1024)).toStringAsFixed(1)}M';
+  }
   return '${(b / (1024 * 1024 * 1024)).toStringAsFixed(1)}G';
 }
 

@@ -1,5 +1,6 @@
 /// 提供 Agent 命令执行历史的本地持久化能力。记录用于后续查看和上下文整理；
 /// 写入失败不会改变命令本身的执行结果。
+library;
 
 import 'dart:convert';
 import 'dart:io';

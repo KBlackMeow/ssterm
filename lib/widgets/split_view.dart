@@ -1,4 +1,5 @@
 /// 可拖动分隔条的双区域布局。
+library;
 
 import 'package:flutter/material.dart';
 
