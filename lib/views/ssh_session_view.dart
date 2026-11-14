@@ -26,8 +26,13 @@ class SshSessionView extends StatefulWidget {
     this.initialSize,
     this.onLayoutChanged,
     this.onOpenEditorTab,
+    this.panelBackground,
   });
 
+  /// Card fill for the SFTP panel. Pass the terminal theme's
+  /// `chromeBackground` so it matches the agent panel; null falls back to
+  /// the (lighter) popup tint.
+  final Color? panelBackground;
   final SftpClient sftp;
   final String host;
   final ValueNotifier<String> remotePath;
@@ -141,6 +146,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                       ),
                       Expanded(
                         child: _SftpFloatingChrome(
+                          background: widget.panelBackground,
                           dockRight: true,
                           child: sftp,
                         ),
@@ -175,6 +181,7 @@ class _SshSessionViewState extends State<SshSessionView> {
                       ),
                       Expanded(
                         child: _SftpFloatingChrome(
+                          background: widget.panelBackground,
                           dockRight: false,
                           child: sftp,
                         ),
@@ -197,8 +204,13 @@ class _SshSessionViewState extends State<SshSessionView> {
 
 /// Rounded, semi-transparent SFTP card over the terminal.
 class _SftpFloatingChrome extends StatelessWidget {
-  const _SftpFloatingChrome({required this.dockRight, required this.child});
+  const _SftpFloatingChrome({
+    required this.dockRight,
+    required this.child,
+    this.background,
+  });
 
+  final Color? background;
   final bool dockRight;
   final Widget child;
 
@@ -218,14 +230,18 @@ class _SftpFloatingChrome extends StatelessWidget {
             _kSftpPanelMargin,
           );
 
+    // Same fill as the agent panel (terminal chromeBackground) and no extra
+    // backdrop blur, so the two cards read identically.
     final panelColor =
-        AppColors.maybeOf(context)?.popup ?? FrostedGlassStyle.panelFillFrosted;
+        background ??
+        AppColors.maybeOf(context)?.popup ??
+        FrostedGlassStyle.panelFillFrosted;
     return Padding(
       padding: margin,
       child: PopupSurface(
         color: panelColor,
         radius: FrostedGlassStyle.panelRadius,
-        backdropBlur: 20,
+        backdropBlur: 0,
         child: child,
       ),
     );

@@ -365,7 +365,7 @@ class _TerminalHomeState extends _TerminalHomeViewMethods {
     return Theme(
       data: Theme.of(context).copyWith(
         extensions: {
-          AppColors.fromBackground(_config.terminal.chromeTabSelected),
+          AppColors.fromBackground(_config.terminal.chromeBackground),
         },
       ),
       child: Shortcuts(

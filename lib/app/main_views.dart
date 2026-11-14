@@ -397,6 +397,7 @@ abstract class _TerminalHomeViewMethods extends _TerminalHomeSshMethods {
             setState(() => tab.sftpPanelVisible = !tab.sftpPanelVisible),
         initialPosition: _config.sftpPosition,
         initialSize: _config.sftpSize,
+        panelBackground: _displayTerminalSettings.chromeBackground,
         onLayoutChanged: (pos, size) {
           _config.sftpPosition = pos;
           _config.sftpSize = size;
