@@ -349,11 +349,13 @@ class TerminalViewState extends State<TerminalView> {
         deleteDetection: widget.deleteDetection,
         onInsert: _onInsert,
         onDelete: () {
+          _clearSelectionOnInput();
           _scrollToBottom();
           widget.terminal.keyInput(TerminalKey.backspace);
         },
         onComposing: _onComposing,
         onAction: (action) {
+          _clearSelectionOnInput();
           _scrollToBottom();
           // Android sends TextInputAction.newline when the user presses the
           // virtual keyboard's enter key.
@@ -518,7 +520,16 @@ class TerminalViewState extends State<TerminalView> {
     return _customTextEditKey.currentState?.hasInputConnection == true;
   }
 
+  /// Full-screen apps (e.g. Claude) redraw in place, so the selection anchors
+  /// never scroll away. Drop the selection as soon as the user sends input.
+  void _clearSelectionOnInput() {
+    if (_controller.selection != null) {
+      _controller.clearSelection();
+    }
+  }
+
   void _onInsert(String text) {
+    _clearSelectionOnInput();
     final key = charToTerminalKey(text.trim());
 
     // On mobile platforms there is no guarantee that virtual keyboard will
@@ -571,6 +582,7 @@ class TerminalViewState extends State<TerminalView> {
     );
 
     if (handled) {
+      _clearSelectionOnInput();
       _scrollToBottom();
     }
 

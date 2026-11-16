@@ -104,6 +104,7 @@ class TerminalSurface extends StatelessWidget {
         final data = await Clipboard.getData('text/plain');
         if (data?.text != null && data!.text!.isNotEmpty) {
           terminal.paste(data.text!);
+          config.controller.clearSelection();
         }
       } else if (value == 'split_h') {
         config.onSplitHorizontal?.call();
