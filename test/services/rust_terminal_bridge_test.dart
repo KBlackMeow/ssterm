@@ -19,6 +19,35 @@ void main() {
   final available = File(path).existsSync();
 
   test(
+    'soft-wrapped rows copy without newlines, hard breaks keep them',
+    () {
+      final terminal = Terminal()..resize(10, 4);
+      final core = RustTerminalCore.open(
+        columns: 10,
+        rows: 4,
+        libraryPath: path,
+      );
+      final bridge = RustTerminalBridge(core: core, terminal: terminal);
+      try {
+        bridge.write(utf8.encode('abcdefghijklmnopqrstuvwxy\r\nshort'));
+        final buffer = terminal.buffer;
+        final text = buffer.getText(
+          BufferRangeLine(
+            CellOffset(0, buffer.scrollBack),
+            CellOffset(9, buffer.scrollBack + 3),
+          ),
+        );
+        expect(text.split('\n').first, 'abcdefghijklmnopqrstuvwxy');
+        expect(text, contains('\nshort'));
+      } finally {
+        bridge.close();
+        core.close();
+      }
+    },
+    skip: available ? false : 'run cargo build --release before this ABI test',
+  );
+
+  test(
     'bridge matches full rebuild for every split of a synchronized redraw',
     () {
       final bytes = utf8.encode(

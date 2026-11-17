@@ -296,6 +296,14 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
     notifyListeners();
   }
 
+  static const _cellAttributesWord = 2;
+
+  /// Bit 24 of a packed row's first attribute word, set by the native core
+  /// when that row soft-wraps into the next one.
+  static const _packedRowContinuesBit = 1 << 24;
+
+  var _historyTailContinues = false;
+
   /// Replaces visible screen rows with cells produced by an external terminal
   /// engine. [packedCells] uses five uint32 values per cell in BufferLine
   /// order: foreground, background, attributes, encoded content, underline.
@@ -343,9 +351,19 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
       // row, including cleared cells and style-only changes, before copying.
       // Never depend on the dirty interval from only the last PTY chunk.
       final source = row * wordsPerRow;
+      // The first cell's attribute word carries a "this row continues on the
+      // next row" marker. Row N+1 is therefore the wrapped one.
+      final continues = packedCells[source + _cellAttributesWord] &
+              _packedRowContinuesBit !=
+          0;
+      if (row + 1 < rows) {
+        target.lines[visibleStart + row + 1].isWrapped = continues;
+      }
       var changed = false;
       for (var word = 0; word < wordsPerRow; word++) {
-        if (line.data[word] != packedCells[source + word]) {
+        var packed = packedCells[source + word];
+        if (word == _cellAttributesWord) packed &= ~_packedRowContinuesBit;
+        if (line.data[word] != packed) {
           changed = true;
           break;
         }
@@ -357,6 +375,7 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
         packedCells,
         source,
       );
+      line.data[_cellAttributesWord] &= ~_packedRowContinuesBit;
       markDirtyRow(row);
     }
     target.setCursor(cursorColumn, cursorRow);
@@ -391,23 +410,44 @@ class Terminal with Observable implements TerminalState, EscapeHandler {
       );
     }
 
-    BufferLine importRow(int row) {
-      final line = BufferLine(columns);
+    bool continuesAt(int row) =>
+        packedRows[row * wordsPerRow + _cellAttributesWord] &
+            _packedRowContinuesBit !=
+        0;
+
+    BufferLine importRow(int row, {required bool wrapped}) {
+      final line = BufferLine(columns)..isWrapped = wrapped;
       line.data.setRange(0, wordsPerRow, packedRows, row * wordsPerRow);
+      line.data[_cellAttributesWord] &= ~_packedRowContinuesBit;
       return line;
     }
 
     if (replace) {
       final lines = <BufferLine>[
-        for (var row = 0; row < rowCount; row++) importRow(row),
+        for (var row = 0; row < rowCount; row++)
+          importRow(row, wrapped: row > 0 && continuesAt(row - 1)),
         for (var row = 0; row < _viewHeight; row++) BufferLine(columns),
       ];
+      // The first screen row continues the last history row.
+      if (rowCount > 0) lines[rowCount].isWrapped = continuesAt(rowCount - 1);
       _mainBuffer.lines.replaceWith(lines);
+      _historyTailContinues = rowCount > 0 && continuesAt(rowCount - 1);
       return;
     }
 
     for (var row = 0; row < rowCount; row++) {
-      _mainBuffer.lines.insert(_mainBuffer.scrollBack, importRow(row));
+      _mainBuffer.lines.insert(
+        _mainBuffer.scrollBack,
+        importRow(
+          row,
+          wrapped: row == 0 ? _historyTailContinues : continuesAt(row - 1),
+        ),
+      );
+    }
+    if (rowCount > 0) {
+      _historyTailContinues = continuesAt(rowCount - 1);
+      _mainBuffer.lines[_mainBuffer.scrollBack].isWrapped =
+          _historyTailContinues;
     }
   }
 

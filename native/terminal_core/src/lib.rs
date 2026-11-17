@@ -386,6 +386,7 @@ impl TerminalCore {
             if self.auto_wrap {
                 let first = self.index(self.cursor_row, 0);
                 self.cells[first].reserved[0] |= 1;
+                self.mark_dirty(self.cursor_row);
             }
             self.cursor_col = 0;
             self.line_feed();
@@ -2091,11 +2092,14 @@ pub extern "C" fn ssterm_terminal_codepoint_width(
 fn pack_xterm_cells(cells: &[TerminalCell], output: &mut [u32]) {
     const WORDS_PER_CELL: usize = 5;
     const WIDTH_SHIFT: u32 = 22;
+    const WRAP_SHIFT: u32 = 24;
     for (index, cell) in cells.iter().enumerate() {
         let offset = index * WORDS_PER_CELL;
         output[offset] = cell.foreground;
         output[offset + 1] = cell.background;
-        output[offset + 2] = cell.attributes;
+        // The row-continues-on-next-row marker lives on a row's first cell.
+        // Dart strips it again when importing (see Terminal.applyPackedScreen).
+        output[offset + 2] = cell.attributes | (u32::from(cell.reserved[0] & 1) << WRAP_SHIFT);
         output[offset + 3] = cell.codepoint | (u32::from(cell.width) << WIDTH_SHIFT);
         output[offset + 4] = cell.underline_color;
     }
